@@ -1,0 +1,10 @@
+[package]
+name = "civ3mapgen"
+version = "0.1.0"
+edition = "2021"
+description = "Reference reimplementation of the Civilization III Conquests random map generator"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3

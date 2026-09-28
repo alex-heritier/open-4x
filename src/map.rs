@@ -1,0 +1,483 @@
+//! Map model: tiles, procedural generation, iso coordinates, yields.
+
+use bevy::prelude::*;
+
+pub const MAP_W: i32 = 80;
+pub const MAP_H: i32 = 60;
+pub const MAP_SEED: u64 = 20260928;
+pub const TILE_W: f32 = 128.0;
+pub const TILE_H: f32 = 64.0;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Base {
+    Ocean,
+    Sea,
+    Coast,
+    Ice,
+    Grassland,
+    Plains,
+    Desert,
+    Tundra,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Relief {
+    Flat,
+    Hill,
+    Mountain,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cover {
+    Bare,
+    Forest,
+    Jungle,
+    Pine,
+}
+
+#[derive(Clone)]
+pub struct Tile {
+    pub base: Base,
+    pub relief: Relief,
+    pub cover: Cover,
+    pub variant: u8,
+    pub seen: bool,
+    pub visible: bool,
+}
+
+#[derive(Resource)]
+pub struct GameMap {
+    pub w: i32,
+    pub h: i32,
+    pub tiles: Vec<Tile>,
+    pub start: (i32, i32),
+}
+
+impl GameMap {
+    pub fn idx(&self, x: i32, y: i32) -> usize {
+        (y * self.w + x) as usize
+    }
+
+    pub fn wrap_x(&self, x: i32) -> i32 {
+        ((x % self.w) + self.w) % self.w
+    }
+
+    pub fn get(&self, x: i32, y: i32) -> Option<&Tile> {
+        if y < 0 || y >= self.h {
+            return None;
+        }
+        Some(&self.tiles[self.idx(self.wrap_x(x), y)])
+    }
+
+    pub fn neighbors(&self, x: i32, y: i32) -> Vec<(i32, i32)> {
+        let mut out = Vec::with_capacity(8);
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let ny = y + dy;
+                if ny >= 0 && ny < self.h {
+                    out.push((self.wrap_x(x + dx), ny));
+                }
+            }
+        }
+        out
+    }
+
+    /// A* path with movement costs, or None when unreachable.
+    /// Returns the steps excluding the start tile.
+    pub fn find_path(&self, start: (i32, i32), goal: (i32, i32)) -> Option<Vec<(i32, i32)>> {
+        if start == goal {
+            return Some(vec![]);
+        }
+        let gt = self.get(goal.0, goal.1)?;
+        if move_cost(gt).is_none() {
+            return None;
+        }
+        use std::cmp::Reverse;
+        use std::collections::{BinaryHeap, HashMap};
+        let w = self.w;
+        let h = |(x, y): (i32, i32)| {
+            let dx = (x - goal.0).abs();
+            let dx = dx.min(w - dx);
+            dx.max((y - goal.1).abs()) as u32
+        };
+        let mut open = BinaryHeap::new();
+        let mut gscore = HashMap::new();
+        let mut came: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
+        gscore.insert(start, 0u32);
+        open.push((Reverse(h(start)), start));
+        while let Some((_, cur)) = open.pop() {
+            if cur == goal {
+                let mut path = vec![];
+                let mut c = cur;
+                while c != start {
+                    path.push(c);
+                    c = came[&c];
+                }
+                path.reverse();
+                return Some(path);
+            }
+            let g = gscore[&cur];
+            for nb in self.neighbors(cur.0, cur.1) {
+                let t = self.get(nb.0, nb.1).unwrap();
+                let Some(cost) = move_cost(t) else {
+                    continue;
+                };
+                let ng = g + cost as u32;
+                if ng < *gscore.get(&nb).unwrap_or(&u32::MAX) {
+                    gscore.insert(nb, ng);
+                    came.insert(nb, cur);
+                    open.push((Reverse(ng + h(nb)), nb));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn is_land(&self, x: i32, y: i32) -> bool {
+        matches!(
+            self.get(x, y).map(|t| t.base),
+            Some(
+                Base::Grassland | Base::Plains | Base::Desert | Base::Tundra
+            )
+        )
+    }
+
+    pub fn generate() -> Self {
+        let w = MAP_W;
+        let h = MAP_H;
+        let seed = MAP_SEED;
+        let mut tiles = Vec::with_capacity((w * h) as usize);
+        for y in 0..h {
+            let lat = ((y as f32 - (h - 1) as f32 / 2.0).abs() * 2.0) / (h - 1) as f32;
+            for x in 0..w {
+                // sample noise on a horizontal cylinder so x wraps seamlessly
+                let t = x as f32 / w as f32;
+                let blend = |s: u64, f: f32| {
+                    fbm(x as f32 * f, y as f32 * f, s) * (1.0 - t)
+                        + fbm((x - w) as f32 * f, y as f32 * f, s) * t
+                };
+                let e = blend(seed, 0.055);
+                let m = blend(seed + 101, 0.07);
+                let r = blend(seed + 202, 0.09);
+
+                let mut base = if e < 0.36 {
+                    Base::Ocean
+                } else if e < 0.42 {
+                    Base::Sea
+                } else if e < 0.46 {
+                    Base::Coast
+                } else if lat > 0.78 {
+                    Base::Tundra
+                } else if (0.15..0.5).contains(&lat) && m < 0.45 || m < 0.30 {
+                    Base::Desert
+                } else if m < 0.55 {
+                    Base::Plains
+                } else {
+                    Base::Grassland
+                };
+                let water = matches!(base, Base::Ocean | Base::Sea | Base::Coast);
+                if water && lat > 0.92 || !water && lat > 0.95 {
+                    base = Base::Ice;
+                }
+
+                let land = matches!(
+                    base,
+                    Base::Grassland | Base::Plains | Base::Desert | Base::Tundra
+                );
+                let mut relief = Relief::Flat;
+                if land {
+                    if e > 0.74 && r > 0.5 {
+                        relief = Relief::Mountain;
+                    } else if e > 0.64 || r > 0.66 {
+                        relief = Relief::Hill;
+                    }
+                }
+                let mut cover = Cover::Bare;
+                if relief == Relief::Flat {
+                    if base == Base::Tundra {
+                        if m > 0.55 && hash2(x as i64, y as i64, seed) < 0.5 {
+                            cover = Cover::Pine;
+                        }
+                    } else if land {
+                        if lat < 0.30 && m > 0.68 {
+                            cover = Cover::Jungle;
+                        } else if m > 0.60 {
+                            cover = Cover::Forest;
+                        }
+                    }
+                }
+                let variant = (hash2(x as i64, y as i64, seed + 7) * 100.0) as u8 % 3;
+                tiles.push(Tile {
+                    base,
+                    relief,
+                    cover,
+                    variant,
+                    seen: false,
+                    visible: false,
+                });
+            }
+        }
+        let mut map = Self {
+            w,
+            h,
+            tiles,
+            start: (w / 2, h / 2),
+        };
+        map.start = map.pick_start();
+        map
+    }
+
+    /// Best grassland or plains capital site: most land nearby, near center.
+    fn pick_start(&self) -> (i32, i32) {
+        let mut best = (self.w / 2, self.h / 2);
+        let mut best_score = f32::MIN;
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let t = &self.tiles[self.idx(x, y)];
+                if !matches!(t.base, Base::Grassland | Base::Plains)
+                    || t.relief != Relief::Flat
+                    || t.cover != Cover::Bare
+                {
+                    continue;
+                }
+                let mut land = 0;
+                for dy in -2..=2 {
+                    for dx in -2..=2 {
+                        if self.is_land(x + dx, y + dy) {
+                            land += 1;
+                        }
+                    }
+                }
+                let dcx = (x - self.w / 2) as f32;
+                let dcy = (y - self.h / 2) as f32;
+                let score = land as f32 - (dcx * dcx + dcy * dcy).sqrt() * 0.05;
+                if score > best_score {
+                    best_score = score;
+                    best = (x, y);
+                }
+            }
+        }
+        best
+    }
+}
+
+/// Food and shields for a worked tile. Civ3 values, except coast is 2 food
+/// (no commerce exists in the MVP, so 1 food coasts would starve) and jungle
+/// is 1/1 for the same reason.
+pub fn yields(t: &Tile) -> (u8, u8) {
+    if t.relief == Relief::Mountain {
+        return (0, 1);
+    }
+    if t.relief == Relief::Hill {
+        return (1, 1);
+    }
+    match t.cover {
+        Cover::Forest => (1, 2),
+        Cover::Jungle => (1, 1),
+        Cover::Pine => (1, 1),
+        Cover::Bare => match t.base {
+            Base::Grassland => (2, 0),
+            Base::Plains => (1, 1),
+            Base::Desert => (0, 1),
+            Base::Tundra => (1, 1),
+            Base::Coast => (2, 0),
+            Base::Sea => (1, 0),
+            Base::Ocean => (1, 0),
+            Base::Ice => (0, 0),
+        },
+    }
+}
+
+/// Movement cost to enter, or None when impassable.
+pub fn move_cost(t: &Tile) -> Option<u8> {
+    match t.base {
+        Base::Ocean | Base::Sea | Base::Coast | Base::Ice => None,
+        _ => {
+            if t.relief == Relief::Mountain {
+                None
+            } else if t.relief == Relief::Hill || t.cover != Cover::Bare {
+                Some(2)
+            } else {
+                Some(1)
+            }
+        }
+    }
+}
+
+pub fn tile_to_world(x: i32, y: i32) -> Vec2 {
+    Vec2::new(
+        (x - y) as f32 * TILE_W / 2.0,
+        -((x + y) as f32) * TILE_H / 2.0,
+    )
+}
+
+pub fn world_to_tile(map: &GameMap, p: Vec2) -> Option<(i32, i32)> {
+    let s = -p.y / (TILE_H / 2.0);
+    let d = p.x / (TILE_W / 2.0);
+    let fx = (s + d) / 2.0;
+    let fy = (s - d) / 2.0;
+    let period = map.w as f32 * TILE_W / 2.0;
+    let mut cands = vec![
+        (fx.floor() as i32, fy.floor() as i32),
+        (fx.floor() as i32, fy.ceil() as i32),
+        (fx.ceil() as i32, fy.floor() as i32),
+        (fx.ceil() as i32, fy.ceil() as i32),
+    ];
+    cands.sort();
+    cands.dedup();
+    for (cx, cy) in cands {
+        if cy < 0 || cy >= map.h {
+            continue;
+        }
+        let wx = map.wrap_x(cx);
+        let mut c = tile_to_world(wx, cy);
+        c.x += ((p.x - c.x) / period).round() * period;
+        if (p.x - c.x).abs() / (TILE_W / 2.0) + (p.y - c.y).abs() / (TILE_H / 2.0)
+            <= 1.0 + 1e-3
+        {
+            return Some((wx, cy));
+        }
+    }
+    None
+}
+
+fn hash2(x: i64, y: i64, seed: u64) -> f32 {
+    let mut h =
+        x.wrapping_mul(374761393).wrapping_add(y.wrapping_mul(668265263)) as u64
+            ^ seed.wrapping_mul(974634211);
+    h = h.wrapping_mul(1274126177);
+    h ^= h >> 16;
+    ((h & 0xffff) as f32) / 65535.0
+}
+
+fn vnoise(x: f32, y: f32, seed: u64) -> f32 {
+    let xi = x.floor() as i64;
+    let yi = y.floor() as i64;
+    let xf = x - x.floor();
+    let yf = y - y.floor();
+    let u = xf * xf * (3.0 - 2.0 * xf);
+    let v = yf * yf * (3.0 - 2.0 * yf);
+    let a = hash2(xi, yi, seed);
+    let b = hash2(xi + 1, yi, seed);
+    let c = hash2(xi, yi + 1, seed);
+    let d = hash2(xi + 1, yi + 1, seed);
+    a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
+}
+
+fn fbm(x: f32, y: f32, seed: u64) -> f32 {
+    let mut v = 0.0;
+    let mut amp = 0.5;
+    let (mut fx, mut fy) = (x, y);
+    for _ in 0..4 {
+        v += amp * vnoise(fx, fy, seed);
+        fx *= 2.03;
+        fy *= 2.01;
+        amp *= 0.5;
+    }
+    v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tile(base: Base, relief: Relief, cover: Cover) -> Tile {
+        Tile {
+            base,
+            relief,
+            cover,
+            variant: 0,
+            seen: false,
+            visible: false,
+        }
+    }
+
+    #[test]
+    fn yields_table() {
+        let flat = Relief::Flat;
+        let bare = Cover::Bare;
+        assert_eq!(yields(&tile(Base::Grassland, flat, bare)), (2, 0));
+        assert_eq!(yields(&tile(Base::Plains, flat, bare)), (1, 1));
+        assert_eq!(yields(&tile(Base::Desert, flat, bare)), (0, 1));
+        assert_eq!(yields(&tile(Base::Tundra, flat, bare)), (1, 1));
+        assert_eq!(yields(&tile(Base::Coast, flat, bare)), (2, 0));
+        assert_eq!(
+            yields(&tile(Base::Grassland, flat, Cover::Forest)),
+            (1, 2)
+        );
+        assert_eq!(
+            yields(&tile(Base::Grassland, Relief::Hill, bare)),
+            (1, 1)
+        );
+        assert_eq!(
+            yields(&tile(Base::Grassland, Relief::Mountain, bare)),
+            (0, 1)
+        );
+    }
+
+    #[test]
+    fn movement_costs() {
+        let flat = Relief::Flat;
+        let bare = Cover::Bare;
+        assert_eq!(move_cost(&tile(Base::Grassland, flat, bare)), Some(1));
+        assert_eq!(move_cost(&tile(Base::Ocean, flat, bare)), None);
+        assert_eq!(move_cost(&tile(Base::Ice, flat, bare)), None);
+        assert_eq!(
+            move_cost(&tile(Base::Grassland, Relief::Mountain, bare)),
+            None
+        );
+        assert_eq!(
+            move_cost(&tile(Base::Grassland, Relief::Hill, bare)),
+            Some(2)
+        );
+        assert_eq!(
+            move_cost(&tile(Base::Grassland, flat, Cover::Forest)),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn neighbors_wrap_x_not_y() {
+        let map = GameMap::generate();
+        let nbs = map.neighbors(0, 10);
+        assert!(nbs.contains(&(map.w - 1, 10)));
+        assert!(nbs.contains(&(1, 10)));
+        let top = map.neighbors(10, 0);
+        assert!(!top.iter().any(|(_, y)| *y < 0));
+    }
+
+    #[test]
+    fn paths_avoid_impassable() {
+        let map = GameMap::generate();
+        let (sx, sy) = map.start;
+        assert_eq!(map.find_path((sx, sy), (sx, sy)).unwrap(), vec![]);
+        let land = map
+            .neighbors(sx, sy)
+            .into_iter()
+            .find(|(x, y)| {
+                move_cost(map.get(*x, *y).unwrap()).is_some()
+            })
+            .expect("start has a passable neighbor");
+        assert_eq!(map.find_path((sx, sy), land).unwrap(), vec![land]);
+        let ocean = (0..map.h)
+            .flat_map(|y| (0..map.w).map(move |x| (x, y)))
+            .find(|(x, y)| {
+                matches!(map.get(*x, *y).map(|t| t.base), Some(Base::Ocean))
+            })
+            .expect("map has ocean");
+        assert_eq!(map.find_path((sx, sy), ocean), None);
+    }
+
+    #[test]
+    fn picking_roundtrips() {
+        let map = GameMap::generate();
+        for (x, y) in [(0, 0), (37, 32), (79, 59), (10, 50)] {
+            let p = tile_to_world(x, y);
+            assert_eq!(world_to_tile(&map, p), Some((x, y)));
+        }
+        assert_eq!(world_to_tile(&map, Vec2::new(1e6, 1e6)), None);
+    }
+}

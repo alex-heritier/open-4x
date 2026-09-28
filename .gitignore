@@ -1,0 +1,5 @@
+target/
+assets/gen/
+.DS_Store
+__pycache__/
+*.py[cod]
