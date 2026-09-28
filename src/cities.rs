@@ -332,7 +332,7 @@ pub fn found_city(
     units: Query<(Entity, &Unit)>,
     cities: Query<&City>,
     mut names: ResMut<CityNamesUsed>,
-    map: Res<GameMap>,
+    mut map: ResMut<GameMap>,
     art: Res<CityArt>,
     assets: Res<AssetServer>,
     view: Res<CityView>,
@@ -357,6 +357,11 @@ pub fn found_city(
     }
     let (x, y) = (u.x, u.y);
     commands.entity(e).despawn();
+    // Settling absorbs any hut or camp on the tile (no reward); a resource
+    // underneath stays for future trade.
+    let i = map.idx(x, y);
+    map.tiles[i].hut = false;
+    map.tiles[i].camp = false;
     let mut city = City {
         name: next_name(&mut names),
         x,

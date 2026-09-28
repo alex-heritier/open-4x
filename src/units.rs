@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 
+use crate::improvements::Work;
 use crate::map::*;
 use crate::render::{sprite_z, RevealAll};
 
@@ -135,6 +136,7 @@ pub struct Unit {
     pub facing: usize,
     pub path: VecDeque<(i32, i32)>,
     pub anim: UnitAnim,
+    pub work: Option<Work>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -203,6 +205,7 @@ pub(crate) fn spawn_unit(
                 facing: 2,
                 path: VecDeque::new(),
                 anim: UnitAnim::Idle { t: 0.0 },
+                work: None,
             },
         ))
         .id()
@@ -227,6 +230,8 @@ pub fn spawn_party(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>)
 }
 
 pub fn order_move(map: &GameMap, u: &mut Unit, dest: (i32, i32)) {
+    // Moving cancels any worker job in progress.
+    u.work = None;
     if (u.x, u.y) == dest {
         u.path.clear();
         return;
@@ -418,11 +423,14 @@ pub fn auto_select(
     if selected.0.is_some_and(|s| {
         units
             .get(s)
-            .is_ok_and(|(_, u)| !u.fortified && u.moves > 0)
+            .is_ok_and(|(_, u)| !u.fortified && u.moves > 0 && u.work.is_none())
     }) {
         return;
     }
-    if let Some((e, _)) = units.iter().find(|(_, u)| !u.fortified && u.moves > 0) {
+    if let Some((e, _)) = units
+        .iter()
+        .find(|(_, u)| !u.fortified && u.moves > 0 && u.work.is_none())
+    {
         selected.0 = Some(e);
     } else if !selected.0.is_some_and(|s| units.get(s).is_ok()) {
         selected.0 = units.iter().next().map(|(e, _)| e);

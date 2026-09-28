@@ -4,6 +4,8 @@ use bevy::prelude::*;
 
 use crate::audio::{self, GameAudio};
 use crate::cities::CityView;
+use crate::features::{self, MessageBoard};
+use crate::improvements;
 use crate::input::Hovered;
 use crate::map::GameMap;
 use crate::splash::SplashUp;
@@ -17,6 +19,9 @@ pub(crate) struct TurnLabel;
 
 #[derive(Component)]
 pub(crate) struct SelLabel;
+
+#[derive(Component)]
+pub(crate) struct MessageLabel;
 
 #[derive(Component)]
 pub(crate) struct EndTurnButton;
@@ -41,7 +46,7 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
         HoverLabel,
     ));
     commands.spawn((
-        Text::new("click: select/move/open city | right-click: move | B: found city | F: fortify | Space: skip | Tab: cycle | Enter: end turn"),
+        Text::new("click: select/move/open city | right-click: move | B: found city | F: fortify | R: road | I: irrigate | Space: skip | Tab: cycle | Enter: end turn"),
         TextFont {
             font: font.clone(),
             font_size: 14.0,
@@ -88,6 +93,23 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
         },
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
         SelLabel,
+    ));
+    commands.spawn((
+        Text::new(""),
+        TextFont {
+            font: font.clone(),
+            font_size: 17.0,
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 0.95, 0.7)),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(36.0),
+            left: Val::Px(8.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+        MessageLabel,
     ));
     commands
         .spawn((
@@ -145,10 +167,37 @@ pub fn update_hover_label(
     text.0 = match hovered.0 {
         Some((x, y)) => {
             let t = &map.tiles[map.idx(x, y)];
-            format!("({x},{y}) {:?} {:?} {:?}", t.base, t.relief, t.cover)
+            let base = format!("({x},{y}) {:?} {:?} {:?}", t.base, t.relief, t.cover);
+            let mut parts = vec![base];
+            if let Some(f) = features::describe(t) {
+                parts.push(f);
+            }
+            if let Some(i) = improvements::describe(t) {
+                parts.push(i);
+            }
+            parts.join(" | ")
         }
         None => String::new(),
     };
+}
+
+pub fn update_message_label(
+    time: Res<Time>,
+    mut board: ResMut<MessageBoard>,
+    mut q: Query<&mut Text, With<MessageLabel>>,
+) {
+    let Ok(mut text) = q.single_mut() else {
+        return;
+    };
+    if board.ttl > 0.0 {
+        board.ttl -= time.delta_secs();
+        text.0 = board.text.clone();
+        if board.ttl <= 0.0 {
+            board.text.clear();
+        }
+    } else {
+        text.0 = String::new();
+    }
 }
 
 pub fn update_turn_label(

@@ -15,6 +15,8 @@ pub struct GameAudio {
     pub run: HashMap<UnitType, Handle<AudioSource>>,
     pub build: Handle<AudioSource>,
     pub fortify: Handle<AudioSource>,
+    pub work_road: Handle<AudioSource>,
+    pub work_irrigate: Handle<AudioSource>,
     pub music: Option<Entity>,
 }
 
@@ -26,6 +28,8 @@ impl GameAudio {
             "City View",
             "EnterTurn",
             "WhatToBuild",
+            "Hut",
+            "Barbarian Raid",
         ];
         let mut ui = HashMap::new();
         for n in ui_names {
@@ -55,6 +59,8 @@ impl GameAudio {
             run,
             build: assets.load("gen/audio/units/Settler/SettlerBuild.wav"),
             fortify: assets.load("gen/audio/units/warrior/WarriorFortify.wav"),
+            work_road: assets.load("gen/audio/units/Worker/WorkRoadShovelIn.wav"),
+            work_irrigate: assets.load("gen/audio/units/Worker/WorkIrrigateHoe1.wav"),
             music: None,
         }
     }

@@ -43,6 +43,12 @@ pub struct Tile {
     pub variant: u8,
     pub seen: bool,
     pub visible: bool,
+    pub hut: bool,
+    pub camp: bool,
+    /// Resource GOOD id (0..22, sheet order) or none.
+    pub resource: Option<u8>,
+    pub road: bool,
+    pub irrigation: bool,
 }
 
 #[derive(Resource)]
@@ -51,6 +57,7 @@ pub struct GameMap {
     pub h: i32,
     pub tiles: Vec<Tile>,
     pub start: (i32, i32),
+    pub seed: u64,
 }
 
 impl GameMap {
@@ -146,9 +153,16 @@ impl GameMap {
     }
 
     pub fn generate() -> Self {
+        let seed: u64 = std::env::var("MAP_SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(MAP_SEED);
+        Self::generate_with_seed(seed)
+    }
+
+    pub fn generate_with_seed(seed: u64) -> Self {
         let w = MAP_W;
         let h = MAP_H;
-        let seed = MAP_SEED;
         let mut tiles = Vec::with_capacity((w * h) as usize);
         for y in 0..h {
             let lat = ((y as f32 - (h - 1) as f32 / 2.0).abs() * 2.0) / (h - 1) as f32;
@@ -217,6 +231,11 @@ impl GameMap {
                     variant,
                     seen: false,
                     visible: false,
+                    hut: false,
+                    camp: false,
+                    resource: None,
+                    road: false,
+                    irrigation: false,
                 });
             }
         }
@@ -225,8 +244,16 @@ impl GameMap {
             h,
             tiles,
             start: (w / 2, h / 2),
+            seed,
         };
         map.start = map.pick_start();
+        // RE stages 10-12: resources, goody huts, barbarian camps. Stage
+        // seeds derive from the water level (0..100 Oceans-slider semantics)
+        // so MAP_SEED still varies them.
+        let wl = (seed % 101) as u32;
+        crate::features::place_resources(&mut map, wl);
+        crate::features::place_goody_huts(&mut map, wl);
+        crate::features::place_barbarian_camps(&mut map, wl);
         map
     }
 
@@ -266,38 +293,52 @@ impl GameMap {
 
 /// Food and shields for a worked tile. Civ3 values, except coast is 2 food
 /// (no commerce exists in the MVP, so 1 food coasts would starve) and jungle
-/// is 1/1 for the same reason.
+/// is 1/1 for the same reason. Bonus resources add their GOOD yield delta.
 pub fn yields(t: &Tile) -> (u8, u8) {
-    if t.relief == Relief::Mountain {
-        return (0, 1);
+    let (f, s) = if t.relief == Relief::Mountain {
+        (0, 1)
+    } else if t.relief == Relief::Hill {
+        (1, 1)
+    } else {
+        match t.cover {
+            Cover::Forest => (1, 2),
+            Cover::Jungle => (1, 1),
+            Cover::Pine => (1, 1),
+            Cover::Bare => match t.base {
+                Base::Grassland => (2, 0),
+                Base::Plains => (1, 1),
+                Base::Desert => (0, 1),
+                Base::Tundra => (1, 1),
+                Base::Coast => (2, 0),
+                Base::Sea => (1, 0),
+                Base::Ocean => (1, 0),
+                Base::Ice => (0, 0),
+            },
+        }
+    };
+    let (mut f, s) = match t
+        .resource
+        .map(|id| crate::features::GOODS[id as usize].bonus)
+    {
+        Some((df, ds)) => (f + df, s + ds),
+        None => (f, s),
+    };
+    if t.irrigation {
+        f += 1;
     }
-    if t.relief == Relief::Hill {
-        return (1, 1);
-    }
-    match t.cover {
-        Cover::Forest => (1, 2),
-        Cover::Jungle => (1, 1),
-        Cover::Pine => (1, 1),
-        Cover::Bare => match t.base {
-            Base::Grassland => (2, 0),
-            Base::Plains => (1, 1),
-            Base::Desert => (0, 1),
-            Base::Tundra => (1, 1),
-            Base::Coast => (2, 0),
-            Base::Sea => (1, 0),
-            Base::Ocean => (1, 0),
-            Base::Ice => (0, 0),
-        },
-    }
+    (f, s)
 }
 
-/// Movement cost to enter, or None when impassable.
+/// Movement cost to enter, or None when impassable. Roads flatten
+/// hill/forest costs to 1 (Civ3's 1/3 MP, expressed in integer moves).
 pub fn move_cost(t: &Tile) -> Option<u8> {
     match t.base {
         Base::Ocean | Base::Sea | Base::Coast | Base::Ice => None,
         _ => {
             if t.relief == Relief::Mountain {
                 None
+            } else if t.road {
+                Some(1)
             } else if t.relief == Relief::Hill || t.cover != Cover::Bare {
                 Some(2)
             } else {
@@ -392,6 +433,11 @@ mod tests {
             variant: 0,
             seen: false,
             visible: false,
+            hut: false,
+            camp: false,
+            resource: None,
+            road: false,
+            irrigation: false,
         }
     }
 
@@ -416,6 +462,31 @@ mod tests {
             yields(&tile(Base::Grassland, Relief::Mountain, bare)),
             (0, 1)
         );
+    }
+
+    #[test]
+    fn resource_bonus_adds_to_base_yield() {
+        let mut t = tile(Base::Grassland, Relief::Flat, Cover::Bare);
+        t.resource = Some(20); // wheat +2 food
+        assert_eq!(yields(&t), (4, 0));
+        let mut t = tile(Base::Sea, Relief::Flat, Cover::Bare);
+        t.resource = Some(16); // whales +1/+1
+        assert_eq!(yields(&t), (2, 1));
+        let mut t = tile(Base::Grassland, Relief::Flat, Cover::Bare);
+        t.resource = Some(0); // horses: no yield yet
+        assert_eq!(yields(&t), (2, 0));
+    }
+
+    #[test]
+    fn irrigation_adds_one_food_roads_flatten_move_cost() {
+        let mut t = tile(Base::Plains, Relief::Flat, Cover::Bare);
+        assert_eq!(yields(&t), (1, 1));
+        t.irrigation = true;
+        assert_eq!(yields(&t), (2, 1));
+        let mut h = tile(Base::Grassland, Relief::Hill, Cover::Bare);
+        assert_eq!(move_cost(&h), Some(2));
+        h.road = true;
+        assert_eq!(move_cost(&h), Some(1));
     }
 
     #[test]

@@ -24,7 +24,13 @@ intended behaviour, or a subset like `--bugs sea-level-split,swapped-wrap-flags`
 | start deconfliction | `0x5eeb00` | exact, including the original's index bug |
 | desert conversion at starts | `0x5edb70` | exact |
 | biome / climate assignment | `0x5f1480` | exact except the `0x5f1ce0` call |
-| resource, barbarian, start-location and smoothing stages | `0x5f22a0`+ | not implemented |
+| resource placement math (freq roll, quantity, block odds) | `0x5f22a0` | data-independent math only; needs `.biq` rows for full placement (`resources`) |
+| goody huts, barbarian camps | `0x5f21b0`, `0x5f2090` | fully specified, implemented (`resources`) |
+| start-location and smoothing stages | `0x5eeee0`+ | not implemented |
+| river art path + mask model | `0x4C5FDA`, `0x407D56` | art path verified, storage hypothesis (`rivers`) |
+| terrain / unit / city sprite selection | `0x4C5F9F`, `0x407C30` | observed inventory (`graphics`) |
+| game RNG | `0x64A20E` | exact (`ai`); strategy/turn logic open |
+| `.biq`/`.bic` container codec | `0x649400` family | exact mode-0 decode; both shipped files verified (`dcl`, see `../biq.md`) |
 
 Everything not implemented only writes resource and feature ids into cells whose
 terrain is already fixed, so the coastline, the ocean fraction, the biome layout

@@ -1,8 +1,10 @@
-# Civ3 Clone (MVP)
+# Civ3 Clone
 
 A solo Japan sandbox built with Rust Bevy, using art and audio converted
 from a local Civilization 3 GOG install. No AI, no tech, no diplomacy:
-found Kyoto, explore, grow cities, end turns.
+found Kyoto, explore, pop goody huts, disperse barbarian camps, work
+resources, grow cities, end turns. Map-feature placement follows the
+reverse-engineered mapgen stages (see `reverse-engineering/NOTES.md`).
 
 ## Setup
 
@@ -26,7 +28,9 @@ Prereqs: Rust, Python 3 with PIL, ffmpeg.
 
 ## Scope
 
-MVP only: terrain, movement, fog, settling, food and shield boxes,
-Warrior/Settler/Worker production, Tokugawa splash, UI and unit sounds,
-and the Asian peace music loop. Out of scope: AI, tech, diplomacy,
-trade, worker improvements, huts, barbarians, save/load, minimap.
+MVP plus the features slice: terrain, movement, fog, settling, food and
+shield boxes, Warrior/Settler/Worker production, Tokugawa splash, UI and
+unit sounds, the Asian peace music loop, plus goody huts (poppable for
+units, maps, or settlers), capturable barbarian camps, and 22 placed
+resources with bonus yields. Out of scope: AI, tech, diplomacy, trade,
+worker improvements, combat, save/load, minimap.

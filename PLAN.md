@@ -64,3 +64,26 @@ screen cursor math); OS event delivery is Bevy/winit machinery.
 - SETTLED-6: City interaction is the full Civ3 city screen recreation.
 - SETTLED-7: Music is the Asian early peace loop plus Menu1 on the splash, converted to OGG at prep.
 - SETTLED-8: No main menu or settings. The app opens directly into the new game.
+
+## Phase 2: map features (landed, supersedes SETTLED-5)
+
+Goody huts, barbarian camps, and resources per `reverse-engineering/NOTES.md`
+§11.8-11.10 (exact stage seeds, quantity math, Fisher-Yates, 1-in-3 camp
+gate, block-3 odds). Deviations: hut/camp counts implement evident intent
+(the binary's hut stage is a no-op under 32 civs); GOOD frequencies and the
+TERR allow-matrix are hardcoded until BIQ framing lands; luxury/strategic
+goods give no yield yet (trade slice); camps are capturable, barb units and
+combat wait on RE. Verified: `cargo test` 30/30, `cargo build` clean, live
+screenshots (hut adjacent to start, hover label, hut pop with Warrior
+reward, bonus clustering, camp render). Demo: `MAP_SEED=2` puts a hut at
+(42,30) next to the start (43,30); pinned by
+`features::tests::demo_seed_layout_is_stable`.
+
+## Phase 3: worker improvements (next, RE-ready)
+
+`graphics-terrain.md` gives exact overlay tables (roads 16x16 neighbor
+mask, irrigation 4x4 edge mask) and Worker FLCs exist for
+ROAD/MINE/IRRIGATE/FORTRESS/JUNGLE/FOREST/PLANT. Also port `GameRng`
+(`ai.rs`, exact) for gameplay randomness. Deferred: terrain blending
+(letter mapping still inference), rivers (hypothesis), combat/AI
+(strings only), BIQ data (DCL mode 0 done, `biq.md` pending).

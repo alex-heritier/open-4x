@@ -25,10 +25,11 @@ GOG = os.environ.get("CIV3_GOG", "../civ3-gog/app")
 OUT = "assets/gen"
 
 UNITS = ["Settler", "warrior", "Worker", "Scout"]
-UNIT_SLOTS = ["DEFAULT", "RUN", "FORTIFY", "FIDGET", "BUILD"]
+UNIT_SLOTS = ["DEFAULT", "RUN", "FORTIFY", "FIDGET", "BUILD", "ROAD",
+              "MINE", "IRRIGATE", "FORTRESS", "JUNGLE", "FOREST", "PLANT"]
 UI_SOUNDS = ["Select.wav", "Button OK.wav", "Button Cancel .wav", "Check.wav",
              "EnterTurn.wav", "Hut.wav", "WhatToBuild.wav", "PopupInfo.wav",
-             "City View.wav", "Grid.wav", "PaperTurn.wav"]
+             "City View.wav", "Grid.wav", "PaperTurn.wav", "Barbarian Raid.wav"]
 MUSIC = [("Diplomusic/DipASEarlyPeace.mp3", "as_early_peace"),
          ("Diplomusic/DipASLatePeace-2.mp3", "as_late_peace"),
          ("Menu/Menu1.mp3", "menu")]
@@ -37,13 +38,18 @@ _is255 = [0] * 255 + [255]
 _is0 = [255] + [0] * 255
 _ge201 = [0] * 201 + [255] * 55
 _le99 = [255] * 100 + [0] * 156
+_ge240 = [0] * 240 + [255] * 16
+_le60 = [255] * 61 + [0] * 195
 
 
-def to_rgba(im, unit=False):
+def to_rgba(im, unit=False, green_clear=False):
     """Apply Civ3 transparency rules, return RGBA image.
 
     Magenta is transparent everywhere. Shadows are exact red, plus vivid
     green for units (the scout's shadow palette is green, not red).
+    Feature sheets (goody huts, terrain buildings) fill outside the tile
+    diamond with green ((0,255,0) or (12,252,12)), cleared fuzzily when
+    green_clear is set. Verified: no art pixel in those sheets matches.
     """
     rgb = im.convert("RGB")
     r, g, b = rgb.split()
@@ -61,6 +67,10 @@ def to_rgba(im, unit=False):
     alpha = Image.composite(Image.new("L", rgb.size, 0), alpha, is_mag)
     shadow_a = Image.new("L", rgb.size, 110)
     alpha = Image.composite(shadow_a, alpha, is_red)
+    if green_clear:
+        is_eg = ImageChops.multiply(r.point(_le60), ImageChops.multiply(
+            g.point(_ge240), b.point(_le60)))
+        alpha = Image.composite(Image.new("L", rgb.size, 0), alpha, is_eg)
     out = out_rgb.convert("RGBA")
     out.putalpha(alpha)
     return out
@@ -480,9 +490,100 @@ def stage_fonts():
     print("fonts/lsans.ttf")
 
 
+# Row-major order of Art/resources.pcx, verified against the named
+# civilopedia icons. Used as canonical GOOD ids until BIQ framing lands.
+RESOURCES = ["horse", "diamonds", "saltpetre", "coal", "oil", "iron",
+             "aluminum", "uranium", "wine", "furs", "dye", "incense",
+             "spice", "ivory", "silk", "rubber", "whales", "game",
+             "fish", "cattle", "wheat", "gold"]
+
+
+def stage_features():
+    outdir = os.path.join(OUT, "features")
+    os.makedirs(outdir, exist_ok=True)
+    manifest = {}
+    # goody huts: 3x3 grid of 128x64 cells, last cell empty
+    huts = Image.open(os.path.join(GOG, "Art", "Terrain", "goodyhuts.pcx"))
+    huts.load()
+    huts = to_rgba(huts, green_clear=True)
+    n = 0
+    for row in range(3):
+        for col in range(3):
+            if row == 2 and col == 2:
+                continue
+            cell = huts.crop((col * 128, row * 64, (col + 1) * 128,
+                              (row + 1) * 64))
+            cell.save(os.path.join(outdir, f"hut_{n}.png"))
+            manifest[f"hut_{n}"] = {"file": f"hut_{n}.png",
+                                    "size": [128, 64], "anchor": [64, 32]}
+            n += 1
+    # barbarian camp: palisade hut at col 2, row 0 of TerrainBuildings
+    tb = Image.open(os.path.join(GOG, "Art", "Terrain", "TerrainBuildings.PCX"))
+    tb.load()
+    camp = to_rgba(tb, green_clear=True).crop((256, 0, 384, 64))
+    camp.save(os.path.join(outdir, "camp.png"))
+    manifest["camp"] = {"file": "camp.png", "size": [128, 64],
+                        "anchor": [64, 32]}
+    # resources: 50px grid with 1px dark-magenta separators; crop inset.
+    # Shadows (resources_shadows.pcx) skipped: opaque blobs, needs softening.
+    res = Image.open(os.path.join(GOG, "Art", "resources.pcx"))
+    res.load()
+    res = to_rgba(res)
+    for i, name in enumerate(RESOURCES):
+        c, r = i % 6, i // 6
+        cell = res.crop((c * 50 + 1, r * 50 + 1,
+                         (c + 1) * 50 - 1, (r + 1) * 50 - 1))
+        cell.save(os.path.join(outdir, f"res_{name}.png"))
+        manifest[f"res_{name}"] = {"file": f"res_{name}.png",
+                                   "size": [48, 48], "anchor": [24, 24]}
+    with open(os.path.join(outdir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=1)
+    print(f"features: {n} huts + camp + {len(RESOURCES)} resources")
+
+
+# Irrigation sheet per base terrain (verified by average hue).
+IRRIGATION_SHEETS = [("grass", "irrigation"), ("plains", "irrigation PLAINS"),
+                     ("desert", "irrigation DESETT"),
+                     ("tundra", "irrigation TUNDRA")]
+
+
+def stage_improvements():
+    outdir = os.path.join(OUT, "improvements")
+    os.makedirs(outdir, exist_ok=True)
+    manifest = {}
+    # roads: 16x16 neighbor-mask table, row-major, 128x64 cells. Bit order
+    # (verified by stub tiles): screen-clockwise from map-E.
+    roads = Image.open(os.path.join(GOG, "Art", "Terrain", "roads.pcx"))
+    roads.load()
+    roads = to_rgba(roads, green_clear=True)
+    for mask in range(256):
+        c, r = mask % 16, mask // 16
+        cell = roads.crop((c * 128, r * 64, (c + 1) * 128, (r + 1) * 64))
+        cell.save(os.path.join(outdir, f"road_{mask}.png"))
+        manifest[f"road_{mask}"] = {"file": f"road_{mask}.png",
+                                    "size": [128, 64], "anchor": [64, 32]}
+    # irrigation: 4x4 edge-mask table per base terrain. Bit order
+    # (verified by edge-contact + 2x2 continuity): 0=W 1=E 2=S 3=N.
+    for base, sheet in IRRIGATION_SHEETS:
+        im = Image.open(os.path.join(GOG, "Art", "Terrain", sheet + ".pcx"))
+        im.load()
+        im = to_rgba(im, green_clear=True)
+        for mask in range(16):
+            c, r = mask % 4, mask // 4
+            cell = im.crop((c * 128, r * 64, (c + 1) * 128, (r + 1) * 64))
+            cell.save(os.path.join(outdir, f"irr_{base}_{mask}.png"))
+            manifest[f"irr_{base}_{mask}"] = {
+                "file": f"irr_{base}_{mask}.png",
+                "size": [128, 64], "anchor": [64, 32]}
+    with open(os.path.join(outdir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=1)
+    print(f"improvements: 256 roads + {16 * len(IRRIGATION_SHEETS)} irrigation")
+
+
 STAGES = {"terrain": stage_terrain, "units": stage_units,
           "cities": stage_cities, "cityscreen": stage_cityscreen,
-          "splash": stage_splash, "audio": stage_audio, "fonts": stage_fonts}
+          "splash": stage_splash, "audio": stage_audio, "fonts": stage_fonts,
+          "features": stage_features, "improvements": stage_improvements}
 
 
 def main():

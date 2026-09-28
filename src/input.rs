@@ -6,10 +6,12 @@ use bevy::window::PrimaryWindow;
 
 use crate::audio::{self, GameAudio};
 use crate::cities::{City, CityView};
+use crate::features::{post, MessageBoard};
+use crate::improvements::{action_slot, can_irrigate, can_road, work_turns, Work, WorkAction};
 use crate::map::*;
 use crate::render::RevealAll;
 use crate::splash::SplashUp;
-use crate::units::{self, Selected, TurnEnded, Unit, UnitAnim};
+use crate::units::{self, Selected, TurnEnded, Unit, UnitAnim, UnitType};
 
 #[derive(Resource, Default)]
 pub struct Hovered(pub Option<(i32, i32)>);
@@ -162,6 +164,7 @@ pub fn orders(
     mut view: ResMut<CityView>,
     audio: Res<GameAudio>,
     splash: Res<SplashUp>,
+    mut board: ResMut<MessageBoard>,
 ) {
     if view.0.is_some() || splash.0 {
         return;
@@ -226,6 +229,7 @@ pub fn orders(
                 u.fortified = true;
                 u.moves = 0;
                 u.path.clear();
+                u.work = None;
                 u.anim = UnitAnim::OneShot {
                     slot: "FORTIFY",
                     t: 0.0,
@@ -239,6 +243,59 @@ pub fn orders(
             if let Ok((_, mut u)) = units.get_mut(s) {
                 u.moves = 0;
                 u.path.clear();
+                u.work = None;
+            }
+        }
+        for (key, action) in [
+            (KeyCode::KeyR, WorkAction::Road),
+            (KeyCode::KeyI, WorkAction::Irrigate),
+        ] {
+            if !keys.just_pressed(key) {
+                continue;
+            }
+            let Ok((_, mut u)) = units.get_mut(s) else {
+                continue;
+            };
+            if u.utype != UnitType::Worker {
+                post(&mut board, "Only Workers can build improvements.");
+                continue;
+            }
+            if u.moves == 0 {
+                post(&mut board, "That unit has no moves left.");
+                continue;
+            }
+            let ok = match action {
+                WorkAction::Road => can_road(&map, u.x, u.y),
+                WorkAction::Irrigate => can_irrigate(&map, u.x, u.y),
+            };
+            if !ok {
+                match action {
+                    WorkAction::Road => post(&mut board, "A road cannot be built here."),
+                    WorkAction::Irrigate => {
+                        post(&mut board, "Irrigation needs fresh water or a chain.")
+                    }
+                }
+                continue;
+            }
+            u.work = Some(Work {
+                action,
+                turns_left: work_turns(action),
+            });
+            u.moves = 0;
+            u.path.clear();
+            u.fortified = false;
+            u.anim = UnitAnim::OneShot {
+                slot: action_slot(action),
+                t: 0.0,
+            };
+            let handle = match action {
+                WorkAction::Road => &audio.work_road,
+                WorkAction::Irrigate => &audio.work_irrigate,
+            };
+            commands.spawn(AudioPlayer(handle.clone()));
+            match action {
+                WorkAction::Road => post(&mut board, "Building road..."),
+                WorkAction::Irrigate => post(&mut board, "Building irrigation..."),
             }
         }
     }
@@ -266,7 +323,7 @@ pub fn orders(
         turn_end.write(TurnEnded);
         audio::sfx(&mut commands, &audio, "EnterTurn");
     }
-    if keys.just_pressed(KeyCode::KeyR) {
+    if keys.just_pressed(KeyCode::F9) {
         reveal.0 = !reveal.0;
     }
 }

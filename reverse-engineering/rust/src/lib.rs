@@ -90,12 +90,17 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod ai;
 pub mod bugs;
 pub mod cell;
+pub mod dcl;
 pub mod fractal;
+pub mod graphics;
 pub mod landmass;
 pub mod options;
 pub mod pipeline;
+pub mod resources;
+pub mod rivers;
 pub mod rng;
 pub mod spiral;
 

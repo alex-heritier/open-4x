@@ -3,9 +3,12 @@ use bevy::window::WindowResolution;
 
 mod audio;
 mod cities;
+mod features;
+mod improvements;
 mod input;
 mod map;
 mod render;
+mod rng;
 mod splash;
 mod tiles;
 mod ui;
@@ -36,14 +39,17 @@ fn main() {
         .init_resource::<cities::CityNamesUsed>()
         .init_resource::<cities::CityView>()
         .init_resource::<splash::SplashUp>()
+        .init_resource::<features::MessageBoard>()
         .add_systems(
             Startup,
             (
                 setup_camera,
                 setup_art,
+                setup_rng,
                 audio::setup_audio,
                 splash::setup_splash,
                 render::spawn_terrain,
+                features::spawn_features,
                 units::spawn_party,
                 ui::spawn_hud,
             )
@@ -59,8 +65,10 @@ fn main() {
                     cities::found_city,
                     units::end_turn_units,
                     cities::end_turn_cities,
+                    improvements::end_turn_work,
                     units::drive_movement,
                     units::advance_anims,
+                    features::resolve_features,
                     units::refresh_visibility,
                     units::restack,
                     units::auto_select,
@@ -77,10 +85,13 @@ fn main() {
                     cities::maintain_city_screen,
                     cities::city_screen_input,
                     cities::city_screen_buttons,
+                    features::sync_feature_sprites,
+                    improvements::sync_improvement_sprites,
                     render::update_fog,
                     ui::update_hover_label,
                     ui::update_turn_label,
                     ui::update_sel_label,
+                    ui::update_message_label,
                 )
                     .chain(),
             )
@@ -98,4 +109,12 @@ fn setup_art(mut commands: Commands, assets: Res<AssetServer>) {
     commands.insert_resource(tiles::TileArt::load(&assets));
     commands.insert_resource(units::UnitArt::load(&assets));
     commands.insert_resource(cities::CityArt::load(&assets));
+    commands.insert_resource(features::FeatureArt::load(&assets));
+    commands.insert_resource(improvements::ImprovementArt::load(&assets));
+}
+
+/// Gameplay RNG, seeded from the map seed (the binary reseeds from the
+/// clock at game start; determinism per map is our deviation).
+fn setup_rng(mut commands: Commands, map: Res<GameMap>) {
+    commands.insert_resource(rng::GameRng::new(map.seed as u32));
 }
