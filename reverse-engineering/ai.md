@@ -60,9 +60,13 @@ for seed 0 is 38 (`2531011>>16 & 0x7FFF`), asserted in tests.
 
 ## Caller census (verified this session, recounted 2026-09-29)
 
-Raw `E8`-scan for `0x64A20E` finds **65 direct call sites** (reproducible:
-every `E8 rel32` in `.text` resolving to `0x64A20E`; an earlier count of 70
-was wrong — recheck the `0x5A`/`0x5C` rows if you repeat it). Game RNG use
+Raw `E8`-scan for `0x64A20E` finds **70 direct call sites** (reproducible:
+every `E8 rel32` in `.text` resolving to `0x64A20E`; `scans.py calls`).
+CORRECTION: an intermediate recount claimed 65 by dropping four `0x5A`
+sites and one `0x5C` site — re-examined, all five are real. Each dropped
+`0x5A` site is a conditional-branch target (`jne` into the `call`, e.g.
+`0x5A0786 → 0x5A078C`) followed by the full `cdq`/`idiv` modulo idiom, and
+all nine `0x5C` sites are individually characterised below. Game RNG use
 is pervasive, not centralised:
 
 | region | callers |
@@ -75,8 +79,8 @@ is pervasive, not centralised:
 | `0x4F/50xxxx` game systems | 7 |
 | `0x52/53/54xxxx` | 12 |
 | `0x58/59xxxx` | 3 |
-| `0x5Axxxx` | 3 (`0x5AF703 0x5AF84B 0x5AFA1B` — the candidate scans below) |
-| `0x5Cxxxx` (unit-AI helper region incl. `0x5C1AD0`) | 8 — densest cluster |
+| `0x5Axxxx` | 7 (`0x5AF703 0x5AF84B 0x5AFA1B` candidate scans + 4 guarded-modulo draws `0x5A078C 0x5A0900 0x5A0AB5 0x5A0C2D`) |
+| `0x5Cxxxx` (unit-AI helper region incl. `0x5C1AD0`) | 9 — densest cluster |
 | `0x5Dxxxx` map/cell | 2 |
 
 ## Random-Nth candidate scans, `0x5AF703–0x5AFB1E` (verified this session)
@@ -469,20 +473,63 @@ Siblings: `BARBARIAN_CAPTURE_CITY_{POPULATION,GOLD,PRODUCTION}`
 `timeGetTime`-gated. This is the queue behind every `0x4ED220(string, x,
 y, flag)` log call cited above (bombard, disease, disorder, production).
 
+## Turn-step executor `0x4708B0` (verified: static walk)
+
+Per-unit turn-step executor, `0x4708B0..0x470A02` (`ret 8`, SEH frame with
+handler `0x657E6B`). 8 direct callers (`0x46F598 0x476F4C 0x477055
+0x4772E8 0x4775E4 0x478211 0x478300 0x4B90B5`): each drives one unit/step
+through it, then post-processes (sampled caller `0x477055`: unit index vs
+`[0x9FD474]`, then `0x40000000`-gated `0x4DBA70` vs `0x4688F0`).
+
+Gate chain, in order:
+
+1. Phase `[0x990390] == 2` (`0x4708C8`), else straight to the epilogue.
+2. `malloc 0x40` action record (`0x4708DF`), built by `0x47B420` with kind
+   `0x11` (`0x47B420` chains `0x49AFF0`, then fills `+0x28/+0x2C` via
+   `0x46F640`/`0x46F650` on `0x74AF60`; `[esi] = 0x30` when the 4th arg
+   is 0).
+3. `0x46F7D0` validator — **neutered stub** (`xor al,al; ret 4`, 3 bytes
+   + nops): the nonzero-exit arm at `0x470977` never fires.
+4. Owner fast path: `[unit+0x34] == [0x9FD4BC]` skips the capability test
+   (`0x470983`); otherwise owner*2105 bit vs `[0xA526BC]`
+   (`0x470985..0x4709A9`), the same capability words as the random-Nth
+   scans.
+5. Mode gate `0x47B550`, a trampoline (`jmp 0x499FC0`):
+   `[0x9AFD74] == 4 || == 2`.
+6. Kind dispatch on `[esi+4]-9` (`0x4709B9`): 76-entry byte table at
+   `0x470A10` selecting jump targets `0x4709D5` (force `cl = 1`) vs
+   `0x4709D7` (leave `cl = 0`). Committable kinds (table 0): 9, 10, 14,
+   17, 18, 19, 29, 31, 32, 33, 81, 82, 84.
+7. `[ebp+0x2060] > 2` commits unconditionally via `0x47B490(0, esi, 8)`;
+   otherwise requires `cl != 0` from step 6. (`0x47B490`: `-1`/`-2`
+   special arms, else strided table `0x90F608` + `0x49B290`.)
+
+Record layout (`0x40` bytes): `+0x28 = [ebp+0x20] +
+([0x9905C4]==-1 ? -1 : [ebp+0x211C])`, `+0x2C = arg + [unit+0x20] +
+10000`, `+0x30` = owner, `+0x34` = stack arg, `+0x38/+0x3C` = unit
+`+0x24/+0x28`.
+
+Sibling `0x470A60` repeats the shape (SEH, `0x47B550` gate, phase-2 gate)
+with a `0x30` record and kind `0x0C`: the sequencer is a family of
+per-kind step executors, not one loop. The 8 callers' dispatch outward
+(which caller handles which phase) is still open.
+
 ## Next targets (concrete)
 
 1. Combat odds: data flow between `0x5B6820` (target select) and `0x4A53A0`
-   (resolve); rank nearby `0x64A20E` callers.
+   (resolve). RNG triage DONE (see sections above): no `0x5B` draws,
+   `0x48/4A/4B` + `0x4D7EC0` ruled out, `0x5C` mapped. Next: live
+   RNG + HP-write trace during an EGYPT combat.
 2. Settler site scorer: `TUT_*` is a dead end (all 22 keys, zero
    `.text` refs — tutorial engine is data-driven). Lone `0x5B`
    founding-gate caller `0x5B9F90` is order *execution* (`push
    0x20000002; call 0x5C1AD0`, then `0x4E69D0` commit), not site
    choice. The scorer (where to send the settler) is still open.
-3. Turn root `0x4708B0` (parent-verified head): SEH frame (handler
-   `0x657E6B` — a real `0x65`-bucket citation), `[0x990390]==2`
-   gate, `malloc 0x40`, unit coords `+0x20/+0x24/+0x28`, `call
-   0x47B420`. Sequencer past the root + `0x6389DD` reseed outward:
-   open.
+3. Turn-step executor `0x4708B0`: mapped (section above), including the
+   neutered `0x46F7D0` stub and the 13 committable kinds. Sibling
+   `0x470A60` mapped (upkeep executor section above); `0x6389DD`
+   reseed outward mapped (reseed section above). Remaining: the 8
+   callers' outward dispatch (which caller drives which phase/kind).
 
 ## Reference implementation
 
@@ -492,3 +539,87 @@ y, flag)` log call cited above (bombard, disease, disorder, production).
 from the upkeep format string, three-stage `action_available` gate,
 `table_backptr`, `cell_index`, `wrap_coord`, `in_bounds`. Combat odds math
 proper and the full turn-loop root: open, no stubs.
+
+## Combat RNG map (verified: `r2` + `scans.py`, 2026-09-29)
+
+No `0x64A20E` (RNG draw) call site exists anywhere in `0x5Bxxxx` — the
+`0x5B5xxx` combat-log cluster resolves no randomness itself. The four
+`0x4Dxxxx` census sites are one function, `0x4D7EC0` (zero direct `E8`
+callers — invoked indirectly), which draws four jitter values, not odds:
+
+```text
+d1 = rand() % 127 - 63          ; [-63, +63]
+d2 = 62 - rand() % 8            ; [55, 62] -> this+0x4EC4, table 0xA502B8 index
+d3 = rand() % 1200 - 600        ; [-600, +599]
+d4 = rand() % 30000 + 30000     ; [30000, 59999]
+```
+
+then calls `0x5FA590` / `0x5FACC0` / `0x5FA6E0` (table-driven) and
+`0x6205D0(0x4EE790, this, this+0x2E164, d4, 5)`. No A/D stats, no HP, no
+probability — ruled OUT as the odds core (likely animation/sound jitter;
+exact role open). The second RNG entry `0x64A201` has only two callers
+(`0x56C1FA`, `0x6389DE`) — not combat-pervasive either.
+
+Remaining odds-hunt surface: the four `0x48/4A/4B` RNG sites (resolve
+`0x4A53A0` lives in `0x4A` — a draw there would be round resolution) and
+the nine `0x5C` unit-AI sites; then a live HP-write trace once EGYPT is
+loaded (HP field itself still unidentified — see Kill path `0x5BBBC0`).
+
+## RNG triage: `0x48/4A/4B` + `0x5C` sites (verified: `r2`, 2026-09-29)
+
+All four `0x48/4A/4B` sites ruled OUT for combat odds:
+
+* `0x48E092`: random-Nth candidate scan — `rand() % (ebx-1)` countdown,
+  rotated scan `((edi+ebp) % (count-1))+1` over global count
+  `[0x9C3DB4]`, candidate test `0x5E2380`, dedupe table
+  `0x910270…0x912E14` stride `0x63C`. Same idiom as `0x5AF703`.
+* `0x4AEC63`: pick 6 unique values from 0..7 (`rand() % 8` + dedupe
+  against `[esi+0x74…]`).
+* `0x4BE1CF` / `0x4BE3B2`: `rand() % 3` twice (3-way picks).
+
+`0x5C` clusters (triaged, not fully characterized):
+
+* `0x5CB0DD/EE/FF`: `rand() % 21` ×2 + third draw, bit-test gates.
+* `0x5CEA7D/A1/B2/B8/C9`: mixed — variable divisors `[ebp+0x588]` and
+  `[ebp+0x574]`, two `rand() % 31`, `cmp edi,edx` selection.
+* `0x5CEF16`: `rand() % esi` + indexed pick `[eax+edx*4]`.
+
+Static odds-core hunt exhausted: no A/D-division + draw site found in
+any censused region. Next step is live: EGYPT combat with a breakpoint
+on the RNG + HP-write watch (HP field still open).
+
+## Upkeep step executor `0x470A60` (verified: static walk)
+
+Sibling of `0x4708B0`: `0x470A60..0x470BC0` (`ret 4`, SEH handler
+`0x657E8E`). Per-faction upkeep step, kind `0x0C`:
+
+1. Mode gate `0x47B550` (ecx=`0x7C7C28`), then phase `[0x990390]==2`.
+2. `malloc 0x30` record, built by `0x47B420` with kind `0x0C`.
+3. Record fill: `+0x28 = [edi+0x20] + slice`,
+   `+0x2C = [esp+0x124] + 999999` (`0xF423F`), where `slice =
+   ([0x9905C4]==-1 ? -1 : [edi+0x211C])` — same slice idiom as the
+   sibling's `+0x28`.
+4. Queue dedup scan over `edi+0x216C` (`0x4845B0` fetch / `0x484580`
+   advance): sets `bl` if any entry has `[entry+4]==0x0C`. Commits via
+   `0x47B490(0, ebp, 8)` ONLY when no kind-`0x0C` entry is queued (empty
+   queue commits immediately).
+5. Turn-slice logging: formats `"Faction Upkeep -- m_iTurnSlice == %d,
+   …"` (`0x684C70`) via `0x64A531`, stores `[edi+0x30]=[edi+0x20]` and
+   `[edi+0x34]=[edi+0x20]+slice`, emits via `OutputDebugStringA`.
+
+So the sequencer family splits by concern: `0x4708B0` = per-unit action
+steps (13 committable kinds), `0x470A60` = per-faction upkeep steps
+(deduped kind `0x0C` + slice logging). Still open: the 8 callers'
+outward dispatch (which caller drives which phase/kind) and the
+`0x6389DD` reseed outward.
+
+## Game-start reseed outward (verified: `r2`, 2026-09-29)
+
+`0x6389DD` sits in `0x6388E0` (head after NOPs at `0x6388D0`), which has
+exactly one caller: `0x6226A0`, inside a `0x622xxx` UI-flow function
+(dialog follow-ups `0x638190`/`0x639550`, `0x622750` on both branches,
+then a `strcpy` into `[esi+0xB20]`). Tail behavior: zero
+`[esi+0xAFC]`/`[esi+0xB1C]`, `srand(GetTickCount())` (`0x637490` is a
+thunk: `jmp [GetTickCount]`), set start flag `[esi+0xAF8]=1`. So the
+game RNG is seeded twice with different clocks: `timeGetTime()` on the
+`0x56C1EA` startup path, `GetTickCount()` when a game actually starts.

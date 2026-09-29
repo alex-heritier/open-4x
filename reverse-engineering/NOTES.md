@@ -1039,10 +1039,34 @@ for (i = 0; i < numCells; i++) {
 }
 ```
 
-**`0x5f1ce0` (614 bytes, 4 args) is still unmapped.** It is where the abstract
-class `{0,1,2,3,8,9}` becomes actual `vfunc(0x04)` / `vfunc(0x08)` / flag writes,
-and where the `bonus[]` array is consumed. Its prologue shows the index
-arithmetic `x, y, W, cls, (W>>1)*cls`. This is the one gap in the biome stage.
+**`0x5f1ce0` — `writeBiomeClass(x, y, cls, bonus)`, solved.** 614 bytes
+(`0x5f1ce0..0x5f1f45`, `ret 0x10`), called once per land cell from pass 1
+(sole external caller `0x5f19a8`); the only other caller is itself
+(`0x5f1f1b`). It is a same-region flood fill, not a single-cell writer:
+
+```c
+writeBiomeClass(x, y, cls, bonus):
+    idx = (x>>1) + (W>>1)*y & 0xFFFF
+    bonus[idx] = 1                                 // 0x5f1d14, unconditional
+    if cell(x,y).vfunc(0xC8) in {5,6,10}: return   // 0x5f1d29..0x5f1d64
+    if cls != 2: cell(x,y).vfunc(0x128)(cls,-1,-1) // 0x5f1d86
+    for n in 1..8:                                 // spiral ring 1, 0x5f1db1
+        nx, ny = wrap(x+dx[n], y+dy[n]); if OOB: continue
+        if cell(nx,ny).vfunc(0xB8) != cell(x,y).vfunc(0xB8): continue
+        if region[nidx] != region[idx]: continue   // [esi+0x3C]
+        if cell(nx,ny).vfunc(0xC8) in {5,6,10}: continue
+        if bonus[nidx] != 0: continue
+        writeBiomeClass(nx, ny, cls, bonus)        // 0x5f1f1b
+```
+
+So `bonus[]` is the flood's visited set (pass 1's `bonus[c] != 0 → continue`
+skips cells a previous flood claimed), `cls == 2` skips only the write
+(grassland is already the land-stage default; the flood still marks), and
+the `{5,6,10}` guard keeps water/special terrains out. The twin gates —
+`0xB8` equality plus `paintContinents` region equality — are new evidence
+for §18.7: whatever `0xB8` is, the biome stage reads it as a flood
+boundary. Reference: `pipeline::write_biome_class` (explicit stack; same
+fixed point as the binary's recursion).
 
 ### 11.6 `assignStartsPerContinent` (`0x5ed5d0`)
 
@@ -1614,8 +1638,8 @@ flagged where both readings are defensible (`sea_level_split`).
 | landmass fix | `0x5ed440` | not implemented |
 | start deconfliction | `0x5eeb00` | exact, including the original's index bug |
 | desert conversion at starts | `0x5edb70` | exact |
-| continent painting | `0x5eddb0` | no observable effect on terrain |
-| biome / climate assignment | `0x5f1480` | exact except the `0x5f1ce0` call |
+| continent painting | `0x5eddb0` | not implemented — region ids gate the `0x5f1ce0` flood |
+| biome / climate assignment | `0x5f1480` | selection exact; `0x5f1ce0` flood mapped, wiring awaits region ids |
 | per-continent starts | `0x5ed5d0` | not implemented |
 | hills / mountains | `0x5f07d0` | not implemented |
 | post-process | `0x5ebe80` | not implemented |
@@ -1639,14 +1663,21 @@ the existing pipeline.
 
 ## 18. Open questions
 
-1. **`0x5f1CE0`** (614 bytes) — the only unmapped function in the biome chain. It
-   turns the abstract class `{0,1,2,3,8,9}` into actual `vfunc(0x04)` /
-   `vfunc(0x08)` / flag writes and consumes the `bonus[]` array. Until it is read,
-   `0x5f1480` is exact in its class *selection* but not in its class *writes*.
-2. **The `.biq` header framing** (§15.4). Blocks faithful resource *data*, not the
-   resource *algorithm*.
-3. **The river system.** `byte[cell+4]` and `byte[cell+5]` are the candidates
-   (§14.3). Finding the renderer that draws `RiverFore.pcx` would settle it.
+1. ~~**`0x5f1CE0`** (614 bytes) — the only unmapped function in the biome chain.~~
+   **SOLVED** (§11.5). Same-region flood fill: unconditional `bonus[idx] = 1`
+   visited mark, `{5,6,10}` terrain guard, `vfunc(0x128)` write unless
+   `cls == 2`, recursive spread over spiral ring 1 gated on `0xB8` +
+   region-id equality. Ported as `pipeline::write_biome_class`; wiring into
+   `assign_biomes` awaits the `paintContinents` region ids.
+2. ~~**The `.biq` header framing** (§15.4).~~ **SOLVED** in `biq.md`:
+   three-byte header with the bitstream starting at file byte 2; both
+   shipped scenario files decode end to end. What remains is the GOOD/TERR
+   variable-length file-row parse, not the container framing.
+3. **The river system.** `byte[cell+5]` (slot 38) is confirmed as the render
+   path's per-tile mask getter, with the overlay gate and table `0xA53BC8`
+   dumped live (`rivers.md`); the render path lives at `0x57Fxxx/0x580xxx`.
+   Still open: which value (mask low nibble vs `[cell+0x2C]` nibbles)
+   selects the river segment — one live trace (`dynamic-tracing.md` Q1).
 4. **The `this->[0x3C]` allocation size** in `0x5eb580` — reads use map-sized
    indices but the caller's `malloc` looks like `numPlayers * 2`.
 5. **`0x5D16A0` / the `Map` vtable base.** The complete-object vtable at `0x670120`
@@ -1663,6 +1694,9 @@ the existing pipeline.
    terrain grouping key. Both readings are consistent only if the id is reused as a
    partition label after `finalizeMap` has run — the placement stages all run after
    it, so that is almost certainly the intent, but it is not proven.
+   Supporting read: the `0x5f1ce0` flood requires `0xB8` equality between
+   center and neighbour (§11.5), a third consumer treating it as a grouping
+   key. The write side (`finalizeMap` numbering) is the unproven half.
 8. **The three resource-class predicates** `0x5e3700` / `0x5e3730` / `0x5e3720`
    gate the three placement blocks in `0x5f22a0`; their UI meaning is unidentified.
 9. **The meaning of the `0x80000` marker** in `0x5eeee0`, and of the `+0x16C` /

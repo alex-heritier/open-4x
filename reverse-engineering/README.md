@@ -29,7 +29,7 @@ cross-references it instead of duplicating it.
 | [`multiplayer.md`](multiplayer.md) | Multiplayer: mode global, net gates → `rust/src/net.rs` |
 | [`air.md`](air.md) | Air combat: move dispatch, bombard-move log stub → `rust/src/air.rs` |
 | [`media.md`](media.md) | Movies/victory media: intro gate, selectors, wonder art → `rust/src/media.rs` |
-| [`rust/`](rust/) | Reference implementation. 162 tests (`cargo test --release`: 155 lib + 5 bin + 2 doc) |
+| [`rust/`](rust/) | Reference implementation. 167 tests (`cargo test --release`: 160 lib + 5 bin + 2 doc) |
 
 ## Quick start
 

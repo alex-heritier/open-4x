@@ -12,6 +12,7 @@ mod map;
 mod render;
 mod rng;
 mod screenshot;
+mod script;
 mod splash;
 mod tiles;
 mod ui;
@@ -44,6 +45,7 @@ fn main() {
         .init_resource::<input::DragState>()
         .init_resource::<cities::CityNamesUsed>()
         .init_resource::<cities::CityView>()
+        .init_resource::<cities::Capital>()
         .init_resource::<cities::BuildMenu>()
         .init_resource::<splash::SplashUp>()
         .init_resource::<features::MessageBoard>()
@@ -63,6 +65,7 @@ fn main() {
                 ui::spawn_hud,
                 actionbar::spawn_bar,
                 screenshot::setup_shots,
+                script::setup_script,
             )
                 .chain(),
         )
@@ -70,6 +73,7 @@ fn main() {
             Update,
             (
                 (
+                    script::drive_script,
                     input::camera_control,
                     input::hover,
                     input::orders,
@@ -103,8 +107,8 @@ fn main() {
                     render::update_fog,
                     render::sync_cover,
                     ui::update_hover_label,
-                    ui::update_turn_label,
                     actionbar::update_bar,
+                    actionbar::blink_next_turn,
                     ui::update_message_label,
                     screenshot::manual_shot,
                 )
@@ -142,12 +146,17 @@ fn setup_camera_zoom(mut cam: Query<&mut Projection, With<Camera2d>>) {
     }
 }
 
-fn setup_art(mut commands: Commands, assets: Res<AssetServer>) {
+fn setup_art(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
+) {
     commands.insert_resource(tiles::TileArt::load(&assets));
     commands.insert_resource(units::UnitArt::load(&assets));
     commands.insert_resource(cities::CityArt::load(&assets));
     commands.insert_resource(features::FeatureArt::load(&assets));
     commands.insert_resource(improvements::ImprovementArt::load(&assets));
+    commands.insert_resource(cities::CapitalStar::generate(&mut images));
 }
 
 /// Gameplay RNG, seeded from the map seed (the binary reseeds from the

@@ -106,6 +106,7 @@ impl GameMap {
         use std::cmp::Reverse;
         use std::collections::{BinaryHeap, HashMap};
         let w = self.w;
+        // Admissible: a road step costs one third, the cheapest move.
         let h = |(x, y): (i32, i32)| {
             let dx = (x - goal.0).abs();
             let dx = dx.min(w - dx);
@@ -128,9 +129,10 @@ impl GameMap {
                 return Some(path);
             }
             let g = gscore[&cur];
+            let here = self.get(cur.0, cur.1).unwrap();
             for nb in self.neighbors(cur.0, cur.1) {
                 let t = self.get(nb.0, nb.1).unwrap();
-                let Some(cost) = move_cost(t) else {
+                let Some(cost) = step_cost(here, t) else {
                     continue;
                 };
                 let ng = g + cost as u32;
@@ -337,16 +339,17 @@ pub fn yields(t: &Tile) -> (u8, u8) {
     (f, s)
 }
 
-/// Movement cost to enter, or None when impassable. Roads flatten
-/// hill/forest costs to 1 (Civ3's 1/3 MP, expressed in integer moves).
+/// Movement points are counted in thirds so roads can cost 1/3 MP.
+pub const MP: u8 = 3;
+
+/// Terrain cost to enter in whole MP, or None when impassable. Roads are
+/// handled by `step_cost`, which needs both ends of the step.
 pub fn move_cost(t: &Tile) -> Option<u8> {
     match t.base {
         Base::Ocean | Base::Sea | Base::Coast | Base::Ice => None,
         _ => {
             if t.relief == Relief::Mountain {
                 None
-            } else if t.road {
-                Some(1)
             } else if t.relief == Relief::Hill || t.cover != Cover::Bare {
                 Some(2)
             } else {
@@ -354,6 +357,14 @@ pub fn move_cost(t: &Tile) -> Option<u8> {
             }
         }
     }
+}
+
+/// Cost in thirds of an MP to step between neighbors, or None when the
+/// destination is impassable. Road to road (city tiles carry a road) is
+/// 1/3 MP whatever the terrain, as in Civ3.
+pub fn step_cost(from: &Tile, to: &Tile) -> Option<u8> {
+    let terrain = move_cost(to)?;
+    Some(if from.road && to.road { 1 } else { terrain * MP })
 }
 
 pub fn tile_to_world(x: i32, y: i32) -> Vec2 {
@@ -493,9 +504,14 @@ mod tests {
         t.irrigation = true;
         assert_eq!(yields(&t), (2, 1));
         let mut h = tile(Base::Grassland, Relief::Hill, Cover::Bare);
-        assert_eq!(move_cost(&h), Some(2));
+        let mut g = tile(Base::Grassland, Relief::Flat, Cover::Bare);
+        assert_eq!(step_cost(&g, &h), Some(2 * MP));
         h.road = true;
-        assert_eq!(move_cost(&h), Some(1));
+        // road only at the destination: full terrain cost
+        assert_eq!(step_cost(&g, &h), Some(2 * MP));
+        g.road = true;
+        assert_eq!(step_cost(&g, &h), Some(1));
+        assert_eq!(step_cost(&h, &tile(Base::Ocean, Relief::Flat, Cover::Bare)), None);
     }
 
     #[test]

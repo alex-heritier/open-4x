@@ -375,6 +375,15 @@ mod tests {
         assert_eq!(&out[..4], b"CIV3", "unexpected save magic {out:?}");
         let tiles = out.windows(4).filter(|w| *w == b"TILE").count();
         assert_eq!(tiles, 20_000, "got {tiles} TILE tags");
+        // Golden values: byte-identical to the game's own decompression
+        // (`save0.tmp` captured live under winedbg, 2026-09-29).
+        assert_eq!(out.len(), 1_748_113);
+        assert_eq!(out.iter().map(|&b| b as u64).sum::<u64>(), 0x8d5_b8cf);
+        assert_eq!(
+            &out[..16],
+            &[0x43, 0x49, 0x56, 0x33, 0x00, 0x1a, 0x18, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x7e, 0x6f]
+        );
+        assert_eq!(&out[out.len() - 16..], &[0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]

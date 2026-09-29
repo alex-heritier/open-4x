@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use crate::actionbar::{InfoBox, NextTurnDisc};
 use crate::audio::{self, GameAudio};
 use crate::cities::CityView;
 use crate::features::{self, MessageBoard};
@@ -9,19 +10,13 @@ use crate::improvements;
 use crate::input::Hovered;
 use crate::map::GameMap;
 use crate::splash::SplashUp;
-use crate::units::{self, Selected, Turn, TurnEnded, Unit};
+use crate::units::{self, Selected, TurnEnded, Unit};
 
 #[derive(Component)]
 pub(crate) struct HoverLabel;
 
 #[derive(Component)]
-pub(crate) struct TurnLabel;
-
-#[derive(Component)]
 pub(crate) struct MessageLabel;
-
-#[derive(Component)]
-pub(crate) struct EndTurnButton;
 
 pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
     let font = assets.load("gen/fonts/lsans.ttf");
@@ -43,38 +38,6 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
         HoverLabel,
     ));
     commands.spawn((
-        Text::new("click: select/move/open city | right-click: move | G: go to | Tab: cycle | Enter: end turn | WASD/wheel: camera"),
-        TextFont {
-            font: font.clone(),
-            font_size: 14.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(90.0),
-            left: Val::Px(8.0),
-            ..default()
-        },
-    ));
-    commands.spawn((
-        Text::new(""),
-        TextFont {
-            font: font.clone(),
-            font_size: 16.0,
-            ..default()
-        },
-        TextColor(Color::WHITE),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(8.0),
-            right: Val::Px(12.0),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-        TurnLabel,
-    ));
-    commands.spawn((
         Text::new(""),
         TextFont {
             font: font.clone(),
@@ -84,42 +47,22 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
         TextColor(Color::srgb(1.0, 0.95, 0.7)),
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(116.0),
+            bottom: Val::Px(56.0),
             left: Val::Px(8.0),
             ..default()
         },
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
         MessageLabel,
     ));
-    commands
-        .spawn((
-            Button,
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: Val::Px(16.0),
-                right: Val::Px(12.0),
-                padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.35, 0.22, 0.1)),
-            EndTurnButton,
-        ))
-        .with_children(|b| {
-            b.spawn((
-                Text::new("End Turn"),
-                TextFont {
-                    font,
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.95, 0.8)),
-            ));
-        });
 }
 
+/// The next-turn disc always ends the turn; the rest of Civ3's bottom-right
+/// box does once no unit is selected ("click here for next turn").
 pub fn end_turn_button(
     mut commands: Commands,
-    buttons: Query<&Interaction, With<EndTurnButton>>,
+    disc: Query<&Interaction, (Changed<Interaction>, With<NextTurnDisc>)>,
+    info_box: Query<&Interaction, (Changed<Interaction>, With<InfoBox>)>,
+    selected: Res<Selected>,
     mut turn_end: MessageWriter<TurnEnded>,
     audio: Res<GameAudio>,
     view: Res<CityView>,
@@ -128,11 +71,10 @@ pub fn end_turn_button(
     if view.0.is_some() || splash.0 {
         return;
     }
-    for pressed in buttons.iter() {
-        if *pressed == Interaction::Pressed {
-            turn_end.write(TurnEnded);
-            audio::sfx(&mut commands, &audio, "EnterTurn");
-        }
+    let pressed = |i: &Interaction| *i == Interaction::Pressed;
+    if disc.iter().any(pressed) || (selected.0.is_none() && info_box.iter().any(pressed)) {
+        turn_end.write(TurnEnded);
+        audio::sfx(&mut commands, &audio, "EnterTurn");
     }
 }
 
@@ -163,8 +105,9 @@ pub fn update_hover_label(
                         Some(p) => {
                             let extra = units::path_turns(
                                 &map,
+                                (u.x, u.y),
                                 u.moves,
-                                units::def(u.utype).moves,
+                                units::def(u.utype).moves * crate::map::MP,
                                 &p,
                             );
                             parts.push(format!(
@@ -206,18 +149,3 @@ pub fn update_message_label(
     }
 }
 
-pub fn update_turn_label(
-    turn: Res<Turn>,
-    units: Query<&Unit>,
-    mut q: Query<&mut Text, With<TurnLabel>>,
-) {
-    let Ok(mut text) = q.single_mut() else {
-        return;
-    };
-    let active = units.iter().filter(|u| !u.fortified && u.moves > 0).count();
-    text.0 = if active == 0 {
-        format!("Turn {}  |  ENTER: end turn", turn.0)
-    } else {
-        format!("Turn {}", turn.0)
-    };
-}

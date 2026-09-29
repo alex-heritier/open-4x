@@ -2,6 +2,7 @@
 //!
 //! Keys and bar buttons both emit `UnitCommand` messages; `run_commands`
 //! is the single executor (found-city lives in `cities::found_city`).
+//! Wake is key-only; every other command has a bar button.
 
 use bevy::prelude::*;
 
@@ -21,6 +22,7 @@ pub enum UnitCommand {
     Skip,
     Wake,
     Goto,
+    Explore,
     Disband,
     FoundCity,
     Work(WorkAction),
@@ -38,6 +40,7 @@ impl UnitCommand {
             UnitCommand::Skip => "Skip (Space)",
             UnitCommand::Wake => "Wake (X)",
             UnitCommand::Goto => "Go to (G)",
+            UnitCommand::Explore => "Explore (E)",
             UnitCommand::Disband => "Disband (Del)",
             UnitCommand::FoundCity => "Found City (B)",
             UnitCommand::Work(WorkAction::Road) => "Road (R)",
@@ -53,6 +56,8 @@ impl UnitCommand {
             UnitCommand::FoundCity => t == UnitType::Settler,
             UnitCommand::Work(_) => t == UnitType::Worker,
             UnitCommand::Fortify => t != UnitType::Scout,
+            // Civ3's Explore is a recon order; settlers and workers hold.
+            UnitCommand::Explore => matches!(t, UnitType::Warrior | UnitType::Scout),
             _ => true,
         }
     }
@@ -61,7 +66,10 @@ impl UnitCommand {
     pub fn enabled(self, map: &GameMap, cities: &[(i32, i32)], u: &Unit) -> bool {
         let idle = u.work.is_none();
         match self {
-            UnitCommand::Wake => u.fortified || u.sentry || u.work.is_some(),
+            UnitCommand::Wake => {
+                u.fortified || u.sentry || u.exploring || u.work.is_some()
+            }
+            UnitCommand::Explore => idle && (u.moves > 0 || u.exploring),
             UnitCommand::Fortify | UnitCommand::Sentry => u.moves > 0 && !u.fortified,
             UnitCommand::Skip | UnitCommand::Goto => u.moves > 0 || !u.path.is_empty(),
             UnitCommand::Disband => true,
@@ -80,16 +88,21 @@ impl UnitCommand {
     }
 }
 
-/// Bar order, left to right: Civ3's own order for these actions, which is the
-/// order of its action list (`action_cell`) and the order its panel draws them
-/// in. `bar_commands_follow_civ3_action_order` pins that.
-pub const BAR_COMMANDS: [UnitCommand; 11] = [
+/// Bar order, left to right within each row: Civ3's own order for these
+/// actions, which is the order of its action list (`action_cell`) and the
+/// order its panel draws them in. `bar_rows_follow_civ3_action_order` pins
+/// that. Civ3 stacks two rows: unit-specific actions (found, worker jobs) a
+/// row up, shared orders below. Wake has no button (in Civ3 it is a
+/// right-click entry), so it stays key-only.
+pub const BAR_ROW_MAIN: [UnitCommand; 6] = [
     UnitCommand::Skip,
     UnitCommand::Fortify,
     UnitCommand::Disband,
     UnitCommand::Goto,
-    UnitCommand::Wake,
+    UnitCommand::Explore,
     UnitCommand::Sentry,
+];
+pub const BAR_ROW_UNIT: [UnitCommand; 5] = [
     UnitCommand::FoundCity,
     UnitCommand::Work(WorkAction::Road),
     UnitCommand::Work(WorkAction::Mine),
@@ -105,6 +118,7 @@ pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
         (KeyCode::Space, UnitCommand::Skip),
         (KeyCode::KeyX, UnitCommand::Wake),
         (KeyCode::KeyG, UnitCommand::Goto),
+        (KeyCode::KeyE, UnitCommand::Explore),
         (KeyCode::Delete, UnitCommand::Disband),
         (KeyCode::Backspace, UnitCommand::Disband),
         (KeyCode::KeyB, UnitCommand::FoundCity),
@@ -172,6 +186,7 @@ pub fn run_commands(
                 u.moves = 0;
                 u.path.clear();
                 u.work = None;
+                u.exploring = false;
                 u.anim = UnitAnim::OneShot { slot: "FORTIFY", t: 0.0 };
                 if warrior {
                     commands.spawn(AudioPlayer(audio.fortify.clone()));
@@ -183,23 +198,38 @@ pub fn run_commands(
                 u.moves = 0;
                 u.path.clear();
                 u.work = None;
+                u.exploring = false;
+                // Sentry strikes the same dug-in pose as fortify.
+                u.anim = UnitAnim::OneShot { slot: "FORTIFY", t: 0.0 };
             }
             UnitCommand::Skip => {
                 u.moves = 0;
                 u.path.clear();
                 u.work = None;
+                u.exploring = false;
             }
             UnitCommand::Wake => {
                 u.fortified = false;
                 u.sentry = false;
+                u.exploring = false;
                 u.work = None;
-                u.moves = units::def(u.utype).moves.min(u.moves.max(1));
+                u.moves = (units::def(u.utype).moves * crate::map::MP)
+                    .min(u.moves.max(crate::map::MP));
             }
             UnitCommand::Goto => {
                 goto.0 = !goto.0;
                 if goto.0 {
                     post(&mut board, "Go to: click a destination (Esc cancels).");
                 }
+            }
+            UnitCommand::Explore => {
+                // Toggles: a second press stands the unit down. Movement
+                // plans the first leg; the readout shows the automation.
+                u.exploring = !u.exploring;
+                u.path.clear();
+                u.fortified = false;
+                u.sentry = false;
+                u.work = None;
             }
             UnitCommand::Disband => {
                 commands.entity(e).despawn();
@@ -215,6 +245,7 @@ pub fn run_commands(
                 u.path.clear();
                 u.fortified = false;
                 u.sentry = false;
+                u.exploring = false;
                 u.anim = UnitAnim::OneShot { slot: action_slot(action), t: 0.0 };
                 commands.spawn(AudioPlayer(audio.work_sfx(action)));
                 post(
@@ -251,8 +282,9 @@ fn action_cell(cmd: UnitCommand, cover: Cover) -> u32 {
         UnitCommand::Fortify => 2,
         UnitCommand::Disband => 3,
         UnitCommand::Goto => 4,
-        // Civ3 has no Wake button on the map panel (Wake is a right-click
-        // entry). Reuse the circular-arrow art, Civ3's Explore, unused here.
+        UnitCommand::Explore => 5,
+        // Wake has no button (in Civ3 it is a right-click entry); the cell
+        // is unused but the match must stay exhaustive.
         UnitCommand::Wake => 5,
         UnitCommand::Sentry => 6,
         UnitCommand::FoundCity => 21,
@@ -277,13 +309,32 @@ fn cover_at(map: &GameMap, u: &Unit) -> Cover {
     map.get(u.x, u.y).map(|t| t.cover).unwrap_or(Cover::Bare)
 }
 
-pub const BAR_H: f32 = 84.0;
-
 #[derive(Component)]
 pub struct BarButton(pub UnitCommand);
 
+/// Unit readout text inside Civ3's bottom-right box.
 #[derive(Component)]
 pub struct BarInfo;
+
+/// Civ and turn line at the foot of the box.
+#[derive(Component)]
+pub struct BoxStatus;
+
+/// Civ3's bottom-right box (`box right`). With no unit selected, clicking
+/// it ends the turn ("Press ENTER or click here for next turn").
+#[derive(Component)]
+pub struct InfoBox;
+
+/// The next-turn disc on the box's top-left knob.
+#[derive(Component)]
+pub struct NextTurnDisc;
+
+/// Next-turn disc art: gold idle, orange rollover, blue highlighted.
+#[derive(Resource)]
+pub struct NextTurnArt(pub [Handle<Image>; 3]);
+
+pub const BOX_W: f32 = 294.0;
+pub const BOX_H: f32 = 137.0;
 
 pub fn spawn_bar(
     mut commands: Commands,
@@ -301,61 +352,139 @@ pub fn spawn_bar(
     ));
     let sheets = ["norm", "over", "down"].map(|s| assets.load(format!("gen/ui/unitbtns_{s}.png")));
     commands.insert_resource(ButtonArt { sheets: sheets.clone() });
+    let turn_art = [0, 1, 2].map(|i| assets.load(format!("gen/ui/nextturn_{i}.png")));
+    commands.insert_resource(NextTurnArt(turn_art.clone()));
+    // Civ3's bottom-right box: unit readout, or the end-turn prompt.
+    // `Button` keeps map clicks from landing through it.
     commands
         .spawn((
-            ImageNode::new(assets.load("gen/cityscreen/BottomFadeBar.png")),
-            // `Button` marks the whole strip as UI: the map ignores clicks on
-            // it (and on the gaps between discs) the way Civ3's panel does.
+            ImageNode::new(assets.load("gen/ui/box_right.png")),
             Button,
+            InfoBox,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Px(BOX_W),
+                height: Val::Px(BOX_H),
+                ..default()
+            },
+            GlobalZIndex(5),
+        ))
+        .with_children(|b| {
+            b.spawn((
+                Text::new(""),
+                TextFont { font: font.clone(), font_size: 15.0, ..default() },
+                TextColor(ink),
+                TextLayout::new_with_justify(Justify::Center),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(40.0),
+                    top: Val::Px(22.0),
+                    width: Val::Px(220.0),
+                    ..default()
+                },
+                BarInfo,
+            ));
+            b.spawn((
+                Text::new(""),
+                TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                TextColor(ink),
+                TextLayout::new_with_justify(Justify::Center),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(40.0),
+                    top: Val::Px(100.0),
+                    width: Val::Px(220.0),
+                    ..default()
+                },
+                BoxStatus,
+            ));
+            b.spawn((
+                ImageNode::new(turn_art[0].clone()),
+                Button,
+                NextTurnDisc,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Px(47.0),
+                    height: Val::Px(28.0),
+                    ..default()
+                },
+            ));
+        });
+    // Civ3 has no bar: the discs float over the bottom of the map, packed
+    // edge to edge and centered in two rows, unit-specific actions a row
+    // up. Only the discs themselves block map clicks; an empty row holds
+    // no space.
+    commands
+        .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                height: Val::Px(BAR_H),
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
-                column_gap: Val::Px(6.0),
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.93, 0.83, 0.62)),
-            GlobalZIndex(5),
-        ))
-        .with_children(|bar| {
-            bar.spawn((
-                Text::new(""),
-                TextFont { font: font.clone(), font_size: 16.0, ..default() },
-                TextColor(ink),
-                Node { width: Val::Px(190.0), ..default() },
-                BarInfo,
-            ));
-            // Civ3 packs the discs edge to edge and centers the row in the
-            // panel right of the unit readout.
-            bar.spawn(Node {
-                flex_grow: 1.0,
-                column_gap: Val::Px(0.0),
+                bottom: Val::Px(14.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(0.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
-            })
-            .with_children(|row| {
-                for cmd in BAR_COMMANDS {
-                    row.spawn((
-                        Button,
-                        BarButton(cmd),
-                        ImageNode::from_atlas_image(
-                            sheets[0].clone(),
-                            TextureAtlas { layout: layout.clone(), index: 0 },
-                        ),
-                        Node {
-                            width: Val::Px(BTN_PX),
-                            height: Val::Px(BTN_PX),
-                            ..default()
-                        },
-                    ));
-                }
-            });
+            },
+            GlobalZIndex(5),
+        ))
+        .with_children(|col| {
+            for cmds in [BAR_ROW_UNIT.as_slice(), BAR_ROW_MAIN.as_slice()] {
+                col.spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(0.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },))
+                .with_children(|row| {
+                    for cmd in cmds {
+                        row.spawn((
+                            Button,
+                            BarButton(*cmd),
+                            ImageNode::from_atlas_image(
+                                sheets[0].clone(),
+                                TextureAtlas { layout: layout.clone(), index: 0 },
+                            ),
+                            Node {
+                                width: Val::Px(BTN_PX),
+                                height: Val::Px(BTN_PX),
+                                ..default()
+                            },
+                        ));
+                    }
+                });
+            }
         });
+}
+
+/// Seconds per half blink of the end-turn prompt.
+const BLINK: f32 = 0.6;
+
+/// Civ3 blinks the next-turn disc (and its prompt) once no unit needs
+/// orders; hovering the disc shows its rollover art.
+pub fn blink_next_turn(
+    time: Res<Time>,
+    selected: Res<Selected>,
+    art: Res<NextTurnArt>,
+    mut disc: Query<(&Interaction, &mut ImageNode), With<NextTurnDisc>>,
+) {
+    let lit = (time.elapsed_secs() / BLINK) as u32 % 2 == 1;
+    for (i, mut img) in disc.iter_mut() {
+        let state = match i {
+            Interaction::Hovered | Interaction::Pressed => 1,
+            _ if selected.0.is_none() && lit => 2,
+            _ => 0,
+        };
+        if img.image != art.0[state] {
+            img.image = art.0[state].clone();
+        }
+    }
 }
 
 /// Show only applicable buttons, dim unavailable ones, swap art on hover or
@@ -369,8 +498,11 @@ pub fn update_bar(
     map: Res<GameMap>,
     goto: Res<GotoMode>,
     mut buttons: Query<(&BarButton, Ref<Interaction>, &mut Node, &mut ImageNode)>,
-    mut info: Query<&mut Text, With<BarInfo>>,
+    mut info: Query<(&mut Text, &mut TextColor), With<BarInfo>>,
+    mut status: Query<&mut Text, (With<BoxStatus>, Without<BarInfo>)>,
     mut out: MessageWriter<UnitCommand>,
+    time: Res<Time>,
+    turn: Res<units::Turn>,
 ) {
     let spots: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
     let unit = selected.0.and_then(|s| units.get(s).ok());
@@ -386,7 +518,8 @@ pub fn update_bar(
             Display::None
         };
         let ok = b.0.enabled(&map, &spots, u);
-        let active = b.0 == UnitCommand::Goto && goto.0;
+        let active = (b.0 == UnitCommand::Goto && goto.0)
+            || (b.0 == UnitCommand::Explore && u.exploring);
         // Civ3's states: gold idle, orange hover, blue held or toggled on.
         let state = match (*interaction, ok) {
             (Interaction::Pressed, true) => 2,
@@ -407,7 +540,13 @@ pub fn update_bar(
             out.write(b.0);
         }
     }
-    if let Ok(mut t) = info.single_mut() {
+    if let Ok((mut t, mut color)) = info.single_mut() {
+        let lit = (time.elapsed_secs() / BLINK) as u32 % 2 == 0;
+        color.0 = if unit.is_none() && !lit {
+            Color::srgba(0.23, 0.14, 0.06, 0.25)
+        } else {
+            Color::srgb(0.23, 0.14, 0.06)
+        };
         t.0 = hint.map(str::to_string).unwrap_or_else(|| match unit {
             Some(u) => {
                 let d = units::def(u.utype);
@@ -417,15 +556,32 @@ pub fn update_bar(
                     "sentry".to_string()
                 } else if u.fortified {
                     "fortified".to_string()
+                } else if u.exploring {
+                    "exploring".to_string()
                 } else if !u.path.is_empty() {
                     format!("going to ({},{})", u.path.back().unwrap().0, u.path.back().unwrap().1)
                 } else {
                     "ready".to_string()
                 };
-                format!("{}  {}/{} MP\n{}", d.name, u.moves, d.moves, state)
+                let terrain = match map.get(u.x, u.y) {
+                    Some(t) if t.cover != Cover::Bare => format!("{:?}", t.cover),
+                    Some(t) if t.relief != crate::map::Relief::Flat => format!("{:?}", t.relief),
+                    Some(t) => format!("{:?}", t.base),
+                    None => String::new(),
+                };
+                format!(
+                    "{}\nMoves {}/{}  -  {}\n{terrain}",
+                    d.name,
+                    units::fmt_moves(u.moves),
+                    d.moves,
+                    state
+                )
             }
-            None => "No unit selected".to_string(),
+            None => "Press ENTER or click here\nfor next turn".to_string(),
         });
+    }
+    if let Ok(mut t) = status.single_mut() {
+        t.0 = format!("Japanese  -  Turn {}", turn.0);
     }
 }
 
@@ -434,30 +590,57 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// Every bar command draws its own cell of the sheet: no two buttons share
+    /// Every bar button draws its own cell of the sheet: no two buttons share
     /// art, and every index is inside the grid.
     #[test]
-    fn bar_commands_map_to_distinct_cells() {
+    fn bar_buttons_map_to_distinct_cells() {
         let mut seen = HashSet::new();
-        for cmd in BAR_COMMANDS {
+        for cmd in BAR_ROW_MAIN.iter().chain(BAR_ROW_UNIT.iter()) {
             for cover in [Cover::Bare, Cover::Forest, Cover::Jungle, Cover::Pine] {
-                let cell = action_cell(cmd, cover);
+                let cell = action_cell(*cmd, cover);
                 assert!(cell < BTN_COLS * BTN_ROWS, "{cmd:?} cell {cell} off sheet");
             }
-            assert!(seen.insert(action_cell(cmd, Cover::Bare)), "{cmd:?} reuses a cell");
+            assert!(seen.insert(action_cell(*cmd, Cover::Bare)), "{cmd:?} reuses a cell");
         }
-        assert_eq!(seen.len(), BAR_COMMANDS.len());
+        assert_eq!(seen.len(), BAR_ROW_MAIN.len() + BAR_ROW_UNIT.len());
     }
 
-    /// The bar lays its buttons out in Civ3's action order, so the row reads
+    /// Each row lays its buttons out in Civ3's action order, so the rows read
     /// left to right the way a Civ3 unit panel does.
     #[test]
-    fn bar_commands_follow_civ3_action_order() {
-        let cells: Vec<u32> = BAR_COMMANDS
-            .iter()
-            .map(|c| action_cell(*c, Cover::Forest))
-            .collect();
-        assert!(cells.windows(2).all(|w| w[0] < w[1]), "out of order: {cells:?}");
+    fn bar_rows_follow_civ3_action_order() {
+        for row in [BAR_ROW_MAIN.as_slice(), BAR_ROW_UNIT.as_slice()] {
+            let cells: Vec<u32> =
+                row.iter().map(|c| action_cell(*c, Cover::Forest)).collect();
+            assert!(cells.windows(2).all(|w| w[0] < w[1]), "out of order: {cells:?}");
+        }
+    }
+
+    /// Explore owns cell 5 (the `#UNIT_ACTIONS` Explore slot); Wake stays
+    /// key-only, as in Civ3, so no bar button collides with it.
+    #[test]
+    fn explore_takes_cell_five_and_wake_has_no_button() {
+        assert_eq!(action_cell(UnitCommand::Explore, Cover::Bare), 5);
+        for cmd in BAR_ROW_MAIN.iter().chain(BAR_ROW_UNIT.iter()) {
+            assert_ne!(*cmd, UnitCommand::Wake, "Wake must stay off the bar");
+        }
+    }
+
+    /// Unit-specific actions sit a row up; shared orders stay below.
+    #[test]
+    fn specific_actions_go_a_row_up() {
+        for cmd in BAR_ROW_UNIT {
+            assert!(
+                matches!(cmd, UnitCommand::FoundCity | UnitCommand::Work(_)),
+                "{cmd:?} is not unit-specific"
+            );
+        }
+        for cmd in BAR_ROW_MAIN {
+            assert!(
+                !matches!(cmd, UnitCommand::FoundCity | UnitCommand::Work(_)),
+                "{cmd:?} belongs a row up"
+            );
+        }
     }
 
     /// Civ3's clearing art depends on the tile: jungle uses the wetlands cell.

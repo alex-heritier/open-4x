@@ -23,18 +23,29 @@ fog off and `CIV3_NO_SPLASH=1` skips the greeting.
 For testing and debugging, `CIV3_SHOT=out.png CIV3_SHOT_FRAME=120 cargo run`
 writes the window to `out.png` and exits; `CIV3_SHOT_FRAME=30,120` (or `{}` in
 the path) grabs several frames, and `CIV3_SHOT_KEEP=1` leaves the game open.
+`CIV3_SCRIPT='20:key B;60:city;90:btn Change'` drives the game unattended
+(keys, turns, unit placement, city-screen buttons and tiles); the action list
+is in `src/script.rs`.
 See `.agents/skills/game-screenshotting/SKILL.md` for the wrapper script and
 the desktop-capture fallback.
 
 ## Controls
 
 - Click: select unit, order move, open city. Right-click: move.
-- Bottom bar: Civ3's unit action buttons; hovering one names the command
+- Unit action buttons float over the bottom of the map, as in Civ3; hovering one names the command
   and its key, unavailable ones are darkened.
-- Worker: R road, I irrigate, M mine, C clear forest/jungle.
-- Arrow keys: step. Tab: cycle units. F: fortify. Space: skip.
-- B: found city with the settler. Enter or End Turn button: end turn.
-- City screen: click tiles to assign workers, Change build, X or ESC closes.
+- Worker: R road, I irrigate, M mine, C clear forest/jungle. Road to road
+  costs 1/3 MP; a mine replaces irrigation and vice versa; workers sharing a
+  tile and job pool their turns.
+- Arrow keys: step. Tab: cycle units that need orders. F: fortify. Space: skip.
+  Units with no moves left cannot be selected; when none need orders the
+  selection clears and the bottom-right box blinks its next-turn prompt.
+- B: found city with the settler. Enter, the next-turn disc, or the
+  bottom-right box (when it shows the prompt): end turn.
+- City screen: click tiles to assign workers (yields show as Civ3's food
+  and shield icons; roads, irrigation and mines are drawn; tiles another
+  city works are dimmed), Change build (Build now / Queue), Governor, X or
+  ESC closes. Idle citizens show as entertainers.
 - P: save a window screenshot as `shot-<unix>.png`.
 - F9: reveal-all debug toggle.
 
@@ -44,5 +55,6 @@ MVP plus the features slice: terrain, movement, fog, settling, food and
 shield boxes, Warrior/Settler/Worker production, Tokugawa splash, UI and
 unit sounds, the Asian peace music loop, plus goody huts (poppable for
 units, maps, or settlers), capturable barbarian camps, and 22 placed
-resources with bonus yields. Out of scope: AI, tech, diplomacy, trade,
-worker improvements, combat, save/load, minimap.
+resources with bonus yields, worker improvements (roads, irrigation, mines,
+clearing), and city production of units and buildings with a queue. Out of
+scope: AI, tech, diplomacy, trade, combat, save/load, minimap.

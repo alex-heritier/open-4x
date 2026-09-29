@@ -45,7 +45,7 @@ The `GOOD` section sits at file offset 29 052 of the inflated stream:
 |---|---|---|
 | row stride | `0x5C` (92 B) | loader loop `add ebx,0x5C` at `0x5974B4` |
 | row count source | global at loader `+0x89C` | loop bound `0x59749F` |
-| per-row reader | call `0x5E3740` per row | `0x5974A8` — it is the row *reader*, not a validator (corrected: it issues the `0x64AF35` field reads below) |
+| per-row reader | call `0x5E3860` per row | reader loop `0x594597`; flat `fread`s (`0x64B3E3`) into `+0x04/+0x1C/+0x3C…` (verified destinations). `0x5E3740` is the WRITER's row function (loop `0x59749F`, `fwrite`s via `0x64AF35`) — formerly mislabeled as the reader |
 | freq field | row `+0x40` | read by `0x5E3740` (`lea ecx,[edi+0x40]`, `0x5E37B6`) and by placement (`NOTES.md` §11.8) — doubly confirmed |
 | u16 at section `+4` | `0x1A` (26) | consistent with a row count; the loader loop bound is authoritative, not this field |
 
@@ -63,26 +63,25 @@ The `GOOD` section sits at file offset 29 052 of the inflated stream:
 | `+0x50` | 12 B | unmapped |
 | total | `0x5C` | ends exactly at the stride — layout closed |
 
-`0x64AF35` is a flat `fread(dst, count*size)` (via `0x64AF64`: `imul`
-count×size, clamped read) — no length prefixes there. But fixed-stride
-slicing still fails: a 3×3 grid search over stride {88, 92, 96} × header
-{4, 6, 8} peaks at stride-92/header-8 with only 11/26 sane freqs and
-names drifting across rows (`H`, `Ir`, `Saltp`, `Oi`, `Rubb…`, `Aluminum…`,
-`Gold…`, `Gems`, `Whea…`, `Incens…` — unmistakably the resource list, at
-wandering offsets). Drifting offsets with flat field reads means
-variable-length data sits *between* the fixed reads: the interleaved
-`0x64C2F8` / `0x64C47B` calls (whose worker `0x64C4A7` dispatches on
-`[esi+0xC] & 0x83` and arg ∈ {0, 1, 2}) read the variable parts — likely
-Pascal strings. So file rows are variable-length; memory rows are the
-fixed `0x5C`. `0x64C31A` is a dual-mode cursor skip: if `[edi+0xC] & 0x108 == 0` it
-returns a binary byte delta (`bytes_read − [edi+4]`); else it counts `\n`
-newlines through a ctype-like table (`0xCCF9A0`, bit `0x80` test per
-byte) — a text mode serving the game's text/ini files through the same
-reader. `0x64C4A7`'s arg-1 path adds that count to the read length.
-Which mode the BIQ stream uses (the flag word is per-open state) is the
-remaining unknown — one flag bit decides whether GOOD rows contain
-variable-length text fields at all. Until then the GOOD×TERR matrix for
-clones stays hardcoded (as the clone does today).
+**CORRECTION (verified live): `0x64AF35` is `fwrite`, not `fread`.**
+`0x64AF64` calls `memmove(streambuf ← userbuf)` (`0x6517d0` =
+memmove with overlap check); its twin `0x64B3E3`/`0x64B412` calls
+`memmove(userbuf ← streambuf)` = the real `fread`. Direction was proven
+by memmove operand order, then confirmed live (writer opens `"wb"`).
+Every `0x64AF35` call below is a WRITE (memory → file). The Pascal-string
+/ text-mode theory for GOOD is dead: the GOOD row reader (`0x5E3860`)
+does flat `fread`s only, and the live GOOD stream used the binary arm
+(`[stream+0xC] & 0x108 == 0`, flags read live as `0x0A`). The
+`0x64C31A` dual-mode cursor analysis stands as written (it serves text
+files elsewhere); it is simply not on the GOOD path.
+
+Slicing history (superseded): a 3×3 grid search over stride {88, 92, 96}
+× header {4, 6, 8} on conquests.biq-inflated peaked at stride-92/header-8
+with only 11/26 sane freqs and drifting names. That failed because
+conquests.biq's GOOD section genuinely contains NO name strings (see
+below) — not because of variable-length framing. Memory rows are the
+fixed `0x5C`; PTW-format file rows are `[u32 len=88][88B data]` (see
+`## Reader/writer split`).
 
 ## Names live outside the BIQ (verified)
 
@@ -158,7 +157,155 @@ above — then reads `GOOD` row `+0x48` (unmapped u32). Preceded by index
 math onto table `0xA52E98` gated by `0x561440`. The two accessors'
 relationship: open.
 
+## Stream layer identified: `0x64C47B` = fseek, `0x64C2F8` = ftell
+
+* `0x64C2F8(stream)` = lock + `0x64C31A` + unlock. `0x64C31A` calls
+  `0x651238([stream+0x10], 0, 1)` — `lseek(fd, 0, SEEK_CUR)` on the MSVC
+  `FILE` fd at `+0x10` — minus `[stream+4]` (`_cnt`, buffered-but-unread)
+  on the binary path. Text-mode (`[stream+0xC] & 0x108`) newline counting
+  is the other arm. BIQ streams open `"rb"` (`0x5942C4`), so the binary
+  arm applies.
+* `0x64C47B(stream, N, whence)` = fseek. `whence ∈ {0,1,2}` else
+  `errno = 0x16` (EINVAL); `SEEK_CUR` adds `ftell` first (`0x64C4D0`);
+  tail is `lseek` via `0x651238` → `SetFilePointer` (`0x6512C7`). The
+  earlier "dispatches on `[esi+0xC] & 0x83`" note was the readable-stream
+  validation, not a format switch.
+
+## GOOD rows: exact writer, paradoxical file (verified: `r2` + probes)
+
+(This section describes the WRITER, `0x597070`/`0x5E3740` — formerly
+mislabeled the reader. All transfers are `fwrite`s.)
+
+`0x5E3740` emits exactly 92 flat bytes per row: `ftell`, then fwrites of
+4 (stack — the length word, see below) + 24 (from `+0x04`) + 32 (from
+`+0x1C`) + 5×u32 (from `+0x3C..+0x4C`, freq at file+64) + 12 (from
+`+0x50`), then `ftell`, `fseek(pos1,SET)`, a 4B re-read into a dead stack
+temp, `fseek(pos2,SET)` — position-neutral. All sizes are immediates;
+the loop at `0x59749F` does no file I/O of its own.
+
+But no fixed stride slices conquests.biq-inflated: strides 92 and 96 fail
+for every header 0–48 (best 11/26 sane freqs), no header 0–300 aligns all
+26 name blobs, and the GOOD section spans 29052→36036 (`RULE` next) =
+6984 bytes ≈ 2.9× the 2392 of 26×92. Cause identified: conquests.biq's
+GOOD section contains NO name strings at all (byte search over the full
+209222B inflated image: zero hits for `Horses`, wide, Pascal, lower- or
+upper-case variants). Its framing after `GOOD` is u16-based
+(`1a 00 2c 01 58 00 …` = 26, 300, 88, …), not the u32/len-88 rows the
+reader consumes. No Conquests `.biq` (all 9 scenarios + MP/scenario
+variants + `civ3mod.bic`, inflated) contains `Horses`.
+
+## Live GOOD rows: full memory dump (winedbg, EGYPT.SAV load)
+
+Break `*0x5974BB` (row-loop exit) during the EGYPT load: count
+`[0x9C3508+0x89C]` = 26, rows at `[0x9C3508+0x3CCC]` = `0x066BFFC8`,
+2392 bytes dumped. Order, names (`+0x04`), freq (`+0x40`), category
+(`+0x3C`: 2 = strategic, 1 = luxury, 0 = bonus):
+
+Horses 160, Iron 160, Saltpeter 120, Coal 120, Oil 120, Rubber 120,
+Aluminum 120, Uranium 100, Wines/Furs/Dyes/Incense/Spices/Ivory/Silks/
+Gems 0, Whales/Game/Fish/Cattle/Wheat/Gold/Sugar/Tropical Fruit/Oasis/
+Tobacco 0. `+0x48` mirrors the row index except Sugar 24 / Tropical
+Fruit 22 / Oasis 23 (an ordering id, not the index). Luxuries and bonus
+all carry freq 0 (the `freq != 0 ? freq : roll` fallback decides them).
+
+The names-in-stream paradox (refined): the reader's 24B `fread`
+provably targets `+0x04` (`lea eax,[esi+4]`, `0x5E3880`) and the 32B key
+`fread` targets `+0x1C` (`0x5E389C`) — all flat, no string-table join in
+the row function — so the reader's stream contained the full names. But
+`Horses` appears in NO Conquests file on disk: not conquests.biq
+(raw/inflated), not any of the 9 scenario `.biq`s, not `civ3mod.bic`,
+not EGYPT.SAV raw, not save0.tmp (game's own 1748113B decompression),
+not the raw autosaves, not the exe. Only the 4 uncompressed PTW `.bix`
+files carry named GOOD rows (29/42-row custom sets — not the live 26).
+Civilopedia is ruled out as the join source (`Silk/Spice/Wine` singular
+vs live `Silks/Spices/Wines` plural). The 26-row named source is
+unidentified; the decisive probe is a fresh load with breakpoints on the
+reader's `fopen` (`0x5942CA`, path in `EBX`) and GOOD loop exit
+(`0x5945B3`).
+
+Open threads, in order:
+
+1. Identify the GOOD stream: fresh-load trace with `*0x5942CA` (reader
+   fopen, path in `EBX`) + `*0x5945B3` (GOOD rows filled) — in progress.
+2. ~~Allocator `0x59BD90`~~ CLOSED: frees old `[ebp+0x3CCC]`, mallocs
+   `((3×count)<<3 − count)<<2` = exactly 92×count
+   (`lea eax,[edi+edi*2]; shl 8; sub edi; shl 2`, `0x59BDD2–0x59BDDB`).
+3. conquests.biq's 6984B GOOD section (29052→36036): u16-framed,
+   nameless — which consumer reads it, and does the Conquests exe ever
+   feed it to `0x5E3860` (whose flat name reads would produce garbage)?
+   Possibly editor-only data.
+4. A TERR allow-matrix value for at least one known tile (pick a tile from
+   a save and read its row's matrix bits out of the process).
+
 ## Open
 
+* GOOD 26-row named source file (see paradox above; fresh-load trace
+  with `*0x5942CA` in progress).
 * UI meaning of the three class predicates `0x5E3700/30/20`.
-* Faithful `GOOD`/`TERR` rows await the `.biq` framing fix (`NOTES.md` §15.4).
+* A TERR allow-matrix value for at least one known tile (pick a tile from
+   a save and read its row's matrix bits out of the process).
+
+## Reader/writer split (verified: `r2` + winedbg + probes)
+
+The scenario codec has two mirrored halves. Prior notes attributed
+everything to one "loader"; the split was proven by memmove operand
+order + a live `"wb"` fopen + a live writer-skip.
+
+| side | function | stream mode | transfer | row function | GOOD gate |
+|---|---|---|---|---|---|
+| reader | `0x594290` dispatch (`cmp eax,'GOOD'`, `0x5943BB` → arm `0x59454B`) | `"rb"` (`0x5942C4`) | `fread` = `0x64B3E3` (565 callers, `0x594318+`) | `0x5E3860` (flat reads into `+0x04/+0x1C/+0x3C…`, one `fseek` skip) | bit 7 of `[ebx]` (`0x59454D`); sets `[esi+0x848] |= 0x80` after |
+| writer | `0x597070` (`"Saving version %d.%02d BIC file"`, `0x59712A`) | `"wb"` (`0x5970A8`, path e.g. `bic__out.tmp`) | `fwrite` = `0x64AF35` | `0x5E3740` (flat writes from row, `ftell`/`fseek` dance) | bit 7 of `[ebx]` (`0x59745A`); skip jumps to `0x5974BB` |
+
+Writer/reader tells: the writer presets each transfer buffer
+(`mov [esp+NN],'TAG'` / count) before the call; the reader never presets
+and `cmp`s the tag after. The writer-skip was caught live: `EBP` still
+held the path pointer (`0x72DA08` = `"bic__out.tmp"`, via global
+`0x72D9CC`) at `0x5974BB`, proving `xor ebp,ebp` never ran (this also
+explains the earlier "EBP should be 26" anomaly: the breakpoint was hit
+via the skip jump, not the loop exit). Caller chain (stack): `? →
+0x59A760 → 0x597070`.
+
+File-row framing (PTW/raw BIC, ground truth from
+`Ancient Mediterranean.bix`): `[GOOD][u32 count][rows…]`, each row
+`[u32 len=88][24B name][32B key][u32 cls][u32 freq][u32 a][u32 b][u32
+c][u32 d][8B tail]`. The reader loads `len` into row `+0x00`, subtracts
+each `fread`'s byte count, conditionally reads the trailing 12B
+(`cmp [esi],0xC; jb`), and `fseek`s past the remainder
+(`fseek(remaining, SEEK_CUR)`, `0x5E396A`) — so longer file rows are
+skipped cleanly. Live EGYPT rows ended with head `0` (len == 88 ==
+consumed). The `.bix` GOOD parses 29/29 with this framing
+(`Tin/Copper/Papyrus/Elephants…` custom set — not the live 26).
+
+Live GOOD table (26/26, second capture identical to the first; rows at
+`[0x9C3508+0x3CCC]`, count `[0x9C3508+0x89C]` = 26):
+
+| # | name (`+0x04`) | key (`+0x1C`) | cls `+0x3C` | freq `+0x40` | a `+0x44` | b `+0x48` | c `+0x4C` |
+|---|---|---|---|---|---|---|---|
+| 0 | Horses | GOOD_Horses | 2 | 160 | 0 | 0 | 4 |
+| 1 | Iron | GOOD_Iron | 2 | 160 | 800 | 1 | 7 |
+| 2 | Saltpeter | GOOD_Saltpeter | 2 | 120 | 800 | 2 | 30 |
+| 3 | Coal | GOOD_Coal | 2 | 120 | 400 | 3 | 44 |
+| 4 | Oil | GOOD_Oil | 2 | 120 | 200 | 4 | 53 |
+| 5 | Rubber | GOOD_Rubber | 2 | 120 | 0 | 5 | 57 |
+| 6 | Aluminum | GOOD_Aluminum | 2 | 120 | 400 | 6 | 64 |
+| 7 | Uranium | GOOD_Uranium | 2 | 100 | 100 | 7 | 65 |
+| 8–15 | Wines Furs Dyes Incense Spices Ivory Silks Gems | GOOD_Wine GOOD_Furs GOOD_Dye GOOD_Incense GOOD_Spice GOOD_Ivory GOOD_Silk GOOD_Diamonds | 1 | 0 | 0 | 8–15 | -1 |
+| 16–25 | Whales Game Fish Cattle Wheat Gold Sugar Tropical Fruit Oasis Tobacco | GOOD_Whales GOOD_Game GOOD_Fish GOOD_Cattle GOOD_Wheat GOOD_Gold GOOD_Sugar GOOD_Bananas GOOD_Oasis GOOD_Tobacco | 0 | 0 | 0 | 16–21,24,22,23,25 | -1 |
+
+(`b` mirrors the row index except Sugar 24 / Tropical Fruit 22 / Oasis
+23. `c` is an increasing id for strategics only — possibly a tech index.
+`+0x50` holds 3 small u32s per row. Full bytes in
+`/tmp/civ3dbg/good_rows.bin`, captured 2026-09-29.)
+
+Load pipeline temp files (all in the exe dir, all captured): the EGYPT
+load wrote `save0.tmp` (1748113B — the game's own DCL decompression of
+EGYPT.SAV), `bic__in_.tmp` (8329B = 736B `BICQVER#` header + `GAME`
+section at 736 — game settings, no GOOD), `bic__out.tmp` (736B header;
+the writer target above). Our `dcl.rs` inflation of EGYPT.SAV is
+BYTE-IDENTICAL to the game's `save0.tmp` (`cmp` clean) — the codec is
+ground-truth validated. (Autosave `.SAV`s are stored raw/uncompressed,
+1.3–1.7MB — `BadDictBits` under DCL.)
+
+Data-path note: the game reads code/DLLs from `civ3-gog/app/Conquests`
+but data files (`Sounds/`, `Text/version.txt`) from `civ3-complete/`
+— check both trees (the two `conquests.biq` copies are byte-identical).

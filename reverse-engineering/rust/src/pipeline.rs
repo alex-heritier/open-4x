@@ -327,12 +327,12 @@ pub const CLIMATE_THRESHOLDS: [[i32; 7]; 3] = [
 ///
 /// # Fidelity
 ///
-/// The class numbers and every threshold are exact. The one thing this crate
-/// does not model is the call to `0x5f1ce0(x, y, cls, bonus)`, which is the
-/// function that turns the abstract class into `vfunc(0x04)`/`vfunc(0x08)` and
-/// flag writes. Storing the class directly is behaviourally equivalent for
-/// everything downstream of it except the `bonus[]` array, which `0x5f1ce0`
-/// also consumes.
+/// The class numbers and every threshold are exact. What this stage does not
+/// model yet is the per-cell call to [`write_biome_class`] (`0x5f1ce0`): the
+/// binary flood-fills each class across its region through the `bonus[]`
+/// visited array, while this port stores the class directly. Wiring the
+/// flood in awaits the `paintContinents` (`0x5eddb0`) region ids, which no
+/// module models yet; the flood itself is implemented and tested below.
 pub fn assign_biomes(grid: &mut MapGrid, opts: &Options, bugs: OriginalBugs) {
     let res = opts.resources.clamp(0, 2) as usize;
     let cli = opts.climate.clamp(0, 2) as usize;
@@ -462,6 +462,84 @@ pub fn assign_biomes(grid: &mut MapGrid, opts: &Options, bugs: OriginalBugs) {
     peak_pass(grid, opts);
 }
 
+/// `0x5f1ce0` — flood-fill one biome class across a single region.
+///
+/// Pass 1 of `0x5f1480` calls this once per land cell as
+/// `writeBiomeClass(x, y, cls, bonus)` (sole external caller `0x5f19a8`);
+/// the only other caller is itself (`0x5f1f1b`, the flood step). Spans
+/// `0x5f1ce0..0x5f1f45` (614 bytes, `ret 0x10`).
+///
+/// Mechanics, in order (`NOTES.md` §11.5):
+///
+/// 1. `bonus[idx] = 1` unconditionally (`0x5f1d14`) — the visited mark.
+///    Pass 1 skips cells whose byte is set, so one flood claims every cell
+///    it touches for all later iterations.
+/// 2. If the center cell's terrain (`vfunc(0xC8)`) is 5, 6 or 10, return
+///    (`0x5f1d29..0x5f1d64`, three identical probe blocks).
+/// 3. Unless `cls == 2` (grassland, already the land-stage default),
+///    `cell.vfunc(0x128)(cls, -1, -1)` (`0x5f1d86`).
+/// 4. For spiral neighbours `n = 1..=8` (ring 1), wrapped per `+0x1F0` and
+///    bounds-checked, recurse into each neighbour whose continent id
+///    (`vfunc(0xB8)`, `0x5f1e52`) and `paintContinents` region id
+///    (`[esi+0x3C]`, `0x5f1ea2`) both match the center's, whose terrain is
+///    not 5/6/10, and whose `bonus[]` byte is still 0.
+///
+/// `regions` is the `uint16` array `paintContinents` (`0x5eddb0`) leaves at
+/// `map+0x3C`, indexed by flat cell index. The binary recurses; this port
+/// uses an explicit stack, which reaches the same fixed point because the
+/// per-cell write is idempotent and the guards are monotonic.
+pub fn write_biome_class(
+    grid: &mut MapGrid,
+    regions: &[u16],
+    bonus: &mut [u8],
+    x: i32,
+    y: i32,
+    cls: u8,
+) {
+    let mut stack = vec![(x, y)];
+    while let Some((x, y)) = stack.pop() {
+        let idx = grid.index(x, y);
+        bonus[idx] = 1; // 0x5f1d14
+        let center_class = grid.cell(idx).map(|c| c.class).unwrap_or(255);
+        if matches!(center_class, 5 | 6 | 10) {
+            continue; // 0x5f1d2c / 0x5f1d48 / 0x5f1d64
+        }
+        if cls != 2 {
+            // 0x5f1d86: vfunc(0x128)(cls, -1, -1).
+            if let Some(cell) = grid.cell_mut(idx) {
+                cell.set_class(cls);
+            }
+        }
+        let center_cont = grid.cell(idx).map(|c| c.continent).unwrap_or(u16::MAX);
+        let center_region = regions.get(idx).copied().unwrap_or(u16::MAX);
+        for n in 1..=8 {
+            // 0x5f1db1: spiralOffset(n, &dx, &dy); wrap + bounds check.
+            let (dx, dy) = spiral_offset(n);
+            let Some((nx, ny)) = grid.wrap_and_check(x + dx, y + dy) else {
+                continue;
+            };
+            let nidx = grid.index(nx, ny);
+            // 0x5f1e52 / 0x5f1e62: same vfunc(0xB8) both sides.
+            if grid.cell(nidx).map(|c| c.continent) != Some(center_cont) {
+                continue;
+            }
+            // 0x5f1ea2: same paintContinents region id.
+            if regions.get(nidx).copied() != Some(center_region) {
+                continue;
+            }
+            // 0x5f1ebf / 0x5f1ed7 / 0x5f1eef: neighbour terrain guard.
+            if matches!(grid.cell(nidx).map(|c| c.class), Some(5 | 6 | 10)) {
+                continue;
+            }
+            // 0x5f1f0b: unvisited only.
+            if bonus.get(nidx) != Some(&0) {
+                continue;
+            }
+            stack.push((nx, ny)); // 0x5f1f1b: the recursive call
+        }
+    }
+}
+
 /// Pass 2 of `0x5f1480` — the percentile contour.
 ///
 /// A second field (`level 5`, seed `water + 0x34B59E`) is generated and land
@@ -569,6 +647,75 @@ mod tests {
     fn generate_is_deterministic() {
         let o = opts(1, 37);
         assert_eq!(generate(&o).grid.cells, generate(&o).grid.cells);
+    }
+
+    /// 8x4 land grid: one continent, one region, everything class 2.
+    fn flood_grid() -> (MapGrid, Vec<u16>, Vec<u8>) {
+        let mut grid = MapGrid::new(8, 4, 0, 0);
+        for c in grid.cells.iter_mut() {
+            c.class = 2;
+            c.sub_class = 2;
+            c.continent = 1;
+        }
+        let n = grid.num_cells();
+        (grid, vec![7u16; n], vec![0u8; n])
+    }
+
+    #[test]
+    fn biome_writer_floods_the_whole_region() {
+        let (mut grid, regions, mut bonus) = flood_grid();
+        write_biome_class(&mut grid, &regions, &mut bonus, 0, 0, 0);
+        // Ring-1 steps (|dx|+|dy| == 2) preserve x+y parity, but every cell
+        // holds one even-parity tile and all even tiles are reachable, so
+        // the flood still claims all 16 cells.
+        assert!(bonus.iter().all(|&b| b == 1), "unclaimed cells remain");
+        assert!(grid.cells.iter().all(|c| c.class == 0));
+        assert!(grid.cells.iter().all(|c| c.sub_class == 0));
+    }
+
+    #[test]
+    fn biome_writer_grassland_marks_without_writing() {
+        let (mut grid, regions, mut bonus) = flood_grid();
+        write_biome_class(&mut grid, &regions, &mut bonus, 0, 0, 2);
+        assert!(bonus.iter().all(|&b| b == 1), "cls 2 still floods");
+        assert!(grid.cells.iter().all(|c| c.class == 2), "cls 2 writes nothing");
+    }
+
+    #[test]
+    fn biome_writer_guarded_center_marks_but_returns() {
+        let (mut grid, regions, mut bonus) = flood_grid();
+        grid.cells[0].class = 6;
+        write_biome_class(&mut grid, &regions, &mut bonus, 0, 0, 0);
+        // bonus[idx] = 1 lands before the terrain guard (0x5f1d14).
+        assert_eq!(bonus[0], 1);
+        assert_eq!(grid.cells[0].class, 6, "guarded cell keeps its class");
+        assert!(bonus[1..].iter().all(|&b| b == 0), "no flood from guard");
+    }
+
+    #[test]
+    fn biome_writer_gates() {
+        // Each gate blocks cell 1 (tiles (2,0),(3,0)) while the flood claims
+        // everything else; the blocked cell keeps class 2 and bonus 0.
+        let cases: &[(&str, Box<dyn Fn(&mut MapGrid, &mut Vec<u16>, &mut Vec<u8>)>)] = &[
+            ("region", Box::new(|_, r, _| r[1] = 9)),
+            ("continent", Box::new(|g, _, _| g.cells[1].continent = 2)),
+            ("terrain", Box::new(|g, _, _| g.cells[1].class = 6)),
+            ("visited", Box::new(|_, _, b| b[1] = 1)),
+        ];
+        for (name, gate) in cases {
+            let (mut grid, mut regions, mut bonus) = flood_grid();
+            gate(&mut grid, &mut regions, &mut bonus);
+            let before = grid.cells[1].class;
+            write_biome_class(&mut grid, &regions, &mut bonus, 0, 0, 0);
+            assert_eq!(grid.cells[1].class, before, "{name}: blocked cell written");
+            if *name != "visited" {
+                assert_eq!(bonus[1], 0, "{name}: blocked cell marked");
+            }
+            assert!(
+                bonus.iter().enumerate().all(|(i, &b)| i == 1 || b == 1),
+                "{name}: flood did not route around the blocked cell"
+            );
+        }
     }
 
     #[test]

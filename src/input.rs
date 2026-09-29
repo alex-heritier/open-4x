@@ -198,9 +198,10 @@ pub fn orders(
                 }
                 return;
             }
+            // Units that spent their moves cannot be selected, as in Civ3.
             let stack: Vec<Entity> = units
                 .iter()
-                .filter(|(_, u)| u.x == x && u.y == y)
+                .filter(|(_, u)| u.x == x && u.y == y && units::selectable(u))
                 .map(|(e, _)| e)
                 .collect();
             if let Some((e, _)) = cities.iter().find(|(_, c)| c.x == x && c.y == y)
@@ -209,7 +210,10 @@ pub fn orders(
                 view.0 = Some(e);
                 audio::sfx(&mut commands, &audio, "City View");
             } else if !stack.is_empty() {
-                // selecting a fortified unit wakes it, as in Civ3
+                // selecting a fortified unit wakes it, as in Civ3; selecting
+                // an explorer stands down auto-explore, or a later click
+                // could never redirect it (auto-select gives the tile order
+                // to whoever still needs orders).
                 let next = match selected.0 {
                     Some(s) if stack.contains(&s) => {
                         let i = stack.iter().position(|&e| e == s).unwrap();
@@ -220,6 +224,7 @@ pub fn orders(
                 if let Ok((_, mut u)) = units.get_mut(next) {
                     u.fortified = false;
                     u.sentry = false;
+                    u.exploring = false;
                 }
                 selected.0 = Some(next);
                 audio::sfx(&mut commands, &audio, "Select");
@@ -253,14 +258,11 @@ pub fn orders(
         }
     }
     if keys.just_pressed(KeyCode::Tab) {
-        let mut cands: Vec<Entity> = units
+        let cands: Vec<Entity> = units
             .iter()
-            .filter(|(_, u)| !u.fortified && u.moves > 0)
+            .filter(|(_, u)| units::needs_orders(u))
             .map(|(e, _)| e)
             .collect();
-        if cands.is_empty() {
-            cands = units.iter().map(|(e, _)| e).collect();
-        }
         if !cands.is_empty() {
             let next = match selected.0 {
                 Some(s) if cands.contains(&s) => {

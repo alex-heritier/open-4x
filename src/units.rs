@@ -3,10 +3,10 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use serde::Deserialize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 
-use crate::improvements::Work;
+use crate::improvements::{action_slot, Work};
 use crate::map::*;
 use crate::render::{sprite_z, RevealAll};
 
@@ -143,6 +143,9 @@ pub struct Unit {
     pub work: Option<Work>,
     /// Sentried: skipped by auto-select like fortified, but not dug in.
     pub sentry: bool,
+    /// Auto-exploring: each turn the unit routes itself toward unseen tiles
+    /// until none are reachable. Any manual order cancels it.
+    pub exploring: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -163,13 +166,18 @@ pub struct TurnEnded;
 
 const STEP_DUR: f32 = 0.38;
 
-/// FLC strip order runs counterclockwise: d0=W, d1=SW, d2=S, d3=SE,
-/// d4=E, d5=NE, d6=N, d7=NW (verified from the warrior sheet).
+/// FLC strip order, read off the warrior sheet: the unit's facing runs
+/// d0 = S, d1 = SE, d2 = E, d3 = NE, d4 = N, d5 = NW, d6 = W, d7 = SW, the
+/// compass cycle counterclockwise from south. d1 is the wide chest-on view
+/// (map-southeast walks straight at the camera) and d3 the right profile
+/// (map-northeast walks straight across the screen).
 pub fn facing_for_step(dx: i32, dy: i32) -> usize {
-    let dsx = (dx - dy) as f32;
-    let dsy = -((dx + dy) as f32) * 0.5;
-    let theta = dsy.atan2(dsx).to_degrees();
-    ((theta - 180.0) / 45.0).round().rem_euclid(8.0) as usize
+    // Compass angle (east 0, north 90), never the isometric screen angle:
+    // on screen the map's cardinals run along the diagonals, so rounding
+    // the screen angle to the nearest eighth of a turn gave east and north
+    // a neighbouring strip.
+    let theta = (-(dy as f32)).atan2(dx as f32).to_degrees();
+    ((theta - 270.0) / 45.0).round().rem_euclid(8.0) as usize
 }
 
 /// Frame sub-rect, inset half a pixel so strip sampling never bleeds
@@ -196,7 +204,7 @@ pub(crate) fn spawn_unit(
     commands
         .spawn((
             Sprite {
-                image: clip.strips[2].clone(),
+                image: clip.strips[0].clone(),
                 rect: Some(frame_rect(clip, 0)),
                 ..default()
             },
@@ -206,13 +214,14 @@ pub(crate) fn spawn_unit(
                 utype,
                 x,
                 y,
-                moves: def(utype).moves,
+                moves: def(utype).moves * MP,
                 fortified: false,
-                facing: 2,
+                facing: 0, // south: a fresh unit faces the viewer
                 path: VecDeque::new(),
                 anim: UnitAnim::Idle { t: 0.0 },
                 work: None,
                 sentry: false,
+                exploring: false,
             },
         ))
         .with_children(|c| {
@@ -250,8 +259,10 @@ pub fn spawn_party(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>)
 }
 
 pub fn order_move(map: &GameMap, u: &mut Unit, dest: (i32, i32)) {
-    // Moving cancels any worker job in progress.
+    // A manual move order cancels standing orders: worker jobs, fortify,
+    // sentry, and auto-explore.
     u.work = None;
+    u.exploring = false;
     if (u.x, u.y) == dest {
         u.path.clear();
         return;
@@ -260,23 +271,65 @@ pub fn order_move(map: &GameMap, u: &mut Unit, dest: (i32, i32)) {
         Some(p) => {
             u.path = p.into();
             u.fortified = false;
+            u.sentry = false;
         }
         None => u.path.clear(),
     }
 }
 
-/// Extra turns a unit needs to walk `path` (0 = arrives this turn),
-/// under the "any movement left may enter" rule.
+/// Route an auto-exploring unit toward its nearest unseen passable tile.
+/// Breadth-first over passable tiles, so the first unseen tile found is the
+/// closest reachable one and needs a single `find_path`. Returns false when
+/// nothing reachable is left unseen, which ends the automation.
+pub fn plan_explore(map: &GameMap, u: &mut Unit) -> bool {
+    let mut seen_q = VecDeque::from([(u.x, u.y)]);
+    let mut done = HashSet::from([(u.x, u.y)]);
+    while let Some((x, y)) = seen_q.pop_front() {
+        for (nx, ny) in map.neighbors(x, y) {
+            if !done.insert((nx, ny)) {
+                continue;
+            }
+            let Some(t) = map.get(nx, ny) else {
+                continue;
+            };
+            if move_cost(t).is_none() {
+                continue;
+            }
+            // Huts and camps are worth the detour: stepping on them pops them.
+            if !t.seen || t.hut || t.camp {
+                if let Some(p) = map.find_path((u.x, u.y), (nx, ny)) {
+                    if !p.is_empty() {
+                        u.path = p.into();
+                        return true;
+                    }
+                }
+                // Unseen but unreachable from here: keep looking past it.
+            }
+            seen_q.push_back((nx, ny));
+        }
+    }
+    u.path.clear();
+    false
+}
+
+/// Extra turns a unit at `start` needs to walk `path` (0 = arrives this
+/// turn), under the "any movement left may enter" rule. Moves are thirds.
 pub fn path_turns(
     map: &GameMap,
+    start: (i32, i32),
     moves_now: u8,
     moves_max: u8,
     path: &[(i32, i32)],
 ) -> u32 {
     let mut mv = moves_now;
     let mut turns = 0;
+    let mut from = start;
     for &(x, y) in path {
-        let cost = map.get(x, y).and_then(move_cost).unwrap_or(1);
+        let cost = match (map.get(from.0, from.1), map.get(x, y)) {
+            (Some(a), Some(b)) => step_cost(a, b).unwrap_or(MP),
+            _ => MP,
+        };
+        from = (x, y);
         if mv == 0 {
             turns += 1;
             mv = moves_max;
@@ -284,6 +337,15 @@ pub fn path_turns(
         mv -= cost.min(mv);
     }
     turns
+}
+
+/// Moves left for display: whole MP plus any thirds, like Civ3's "1 1/3".
+pub fn fmt_moves(thirds: u8) -> String {
+    match (thirds / MP, thirds % MP) {
+        (w, 0) => w.to_string(),
+        (0, f) => format!("{f}/{MP}"),
+        (w, f) => format!("{w} {f}/{MP}"),
+    }
 }
 
 pub fn end_turn_units(
@@ -294,7 +356,7 @@ pub fn end_turn_units(
     for _ in events.read() {
         turn.0 += 1;
         for mut u in units.iter_mut() {
-            u.moves = def(u.utype).moves;
+            u.moves = def(u.utype).moves * MP;
         }
     }
 }
@@ -307,10 +369,19 @@ pub fn drive_movement(map: Res<GameMap>, mut units: Query<(Entity, &mut Unit)>) 
         if u.fortified || u.moves == 0 {
             continue;
         }
+        // Auto-explore plans a fresh leg whenever the last one runs out;
+        // with nothing left unseen the automation ends and the unit waits.
+        if u.exploring && u.path.is_empty() && !plan_explore(&map, &mut u) {
+            u.exploring = false;
+            continue;
+        }
         let Some(&(nx, ny)) = u.path.front() else {
             continue;
         };
-        let cost = map.get(nx, ny).and_then(move_cost);
+        let cost = match (map.get(u.x, u.y), map.get(nx, ny)) {
+            (Some(from), Some(to)) => step_cost(from, to),
+            _ => None,
+        };
         let Some(cost) = cost else {
             u.path.clear();
             continue;
@@ -368,8 +439,27 @@ pub fn advance_anims(
 
 pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
     for (u, mut sprite) in q.iter_mut() {
-        let (slot, t, looped) = match u.anim {
-            UnitAnim::Idle { t } => ("DEFAULT", t, true),
+        let (slot, t, fps, looped) = match u.anim {
+            UnitAnim::Idle { t } => {
+                // Standing orders show: a working unit keeps looping its
+                // job clip, and a fortified or sentried unit holds its
+                // dug-in frame (Civ3 keeps FORTIFY's last frame up; units
+                // without that art idle as usual).
+                if let Some(w) = u.work {
+                    (action_slot(w.action), t, 12.0, true)
+                } else if u.fortified {
+                    match art.clip(u.utype, "FORTIFY") {
+                        Some(clip) => {
+                            sprite.image = clip.strips[u.facing].clone();
+                            sprite.rect = Some(frame_rect(clip, clip.frames - 1));
+                            continue;
+                        }
+                        None => ("DEFAULT", t, 8.0, true),
+                    }
+                } else {
+                    ("DEFAULT", t, 8.0, true)
+                }
+            }
             UnitAnim::Stepping { t, dur, .. } => {
                 // run cycle syncs to the step duration
                 let clip = art.clip(u.utype, "RUN");
@@ -383,14 +473,13 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
                 sprite.rect = Some(frame_rect(clip, f));
                 continue;
             }
-            UnitAnim::OneShot { slot, t } => (slot, t, false),
+            UnitAnim::OneShot { slot, t } => (slot, t, 12.0, false),
         };
         let Some(clip) =
             art.clip(u.utype, slot).or_else(|| art.clip(u.utype, "DEFAULT"))
         else {
             continue;
         };
-        let fps = if looped { 8.0 } else { 12.0 };
         let f = if looped {
             ((t * fps) as usize) % clip.frames
         } else {
@@ -401,7 +490,11 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
     }
 }
 
-pub fn refresh_visibility(mut map: ResMut<GameMap>, units: Query<&Unit>) {
+pub fn refresh_visibility(
+    mut map: ResMut<GameMap>,
+    units: Query<&Unit>,
+    cities: Query<&crate::cities::City>,
+) {
     for t in map.tiles.iter_mut() {
         t.visible = false;
     }
@@ -423,6 +516,17 @@ pub fn refresh_visibility(mut map: ResMut<GameMap>, units: Query<&Unit>) {
                 t.visible = true;
                 t.seen = true;
             }
+        }
+    }
+    // Cities light their workable radius, as in Civ3.
+    for c in cities.iter() {
+        let mut tiles = crate::cities::radius_tiles(&map, c.x, c.y);
+        tiles.push((c.x, c.y));
+        for (nx, ny) in tiles {
+            let i = map.idx(nx, ny);
+            let t = &mut map.tiles[i];
+            t.visible = true;
+            t.seen = true;
         }
     }
 }
@@ -477,25 +581,41 @@ pub fn restack(
 #[derive(Component)]
 pub struct StackBadge;
 
+/// Civ3 only lets a unit with movement left be selected.
+pub fn selectable(u: &Unit) -> bool {
+    u.moves > 0
+}
+
+/// A unit "requires attention": it can act and has no standing order
+/// (fortify, sentry, explore, a worker job or a go-to route).
+pub fn needs_orders(u: &Unit) -> bool {
+    selectable(u)
+        && !u.fortified
+        && !u.exploring
+        && u.work.is_none()
+        && u.path.is_empty()
+}
+
+/// Keep the selection while the unit can still act (or is still walking a
+/// route), otherwise move to the nearest unit that needs orders, or to none:
+/// with nothing selected the HUD invites the player to end the turn.
 pub fn auto_select(
     units: Query<(Entity, &Unit)>,
     mut selected: ResMut<Selected>,
+    mut last_pos: Local<(i32, i32)>,
 ) {
-    if selected.0.is_some_and(|s| {
-        units
-            .get(s)
-            .is_ok_and(|(_, u)| !u.fortified && u.moves > 0 && u.work.is_none())
-    }) {
-        return;
+    if let Some((_, u)) = selected.0.and_then(|s| units.get(s).ok()) {
+        *last_pos = (u.x, u.y);
+        if needs_orders(u) || (selectable(u) && !u.path.is_empty()) {
+            return;
+        }
     }
-    if let Some((e, _)) = units
+    let (lx, ly) = *last_pos;
+    selected.0 = units
         .iter()
-        .find(|(_, u)| !u.fortified && u.moves > 0 && u.work.is_none())
-    {
-        selected.0 = Some(e);
-    } else if !selected.0.is_some_and(|s| units.get(s).is_ok()) {
-        selected.0 = units.iter().next().map(|(e, _)| e);
-    }
+        .filter(|(_, u)| needs_orders(u))
+        .min_by_key(|(_, u)| (u.x - lx).abs().max((u.y - ly).abs()))
+        .map(|(e, _)| e);
 }
 
 pub fn unit_visibility(
@@ -543,13 +663,88 @@ mod tests {
 
     #[test]
     fn facing_matches_flc_order() {
-        // d0=W d1=SW d2=S d3=SE d4=E d5=NE d6=N d7=NW
-        assert_eq!(facing_for_step(1, 0), 3); // map-east runs screen-SE
-        assert_eq!(facing_for_step(-1, 0), 7); // map-west runs screen-NW
-        assert_eq!(facing_for_step(0, -1), 5); // map-north runs screen-NE
-        assert_eq!(facing_for_step(0, 1), 1); // map-south runs screen-SW
-        assert_eq!(facing_for_step(1, 1), 2); // diagonal S
-        assert_eq!(facing_for_step(-1, -1), 6); // diagonal N
+        // d0=S d1=SE d2=E d3=NE d4=N d5=NW d6=W d7=SW
+        assert_eq!(facing_for_step(0, 1), 0); // south walks at the camera
+        assert_eq!(facing_for_step(1, 1), 1);
+        assert_eq!(facing_for_step(1, 0), 2); // east is a diagonal on screen
+        assert_eq!(facing_for_step(1, -1), 3);
+        assert_eq!(facing_for_step(0, -1), 4); // north is a diagonal on screen
+        assert_eq!(facing_for_step(-1, -1), 5);
+        assert_eq!(facing_for_step(-1, 0), 6);
+        assert_eq!(facing_for_step(-1, 1), 7);
+    }
+
+    #[test]
+    fn roads_make_long_walks_short() {
+        let mut map = GameMap::generate();
+        let (sx, sy) = map.start;
+        // three road steps east of the start, all on passable land
+        let run: Vec<(i32, i32)> = (0..=3).map(|d| (map.wrap_x(sx + d), sy)).collect();
+        for &(x, y) in &run {
+            let i = map.idx(x, y);
+            map.tiles[i].base = Base::Grassland;
+            map.tiles[i].relief = Relief::Hill;
+            map.tiles[i].cover = Cover::Bare;
+        }
+        let hills = path_turns(&map, (sx, sy), MP, MP, &run[1..]);
+        assert!(hills >= 2, "three hills take a 1-MP unit three turns");
+        for &(x, y) in &run {
+            let i = map.idx(x, y);
+            map.tiles[i].road = true;
+        }
+        // 3 road steps cost 3 thirds: one MP, arriving this turn
+        assert_eq!(path_turns(&map, (sx, sy), MP, MP, &run[1..]), 0);
+        let path = map.find_path((sx, sy), run[3]).unwrap();
+        assert_eq!(path.len(), 3);
+        assert_eq!(fmt_moves(4), "1 1/3");
+        assert_eq!(fmt_moves(2), "2/3");
+        assert_eq!(fmt_moves(6), "2");
+    }
+
+    fn scout_at(x: i32, y: i32) -> Unit {
+        Unit {
+            utype: UnitType::Scout,
+            x,
+            y,
+            moves: MP,
+            fortified: false,
+            facing: 0,
+            path: VecDeque::new(),
+            anim: UnitAnim::Idle { t: 0.0 },
+            work: None,
+            sentry: false,
+            exploring: false,
+        }
+    }
+
+    #[test]
+    fn explore_routes_to_unseen_tiles_then_ends() {
+        let map = GameMap::generate();
+        let (sx, sy) = map.start;
+        let mut u = scout_at(sx, sy);
+        u.exploring = true;
+        assert!(plan_explore(&map, &mut u));
+        assert!(!u.path.is_empty());
+        // A fully seen map with no huts or camps ends the automation.
+        let mut done_map = GameMap::generate();
+        for t in done_map.tiles.iter_mut() {
+            t.seen = true;
+            t.hut = false;
+            t.camp = false;
+        }
+        u.path.clear();
+        assert!(!plan_explore(&done_map, &mut u));
+    }
+
+    #[test]
+    fn exploring_units_need_no_orders_but_manual_orders_cancel() {
+        let map = GameMap::generate();
+        let (sx, sy) = map.start;
+        let mut u = scout_at(sx, sy);
+        u.exploring = true;
+        assert!(!needs_orders(&u));
+        order_move(&map, &mut u, (map.wrap_x(sx + 1), sy));
+        assert!(!u.exploring);
     }
 
     #[test]
@@ -568,11 +763,11 @@ mod tests {
                 .iter()
                 .map(|&(x, y)| map.get(x, y).and_then(move_cost).unwrap() as u32)
                 .sum();
-            assert!(path_turns(&map, 1, 1, &path) >= 2 || costs > 3);
-            assert_eq!(path_turns(&map, 0, 1, &[]), 0);
+            assert!(path_turns(&map, (sx, sy), MP, MP, &path) >= 2 || costs > 3);
+            assert_eq!(path_turns(&map, (sx, sy), 0, MP, &[]), 0);
         }
         // a full-move unit with nothing left waits a turn for a 1-step path
-        assert_eq!(path_turns(&map, 0, 1, &[(sx, sy)]), 1);
+        assert_eq!(path_turns(&map, (sx, sy), 0, MP, &[(sx + 1, sy)]), 1);
     }
 }
 

@@ -23,7 +23,7 @@ intended behaviour, or a subset like `--bugs sea-level-split,swapped-wrap-flags`
 | land/sea generation | `0x5eceb0` | exact |
 | start deconfliction | `0x5eeb00` | exact, including the original's index bug |
 | desert conversion at starts | `0x5edb70` | exact |
-| biome / climate assignment | `0x5f1480` | exact except the `0x5f1ce0` call |
+| biome / climate assignment | `0x5f1480` | selection exact; `0x5f1ce0` flood mapped (`write_biome_class`), wiring awaits region ids |
 | resource placement math (freq roll, quantity, block odds) | `0x5f22a0` | data-independent math only; needs `.biq` rows for full placement (`resources`) |
 | goody huts, barbarian camps | `0x5f21b0`, `0x5f2090` | fully specified, implemented (`resources`) |
 | start-location and smoothing stages | `0x5eeee0`+ | not implemented |

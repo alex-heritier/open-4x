@@ -536,7 +536,9 @@ pub fn sync_feature_sprites(
         sprite.color = if reveal.0 || t.visible {
             bevy::prelude::Color::WHITE
         } else if t.seen {
-            bevy::prelude::Color::srgb(0.45, 0.45, 0.5)
+            // Feature art sits above the fog diamonds, so it dims itself to
+            // the same 60% a remembered tile keeps.
+            bevy::prelude::Color::srgb(0.6, 0.6, 0.6)
         } else {
             bevy::prelude::Color::BLACK
         };
@@ -620,9 +622,12 @@ pub fn resolve_features(
                         }
                     }
                     if let Some((e, _, name)) = best {
-                        if let Ok((_, mut c)) = cities.get_mut(e) {
+                        let taken = cities.get(e).ok().map(|(_, c)| {
+                            crate::cities::taken_tiles(cities.iter().map(|(_, c)| c), (c.x, c.y))
+                        });
+                        if let (Ok((_, mut c)), Some(taken)) = (cities.get_mut(e), taken) {
                             c.size += 1;
-                            crate::cities::governor_assign(&map, &mut c);
+                            crate::cities::governor_fill(&map, &mut c, &taken);
                         }
                         post(
                             &mut board,
@@ -859,11 +864,12 @@ mod tests {
             y: sy,
             moves: 2,
             fortified: false,
-            facing: 2,
+            facing: 0,
             path: Default::default(),
             anim: crate::units::UnitAnim::Idle { t: 0.0 },
             work: None,
             sentry: false,
+            exploring: false,
         });
         app.add_systems(Update, resolve_features);
         app.update();

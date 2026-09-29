@@ -75,3 +75,11 @@ and backtrace from there.
   with the Wine staging runtime above.
 * Record results back into `rivers.md` (Q1) and `ai.md` (Q2) with
   addresses, then extend `rust/src/rivers.rs` / `ai.rs` to match.
+
+## No headless load (verified 2026-09-29)
+
+`Civ3Conquests.exe 'Saves\EGYPT.SAV'` boots to the menu and ignores the
+argument (no `save0.tmp` after 40s, menu screenshot). There is no CLI
+save-load: every dynamic trace needs GUI driving (Load Game dialog) by
+a human or the CUA driver — never foreground-drive while the user is
+working in another window.

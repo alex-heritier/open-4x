@@ -89,6 +89,20 @@ bpp, speed 125. Small unit-faced sprites; 476 `.flc` files ship under
 `warriorDeath/Default/Fidget/Fortify/Run/Victory.flc` — matching the filled
 combat slots above.
 
+## FLC direction blocks (verified from the warrior sheet)
+
+Every unit FLC holds 8 direction blocks of `total/8` frames each, in the
+order the map draws them: `d0 = S`, `d1 = SE`, `d2 = E`, `d3 = NE`,
+`d4 = N`, `d5 = NW`, `d6 = W`, `d7 = SW` — the compass cycle clockwise
+from south. Read off `warrior/DEFAULT.flc`: `d1` is the chest-on view
+(map-southeast walks straight at the camera), `d5` the back with the
+mane over the shoulders, and `d3`/`d7` the right/left profiles
+(map-northeast/southwest walk straight across the screen). The four map
+cardinals are the 3/4 views, so on screen the block order does *not* run
+in even 45-degree steps: picking a block by rounding the isometric
+screen angle hands east and north a diagonal neighbour.
+`civ3-clone` picks it in `units::facing_for_step` from the compass angle.
+
 ## Reference implementation
 
 `rust/src/graphics.rs`: `UNIT_ANIM_SLOTS` (exact 30-key universe),

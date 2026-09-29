@@ -44,7 +44,7 @@ indirect), `KERNEL32` (107).
 | 7 | `0x50–0x53` | Diplomacy engine, espionage missions, advisor UI, ambience | swept (`diplomacy.md` dialogs/espionage) |
 | 8 | `0x59` | Scenario load/save (`Scenario::loadUNIT/BLDG/PRTO`), BIQ codec | swept (`biq.md` load sequence + tag inventory) |
 | 9 | `0x5A–0x5D` | Unit-AI scans, combat strings/flow, wonders/victory, world setup | swept (`ai.md` assassin, `media.md` wonders) |
-| 10 | `0x5E–0x5F`, `0x60–0x61`, `0x65` | Mapgen pipeline (done, audit only) + UI framework + CRT tail | mapgen done; UI/CRT open |
+| 10 | `0x5E–0x5F`, `0x60–0x61`, `0x65` | Mapgen pipeline (done, audit only) + UI framework + CRT tail | swept (`ui.md`: event registry, tag parser, CRT tail) |
 
 ## Anchor addresses (verified)
 

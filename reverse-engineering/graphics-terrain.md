@@ -65,6 +65,18 @@ with its neighbours across the 81 cells. The `x` filename letters
 (`xdgc xdgp xdpc xggc xpgc xtgc`, alphabet `{c,d,g,p,t}`) name the pair or
 triple being blended; exact letter-to-terrain mapping is inference.
 
+## Fog of war sheet (`FogOfWar.pcx`, verified this session)
+
+Same 9x9 geometry and the same per-vertex addressing as the terrain blend
+sheets (`col = 3*W + N`, `row = 3*S + E`), but the four vertex digits are
+fog states: never seen, remembered, lit. Decoding all 81 cells, the corner
+pixels of a digit are 0 / 153 / 255-and-magenta respectively, so the gray
+is how much terrain survives at that pixel and a cell fades lit terrain
+through remembered into black across one tile. A remembered tile keeps
+60 % of its brightness (153/255; a game screenshot measures 0.575-0.6 of
+the same terrain art against 0.95-1.0 for lit tiles). `civ3-clone` renders
+it as `gen/terrain/fog.png` and picks the cell in `render::fog_cell`.
+
 ## The map-view renderer class (verified this session)
 
 Vtable `0x66A508`, 73 slots, installed by three constructors (`0x4C2F5B`,

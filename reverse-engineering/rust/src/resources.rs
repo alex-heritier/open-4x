@@ -93,6 +93,85 @@ pub fn barbarian_camp_lands(rng: &mut Rng) -> bool {
     rng.one_in(3)
 }
 
+/// A decoded `GOOD` row: the 92B memory layout after `0x5e3860` reads one
+/// file row. Offsets match the live dump (`resources.md`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GoodRow {
+    /// Display name, NUL-padded. (`+0x04`, 24B fread, `0x5e3886`)
+    pub name: [u8; 24],
+    /// `GOOD_*` key, NUL-padded. (`+0x1c`, 32B fread, `0x5e38a2`)
+    pub key: [u8; 32],
+    /// 2 = strategic, 1 = luxury, 0 = bonus. (`+0x3c`)
+    pub cls: u32,
+    /// Per-resource frequency. (`+0x40`)
+    pub freq: u32,
+    /// Unmapped. (`+0x44`)
+    pub a: u32,
+    /// Ordering id (≈ row index). (`+0x48`)
+    pub b: u32,
+    /// Increasing id for strategics, `u32::MAX` otherwise. (`+0x4c`)
+    pub c: u32,
+    /// Trailing 12B (`+0x50`): three small u32s.
+    pub tail: [u8; 12],
+}
+
+impl GoodRow {
+    fn cstr(bytes: &[u8]) -> &str {
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        core::str::from_utf8(&bytes[..end]).unwrap_or("")
+    }
+
+    /// Display name up to the first NUL.
+    pub fn name_str(&self) -> &str {
+        Self::cstr(&self.name)
+    }
+
+    /// `GOOD_*` key up to the first NUL.
+    pub fn key_str(&self) -> &str {
+        Self::cstr(&self.key)
+    }
+}
+
+/// Parse a raw-BIC (PTW-format) `GOOD` section body: the bytes after the
+/// tag. Layout: `[u32 count][rows…]`, each row `[u32 len][data…]` with
+/// `len >= 88`; the row reader (`0x5e3860`) consumes the fixed 88B core
+/// and `fseek`s past the rest (`0x5e396a`). Returns `None` on truncation.
+///
+/// Ground truth: `Ancient Mediterranean.bix` parses 29/29. Conquests
+/// `.biq` GOOD sections use a different (u16-based, nameless) framing
+/// (see `resources.md`); do not feed them here.
+pub fn parse_ptw_good_section(body: &[u8]) -> Option<(u32, Vec<GoodRow>)> {
+    if body.len() < 4 {
+        return None;
+    }
+    let count = u32::from_le_bytes(body[0..4].try_into().ok()?);
+    let mut rows = Vec::with_capacity(count.min(256) as usize);
+    let mut off = 4;
+    for _ in 0..count {
+        if off + 4 > body.len() {
+            return None;
+        }
+        let len = u32::from_le_bytes(body[off..off + 4].try_into().ok()?) as usize;
+        if len < 88 || off + 4 + len > body.len() {
+            return None;
+        }
+        let d = &body[off + 4..off + 4 + 88];
+        let u = |i: usize| u32::from_le_bytes(d[i..i + 4].try_into().unwrap());
+        rows.push(GoodRow {
+            name: d[0..24].try_into().unwrap(),
+            key: d[24..56].try_into().unwrap(),
+            cls: u(56),
+            freq: u(60),
+            a: u(64),
+            b: u(68),
+            c: u(72),
+            tail: d[76..88].try_into().unwrap(),
+        });
+        off += 4 + len;
+    }
+    Some((count, rows))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,12 +226,35 @@ mod tests {
     #[test]
     fn good_section_layout() {
         // GOOD section of decoded conquests.biq: tag + u16 26 at +4.
-        // Row stride 0x5C comes from the loader loop (0x5974B4), not the file.
+        // Memory-row stride 0x5C comes from the reader loop (0x5945ac)
+        // and writer loop (0x5974b4), not the file.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let p = root.join("../../../civ3-gog/app/Conquests/conquests.biq");
         let raw = std::fs::read(&p).unwrap_or_else(|_| panic!("missing {}", p.display()));
         let out = crate::dcl::decompress(&raw).expect("biq decodes");
         let at = out.windows(4).position(|w| w == b"GOOD").expect("GOOD section");
         assert_eq!(u16::from_le_bytes([out[at + 4], out[at + 5]]), 26);
+    }
+
+    #[test]
+    fn ptw_bix_good_parses() {
+        // Raw-BIC GOOD section: 29 len-88 rows with names inline.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let p = root.join("../../../civ3-gog/app/civ3PTW/Scenarios/Ancient Mediterranean.bix");
+        let raw = std::fs::read(&p).unwrap_or_else(|_| panic!("missing {}", p.display()));
+        let at = raw.windows(4).position(|w| w == b"GOOD").expect("GOOD section");
+        let (count, rows) = parse_ptw_good_section(&raw[at + 4..]).expect("parses");
+        assert_eq!(count, 29);
+        assert_eq!(rows.len(), 29);
+        assert_eq!(rows[0].name_str(), "Horses");
+        assert_eq!(rows[0].key_str(), "GOOD_Horses");
+        assert_eq!(rows[0].freq, 160);
+        assert_eq!(rows[1].name_str(), "Iron");
+        assert_eq!(rows[1].freq, 200);
+        assert_eq!(rows[3].name_str(), "Tin");
+        assert_eq!(rows[10].name_str(), "Purple");
+        assert_eq!(rows[10].key_str(), "GOOD_Dye");
+        assert_eq!(rows[28].name_str(), "Opium");
+        assert!(parse_ptw_good_section(&raw[at + 4..at + 7]).is_none());
     }
 }

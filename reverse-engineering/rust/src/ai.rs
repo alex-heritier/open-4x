@@ -34,6 +34,11 @@ impl GameRng {
     }
 
     /// Re-seed live state (`0x64A201`: overwrite the `+0x14` state word).
+    ///
+    /// Seeded twice per run with different clocks: `timeGetTime()` on the
+    /// `0x56C1EA` startup path, `GetTickCount()` at game start (`0x6389DD`,
+    /// called from `0x6226A0` via `0x6388E0`, which also zeroes
+    /// `[esi+0xAFC]`/`[esi+0xB1C]` and sets start flag `[esi+0xAF8]`).
     pub fn reseed(&mut self, seed: u32) {
         self.state = seed;
     }
@@ -242,6 +247,43 @@ pub fn assassin_branch(al: u8) -> AssassinOutcome {
     }
 }
 
+/// Turn-step mode gate (`0x499FC0`, reached via the `0x47B550` trampoline).
+///
+/// Both step executors (`0x4708B0`, `0x470A60`) require the mode word at
+/// `[0x9AFD74]` to be 2 or 4 before doing anything.
+pub fn step_mode_open(mode: u32) -> bool {
+    mode == 4 || mode == 2
+}
+
+/// Committable action kinds for `0x4708B0` step 6.
+///
+/// `[esi+4]-9` indexes the 76-entry byte table at `0x470A10`; table 0
+/// forces `cl = 1` (commit allowed), table 1 leaves `cl = 0`. Out of
+/// range (`> 75` after the `-9`) skips the dispatch with `cl = 0`.
+pub fn step_kind_committable(kind: u32) -> bool {
+    matches!(
+        kind.wrapping_sub(9),
+        0 | 1 | 5 | 8 | 9 | 10 | 20 | 22 | 23 | 24 | 72 | 73 | 75
+    )
+}
+
+/// Upkeep record slot (`0x470A60` step 3).
+///
+/// `+0x28 = [edi+0x20] + slice` where `slice` is the faction turn slice
+/// (`[edi+0x211C]`), or `-1` when the global `[0x9905C4]` is `-1`.
+pub fn upkeep_record_due(turn_base: i32, slice_or_neg1: i32) -> i32 {
+    turn_base.wrapping_add(slice_or_neg1)
+}
+
+/// Upkeep queue dedup (`0x470A60` step 4).
+///
+/// The queue scan sets `bl` when any entry carries kind `0x0C`; the
+/// `0x47B490` commit fires only when no such entry is queued (an empty
+/// queue commits immediately).
+pub fn upkeep_commit_allowed(queued_kinds: &[u32]) -> bool {
+    !queued_kinds.contains(&0x0c)
+}
+
 /// City-name uniqueness scan (`0x4D9DDE` founding validation).
 ///
 /// The candidate name is byte-compared against every existing city name
@@ -433,6 +475,28 @@ mod tests {
         assert_eq!(assassin_branch(0), AssassinOutcome::Arm0);
         assert_eq!(assassin_branch(1), AssassinOutcome::Arm1);
         assert_eq!(assassin_branch(7), AssassinOutcome::ArmOther);
+    }
+
+    #[test]
+    fn step_executor_gates() {
+        // 0x499FC0: modes 2 and 4 only.
+        assert!(step_mode_open(2));
+        assert!(step_mode_open(4));
+        assert!(!step_mode_open(0));
+        assert!(!step_mode_open(3));
+        // 0x470A10 byte table: 13 committable kinds (table 0).
+        for k in [9, 10, 14, 17, 18, 19, 29, 31, 32, 33, 81, 82, 84] {
+            assert!(step_kind_committable(k), "kind {k}");
+        }
+        for k in [0, 8, 11, 15, 30, 80, 83, 85, 100] {
+            assert!(!step_kind_committable(k), "kind {k}");
+        }
+        // 0x470A60: upkeep record slot + kind-0x0C queue dedup.
+        assert_eq!(upkeep_record_due(100, 6), 106);
+        assert_eq!(upkeep_record_due(100, -1), 99);
+        assert!(upkeep_commit_allowed(&[]));
+        assert!(upkeep_commit_allowed(&[0x0b, 0x11]));
+        assert!(!upkeep_commit_allowed(&[0x0b, 0x0c]));
     }
 
     #[test]

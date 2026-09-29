@@ -9,7 +9,10 @@
 //! Rules are Civ3-shaped with two sandbox deviations: irrigation water
 //! access accepts any water (no rivers exist yet) and work times are
 //! shortened (road 4, irrigation 5). Roads give no yield (commerce
-//! arrives with the trade slice); irrigation is +1 food.
+//! arrives with the trade slice) but cut road-to-road moves to 1/3 MP;
+//! irrigation is +1 food. A mine and irrigation exclude each other: each
+//! replaces the other, as in Civ3. Workers on one tile doing the same job
+//! pool their labor.
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -20,10 +23,10 @@ use crate::audio::GameAudio;
 use crate::cities::City;
 use crate::features::{post, MessageBoard};
 use crate::map::{tile_to_world, Base, Cover, GameMap, Relief, Tile};
-use crate::render::{tile_z, RevealAll};
+use crate::render::{fog_for, tile_z, Fog, RevealAll};
 use crate::units::{Unit, UnitAnim};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum WorkAction {
     Road,
     Irrigate,
@@ -100,7 +103,8 @@ pub fn can_road(map: &GameMap, x: i32, y: i32) -> bool {
     })
 }
 
-/// Mines go on hills, mountains and bare desert (Civ3 mine terrain).
+/// Mines go on hills, mountains and bare desert (Civ3 mine terrain). A
+/// mine replaces irrigation.
 pub fn can_mine(map: &GameMap, x: i32, y: i32) -> bool {
     map.get(x, y).is_some_and(|t| {
         !t.mine
@@ -118,7 +122,8 @@ pub fn can_clear(map: &GameMap, x: i32, y: i32) -> bool {
 }
 
 /// Irrigation needs flat, clear, farmable land plus water access: an
-/// adjacent water tile or an adjacent irrigated tile (chains).
+/// adjacent water tile or an adjacent irrigated tile (chains). It replaces
+/// a mine.
 pub fn can_irrigate(map: &GameMap, x: i32, y: i32) -> bool {
     let Some(t) = map.get(x, y) else {
         return false;
@@ -197,6 +202,58 @@ pub fn describe(t: &Tile) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(", "))
 }
 
+/// Apply a finished job to its tile.
+pub fn apply_work(t: &mut Tile, a: WorkAction) {
+    match a {
+        WorkAction::Road => t.road = true,
+        WorkAction::Irrigate => {
+            t.irrigation = true;
+            t.mine = false;
+        }
+        WorkAction::Mine => {
+            t.mine = true;
+            t.irrigation = false;
+        }
+        WorkAction::Clear => t.cover = Cover::Bare,
+    }
+}
+
+/// One turn of labor. Workers sharing a tile and job pool it: the group
+/// continues from its most advanced member and gains one turn per worker.
+/// Returns the jobs that finished, once per (tile, action).
+pub fn advance_work(units: &mut [Mut<Unit>]) -> Vec<(i32, i32, WorkAction)> {
+    let mut groups: HashMap<(i32, i32, WorkAction), (u8, u8)> = HashMap::new();
+    for u in units.iter() {
+        if let Some(w) = u.work {
+            let g = groups.entry((u.x, u.y, w.action)).or_insert((u8::MAX, 0));
+            g.0 = g.0.min(w.turns_left);
+            g.1 += 1;
+        }
+    }
+    let mut done = vec![];
+    for u in units.iter_mut() {
+        let Some(w) = u.work else { continue };
+        // Working units never bank moves.
+        u.moves = 0;
+        let key = (u.x, u.y, w.action);
+        let (left, workers) = groups[&key];
+        let left = left.saturating_sub(workers);
+        if left > 0 {
+            u.work = Some(Work { turns_left: left, ..w });
+            continue;
+        }
+        u.work = None;
+        u.anim = UnitAnim::OneShot {
+            slot: action_slot(w.action),
+            t: 0.0,
+        };
+        if !done.contains(&key) {
+            done.push(key);
+        }
+    }
+    done
+}
+
 /// Advance worker jobs on end turn; complete and apply to the map.
 pub fn end_turn_work(
     mut commands: Commands,
@@ -207,31 +264,14 @@ pub fn end_turn_work(
     audio: Res<GameAudio>,
 ) {
     for _ in end.read() {
-        for mut u in units.iter_mut() {
-            let Some(mut w) = u.work else { continue };
-            // Working units never bank moves.
-            u.moves = 0;
-            w.turns_left = w.turns_left.saturating_sub(1);
-            u.work = Some(w);
-            if w.turns_left > 0 {
-                continue;
-            }
-            u.work = None;
-            let i = map.idx(u.x, u.y);
-            match w.action {
-                WorkAction::Road => map.tiles[i].road = true,
-                WorkAction::Irrigate => map.tiles[i].irrigation = true,
-                WorkAction::Mine => map.tiles[i].mine = true,
-                WorkAction::Clear => map.tiles[i].cover = Cover::Bare,
-            }
-            u.anim = UnitAnim::OneShot {
-                slot: action_slot(w.action),
-                t: 0.0,
-            };
-            commands.spawn(AudioPlayer(audio.work_sfx(w.action)));
+        let mut all: Vec<Mut<Unit>> = units.iter_mut().collect();
+        for (x, y, action) in advance_work(&mut all) {
+            let i = map.idx(x, y);
+            apply_work(&mut map.tiles[i], action);
+            commands.spawn(AudioPlayer(audio.work_sfx(action)));
             post(
                 &mut board,
-                format!("Workers complete {} ({},{}).", action_name(w.action), u.x, u.y),
+                format!("Workers complete {} ({x},{y}).", action_name(action)),
             );
         }
     }
@@ -279,6 +319,7 @@ impl ImprovementArt {
 enum ImpLayer {
     Road,
     Irrigation,
+    Mine,
 }
 
 #[derive(Component)]
@@ -293,7 +334,57 @@ fn sprite_key(t: &Tile, layer: ImpLayer, mask: u8) -> String {
     match layer {
         ImpLayer::Road => format!("road_{mask}"),
         ImpLayer::Irrigation => format!("irr_{}_{mask}", irr_sheet(t)),
+        ImpLayer::Mine => "mine".to_string(),
     }
+}
+
+impl ImpLayer {
+    const ALL: [ImpLayer; 3] = [ImpLayer::Irrigation, ImpLayer::Road, ImpLayer::Mine];
+
+    fn on(self, t: &Tile) -> bool {
+        match self {
+            ImpLayer::Road => t.road,
+            ImpLayer::Irrigation => t.irrigation,
+            ImpLayer::Mine => t.mine,
+        }
+    }
+
+    fn mask(self, map: &GameMap, hubs: &[(i32, i32)], x: i32, y: i32) -> u8 {
+        match self {
+            ImpLayer::Road => road_mask(map, hubs, x, y),
+            ImpLayer::Irrigation => irr_mask(map, x, y),
+            ImpLayer::Mine => 0,
+        }
+    }
+
+    /// Draw order above the base tile: irrigation, roads, then the mine.
+    fn z(self) -> f32 {
+        match self {
+            ImpLayer::Irrigation => 1.5,
+            ImpLayer::Road => 1.6,
+            ImpLayer::Mine => 1.7,
+        }
+    }
+}
+
+/// Improvement overlays for one tile, bottom to top, as (image, anchor
+/// in pixels from the 128x64 cell's top-left). Shared by the city screen.
+pub fn tile_overlays(
+    map: &GameMap,
+    art: &ImprovementArt,
+    hubs: &[(i32, i32)],
+    x: i32,
+    y: i32,
+) -> Vec<Handle<Image>> {
+    let Some(t) = map.get(x, y) else {
+        return vec![];
+    };
+    ImpLayer::ALL
+        .iter()
+        .filter(|l| l.on(t))
+        .filter_map(|l| art.defs.get(&sprite_key(t, *l, l.mask(map, hubs, x, y))))
+        .map(|(image, _)| image.clone())
+        .collect()
 }
 
 /// Spawn overlays for new improvements, refresh masks, tint by fog.
@@ -303,29 +394,36 @@ pub fn sync_improvement_sprites(
     art: Res<ImprovementArt>,
     reveal: Res<RevealAll>,
     cities: Query<&City>,
-    mut q: Query<(Entity, &mut ImprovementSprite, &mut Sprite)>,
+    mut q: Query<(
+        Entity,
+        &mut ImprovementSprite,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
 ) {
     let hubs: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
     let mut have: HashSet<(i32, i32, ImpLayer)> = HashSet::new();
-    for (_, mut fs, mut sprite) in q.iter_mut() {
-        have.insert((fs.x, fs.y, fs.layer));
+    for (e, mut fs, mut sprite, mut vis) in q.iter_mut() {
         let t = &map.tiles[map.idx(fs.x, fs.y)];
-        let mask = match fs.layer {
-            ImpLayer::Road => road_mask(&map, &hubs, fs.x, fs.y),
-            ImpLayer::Irrigation => irr_mask(&map, fs.x, fs.y),
-        };
+        // A mine replaces irrigation and vice versa: drop stale overlays.
+        if !fs.layer.on(t) {
+            commands.entity(e).despawn();
+            continue;
+        }
+        have.insert((fs.x, fs.y, fs.layer));
+        let mask = fs.layer.mask(&map, &hubs, fs.x, fs.y);
         if mask != fs.mask {
             // Neighbor change: swap to the new mask tile.
             let key = sprite_key(t, fs.layer, mask);
             sprite.image = art.defs[&key].0.clone();
             fs.mask = mask;
         }
-        sprite.color = if reveal.0 || t.visible {
-            Color::WHITE
-        } else if t.seen {
-            Color::srgb(0.45, 0.45, 0.5)
-        } else {
-            Color::BLACK
+        // Improvements sit below the fog diamonds, which do the dimming;
+        // unseen ones hide so nothing spills past the fog edge.
+        sprite.color = Color::WHITE;
+        *vis = match fog_for(reveal.0, t) {
+            Fog::Black => Visibility::Hidden,
+            _ => Visibility::Visible,
         };
     }
     // Spawn overlays for improvements that lack them.
@@ -333,42 +431,25 @@ pub fn sync_improvement_sprites(
         for x in 0..map.w {
             let t = &map.tiles[map.idx(x, y)];
             let pos = tile_to_world(x, y);
-            if t.irrigation && !have.contains(&(x, y, ImpLayer::Irrigation)) {
-                let mask = irr_mask(&map, x, y);
-                let key = sprite_key(t, ImpLayer::Irrigation, mask);
-                let (image, anchor) = art.defs[&key].clone();
+            for layer in ImpLayer::ALL {
+                if !layer.on(t) || have.contains(&(x, y, layer)) {
+                    continue;
+                }
+                let mask = layer.mask(&map, &hubs, x, y);
+                let (image, anchor) = art.defs[&sprite_key(t, layer, mask)].clone();
+                let vis = match fog_for(reveal.0, t) {
+                    Fog::Black => Visibility::Hidden,
+                    _ => Visibility::Visible,
+                };
                 commands.spawn((
                     Sprite {
                         image,
                         ..default()
                     },
                     anchor,
-                    Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 1.5)),
-                    ImprovementSprite {
-                        x,
-                        y,
-                        layer: ImpLayer::Irrigation,
-                        mask,
-                    },
-                ));
-            }
-            if t.road && !have.contains(&(x, y, ImpLayer::Road)) {
-                let mask = road_mask(&map, &hubs, x, y);
-                let key = sprite_key(t, ImpLayer::Road, mask);
-                let (image, anchor) = art.defs[&key].clone();
-                commands.spawn((
-                    Sprite {
-                        image,
-                        ..default()
-                    },
-                    anchor,
-                    Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 1.6)),
-                    ImprovementSprite {
-                        x,
-                        y,
-                        layer: ImpLayer::Road,
-                        mask,
-                    },
+                    vis,
+                    Transform::from_xyz(pos.x, pos.y, tile_z(x, y, layer.z())),
+                    ImprovementSprite { x, y, layer, mask },
                 ));
             }
         }
@@ -580,10 +661,11 @@ mod tests {
             y: sy,
             moves: 1,
             fortified: false,
-            facing: 2,
+            facing: 0,
             path: Default::default(),
             anim: UnitAnim::Idle { t: 0.0 },
             sentry: false,
+            exploring: false,
             work: Some(Work {
                 action: WorkAction::Road,
                 turns_left: 1,
@@ -598,6 +680,88 @@ mod tests {
         assert!(map.tiles[map.idx(sx, sy)].road);
         let board = app.world().resource::<MessageBoard>();
         assert!(board.text.contains("road"), "got: {}", board.text);
+    }
+
+    fn test_app(map: GameMap) -> App {
+        let mut app = App::new();
+        app.insert_resource(map);
+        app.insert_resource(MessageBoard::default());
+        app.insert_resource(GameAudio {
+            menu: Handle::default(),
+            peace: Handle::default(),
+            ui: Default::default(),
+            run: Default::default(),
+            build: Handle::default(),
+            fortify: Handle::default(),
+            work_road: Handle::default(),
+            work_irrigate: Handle::default(),
+            work_mine: Handle::default(),
+            work_clear: Handle::default(),
+            music: None,
+        });
+        app.add_message::<crate::units::TurnEnded>();
+        app.add_systems(Update, end_turn_work);
+        app
+    }
+
+    fn worker(x: i32, y: i32, action: WorkAction, turns_left: u8) -> Unit {
+        Unit {
+            utype: crate::units::UnitType::Worker,
+            x,
+            y,
+            moves: 3,
+            fortified: false,
+            facing: 0,
+            path: Default::default(),
+            anim: UnitAnim::Idle { t: 0.0 },
+            sentry: false,
+            exploring: false,
+            work: Some(Work { action, turns_left }),
+        }
+    }
+
+    fn end_turn(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<Messages<crate::units::TurnEnded>>()
+            .write(crate::units::TurnEnded);
+        app.update();
+    }
+
+    #[test]
+    fn workers_on_one_tile_pool_labor() {
+        let map = GameMap::generate();
+        let (sx, sy) = map.start;
+        let mut app = test_app(map);
+        let n = work_turns(WorkAction::Road);
+        let a = app.world_mut().spawn(worker(sx, sy, WorkAction::Road, n)).id();
+        let b = app.world_mut().spawn(worker(sx, sy, WorkAction::Road, n)).id();
+        // a lone worker elsewhere is not helped
+        let c = app.world_mut().spawn(worker(sx + 1, sy, WorkAction::Road, n)).id();
+        end_turn(&mut app);
+        let left = |app: &App, e| app.world().get::<Unit>(e).unwrap().work.map(|w| w.turns_left);
+        assert_eq!(left(&app, a), Some(n - 2));
+        assert_eq!(left(&app, b), Some(n - 2));
+        assert_eq!(left(&app, c), Some(n - 1));
+        end_turn(&mut app);
+        assert_eq!(left(&app, a), None, "two workers halve a 4-turn road");
+        assert_eq!(left(&app, b), None);
+        let map = app.world().resource::<GameMap>();
+        assert!(map.tiles[map.idx(sx, sy)].road);
+        assert!(!map.tiles[map.idx(sx + 1, sy)].road);
+    }
+
+    #[test]
+    fn mine_and_irrigation_replace_each_other() {
+        let map = GameMap::generate();
+        let mut t = map.tiles[map.idx(map.start.0, map.start.1)].clone();
+        apply_work(&mut t, WorkAction::Irrigate);
+        assert!(t.irrigation && !t.mine);
+        apply_work(&mut t, WorkAction::Mine);
+        assert!(t.mine && !t.irrigation);
+        apply_work(&mut t, WorkAction::Irrigate);
+        assert!(t.irrigation && !t.mine);
+        apply_work(&mut t, WorkAction::Road);
+        assert!(t.irrigation && t.road);
     }
 
     #[test]

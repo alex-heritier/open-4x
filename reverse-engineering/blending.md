@@ -130,10 +130,11 @@ overlays are tile-sized, units are not.
    land sheets share one grass-green center family (`#9c9c39`), `xdpc`
    alone is sand-centered — so the letters encode pairs/contexts, mapping
    unknown.
-2. Exact 81-cell row/col semantics: NE art is a function of `col mod 3`
-   (3 states); the NW/second-axis encoding is unrecovered. The runtime
-   caller computing `(sheetIdx, cellIdx)` was not located (no direct
-   callers of `0x4C3880`; no slot-`0x60` dispatch inside the view region).
+2. ~~Exact 81-cell row/col semantics: NE art is a function of `col mod 3`
+   (3 states); the NW/second-axis encoding is unrecovered.~~ **SUPERSEDED**
+   by the pixel-measurement update below (3^4 vertex blends). Still open:
+   the runtime caller computing `(sheetIdx, cellIdx)` (no direct callers
+   of `0x4C3880`; no slot-`0x60` dispatch inside the view region).
 3. Mountain/forest variant selection predicate.
 4. `+0x58` flag-word bit assignments behind table `0xA52EB4`.
 

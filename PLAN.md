@@ -125,6 +125,39 @@ for gameplay randomness, worker auto-mode.
   has food/shield fill bars, citizens, owned buildings, queue panel,
   Governor button. V opens the city under the selected unit.
 
+### City screen, construction, tile improvements (landed)
+
+- Improvements: mine overlay art (`TerrainBuildings.PCX` col 2 row 1, prep
+  stage `improvements` -> `gen/improvements/mine.png`); a mine replaces
+  irrigation and vice versa; workers on one tile and job pool labor.
+  Movement is counted in thirds (`map::MP`): road to road costs 1/3 MP, and
+  city tiles carry a road.
+- City tiles: the center yields its own terrain, irrigated for free when it
+  could be, with at least one shield. Other cities' worked tiles and
+  unexplored tiles cannot be worked. Growth adds the best free tile and
+  keeps manual picks; shrinking drops the worst.
+- Construction: Settlers need size 3 (held at full cost, announced once);
+  unit completion, growth and starvation post messages.
+- City screen: Civ3 food/shield icons from `CityIcons.pcx` in a top layer;
+  road, irrigation and mine overlays; dimmed foreign tiles; entertainer heads
+  for idle citizens (`popHeads.pcx` row 16 col 1, prep stage `cities`);
+  correct `buildings-small.pcx` cells (32-px grid). The screen rebuilds only
+  when the city, menu or its radius tiles change.
+- `CIV3_SCRIPT` input driver for unattended captures (`src/script.rs`).
+- Open: `conquests.biq` decodes to corrupt records past the first few BLDG
+  entries (names cut, zero lengths), so rule numbers stay hardcoded; Civ3's
+  Worker pop cost and the governor's food-first weighting are unverified.
+
+### Civ3 map HUD and selection (landed)
+
+- No bottom bar: action discs float over the map; Civ3's `box right`
+  panel (bottom right) holds the unit readout and the `nextturn states`
+  disc (prep stage `hud`). With no unit needing orders nothing is selected,
+  and the disc and "Press ENTER or click here for next turn" blink.
+- Units with no moves left cannot be selected; auto-select moves to the
+  nearest unit that needs orders.
+- City sprites anchor at the 167x95 cell center (they drew a tile north).
+
 ### Terrain blending (landed)
 
 `src/blend.rs`: base tiles draw a cell of the 9x9 transition sheets

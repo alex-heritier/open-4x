@@ -79,3 +79,24 @@ sole-caller claim holds at function granularity. `text\Civilopedia.txt`
   (`0x4F` bucket) + credits/cursor-anim ini (child-reported).
 * `0x63` GameSpy/mmio spillover (child-reported): version-gate +
   mmio chunk-walk callers; volume mixer tables nearby.
+
+## UI framework: event registry + tag parser + CRT tail (verified: `r2`)
+
+The last unswept region group (`REGIONS.md` #10), now mapped:
+
+* Event registry `0x60BBB0..0x60BC48`: null-checked singleton
+  `[0xCAD4B0]`, then the repeated idiom `push 0; push 0; push
+  "mouseover..."; call esi` registering `mouseoverdoubleclick`,
+  `mouseoverleft/right`, `mouseoverdoubleclick/left|right`,
+  `mouseoverwonder`, `mouseoverbuilding`. The `0x60` bucket is the UI
+  event-name registry (plus the map RNG `0x60BA80` and CRT heap/new).
+* `$TAG` parser continuation at `0x61C2C1` (sibling of the tokenizer's
+  `0x61C168`): after the `$DROPDOWN`/`$DROPLINK` `strncmp` matches via
+  `0x64AE80`, `[ebx+9]-0x30` parses the control index digit (`cmp 0xA`),
+  then a `rep movsd`/`rep movsb` memcpy copies the token span. The `$TAG`
+  + digit shape is the control-creation syntax.
+* `0x65` CRT tail: SEH scope-table trampolines (`0x657E6B`/
+  `0x657E8E`: `mov eax, scopetable; jmp 0x649B2A`) with C++ unwinding
+  funclets between them (`call 0x649A80` frees), plus the MSVC
+  `Runtime Error!` strings. No game logic; the turn-step SEH handlers
+  are vanilla CRT scaffolding.

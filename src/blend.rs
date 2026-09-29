@@ -81,7 +81,7 @@ fn substitutes(v: Terr) -> &'static [Terr] {
 
 /// The four tiles around each vertex, in N, E, S, W order (offsets from
 /// the tile; the tile itself is always included).
-const VERTEX_TILES: [[(i32, i32); 4]; 4] = [
+pub(crate) const VERTEX_TILES: [[(i32, i32); 4]; 4] = [
     [(0, 0), (-1, 0), (0, -1), (-1, -1)], // N
     [(0, 0), (0, -1), (1, 0), (1, -1)],   // E
     [(0, 0), (1, 0), (0, 1), (1, 1)],     // S

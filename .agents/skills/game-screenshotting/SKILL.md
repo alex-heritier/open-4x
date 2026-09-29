@@ -89,6 +89,24 @@ crate is needed. This is the cheapest way to check one sprite or overlay, and
 the capture is asynchronous, so the observer (not the same frame) is what writes
 the file.
 
+### Scripted input (`CIV3_SCRIPT`)
+
+For states behind input (city founded, city screen open, build menu, a
+worker job finished), `src/script.rs` replays a `;`-separated list of
+`<frame>:<action>` steps, first thing in `Update`:
+
+```bash
+CIV3_NO_SPLASH=1 CIV3_REVEAL=1 \
+CIV3_SCRIPT='20:key B;30:sel Worker;32:tp @1,0;40:key R;60:end 4;100:city;130:btn Change' \
+CIV3_SHOT='/tmp/s-{}.png' CIV3_SHOT_FRAME=90,160 cargo run
+```
+
+Actions: `key <K>`, `end <n>`, `sel <UnitType>`, `tp <x>,<y>`,
+`imp <x>,<y> <road|irr|mine>`, `city`, `btn <Change|Close|Governor|CloseMenu|Pick:<item>|Queue:<item>|Unqueue:<i>>`,
+`tile <rx>,<ry>`. `@dx,dy` coordinates are relative to the first city. Each
+step prints `script: frame N: ...`; a missing button prints `script: no
+button ...` (for example, `Pick:` closes the build menu, so queue first).
+
 ### `P` key
 
 While the game runs, `P` writes `shot-<unix seconds>.png` into the working

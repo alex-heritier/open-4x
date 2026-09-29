@@ -4,7 +4,7 @@
 The game never reads PCX, FLC, or MP3. Run from civ3-clone/:
     python3 tools/prep_assets.py [stage ...]
 Stages: terrain units cities cityscreen splash audio fonts features
-improvements unitbuttons (default: all)
+improvements unitbuttons fog (default: all)
 
 Engine color rules (verified by probe):
 - magenta (255,0,255) and palette index 255: transparent
@@ -403,8 +403,11 @@ def crop_cities():
     for name, row in [("town", 1), ("city", 2), ("metro", 3)]:
         crop = sheet.crop((0, row * 95, 167, (row + 1) * 95))
         crop.save(os.path.join(outdir, name + ".png"))
+        # The town's footprint is centered in the 167x95 cell, so the cell
+        # center sits on the tile center (a bottom anchor drew cities one
+        # tile north of their square).
         manifest[name] = {"file": name + ".png", "size": [167, 95],
-                          "anchor": [83, 90]}
+                          "anchor": [83, 47]}
     with open(os.path.join(outdir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
     # X close buttons: three states in the top-left of XandView
@@ -433,7 +436,10 @@ def crop_cities():
     heads.load()
     to_rgba(heads.crop((200, 0, 250, 50))).save(
         os.path.join(uid, "citizen.png"))
-    print("cities cropped: sprites + x/prod buttons + icons + citizen")
+    # entertainer (jester, row 16 col 1): idle citizens on the city screen
+    to_rgba(heads.crop((50, 800, 100, 850))).save(
+        os.path.join(uid, "entertainer.png"))
+    print("cities cropped: sprites + x/prod buttons + icons + citizen + entertainer")
 
 
 def stage_cityscreen():
@@ -531,6 +537,33 @@ def stage_unitbuttons():
     print(f"unitbuttons: {len(BTN_SHEETS)} sheets")
 
 
+def stage_hud():
+    """Civ3's map HUD: the bottom-right unit box and the next-turn disc.
+
+    `box right color.pcx` (294x137) is the unit/status panel; its alpha twin
+    holds the shape. `nextturn states color.pcx` is three 47x28 discs (gold
+    idle, orange rollover, blue highlighted) that sit on the box's top-left
+    knob; Civ3 blinks it when no unit needs orders.
+    """
+    d = os.path.join(OUT, "ui")
+    os.makedirs(d, exist_ok=True)
+    iface = os.path.join(GOG, "Art", "interface")
+
+    def with_alpha(stem):
+        color = Image.open(os.path.join(iface, stem + " color.pcx")).convert("RGBA")
+        alpha = Image.open(os.path.join(iface, stem + " alpha.pcx")).convert("L")
+        color.putalpha(alpha)
+        return color
+
+    with_alpha("box right").save(os.path.join(d, "box_right.png"))
+    turn = with_alpha("nextturn states")
+    w = turn.width // 3
+    for i in range(3):
+        turn.crop((i * w, 0, (i + 1) * w, turn.height)).save(
+            os.path.join(d, f"nextturn_{i}.png"))
+    print("hud: box_right + 3 nextturn states")
+
+
 def stage_features():
     outdir = os.path.join(OUT, "features")
     os.makedirs(outdir, exist_ok=True)
@@ -608,16 +641,49 @@ def stage_improvements():
             manifest[f"irr_{base}_{mask}"] = {
                 "file": f"irr_{base}_{mask}.png",
                 "size": [128, 64], "anchor": [64, 32]}
+    # mine: shaft mound at col 2, row 1 of TerrainBuildings (128x64 cells;
+    # the barbarian camp in stage_features is col 2, row 0 of the same sheet)
+    tb = Image.open(os.path.join(GOG, "Art", "Terrain", "TerrainBuildings.PCX"))
+    tb.load()
+    mine = to_rgba(tb, green_clear=True).crop((256, 64, 384, 128))
+    mine.save(os.path.join(outdir, "mine.png"))
+    manifest["mine"] = {"file": "mine.png", "size": [128, 64], "anchor": [64, 32]}
     with open(os.path.join(outdir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
-    print(f"improvements: 256 roads + {16 * len(IRRIGATION_SHEETS)} irrigation")
+    print(f"improvements: 256 roads + {16 * len(IRRIGATION_SHEETS)} irrigation + mine")
+
+
+def stage_fog():
+    """Civ3's fog of war: the 9x9 per-vertex transition sheet over black.
+
+    `Art/Terrain/FogOfWar.pcx` is a grayscale mask whose value is how much
+    of the terrain stays visible at that pixel (255 clear, 0 black,
+    magenta no fog). The engine picked a cell from the four vertex fog
+    states, the same addressing the terrain blend sheets use and that
+    `render::fog_cell` repeats. Its corners are 0 where a vertex is
+    never-seen, 153 where it is remembered, and clear where it is lit.
+
+    Civ3 blended the mask in display space, where a remembered tile keeps
+    60% of its brightness; the renderer blends in linear space, so bake
+    the alpha that displays the same, alpha = 1 - (v/255)**2.2.
+    """
+    src = Image.open(os.path.join(GOG, "Art", "Terrain", "FogOfWar.pcx"))
+    im = to_rgba(src)
+    alpha = im.getchannel("R").point(
+        [round(255 * (1 - (v / 255) ** 2.2)) for v in range(256)])
+    out = Image.new("RGBA", im.size, (0, 0, 0, 255))
+    out.putalpha(ImageChops.multiply(alpha, im.getchannel("A")))
+    out.save(os.path.join(OUT, "terrain", "fog.png"))
+    print(f"  terrain/fog: {out.size}")
+    print("fog: 9x9 cells from FogOfWar.pcx")
 
 
 STAGES = {"terrain": stage_terrain, "units": stage_units,
           "cities": stage_cities, "cityscreen": stage_cityscreen,
           "splash": stage_splash, "audio": stage_audio, "fonts": stage_fonts,
           "features": stage_features, "improvements": stage_improvements,
-          "unitbuttons": stage_unitbuttons}
+          "unitbuttons": stage_unitbuttons, "hud": stage_hud,
+          "fog": stage_fog}
 
 
 def main():
