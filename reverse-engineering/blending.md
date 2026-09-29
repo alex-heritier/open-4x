@@ -78,6 +78,22 @@ drawing) and the same 2105-dword row stride appears at `0xA53BC8`
 (`rivers.md` overlay gate). `+0x58` is therefore the renderer's per-cell
 flag word; its bit assignments are open.
 
+Both halves are now partly pinned (2026-09-29):
+
+* the **bit index** comes from the owner→bit table at `0xA52EB4` (rows of
+  8420 bytes = 2105 dwords) — the same table the owner-capability test in
+  `ai.md`/`0x46F56A` uses, so `cell+0x58` is a *per-civ* bitfield and the
+  `param` of the builder indexes civ-like rows; which `param` the blend
+  builder passes is still open (probe: break at `0x4C34CA` and read it).
+* the builder's **wrap gates are `view+0x1F0` bits 1 and 2**, not bit 0:
+  `0x4C3488` (bit 2) wraps against `view+0x154`, `0x4C3344`/`0x4C36DA`
+  (bit 2) and `0x4C336D`/`0x4C345F`/`0x4C3703` (bit 1) do the same in the
+  other axis; the identical pair is tested 16 more times in mapgen
+  (`0x5F49AC` bit 2 against `[ecx+0x154]`, `0x5F4C62` bit 1 against
+  `[ecx+0x168]`). That is the wrap-flag pair `NOTES.md` §16 models as
+  `swapped_wrap_flags` — bits 1/2 of the view flags byte, one extent each
+  (`+0x154`, `+0x168`).
+
 ## Painter's order (verified in pixels, `xtgc.pcx`)
 
 SE/SW edge midpoints are interior texture in all 81 cells: no base-sheet
@@ -130,11 +146,18 @@ overlays are tile-sized, units are not.
    land sheets share one grass-green center family (`#9c9c39`), `xdpc`
    alone is sand-centered — so the letters encode pairs/contexts, mapping
    unknown.
-2. ~~Exact 81-cell row/col semantics: NE art is a function of `col mod 3`
-   (3 states); the NW/second-axis encoding is unrecovered.~~ **SUPERSEDED**
-   by the pixel-measurement update below (3^4 vertex blends). Still open:
-   the runtime caller computing `(sheetIdx, cellIdx)` (no direct callers
-   of `0x4C3880`; no slot-`0x60` dispatch inside the view region).
+2. ~~Exact 81-cell row/col semantics~~ **SUPERSEDED** by the
+   pixel-measurement update below (3^4 vertex blends). The runtime caller
+   computing `(sheetIdx, cellIdx)` is still unfound, but its dispatch slot
+   is now pinned (2026-09-29): the three draw entry points sit in the **map
+   view vtable `0x66A508`** — `0x4C31A0` at `0x66A558` (slot `0x50`),
+   `0x4C3210` at `0x66A55C` (slot `0x54`), `0x4C3880` at `0x66A568`
+   (slot `0x60`). There is no `call [reg+0x60]` on the view object anywhere;
+   the only slot-`0x60` sites whose object is identifiable are on *other*
+   singletons (`0x57CACA` on `[0xA50A90]`, `0x56C3F9`), so the caller either
+   dispatches through a stored pointer or the view type is reached by a
+   different slot. Decisive probe (one breakpoint): break on `0x4C3880`
+   live and read the return address — that names the caller.
 3. Mountain/forest variant selection predicate.
 4. `+0x58` flag-word bit assignments behind table `0xA52EB4`.
 
@@ -154,12 +177,34 @@ are (0,0), (4,4), (8,8) and match each triple's center colors.
 
 This supersedes the "NE = col mod 3, south never blends" reading in
 "Painter's order" above (the south vertices do vary per cell; the
-earlier sampling hit magenta padding). The vertex touches four tiles, so
-consistent seams need a shared vertex type; the clone (`src/blend.rs`)
-uses a priority over the four tiles: water beats land and tundra > desert
-> plains > grass on land; on water tiles land counts as coast and
-shallower water wins. Sheet choice: a triple containing the tile's own
-type that covers the most vertex types (coast weighted 3); missing types
-use nearest substitutes. Still open: the engine's real vertex-priority
-and sheet-choice rules, `wSSS`/`wOOO` roles (pure sea/ocean variants),
-and hills/forest/mountain overlays (not blended here).
+earlier sampling hit magenta padding).
+
+### Cells sit on the dual grid (2026-09-29, from play; supersedes the priority rule)
+
+The clone first drew each cell centered on its own tile and gave each
+vertex the "strongest" of the four tiles sharing that corner (water beats
+land). That paints a plains tile with water on three corners as mostly
+water, which Civ3 never shows: **a tile that looks mostly water is always
+a coast tile**. The consistent reading is that the cells are offset half a
+tile from the map: a cell is centered on a tile *corner*, and its N/E/S/W
+vertices are the *centers* of the four tiles around that corner. Each
+vertex then simply takes its own tile's terrain; no priority is needed,
+every tile center shows its own type, and each tile is covered by the four
+cells that have it as a vertex. (Clone mapping, `tile_to_world` y-up: cell
+`(x, y)` has `(x, y)` on N, `(x+1, y)` on E, `(x+1, y+1)` on S, `(x, y+1)`
+on W, and is drawn 32 px below tile `(x, y)`'s center.) Not yet confirmed
+in the disassembly: the blend builder's `(x, y-1)`/`(x-1, y)`/`(x+1, y)`/
+`(x, y+1)` fetch in native (parity) coordinates is consistent with
+iterating corner positions, but the caller is still unfound.
+
+A corollary the art depends on: a cell with any land vertex comes from a
+land sheet, whose only water digit is coast, so any sea or ocean tile
+touching land (diagonals included) would meet its all-water cells in a
+hard coast/sea seam. Civ3 maps keep every such water tile coast; the clone
+enforces it after generation (`map::coast_shores`).
+
+Sheet choice (clone): among the land sheets, the triple covering the most
+vertex types (coast weighted 3); missing types use nearest substitutes.
+Still open: the engine's real sheet-choice rule (tundra next to plains has
+no sheet and falls back to grass), `wSSS`/`wOOO` roles (pure sea/ocean
+variants), and whether hills/forest/mountain overlays blend at all.

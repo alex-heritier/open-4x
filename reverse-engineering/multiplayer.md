@@ -66,9 +66,17 @@ assignment (`0x5A`), all logging via `0x5F9920`.
   (used-races mask, `0x5A09D3–0x5A09F2`); failure logs the string and
   stamps `-1` (`mov [edx],0xFFFFFFFF`, `0x5A097B`).
 
-Sites `0x54E504`/`0x54E633`/`0x5A0CAE`/`0x5A2167`: same string,
-unread (HYPOTHESIS: setup variants). The `0x685300–0x6855F0` cluster
-is the whole MP setup vocabulary: `MP_CHANGE_SESSION_NAME`,
+Sites `0x54E504`/`0x54E633`/`0x5A0CAE`/`0x5A2167`, re-read 2026-09-29:
+they are **not** setup variants. `0x5A0CAE` is the failure branch of the
+race-assignment loop (the same code as the game-start bullet above):
+`call 0x53A060` → on zero it pushes
+`"+++Failed to assign a race to player %d+++\n"` (`0x6853FC`), stamps `-1`
+into the per-player slot (`mov [eax+ecx],0xFFFFFFFF`) and reloads the
+player count `[0x9C3DB4]`. So the four sites are that loop's
+*unassignable-race* diagnostics, single-player and MP alike.
+
+The `0x685300–0x6855F0` cluster is the whole MP setup vocabulary:
+`MP_CHANGE_SESSION_NAME`,
 `MP_NO_EXIT`, `MP_TOO_MANY_PLAYERS`, `MP_NO_AI_IN_TURNLESS`,
 `MP_NOT_EVERYONE_READY`, `MP_OTHER_PLAYERS_CONNECTED`,
 `MP_HOTSEAT_PLAYER_IN_NORMAL_GAME`, `MP_NO_SAME_RACES`,

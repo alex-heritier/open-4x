@@ -769,13 +769,164 @@ mod tests {
         // a full-move unit with nothing left waits a turn for a 1-step path
         assert_eq!(path_turns(&map, (sx, sy), 0, MP, &[(sx + 1, sy)]), 1);
     }
+
+    fn ring_app(selected: Selected) -> (App, Entity, Entity) {
+        let mut app = App::new();
+        app.insert_resource(SelectionRing {
+            image: Handle::default(),
+            frame: Vec2::new(93.0, 46.0),
+            frames: 31,
+            ms: 175.0,
+        });
+        app.insert_resource(Time::<()>::default());
+        let unit = app
+            .world_mut()
+            .spawn((
+                scout_at(10, 10),
+                Visibility::Visible,
+                Transform::default(),
+            ))
+            .id();
+        let ring = app
+            .world_mut()
+            .spawn((
+                Sprite::default(),
+                Visibility::Hidden,
+                Transform::default(),
+                SelectionRingSprite,
+            ))
+            .id();
+        app.insert_resource(selected);
+        app.add_systems(Update, ring_follow);
+        (app, unit, ring)
+    }
+
+    #[test]
+    fn the_ring_hides_without_a_selection() {
+        let (mut app, _, ring) = ring_app(Selected(None));
+        app.update();
+        let vis = app.world().entity(ring).get::<Visibility>().unwrap();
+        assert_eq!(*vis, Visibility::Hidden);
+    }
+
+    #[test]
+    fn the_ring_sits_under_the_selected_unit() {
+        let (mut app, unit, ring) = ring_app(Selected(None));
+        app.world_mut().resource_mut::<Selected>().0 = Some(unit);
+        app.update();
+        let vis = app.world().entity(ring).get::<Visibility>().unwrap();
+        assert_eq!(*vis, Visibility::Visible);
+        let at = tile_to_world(10, 10);
+        let tf = app.world().entity(ring).get::<Transform>().unwrap();
+        assert_eq!((tf.translation.x, tf.translation.y), (at.x, at.y));
+    }
+}
+
+/// The white ellipse Civ3 draws under the selected unit. The game ships no
+/// Civ3's selection marker: the dashed ellipse under the selected unit,
+/// which lives in `Art/Animations/Cursor/Cursor.flc` (prep stage `cursor`,
+/// 31 frames of a 175 ms crawl, 93x46 each).
+#[derive(Resource)]
+pub struct SelectionRing {
+    image: Handle<Image>,
+    frame: Vec2,
+    frames: u32,
+    ms: f32,
+}
+
+#[derive(Deserialize)]
+struct RingEntry {
+    file: String,
+    frame: [u32; 2],
+    frames: u32,
+    ms: f32,
+}
+
+impl SelectionRing {
+    pub fn load(asset_server: &AssetServer) -> Self {
+        let text = fs::read_to_string("assets/gen/cursor/manifest.json")
+            .expect("run from civ3-clone/ after tools/prep_assets.py cursor");
+        let raw: HashMap<String, RingEntry> =
+            serde_json::from_str(&text).expect("cursor manifest parses");
+        let e = &raw["ring"];
+        Self {
+            image: asset_server.load(format!("gen/cursor/{}", e.file)),
+            frame: Vec2::new(e.frame[0] as f32, e.frame[1] as f32),
+            frames: e.frames,
+            ms: e.ms,
+        }
+    }
+
+    /// Frame `f` of the horizontal strip.
+    fn rect(&self, f: u32) -> Rect {
+        let x = f as f32 * self.frame.x;
+        Rect::new(x, 0.0, x + self.frame.x, self.frame.y)
+    }
+}
+
+#[derive(Component)]
+pub struct SelectionRingSprite;
+
+/// The ring starts hidden; `ring_follow` shows it under the selection.
+pub fn spawn_selection_ring(mut commands: Commands, ring: Res<SelectionRing>) {
+    commands.spawn((
+        Sprite {
+            image: ring.image.clone(),
+            rect: Some(ring.rect(0)),
+            ..default()
+        },
+        Visibility::Hidden,
+        Transform::default(),
+        SelectionRingSprite,
+    ));
+}
+
+/// Keep the ring under the selected unit's feet, mirroring the unit's own
+/// visibility so a unit hidden by fog or under a stack hides its ring too.
+pub fn ring_follow(
+    time: Res<Time>,
+    ring: Res<SelectionRing>,
+    selected: Res<Selected>,
+    units: Query<(&Unit, &Visibility)>,
+    mut q: Query<
+        (&mut Sprite, &mut Transform, &mut Visibility),
+        (With<SelectionRingSprite>, Without<Unit>),
+    >,
+    mut crawl: Local<f32>,
+) {
+    let Ok((mut sprite, mut tf, mut vis)) = q.single_mut() else {
+        return;
+    };
+    let Some((u, unit_vis)) = selected.0.and_then(|s| units.get(s).ok()) else {
+        *vis = Visibility::Hidden;
+        return;
+    };
+    // The dashes crawl around the ellipse: advance one frame every
+    // `ring.ms`, as the FLC's own timing does.
+    *crawl += time.delta_secs() * 1000.0;
+    if ring.ms > 0.0 {
+        let f = (*crawl / ring.ms) as u32 % ring.frames;
+        let rect = ring.rect(f);
+        if sprite.rect != Some(rect) {
+            sprite.rect = Some(rect);
+        }
+    }
+    let pos = tile_to_world(u.x, u.y);
+    // On the unit's feet (the art's ellipse is centered in its cell) and
+    // just below the unit sprites, which sit at layer 4.0.
+    tf.translation = Vec3::new(pos.x, pos.y, sprite_z(u.x, u.y, 3.5));
+    *vis = if *unit_vis == Visibility::Visible {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
 }
 
 pub fn selection_gizmo(
     selected: Res<Selected>,
     units: Query<&Unit>,
     map: Res<GameMap>,
-    hovered: Res<crate::input::Hovered>,
+    preview: Res<crate::input::MovePreview>,
     mut gizmos: Gizmos,
 ) {
     let Some(s) = selected.0 else {
@@ -784,33 +935,24 @@ pub fn selection_gizmo(
     let Ok(u) = units.get(s) else {
         return;
     };
-    let c = tile_to_world(u.x, u.y);
-    let hw = TILE_W / 2.0;
-    let hh = TILE_H / 2.0;
-    let corners = [
-        Vec2::new(c.x, c.y + hh),
-        Vec2::new(c.x + hw, c.y),
-        Vec2::new(c.x, c.y - hh),
-        Vec2::new(c.x - hw, c.y),
-    ];
-    for i in 0..4 {
-        gizmos.line_2d(corners[i], corners[(i + 1) % 4], Color::srgb(1.0, 1.0, 0.0));
-    }
     for (x, y) in u.path.iter() {
         gizmos.circle_2d(tile_to_world(*x, *y), 4.0, Color::WHITE);
     }
-    // Preview of the route a click would take.
-    if let Some(dest) = hovered.0 {
-        if dest != (u.x, u.y) {
-            if let Some(p) = map.find_path((u.x, u.y), dest) {
-                let mut prev = tile_to_world(u.x, u.y);
-                for (x, y) in p {
-                    let cur = tile_to_world(x, y);
-                    gizmos.line_2d(prev, cur, Color::srgba(1.0, 1.0, 0.3, 0.8));
-                    prev = cur;
-                }
-                gizmos.circle_2d(prev, 8.0, Color::srgb(1.0, 1.0, 0.3));
-            }
+    // The route a Go-to, or a held press, would take. Nothing is drawn for
+    // a plain hover: Civ3 only shows the path while it is being aimed.
+    let Some(dest) = preview.0 else {
+        return;
+    };
+    if dest == (u.x, u.y) {
+        return;
+    }
+    if let Some(p) = map.find_path((u.x, u.y), dest) {
+        let mut prev = tile_to_world(u.x, u.y);
+        for (x, y) in p {
+            let cur = tile_to_world(x, y);
+            gizmos.line_2d(prev, cur, Color::srgba(1.0, 1.0, 0.3, 0.8));
+            prev = cur;
         }
+        gizmos.circle_2d(prev, 8.0, Color::srgb(1.0, 1.0, 0.3));
     }
 }

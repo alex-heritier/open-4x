@@ -4,6 +4,15 @@ Stage 10 of `generateMap` (`0x5eb580`). Companion to `NOTES.md` §11.8, which
 specifies the algorithm; this file adds the data path, the `.biq` record
 layout it consumes, and what a clone needs to reimplement it.
 
+**2026-09-29 correction: the `.biq` decode was broken** (`biq.md`: the DCL
+distance mask was read from the wrong header byte). Everything this file
+previously said about `conquests.biq` having "no name strings" and a "u16,
+nameless GOOD framing" was an artifact of that, and the Civilopedia-join
+model of `save1.tmp` is retired: `save1.tmp` is byte-identical to a correct
+DCL decode of `conquests.biq`, and the file's `GOOD` rows carry the names
+the live table showed. The tables below are re-derived from the corrected
+decode.
+
 ## Data path (verified this session)
 
 A raw scan of `.text` for the two 4-byte tags finds only:
@@ -29,7 +38,7 @@ and the `TERR` list per resource.
 | list | field | meaning |
 |---|---|---|
 | `GOOD` +`0x40` | `int` frequency | per-resource abundance; `0` means roll `rand_int(26)+rand_int(26)+50` |
-| `TERR` +`0x08` | pointer to byte array | bit `g&7` of byte `g>>3` = resource `g` may appear on this terrain (`0x5F2470`) |
+| `TERR` +`0x08` | pointer to byte array (memory row) | bit `g&7` of byte `g>>3` = resource `g` may appear on this terrain (`0x5F2470`); the bytes come from a `u32`-wide allow mask in the file row (below) |
 | both | class predicates | `0x5E3700` / `0x5E3730` (`== 2`) / `0x5E3720` gate the three blocks |
 
 Scenario-loader strings confirm the records come from the `.biq`:
@@ -47,20 +56,22 @@ The `GOOD` section sits at file offset 29 052 of the inflated stream:
 | row count source | global at loader `+0x89C` | loop bound `0x59749F` |
 | per-row reader | call `0x5E3860` per row | reader loop `0x594597`; flat `fread`s (`0x64B3E3`) into `+0x04/+0x1C/+0x3C…` (verified destinations). `0x5E3740` is the WRITER's row function (loop `0x59749F`, `fwrite`s via `0x64AF35`) — formerly mislabeled as the reader |
 | freq field | row `+0x40` | read by `0x5E3740` (`lea ecx,[edi+0x40]`, `0x5E37B6`) and by placement (`NOTES.md` §11.8) — doubly confirmed |
-| u16 at section `+4` | `0x1A` (26) | consistent with a row count; the loader loop bound is authoritative, not this field |
+| `u32` at section `+4` | `0x1A` (26) | the row count: the reader reads it with one `fread 4` (`0x59456B`), the loader loop bound is the same value |
+| file row framing | `[u32 len=88][88 B body]` | `0x5E3860` reads `len` into row `+0x00`, consumes 88 B and `fseek`s past any remainder (`0x5E396A`) |
 
 `0x5E3740` memory layout per row (all `0x64AF35` reads into `edi`):
 
 | memory offset | size | role |
 |---|---|---|
-| `+0x04` | 24 B | string/blob (unmapped: name or binary) |
-| `+0x1C` | 32 B | string/blob (unmapped) |
-| `+0x3C` | u32 | unmapped |
+| `+0x00` | u32 | the file row's `len` word (the reader subtracts each `fread` from it) |
+| `+0x04` | 24 B | display name (`Horses`, NUL-padded) |
+| `+0x1C` | 32 B | `GOOD_*` key (`GOOD_Horses`) |
+| `+0x3C` | u32 | class: 2 = strategic, 1 = luxury, 0 = bonus |
 | `+0x40` | u32 | **frequency** (confirmed) |
-| `+0x44` | u32 | unmapped |
-| `+0x48` | u32 | unmapped |
-| `+0x4C` | u32 | unmapped |
-| `+0x50` | 12 B | unmapped |
+| `+0x44` | u32 | `a`: 800/400/200/100 on strategics, 0 elsewhere (unmapped second rate; the editor's Good tab has both an appearance ratio and a disappearance probability, and `freq` is the first) |
+| `+0x48` | u32 | `b`: **icon/ordering id = the `resources.pcx` cell** (equals the row index except Sugar 24 / Tropical Fruit 22 / Oasis 23; see the icon section below) |
+| `+0x4C` | u32 | `c`: **the `TECH` row that reveals this resource** (8/8 correct below), `-1` on luxuries and bonus goods |
+| `+0x50` | 12 B | 3 small u32s per row |
 | total | `0x5C` | ends exactly at the stride — layout closed |
 
 **CORRECTION (verified live): `0x64AF35` is `fwrite`, not `fread`.**
@@ -76,41 +87,149 @@ does flat `fread`s only, and the live GOOD stream used the binary arm
 files elsewhere); it is simply not on the GOOD path.
 
 Slicing history (superseded): a 3×3 grid search over stride {88, 92, 96}
-× header {4, 6, 8} on conquests.biq-inflated peaked at stride-92/header-8
-with only 11/26 sane freqs and drifting names. That failed because
-conquests.biq's GOOD section genuinely contains NO name strings (see
-below) — not because of variable-length framing. Memory rows are the
-fixed `0x5C`; PTW-format file rows are `[u32 len=88][88B data]` (see
-`## Reader/writer split`).
+× header {4, 6, 8} on "conquests.biq-inflated" peaked at stride-92/header-8
+with only 11/26 sane freqs and drifting names. The framing was never the
+problem: the decode itself was wrong (see the correction at the top), which
+also made the names disappear. With the fixed codec a plain PTW walk parses
+26/26 rows in one pass. Memory rows are the fixed `0x5C`; file rows are
+`[u32 len=88][88B data]` (see `## Reader/writer split`).
 
-## Names live outside the BIQ (verified)
+## Names are in the BIQ (verified: corrected decode)
 
-Full resource names appear nowhere in the decoded BIQ (only `Aluminum`,
-`Gold`, `Fish` surface as fragments; the rest — Saltpeter, Horses,
-Cattle, Wheat, Coal, Uranium, Rubber — zero hits). The canonical 26
-names come from `Conquests/Text/PediaIcons.txt` (`#ICON_GOOD_*`, 26
-entries, alphabetical: Aluminum … Tobacco), each pointing at per-resource
-civilopedia icons — not at map-sheet cells. GOOD rows carry short keys
-only; matching row `g` to a name needs the variable-length parse above.
+`conquests.biq`'s `GOOD` rows carry the same 24 B names and 32 B keys the
+live table showed (`Horses`/`GOOD_Horses` … `Tobacco`/`GOOD_Tobacco`), and
+the 88 B file cores are byte-identical to the live memory rows
+(`/tmp/civ3dbg/good_rows.bin`); `resources::tests::good_section_layout`
+pins that. The old "names live outside the BIQ" reading came from decoding
+the file with the wrong DCL mask: `Horses` and friends are present in
+`conquests.biq` itself, as they are in the 9 Conquests scenario `.biq`s and
+the custom `.bix` sets (only the obfuscated/custom-good sets lack them).
 
-## TERR file rows: same variable-length story (verified)
+`Conquests/Text/PediaIcons.txt` (`#ICON_GOOD_*`, 26 entries) is still the
+source of the icon keys, but it is no longer needed to name rows.
 
-The `TERR` section at inflated offset 195 819 opens with a plausible
-`0x0E` (14 terrains?) but its rows are fragmented short keys and binary
-(`…se W_se…`, `WetH`, repeated `Ba.g` / `nnHH` filler-like quads) — same
-variable-length framing as `GOOD`, same unmapped field boundaries. The
-memory-side contract is what placement actually reads and is verified
-(`[row+8]` pointer + `g&7`/`g>>3` bit test, `0x5F2470`); file-side TERR
-parse needs the same `0x64C4A7`-path analysis as GOOD.
+## TERR file rows: the allow-matrix source (verified: corrected decode)
 
-## Icon sheet order: unverified
+`TERR` at inflated offset 195 819: `[u32 14]`, then 14 rows of
+`[u32 len = 233][body]`, the last ending exactly on `WSIZ` at 199 145. The
+row reader `0x5E9300` consumes the body in this order, which fixes the
+layout:
 
-`Art/resources.pcx` is 300x300 px with a 6x6 grid of 50 px cells (36 cells,
-magenta gutters every 50 px) — it does **not** trivially match a 26-row
-`GOOD` list, so whether `GOOD` index `g` addresses sheet cell `g` in
-row-major order is **unverified**. Deciding it needs the `GOOD` row name
-field (row layout beyond stride/`+0x40` is unmapped) or the renderer that
-blits the sheet. Do not assume `g` = sheet cell.
+| body offset | size | role |
+|---|---|---|
+| `+0x00` | u32 | goods count (26 = the GOOD row count) |
+| `+0x04` | `ceil(goods/8)` = 4 B | **allow mask**, little-endian: bit `g` = resource `g` may appear here |
+| `+0x08` | 32 B | display name (`Desert`, NUL-padded) |
+| `+0x28` | 32 B | `TERR_*` key (`TERR_Desert`; spaces become underscores: `TERR_Flood_Plain`) |
+| `+0x48` | 161 B | terrain properties, unmodelled (the reader `fseek`s past the rest) |
+
+**Memory↔file mapping for TERR rows (verified 2026-09-29):** the reader
+`0x5E9300` stores `len` at `+0x04`, allocates the mask and stores its
+pointer at `+0x08`, then `fread 0x20` into `+0x0C` (`0x5E93D1`) = the name,
+and the key follows at `+0x2C`. In the file the same fields sit at body
+`+0x08` (name) and `+0x28` (key), so **memory = file body + 4** throughout
+the row. Consequences: the tail byte that `0x5CD960(terrain)` tests at
+`row+0x7A` is **body `+0x76`**, which is `1` for all land terrains except
+Volcano and `0` for Volcano/Coast/Sea/Ocean (an is-land/enterable flag),
+and body `+0x74`/`+0x75`/`+0x77` are `1` for the nine land terrains
+excluding Marsh (`+0x78` = `3` on every row). See `workers.md`.
+
+**The rest of the row is a u32 struct, not opaque bytes.** The reader's
+field list (`0x5E9406` ff, one `fread 4` each) is `+0x4C`, `+0x50`,
+`+0x54`, `+0x58`, … i.e. body `+0x48`, `+0x4C`, `+0x50`, `+0x54`, …
+(Desert: `1, 1, 1, 10, 1, 0, 1, 0, -1, -1, 0x0101, 0x01010101, 3, 1, …`),
+so the per-terrain bytes `0x5CD960` reads are *inside* those words. The row
+ends with a second, **length-prefixed name string** (`10` then `"LM Desert"`;
+Ocean has `"Ocean"`) followed by the `TERR_*` key again — the `LM ` prefix
+reads as the terrain's landmark/improvement name.
+
+That second name is a **preferred variant, not a duplicate**: its only two
+consumers (`0x554D62`, `0x5AAFA5`) pick it over the primary name at `+0x0C`
+when a tile predicate holds:
+
+```asm
+call [reg+0xC8]                       ; terrain id
+imul ecx,0xF0 ; add [0x9C7328]        ; TERR row
+tile->vfunc(0x78)() ? TERR?+0x0C (0x5E8D00) : TERR+0xA8 (0x5E8CF0)
+; then strlen()
+```
+
+What `vfunc(0x78)` is, and what the `LM ` prefix stands for
+(landmark/mode name most likely), stays open.
+
+In memory the same row keeps the remaining length at `+0x04`, a *pointer*
+to the mask array at `+0x08` (`malloc((goods+7)>>3)` at `0x5E936C`, stored at
+`0x5E9382`) and the count at `+0x60`, in `0xf0`-byte rows (`0x596532`;
+14 rows for `BICX`, 12 for the older `BIC ` layout, `biq.md`). Placement
+reads the mask through that pointer exactly as the file bytes are laid out
+(`0x5F2470`), so the file row above *is* the placement input.
+
+Ground truth, `conquests.biq` (`resources::tests::terr_section_gives_allow_matrix`):
+
+| # | terrain | mask | allows |
+|---|---|---|---|
+| 0 | Desert | `0x01000814` | Saltpeter, Oil, Incense, Oasis |
+| 1 | Plains | `0x00582101` | Horses, Wines, Ivory, Cattle, Wheat, Sugar |
+| 2 | Grassland | `0x02180101` | Horses, Wines, Cattle, Wheat, Tobacco |
+| 3 | Tundra | `0x00020250` | Oil, Aluminum, Furs, Game |
+| 4 | Flood Plain | `0x00100000` | Wheat |
+| 5 | Hills | `0x0260094f` | Horses, Iron, Saltpeter, Coal, Aluminum, Wines, Incense, Gold, Sugar, Tobacco |
+| 6 | Mountains | `0x0020808e` | Iron, Saltpeter, Coal, Uranium, Gems, Gold |
+| 7 | Forest | `0x000276a0` | Rubber, Uranium, Furs, Dyes, Spices, Ivory, Silks, Game |
+| 8 | Jungle | `0x0080d428` | Coal, Rubber, Dyes, Spices, Silks, Gems, Tropical Fruit |
+| 9 | Marsh | `0x00060030` | Oil, Rubber, Game, Fish |
+| 10 | Volcano | `0x00000000` | — |
+| 11 | Coast | `0x00040000` | Fish |
+| 12 | Sea | `0x00050000` | Whales, Fish |
+| 13 | Ocean | `0x00000000` | — |
+
+The mask bit order is the placement's own (`byte[ptr + (g>>3)] &
+(1 << (g&7))`), so bit `g` of the little-endian `u32` is GOOD row `g`.
+That closes the "TERR allow-matrix value" open thread: the hardcoded table
+in the clone can now come from the file.
+
+## Icon sheet order: **cell = the row's `b` field** (verified by eye)
+
+`Art/resources.pcx` is 300x300 px, a 6x6 grid of 50 px cells (36 cells,
+magenta gutters every 50 px), loaded once by the map-view art init
+(single `.text` ref to the path `0x72848C` at `0x4C77B2`). Rendering it at
+3x with a grid and reading the cells (2026-09-29) identifies every icon:
+
+| cell | icon | GOOD row | row `b` |
+|---|---|---|---|
+| 0 | horse | Horses | 0 |
+| 1 | grey ore | Iron | 1 |
+| 2 | pale crystals | Saltpeter | 2 |
+| 3 | black lumps | Coal | 3 |
+| 4 | oil drop/derrick | Oil | 4 |
+| 5 | black ring | Rubber | 5 |
+| 6 | metal cylinder | Aluminum | 6 |
+| 7 | green glowing rocks | Uranium | 7 |
+| 8 | grapes | Wines | 8 |
+| 9 | pelt | Furs | 9 |
+| 10 | pigment bowl | Dyes | 10 |
+| 11 | smoking censer | Incense | 11 |
+| 12 | herb pile | Spices | 12 |
+| 13 | elephant | Ivory | 13 |
+| 14 | blue fabric bundle | Silks | 14 |
+| 15 | jewel pile | Gems | 15 |
+| 16 | grey whale | Whales | 16 |
+| 17 | deer | Game | 17 |
+| 18 | pale fish | Fish | 18 |
+| 19 | cow | Cattle | 19 |
+| 20 | sheaf | Wheat | 20 |
+| 21 | gold nuggets | Gold | 21 |
+| 22 | bananas | Tropical Fruit | **22** |
+| 23 | palm + water | Oasis | **23** |
+| 24 | cane/plant | Sugar | **24** |
+| 25 | leaf bundle | Tobacco | 25 |
+
+Cells 26-35 are magenta (empty) on this sheet. The three tail rows are the
+proof of the rule: `Sugar` sits at row 22 but its icon is cell **24**, and
+`Tropical Fruit` (row 23) is cell 22, `Oasis` (row 24) is cell 23 — i.e.
+**the sheet cell is the row's `b` field (`+0x48`), not the row index**. That
+also finally names `b`: it is the icon/ordering id, and it is identical to
+the row index for all rows except those three (`resources.md` GOOD table).
 
 ## Quantity math (from `NOTES.md` §11.8, restated for implementers)
 
@@ -171,7 +290,7 @@ relationship: open.
   earlier "dispatches on `[esi+0xC] & 0x83`" note was the readable-stream
   validation, not a format switch.
 
-## GOOD rows: exact writer, paradoxical file (verified: `r2` + probes)
+## GOOD rows: exact writer, and what it writes (verified: `r2` + probes)
 
 (This section describes the WRITER, `0x597070`/`0x5E3740` — formerly
 mislabeled the reader. All transfers are `fwrite`s.)
@@ -183,16 +302,27 @@ mislabeled the reader. All transfers are `fwrite`s.)
 temp, `fseek(pos2,SET)` — position-neutral. All sizes are immediates;
 the loop at `0x59749F` does no file I/O of its own.
 
-But no fixed stride slices conquests.biq-inflated: strides 92 and 96 fail
-for every header 0–48 (best 11/26 sane freqs), no header 0–300 aligns all
-26 name blobs, and the GOOD section spans 29052→36036 (`RULE` next) =
-6984 bytes ≈ 2.9× the 2392 of 26×92. Cause identified: conquests.biq's
-GOOD section contains NO name strings at all (byte search over the full
-209222B inflated image: zero hits for `Horses`, wide, Pascal, lower- or
-upper-case variants). Its framing after `GOOD` is u16-based
-(`1a 00 2c 01 58 00 …` = 26, 300, 88, …), not the u32/len-88 rows the
-reader consumes. No Conquests `.biq` (all 9 scenarios + MP/scenario
-variants + `civ3mod.bic`, inflated) contains `Horses`.
+**Writer call sites (verified: `E8` census + `r2`).** `0x597070` has 7
+callers (`0x599FDF`, `0x59A631`, `0x59A7EF`, `0x59B18A`, `0x59B361`,
+`0x59B3F9`, `0x59B410`), all in the 0x599Fxx–0x59B4xx save/export block,
+and every one of them passes the path held in the global `0x72D9CC`
+(initialised to `"bic__out.tmp"` at `0x72DA08`, table entry, next to
+`"bic__in_.tmp"` at `0x72D9C8`). The writer never writes `save*.tmp`: that
+name comes only from `0x5F76C0`'s `%s%d%s` loop (`biq.md`). `0x597070` is
+the BIC **save** path (scenario editing/export), not the load staging path.
+
+Sizes match the file exactly: `len` at row `+0x00`, name 24 B at `+0x04`,
+key 32 B at `+0x1C`, `class` at `+0x3C`, `freq` at `+0x40`, `a`/`b`/`c` at
+`+0x44`/`+0x48`/`+0x4C`, 12 B tail at `+0x50`.
+
+Retired claim (2026-09-29): the earlier text here said no fixed stride
+slices the inflated `conquests.biq`, that its GOOD section has no name
+strings, and that no Conquests file contains `Horses`. All three were
+artifacts of the DCL mask bug — the "u16 framing" (`1a 00 2c 01 58 00 …`)
+was corrupted bytes. With the fixed decode: GOOD spans 29052 → 31452
+(`GOVT` next) = exactly 2392 B = 26 × 92, the row walk parses 26/26, and
+the "6984-byte span" came from a byte search on the corrupt image rather
+than from the section walk.
 
 ## Live GOOD rows: full memory dump (winedbg, EGYPT.SAV load)
 
@@ -205,45 +335,93 @@ Horses 160, Iron 160, Saltpeter 120, Coal 120, Oil 120, Rubber 120,
 Aluminum 120, Uranium 100, Wines/Furs/Dyes/Incense/Spices/Ivory/Silks/
 Gems 0, Whales/Game/Fish/Cattle/Wheat/Gold/Sugar/Tropical Fruit/Oasis/
 Tobacco 0. `+0x48` mirrors the row index except Sugar 24 / Tropical
-Fruit 22 / Oasis 23 (an ordering id, not the index). Luxuries and bonus
+Fruit 22 / Oasis 23 (the icon/ordering id = the `resources.pcx` cell; see
+the icon section below). Luxuries and bonus
 all carry freq 0 (the `freq != 0 ? freq : roll` fallback decides them).
 
-The names-in-stream paradox (refined): the reader's 24B `fread`
-provably targets `+0x04` (`lea eax,[esi+4]`, `0x5E3880`) and the 32B key
-`fread` targets `+0x1C` (`0x5E389C`) — all flat, no string-table join in
-the row function — so the reader's stream contained the full names. But
-`Horses` appears in NO Conquests file on disk: not conquests.biq
-(raw/inflated), not any of the 9 scenario `.biq`s, not `civ3mod.bic`,
-not EGYPT.SAV raw, not save0.tmp (game's own 1748113B decompression),
-not the raw autosaves, not the exe. Only the 4 uncompressed PTW `.bix`
-files carry named GOOD rows (29/42-row custom sets — not the live 26).
-Civilopedia is ruled out as the join source (`Silk/Spice/Wine` singular
-vs live `Silks/Spices/Wines` plural). The 26-row named source is
-unidentified; the decisive probe is a fresh load with breakpoints on the
-reader's `fopen` (`0x5942CA`, path in `EBX`) and GOOD loop exit
-(`0x5945B3`).
+The names-in-stream question (resolved): the reader's 24 B `fread`
+targets `+0x04` (`lea eax,[esi+4]`, `0x5E3880`) and the 32 B key `fread`
+targets `+0x1C` (`0x5E389C`), flat, with no string-table join — so the
+stream really carries the names, and now `conquests.biq` is known to
+carry them too (the "zero hits for `Horses`" search ran on the corrupt
+decode).
+
+**RESOLVED (2026-09-29, live chained one-shots + corrected codec):** the
+GOOD stream is `save1.tmp` (209 222 B rules), opened second by the reader
+(`*0x5942CF` post-`fopen`, `FILE* 0x73CE50`) right after `bic__in_.tmp`
+(whose `FILE*` is reused — bic is closed first). At the GOOD exit
+(`*0x5945B3`) `EDI` is save1's `FILE*`, `EBP`/`EAX` = 26, `EBX` = 2392,
+the table is at `[ESI+0x3CCC]`. `save1.tmp` is **the game's own DCL decode
+of `conquests.biq`**, written by `0x5F76C0` as the first free
+`save%d.tmp` (`biq.md`): with the mask fix, this crate's decode of
+`conquests.biq` is byte-identical to the captured `save1.tmp`, and its
+GOOD section (`@29052`, `[u32 26][26×[len=88][88B]]`, `GOVT` at 31452)
+parses to the 92 B live cores **26/26 byte-identical**. It is deleted
+after the read, and it is NOT from EGYPT.SAV (one DCL stream → save0 only,
+pinned by `egypt_sav_holds_one_stream`).
+
+Retired model: "the writer `0x597070` assembles save1 per load from rules
+staging joined with Civilopedia key+title strings". `0x597070` writes only
+`bic__out.tmp` (all 7 call sites pass the `0x72D9CC` global) and is the BIC
+**save** path; nothing joins Civilopedia into the rules stream. The
+"86 % of bytes differ from `biq.inflated`" observation that motivated the
+model was the mask bug.
 
 Open threads, in order:
 
-1. Identify the GOOD stream: fresh-load trace with `*0x5942CA` (reader
-   fopen, path in `EBX`) + `*0x5945B3` (GOOD rows filled) — in progress.
+1. ~~Identify the GOOD stream~~ CLOSED (2026-09-29): `save1.tmp` is the
+   loader's temp copy of decoded `conquests.biq` (byte-identical to this
+   crate's decode after the mask fix; `FILE*` matched at the GOOD exit).
+   Follow-ups both closed: `0x5F76C0` writes it (`save%d.tmp`), and
+   `conquests.biq` *is* the source (the earlier "never opened during the
+   load" note came from grepping a decode that had no usable strings).
 2. ~~Allocator `0x59BD90`~~ CLOSED: frees old `[ebp+0x3CCC]`, mallocs
    `((3×count)<<3 − count)<<2` = exactly 92×count
    (`lea eax,[edi+edi*2]; shl 8; sub edi; shl 2`, `0x59BDD2–0x59BDDB`).
-3. conquests.biq's 6984B GOOD section (29052→36036): u16-framed,
-   nameless — which consumer reads it, and does the Conquests exe ever
-   feed it to `0x5E3860` (whose flat name reads would produce garbage)?
-   Possibly editor-only data.
-4. A TERR allow-matrix value for at least one known tile (pick a tile from
-   a save and read its row's matrix bits out of the process).
+3. ~~conquests.biq's GOOD section framing~~ CLOSED (2026-09-29): 29 052 →
+   31 452 (2392 B = 26 × 92), `[u32 count][rows]` like every PTW-BIC file.
+   The "u16-framed, nameless" reading was the decode bug.
+4. ~~TERR allow-matrix~~ CLOSED: all 14 rows decoded from the file, table
+   above (`Horses`/`Oil`/`Incense`/`Oasis` on Desert, `Wheat` on Flood
+   Plain, none on Ocean/Volcano — matching play).
 
 ## Open
 
-* GOOD 26-row named source file (see paradox above; fresh-load trace
-  with `*0x5942CA` in progress).
-* UI meaning of the three class predicates `0x5E3700/30/20`.
-* A TERR allow-matrix value for at least one known tile (pick a tile from
-   a save and read its row's matrix bits out of the process).
+* GOOD field `a` (`+0x44`: 800/400/200/100 on strategics, 0 elsewhere) and
+   the 12 B tail at `+0x50` (three small u32s, all `<= 4`) are still
+   unmapped — and they are **not** the icon (icons come from `b`, above).
+   Tail distribution over the 26 rows (2026-09-29):
+   `(0,0,1)` Horses/Saltpeter/Dyes/Tobacco, `(0,1,0)` Iron, `(0,2,1)` Coal,
+   `(0,1,2)` Oil, `(0,0,2)` Rubber/Incense/Spices/Ivory, `(0,2,0)` Aluminum,
+   `(0,2,3)` Uranium, `(1,0,1)` Wines/Sugar/Tropical Fruit, `(0,1,1)` Furs,
+   `(0,0,3)` Silks, `(0,0,4)` Gems/Gold, `(1,1,2)` Whales, `(2,0,0)`
+   Game/Wheat/Oasis, `(2,0,1)` Fish, `(2,1,0)` Cattle. So the first value is
+   `0` for every strategic, `0` for luxuries except Wines, and `0/1/2`
+   across the bonus group (2 = the Game/Wheat/Oasis/Fish/Cattle set) — a
+   subtype/category id, not an icon cell (rows collide). The icon-cell
+   reading is **rejected**: `Horses` and `Tobacco` share `(0,0,1)` while
+   being different icons. Concrete probe: the editor's Good property page
+   (its field order).
+   Probe executed 2026-09-29 (`editor.md`): the Good page is dialog **135
+   'Natural Resources'** and it names the candidates. `+0x44` is one of the
+   two `Strategic and Luxury Resources` numbers — **`Appearance Ratio:`**
+   (label 1088, value control 1017) or **`Disappearance Probability:`**
+   (label 1091, value control 1018) — which fits `a` being non-zero *only*
+   on strategics (0 = never/not applicable). The 12 B tail's three values
+   line up with the other page fields the row needs: the `Type` radio
+   (`Bonus Resource`/`Luxury`/`Strategic Resource`, controls 1082/1087/1086)
+   and the `Bonuses` group (`Food:`/`Shields:`/`Commerce:`, 1083/1084/1085)
+   — the doc's `(0,0,1)`/`(2,0,0)`/`(1,1,2)` values are small enough to be
+   those three food/shield/commerce bonuses, but the corpus alone does not
+   pin the order. Decisive step (still open): bind control id -> row offset
+   through the editor's GOOD reader/serializer; see `editor.md` "Still
+   open".
+* TERR's tail is mapped down to the two gameplay numbers (`workers.md`):
+  `u32` **movement cost** at body `+0x58` (1/2/3) and `u32` **defense
+  bonus %** at `+0x54` (10/20/25/50/80/100), both matching Civ3's tables
+  (with 8.8 fixed-point copies further down at `+0x94`/`+0x98`), and the
+  land/enterable flag at body `+0x76`. What the trailing `"LM <name>"`
+  string is used for stays open.
 
 ## Reader/writer split (verified: `r2` + winedbg + probes)
 
@@ -293,18 +471,44 @@ Live GOOD table (26/26, second capture identical to the first; rows at
 | 16–25 | Whales Game Fish Cattle Wheat Gold Sugar Tropical Fruit Oasis Tobacco | GOOD_Whales GOOD_Game GOOD_Fish GOOD_Cattle GOOD_Wheat GOOD_Gold GOOD_Sugar GOOD_Bananas GOOD_Oasis GOOD_Tobacco | 0 | 0 | 0 | 16–21,24,22,23,25 | -1 |
 
 (`b` mirrors the row index except Sugar 24 / Tropical Fruit 22 / Oasis
-23. `c` is an increasing id for strategics only — possibly a tech index.
-`+0x50` holds 3 small u32s per row. Full bytes in
+23. `+0x50` holds 3 small u32s per row. Full bytes in
 `/tmp/civ3dbg/good_rows.bin`, captured 2026-09-29.)
+
+### `+0x4C` is the revealing tech (verified)
+
+`c` indexes the `TECH` section of the same file. All eight strategics name
+their canonical reveal tech, in `conquests.biq` (83 TECH rows) and, with its
+own indices, in `civ3mod.bic` (82 rows):
+
+| GOOD | `c` | `TECH` row `c` |
+|---|---|---|
+| Horses | 4 | The Wheel |
+| Iron | 7 | Iron Working |
+| Saltpeter | 30 | Gunpowder |
+| Coal | 44 | Steam Power |
+| Oil | 53 | Refining |
+| Rubber | 57 | Replaceable Parts |
+| Aluminum | 64 | Rocketry |
+| Uranium | 65 | Fission |
+
+The Horses pairing is the game's own rule, not a data slip: The Wheel's
+civilopedia text is "{New Resource} Horses appear on the map"
+(`Conquests/Text/Civilopedia.txt`). Luxuries and bonus goods carry `-1`.
+Pinned by `resources::tests::strategic_reveal_tech_indices` (which reads the
+TECH row names out of the decoded file).
 
 Load pipeline temp files (all in the exe dir, all captured): the EGYPT
 load wrote `save0.tmp` (1748113B — the game's own DCL decompression of
 EGYPT.SAV), `bic__in_.tmp` (8329B = 736B `BICQVER#` header + `GAME`
-section at 736 — game settings, no GOOD), `bic__out.tmp` (736B header;
-the writer target above). Our `dcl.rs` inflation of EGYPT.SAV is
-BYTE-IDENTICAL to the game's `save0.tmp` (`cmp` clean) — the codec is
-ground-truth validated. (Autosave `.SAV`s are stored raw/uncompressed,
-1.3–1.7MB — `BadDictBits` under DCL.)
+section at 736 — the loaded game settings, no GOOD). `save1.tmp` is the
+game's own DCL decode of `conquests.biq` — the rules stream the live GOOD
+table comes from, written by `0x5F76C0` (`biq.md`). `bic__out.tmp` is the
+*save* target of `0x597070` (`0x72D9CC`), not part of the load. Our
+`dcl.rs` decode of EGYPT.SAV is BYTE-IDENTICAL to the game's `save0.tmp`,
+and after the mask fix its decode of `conquests.biq` is BYTE-IDENTICAL to
+`save1.tmp` (`cmp` clean) — the codec is ground-truth validated on both.
+(Autosave `.SAV`s are stored
+raw/uncompressed, 1.3–1.7MB — `BadDictBits` under DCL.)
 
 Data-path note: the game reads code/DLLs from `civ3-gog/app/Conquests`
 but data files (`Sounds/`, `Text/version.txt`) from `civ3-complete/`

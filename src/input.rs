@@ -1,5 +1,8 @@
 //! Camera control and tile hover picking.
-
+//!
+//! Panning is keys and wheel only: Civ3 ties the left button to movement,
+//! so a press and drag never scrolls the map.
+//!
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -15,20 +18,31 @@ use crate::units::{self, Selected, TurnEnded, Unit};
 #[derive(Resource, Default)]
 pub struct Hovered(pub Option<(i32, i32)>);
 
+/// How long the left button must stay down on a tile before the move
+/// preview appears. Civ3 waits about this long; a quicker click still
+/// orders the move, it just never draws the route.
+pub const HOLD_SECS: f32 = 0.3;
+
+/// Destination the route is drawn for, or None for no preview. Civ3 shows
+/// the path and the destination tile only while the Go-to command is armed
+/// or while the button is held on a tile, never on a plain hover.
 #[derive(Resource, Default)]
-pub struct DragState {
-    start: Vec2,
-    last: Vec2,
-    active: bool,
-    moved: bool,
+pub struct MovePreview(pub Option<(i32, i32)>);
+
+/// Scripted runs aim the hover without a mouse.
+#[derive(Resource, Default)]
+pub struct HoverPin(pub Option<(i32, i32)>);
+
+#[derive(Default)]
+pub(crate) struct Hold {
+    /// A press started while a unit was selected.
+    armed: bool,
+    secs: f32,
 }
 
 pub fn camera_control(
-    mut drag: ResMut<DragState>,
-    buttons: Res<ButtonInput<MouseButton>>,
     mut wheel: MessageReader<MouseWheel>,
     keys: Res<ButtonInput<KeyCode>>,
-    window: Single<&Window, With<PrimaryWindow>>,
     mut cam: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
     time: Res<Time>,
 ) {
@@ -58,33 +72,6 @@ pub fn camera_control(
         tf.translation +=
             (dir.normalize() * 700.0 * ortho.scale * time.delta_secs()).extend(0.0);
     }
-    let cur = window.cursor_position();
-    if buttons.just_pressed(MouseButton::Left) {
-        if let Some(p) = cur {
-            *drag = DragState {
-                start: p,
-                last: p,
-                active: true,
-                moved: false,
-            };
-        }
-    }
-    if buttons.pressed(MouseButton::Left) && drag.active {
-        if let Some(p) = cur {
-            if (p - drag.start).length() > 6.0 {
-                drag.moved = true;
-            }
-            if drag.moved {
-                let d = (p - drag.last) * ortho.scale;
-                tf.translation.x -= d.x;
-                tf.translation.y += d.y;
-                drag.last = p;
-            }
-        }
-    }
-    if buttons.just_released(MouseButton::Left) {
-        drag.active = false;
-    }
 }
 
 pub fn hover(
@@ -94,28 +81,33 @@ pub fn hover(
     mut hovered: ResMut<Hovered>,
     mut gizmos: Gizmos,
     ui: Query<&Interaction, With<Button>>,
+    pin: Res<HoverPin>,
+    selected: Res<Selected>,
+    preview: Res<MovePreview>,
 ) {
     // The pointer is over a UI button: map picking is off.
-    if ui.iter().any(|i| *i != Interaction::None) {
-        hovered.0 = None;
+    let tile = if let Some(p) = pin.0 {
+        Some(p)
+    } else if ui.iter().any(|i| *i != Interaction::None) {
+        None
+    } else {
+        let picked = cam.single().ok().and_then(|(camera, gt)| {
+            let cur = window.cursor_position()?;
+            let world = camera.viewport_to_world_2d(gt, cur).ok()?;
+            world_to_tile(&map, world)
+        });
+        picked
+    };
+    hovered.0 = tile;
+    let Some((x, y)) = tile else {
+        return;
+    };
+    // With a unit selected the tile cursor is the move preview, so Civ3
+    // shows nothing until the route is actually being aimed (Go-to armed
+    // or the button held).
+    if selected.0.is_some() && preview.0 != Some((x, y)) {
         return;
     }
-    let Ok((camera, gt)) = cam.single() else {
-        return;
-    };
-    let Some(cur) = window.cursor_position() else {
-        hovered.0 = None;
-        return;
-    };
-    let Ok(world) = camera.viewport_to_world_2d(gt, cur) else {
-        hovered.0 = None;
-        return;
-    };
-    let Some((x, y)) = world_to_tile(&map, world) else {
-        hovered.0 = None;
-        return;
-    };
-    hovered.0 = Some((x, y));
     let c = tile_to_world(x, y);
     let hw = TILE_W / 2.0;
     let hh = TILE_H / 2.0;
@@ -130,9 +122,169 @@ pub fn hover(
     }
 }
 
+
+/// Work out whether the route is being aimed, and for which tile: the
+/// armed Go-to command previews under the pointer, and otherwise only a
+/// press held on a tile with a unit selected does, the way Civ3 shows it
+/// before the button comes back up. Sliding the pointer while held just
+/// moves the destination.
+pub fn hold_preview(
+    time: Res<Time>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    hovered: Res<Hovered>,
+    selected: Res<Selected>,
+    units: Query<&Unit>,
+    goto: Res<GotoMode>,
+    mut hold: Local<Hold>,
+    mut preview: ResMut<MovePreview>,
+) {
+    let from = selected
+        .0
+        .and_then(|s| units.get(s).ok())
+        .map(|u| (u.x, u.y));
+    // A press only arms while a unit is selected; the timer keeps running
+    // until the button comes up.
+    if buttons.just_pressed(MouseButton::Left) && !hold.armed {
+        hold.armed = from.is_some();
+        hold.secs = 0.0;
+    }
+    if !buttons.pressed(MouseButton::Left) {
+        hold.armed = false;
+        hold.secs = 0.0;
+    } else if hold.armed {
+        hold.secs += time.delta_secs();
+    }
+    let aiming = goto.0 || (hold.armed && hold.secs >= HOLD_SECS);
+    preview.0 = match (aiming, hovered.0, from) {
+        (true, Some(dest), Some(here)) if dest != here => Some(dest),
+        _ => None,
+    };
+}
+
 fn move_order(map: &GameMap, units: &mut Query<(Entity, &mut Unit)>, s: Entity, dest: (i32, i32)) {
     if let Ok((_, mut u)) = units.get_mut(s) {
         units::order_move(map, &mut u, dest);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::units::{UnitAnim, UnitType};
+    use std::collections::VecDeque;
+    use std::time::Duration;
+
+    fn unit_at(x: i32, y: i32) -> Unit {
+        Unit {
+            utype: UnitType::Scout,
+            x,
+            y,
+            moves: 3,
+            fortified: false,
+            facing: 0,
+            path: VecDeque::new(),
+            anim: UnitAnim::Idle { t: 0.0 },
+            work: None,
+            sentry: false,
+            exploring: false,
+        }
+    }
+
+    /// A scout at (10, 10) with the pointer pinned to (12, 12).
+    fn app(selected: bool) -> App {
+        let mut app = App::new();
+        app.insert_resource(Hovered(Some((12, 12))));
+        app.insert_resource(GotoMode(false));
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.insert_resource(MovePreview::default());
+        app.insert_resource(Time::<()>::default());
+        let e = app.world_mut().spawn(unit_at(10, 10)).id();
+        app.insert_resource(Selected(if selected { Some(e) } else { None }));
+        app.add_systems(Update, hold_preview);
+        app
+    }
+
+    fn preview(app: &App) -> Option<(i32, i32)> {
+        app.world().resource::<MovePreview>().0
+    }
+
+    fn press(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+    }
+
+    fn wait(app: &mut App, secs: f32) {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(secs));
+        app.update();
+    }
+
+    #[test]
+    fn hovering_a_tile_previews_nothing() {
+        let mut app = app(true);
+        app.update();
+        assert_eq!(preview(&app), None);
+    }
+
+    #[test]
+    fn a_held_press_previews_the_route() {
+        let mut app = app(true);
+        press(&mut app);
+        app.update();
+        // Still under the delay: Civ3 waits before it draws the path.
+        assert_eq!(preview(&app), None);
+        wait(&mut app, HOLD_SECS + 0.05);
+        assert_eq!(preview(&app), Some((12, 12)));
+    }
+
+    #[test]
+    fn a_quick_click_never_previews() {
+        let mut app = app(true);
+        press(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+        wait(&mut app, HOLD_SECS + 0.05);
+        assert_eq!(preview(&app), None);
+    }
+
+    #[test]
+    fn the_preview_follows_the_pointer_while_held() {
+        let mut app = app(true);
+        press(&mut app);
+        wait(&mut app, HOLD_SECS + 0.05);
+        assert_eq!(preview(&app), Some((12, 12)));
+        // Sliding to another tile while the button is still down aims there.
+        app.world_mut().resource_mut::<Hovered>().0 = Some((11, 13));
+        app.update();
+        assert_eq!(preview(&app), Some((11, 13)));
+    }
+
+    #[test]
+    fn holding_with_no_unit_selected_does_nothing() {
+        let mut app = app(false);
+        press(&mut app);
+        wait(&mut app, HOLD_SECS + 0.05);
+        assert_eq!(preview(&app), None);
+    }
+
+    #[test]
+    fn the_armed_goto_previews_on_hover() {
+        let mut app = app(true);
+        app.world_mut().resource_mut::<GotoMode>().0 = true;
+        app.update();
+        assert_eq!(preview(&app), Some((12, 12)));
+    }
+
+    #[test]
+    fn the_units_own_tile_is_no_destination() {
+        let mut app = app(true);
+        app.world_mut().resource_mut::<Hovered>().0 = Some((10, 10));
+        app.world_mut().resource_mut::<GotoMode>().0 = true;
+        app.update();
+        assert_eq!(preview(&app), None);
     }
 }
 
@@ -159,7 +311,6 @@ pub fn orders(
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     hovered: Res<Hovered>,
-    drag: Res<DragState>,
     mut selected: ResMut<Selected>,
     mut units: Query<(Entity, &mut Unit)>,
     map: Res<GameMap>,
@@ -189,7 +340,7 @@ pub fn orders(
             audio::sfx(&mut commands, &audio, "City View");
         }
     }
-    if buttons.just_released(MouseButton::Left) && !drag.moved {
+    if buttons.just_released(MouseButton::Left) {
         if let Some((x, y)) = hovered.0 {
             if goto.0 {
                 goto.0 = false;

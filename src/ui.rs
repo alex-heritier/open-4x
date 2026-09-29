@@ -8,6 +8,7 @@ use crate::cities::CityView;
 use crate::features::{self, MessageBoard};
 use crate::improvements;
 use crate::input::Hovered;
+use crate::input::MovePreview;
 use crate::map::GameMap;
 use crate::splash::SplashUp;
 use crate::units::{self, Selected, TurnEnded, Unit};
@@ -82,6 +83,7 @@ pub fn update_hover_label(
     map: Res<GameMap>,
     hovered: Res<Hovered>,
     selected: Res<Selected>,
+    preview: Res<MovePreview>,
     units: Query<&Unit>,
     mut q: Query<&mut Text, With<HoverLabel>>,
 ) {
@@ -99,8 +101,10 @@ pub fn update_hover_label(
             if let Some(i) = improvements::describe(t) {
                 parts.push(i);
             }
-            if let Some(u) = selected.0.and_then(|s| units.get(s).ok()) {
-                if (u.x, u.y) != (x, y) {
+            // The route readout belongs to the move preview: Civ3 shows it
+            // while a Go-to or a held press is being aimed, not on a hover.
+            if preview.0 == Some((x, y)) {
+                if let Some(u) = selected.0.and_then(|s| units.get(s).ok()) {
                     match map.find_path((u.x, u.y), (x, y)) {
                         Some(p) => {
                             let extra = units::path_turns(

@@ -4,7 +4,7 @@
 The game never reads PCX, FLC, or MP3. Run from civ3-clone/:
     python3 tools/prep_assets.py [stage ...]
 Stages: terrain units cities cityscreen splash audio fonts features
-improvements unitbuttons fog (default: all)
+improvements unitbuttons fog borders cursor (default: all)
 
 Engine color rules (verified by probe):
 - magenta (255,0,255) and palette index 255: transparent
@@ -439,7 +439,40 @@ def crop_cities():
     # entertainer (jester, row 16 col 1): idle citizens on the city screen
     to_rgba(heads.crop((50, 800, 100, 850))).save(
         os.path.join(uid, "entertainer.png"))
-    print("cities cropped: sprites + x/prod buttons + icons + citizen + entertainer")
+    # City-panel top bar buttons: previous/next city, close, in
+    # normal/hover/pressed states. `cityMgmtButtons.pcx` is a 4x3 grid of
+    # 49x60 cells (prev, next, eye, X), with the dev's own layout notes
+    # under it.
+    mgmt = Image.open(os.path.join(OUT, "cityscreen", "cityMgmtButtons.png"))
+    for row in range(3):
+        # The sheet's third column (the small eye) is unused: the panel's
+        # city view is always on screen, so it has no view toggle.
+        for col, name in enumerate(["prev", "next", "x"]):
+            # 47 wide: the cells' last two columns carry the next button's
+            # edge, which would show as a sliver on the top bar.
+            mgmt.crop((col * 49, row * 60, col * 49 + 47, row * 60 + 60)).save(
+                os.path.join(uid, f"mgmt_{name}_{row}.png"))
+    # Scrollbar pieces from `Art/scroll.pcx`: the small arrow set at the top
+    # of the sheet (18x16 cells, green then orange for idle/hover) and the
+    # ladder track tile.
+    sc = to_rgba(Image.open(os.path.join(GOG, "Art", "scroll.pcx")))
+    for name, box in [
+        ("scroll_up_0", (112, 14, 130, 30)),
+        ("scroll_up_1", (128, 14, 146, 30)),
+        ("scroll_down_0", (112, 0, 130, 16)),
+        ("scroll_down_1", (128, 0, 146, 16)),
+        ("scroll_track", (14, 138, 28, 158)),
+    ]:
+        sc.crop(box).save(os.path.join(uid, name + ".png"))
+    # Fade bars: the game masks the bar art with its Alpha sheet, so bake
+    # the mask into the alpha channel here.
+    for name in ["TopFadeBar", "BottomFadeBar"]:
+        art = Image.open(os.path.join(OUT, "cityscreen", name + ".png")).convert("RGB")
+        mask = Image.open(os.path.join(OUT, "cityscreen", name + "Alpha.png")).convert("L")
+        faded = art.convert("RGBA")
+        faded.putalpha(mask)
+        faded.save(os.path.join(uid, name + ".png"))
+    print("cities cropped: sprites + buttons + icons + citizen + entertainer")
 
 
 def stage_cityscreen():
@@ -678,12 +711,102 @@ def stage_fog():
     print("fog: 9x9 cells from FogOfWar.pcx")
 
 
+def stage_cursor():
+    """Civ3's selection marker: `Art/Animations/Cursor/Cursor.flc`.
+
+    The dashed white ellipse drawn around the selected unit is not in the
+    interface art — the game keeps it in the animation folder as a 31
+    frame FLC on a 93x46 canvas (art inset 1 px), the dashes crawling
+    around the ellipse. `Cursor.ini` gives 175 ms per frame. Slides convert
+    like unit art: magenta out, the red ring under the dashes is Civ3's
+    shadow (`to_rgba`), so it lands as a translucent dark outline.
+    """
+    src = os.path.join(GOG, "Art", "Animations", "Cursor", "Cursor.flc")
+    outdir = os.path.join(OUT, "cursor")
+    os.makedirs(outdir, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        pat = os.path.join(tmp, "f_%04d.png")
+        ffmpeg_frames(src, pat)
+        frames = sorted(glob.glob(os.path.join(tmp, "f_*.png")))
+        w, h = Image.open(frames[0]).size
+        strip = Image.new("RGBA", (w * len(frames), h), (0, 0, 0, 0))
+        for i, f in enumerate(frames):
+            fim = Image.open(f)
+            fim.load()
+            strip.paste(to_rgba(fim), (i * w, 0))
+        strip.save(os.path.join(outdir, "ring.png"))
+        with open(os.path.join(outdir, "manifest.json"), "w") as f:
+            json.dump({"ring": {"file": "ring.png", "frame": [w, h],
+                                 "frames": len(frames), "ms": 175}}, f, indent=1)
+        print(f"  cursor/ring.png: {w}x{h} x{len(frames)}f")
+    print("cursor: selection ring from Cursor.flc")
+
+
+def stage_borders():
+    """Civ3's cultural border ribbon: `Art/Terrain/Territory.pcx`.
+
+    The sheet is 256x288 = 2 columns x 4 rows of 128x72 cells (the exe
+    slices it at 0x4C6A4B with x += 128, y += 72). Each cell is one tile
+    diamond, inset 4 px top and bottom so its center is the cell center,
+    with the ribbon drawn along one edge: row 0 the upper-left edge, 1
+    upper-right, 2 lower-left, 3 lower-right. Column 1 is a variant whose
+    ribbon bulges into the tile (purpose unresolved); the game's own
+    screenshot shows the straight column-0 ribbon on every edge, so only
+    those four cells ship.
+
+    The gray diamond (index 1) and the purple surround (255) are
+    transparent: the loader ends by making indices 0 and 1 transparent
+    (0x4C6A8F..0x4C6AAA calls 0x5FFED0 with 0 and 1), so the gray is a
+    template, not art. What is left is a chain of beads on a thread. The
+    game paints it in the owner's color: the bead core (64) is the color
+    and the rod rim (65) a darker shade of it, so both bake to a gray
+    level for the runtime tint. The two magenta pinks (249, 252) are the
+    shadow thread and the bead's soft edge, which the game draws dark and
+    nearly neutral (they read desaturated over terrain), so they bake to
+    black. Alphas are eyeballed from the blurred reference screenshot,
+    not measured.
+    """
+    outdir = os.path.join(OUT, "borders")
+    os.makedirs(outdir, exist_ok=True)
+    src = Image.open(os.path.join(GOG, "Art", "Terrain", "Territory.pcx"))
+    src.load()
+    # `tobytes` on a P image is the raw palette index per pixel; `convert`
+    # would go through RGB and lose the index.
+    raw = src.tobytes()
+    alpha = {1: 0, 255: 0, 64: 255, 65: 255, 249: 110, 252: 70}
+    ink = {64: 255, 65: 200}  # civ color, and its dark rim, via the tint
+    lut = lambda table: bytes(table.get(i, 0) for i in range(256))
+    lum = Image.frombytes("L", src.size, bytes(lut(ink)[b] for b in raw))
+    mask = Image.frombytes("L", src.size, bytes(lut(alpha)[b] for b in raw))
+    body = Image.merge("RGBA", (lum, lum, lum, mask))
+    # Sheet row -> the map neighbor the edge faces. `map::tile_to_world`
+    # is in Bevy world space, y up: (x+1, y) lands at (+64, -32), which is
+    # down-right on screen, (x, y+1) down-left, (x-1, y) up-left and
+    # (x, y-1) up-right. So row 0 (upper-left edge) faces `xm`, row 1
+    # `ym`, row 2 `yp` and row 3 `xp`. The ribbon must land in that
+    # quadrant of the cell (image space, y down); a vertical flip here puts
+    # every ribbon on the mirrored edge and breaks the outline into
+    # scattered dashes.
+    for row, (side, (ux, uy)) in enumerate(
+            zip(["xm", "ym", "yp", "xp"], [(0, 0), (1, 0), (0, 1), (1, 1)])):
+        cell = body.crop((0, row * 72, 128, row * 72 + 72))
+        cell.save(os.path.join(outdir, f"border_{side}.png"))
+        box = cell.getchannel("A").getbbox()
+        assert box, f"border_{side}.png is empty"
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        assert (cx > 64) == bool(ux) and (cy > 36) == bool(uy), \
+            f"border_{side}.png ribbon sits at {cx:.0f},{cy:.0f}"
+        print(f"  borders/border_{side}.png: {cell.size}")
+    print("borders: 4 edges from Territory.pcx")
+
+
 STAGES = {"terrain": stage_terrain, "units": stage_units,
           "cities": stage_cities, "cityscreen": stage_cityscreen,
           "splash": stage_splash, "audio": stage_audio, "fonts": stage_fonts,
           "features": stage_features, "improvements": stage_improvements,
           "unitbuttons": stage_unitbuttons, "hud": stage_hud,
-          "fog": stage_fog}
+          "fog": stage_fog, "borders": stage_borders,
+          "cursor": stage_cursor}
 
 
 def main():

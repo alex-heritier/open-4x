@@ -90,6 +90,13 @@ ecx,0x9C3508; call 0x598580`; `call 0x60E6B0`; then a
 Open: what computes 36..39 inside/above `0x440EE0`, and the embargo
 half of the deal text.
 
+`0x440EE0` re-checked 2026-09-29: its head zeroes **seven** out-params
+(`[esp+0x48]`, `+0x5C`, `+0x60`, `+0x3C`, …) and there is no
+`cmp …,0x24…0x27` anywhere in `0x440D00`-`0x441300`, so 36..39 are
+*produced* by the scoring path, not matched against input codes. Probe:
+break on `0x440EE0` live, step to the `ret`, dump the out-params — that
+maps each slot to the numbers the deal dialog shows. Embargo half unchanged.
+
 ## Deal scorer `0x440EE0` (verified: `r2` + jump-table bytes)
 
 Two-sided item-list evaluator (thiscall, out-params at `[esp+0x48]`,

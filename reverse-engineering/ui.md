@@ -64,6 +64,13 @@ sole-caller claim holds at function granularity. `text\Civilopedia.txt`
 (`0x728BF0`) push sites: `0x4CA4C8`/`0x4CA4DB` (same fn), `0x4CD770`/
 `0x4CD787`, `0x59A8E4`. Branch semantics on `[esi+0x110]`: open.
 
+The `0x4CD770`/`0x4CD787` pair is a **path test, not a field branch**:
+`0x64CCC0` compares the requested path against `"text\\Civilopedia.txt"`
+and, on equality, hands the buffer to `0x60E870` (`0x4CD78C`); the other arm
+keeps the default (`mov eax,edi`). So that branch selects the civilopedia
+*parser* by filename. `[esi+0x110]` itself is still only known as "arg
+copied at construction" (`0x4D2800`); its semantics stay open.
+
 ## `0x53`/`0x4F` advisor + governor + HOF (sweep; GCON head verified)
 
 * GCON region tooltips `0x5356D0` (parent-verified): SEH frame,

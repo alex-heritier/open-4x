@@ -250,6 +250,7 @@ impl GameMap {
             start: (w / 2, h / 2),
             seed,
         };
+        map.coast_shores();
         map.start = map.pick_start();
         // RE stages 10-12: resources, goody huts, barbarian camps. Stage
         // seeds derive from the water level (0..100 Oceans-slider semantics)
@@ -259,6 +260,25 @@ impl GameMap {
         crate::features::place_goody_huts(&mut map, wl);
         crate::features::place_barbarian_camps(&mut map, wl);
         map
+    }
+
+    /// Any water touching land, diagonals included, is coast, as on every
+    /// Civ3 map. The terrain art depends on it: a cell with land on a
+    /// vertex comes from a land sheet, whose only water is coast, so a sea
+    /// or ocean tile beside land would meet its all-water neighbor cells
+    /// with a hard coast/sea seam.
+    fn coast_shores(&mut self) {
+        let shore: Vec<usize> = (0..self.h)
+            .flat_map(|y| (0..self.w).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                matches!(self.tiles[self.idx(x, y)].base, Base::Sea | Base::Ocean)
+                    && self.neighbors(x, y).iter().any(|&(nx, ny)| self.is_land(nx, ny))
+            })
+            .map(|(x, y)| self.idx(x, y))
+            .collect();
+        for i in shore {
+            self.tiles[i].base = Base::Coast;
+        }
     }
 
     /// Best grassland or plains capital site: most land nearby, near center.
@@ -533,6 +553,25 @@ mod tests {
             move_cost(&tile(Base::Grassland, flat, Cover::Forest)),
             Some(2)
         );
+    }
+
+    #[test]
+    fn water_beside_land_is_coast() {
+        for seed in [1, 2, 7] {
+            let map = GameMap::generate_with_seed(seed);
+            for y in 0..map.h {
+                for x in 0..map.w {
+                    let t = &map.tiles[map.idx(x, y)];
+                    if matches!(t.base, Base::Sea | Base::Ocean) {
+                        assert!(
+                            !map.neighbors(x, y).iter().any(|&(nx, ny)| map.is_land(nx, ny)),
+                            "seed {seed}: {:?} at ({x},{y}) touches land",
+                            t.base
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

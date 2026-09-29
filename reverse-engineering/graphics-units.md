@@ -103,6 +103,25 @@ in even 45-degree steps: picking a block by rounding the isometric
 screen angle hands east and north a diagonal neighbour.
 `civ3-clone` picks it in `units::facing_for_step` from the compass angle.
 
+
+## Selection ring (`Art/Animations/Cursor/Cursor.flc`)
+
+The dashed ellipse the game draws under the *selected* unit is not in the
+interface art and not in a unit folder: it is `Art/Animations/Cursor/`, a
+31 frame FLC on a 93x46 canvas (art inset 1 px) whose dashes crawl around
+the ellipse — every frame differs from every other across the whole
+ellipse — and `Cursor.ini` gives the timing (175 ms per frame,
+`DEFAULT`). Its colors follow the usual art rules: magenta around it and
+the red under the dashes is Civ3's shadow, so the ring lands as white
+dashes on a translucent dark outline.
+
+Two near-misses worth naming: `Art/CURSOR.PCX` is the mouse cursor sheet,
+and the `x_` FLCs beside a unit's clips are full-canvas variants of its
+own animations (the Cannon's `x_CannonDefault.flc` is 120x60 against
+`CannonDefault.flc`'s 58x46 with the crew drawn in), not selection art.
+`civ3-clone` converts the ring in the prep stage `cursor` and loops it in
+`units::SelectionRing` / `ring_follow`.
+
 ## Reference implementation
 
 `rust/src/graphics.rs`: `UNIT_ANIM_SLOTS` (exact 30-key universe),

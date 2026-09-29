@@ -58,6 +58,14 @@ pub fn sprite_z(x: i32, y: i32, layer: f32) -> f32 {
     tile_z(x, y, layer) + 500.0
 }
 
+/// Z for cultural border ribbons: above every terrain row, so neither the
+/// next row's ground nor a forest or hill canopy paints over the ribbon,
+/// and below the fog diamonds (`fog_z` is 50 higher, more than a row
+/// step), which dim it with the tile.
+pub fn border_z(x: i32, y: i32, layer: f32) -> f32 {
+    tile_z(x, y, layer) + 200.0
+}
+
 /// Z for fog diamonds: above every terrain row and improvement layer, so
 /// bright tall art never spills past a fog boundary, and below units and
 /// cities, which manage their own visibility.
@@ -159,6 +167,23 @@ pub fn spawn_terrain(
     assets: Res<AssetServer>,
 ) {
     let fog = assets.load(FOG_SHEET);
+    // Ground: one blended cell per tile corner (`blend::corner_cell`). Row
+    // -1 holds the cells over the north half of map row 0. The cells tile
+    // the plane without overlap, so a cell sorts with its top tile.
+    for y in -1..map.h {
+        for x in 0..map.w {
+            let (stem, col, row) = crate::blend::corner_cell(&map, x, y);
+            let pos = tile_to_world(x, y) + crate::blend::CORNER_OFFSET;
+            commands.spawn((
+                Sprite {
+                    image: assets.load(crate::blend::sheet_path(stem)),
+                    rect: Some(cell_rect(col, row)),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 0.0)),
+            ));
+        }
+    }
     for y in 0..map.h {
         for x in 0..map.w {
             let t = &map.tiles[map.idx(x, y)];
@@ -173,26 +198,20 @@ pub fn spawn_terrain(
                 Transform::from_xyz(pos.x, pos.y, fog_z(x, y)),
                 FogSprite { x, y },
             ));
-            let base = base_name(t);
-            let def = &art.defs[&base];
-            // Blended cell from the transition sheets; ice keeps its own art.
-            let (image, rect) = match crate::blend::cell_for(&map, x, y) {
-                Some((stem, col, row)) => (
-                    assets.load(crate::blend::sheet_path(stem)),
-                    Some(crate::blend::cell_rect(col, row)),
-                ),
-                None => (def.image.clone(), None),
-            };
-            commands.spawn((
-                Sprite {
-                    image,
-                    rect,
-                    ..default()
-                },
-                art.anchor(&base),
-                Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 0.0)),
-                TileSprite { x, y },
-            ));
+            // Ice keeps its own unblended art over the tundra the cells
+            // give it.
+            if t.base == Base::Ice {
+                let base = base_name(t);
+                commands.spawn((
+                    Sprite {
+                        image: art.defs[&base].image.clone(),
+                        ..default()
+                    },
+                    art.anchor(&base),
+                    Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 0.5)),
+                    TileSprite { x, y },
+                ));
+            }
             if let Some(c) = crate::blend::cover_sprite(&map, x, y) {
                 let size = c.rect.size();
                 commands.spawn((

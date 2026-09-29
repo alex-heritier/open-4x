@@ -4,6 +4,7 @@ use bevy::window::WindowResolution;
 mod actionbar;
 mod audio;
 mod blend;
+mod borders;
 mod cities;
 mod features;
 mod improvements;
@@ -42,10 +43,12 @@ fn main() {
         .insert_resource(render::RevealAll(std::env::var("CIV3_REVEAL").is_ok()))
         .insert_resource(units::Turn(1))
         .init_resource::<input::Hovered>()
-        .init_resource::<input::DragState>()
+        .init_resource::<input::HoverPin>()
+        .init_resource::<input::MovePreview>()
         .init_resource::<cities::CityNamesUsed>()
         .init_resource::<cities::CityView>()
         .init_resource::<cities::Capital>()
+        .init_resource::<cities::Treasury>()
         .init_resource::<cities::BuildMenu>()
         .init_resource::<splash::SplashUp>()
         .init_resource::<features::MessageBoard>()
@@ -62,6 +65,7 @@ fn main() {
                 render::spawn_terrain,
                 features::spawn_features,
                 units::spawn_party,
+                units::spawn_selection_ring,
                 ui::spawn_hud,
                 actionbar::spawn_bar,
                 screenshot::setup_shots,
@@ -76,6 +80,7 @@ fn main() {
                     script::drive_script,
                     input::camera_control,
                     input::hover,
+                    input::hold_preview,
                     input::orders,
                     actionbar::run_commands,
                     cities::found_city,
@@ -96,14 +101,16 @@ fn main() {
                 (
                     units::unit_visibility,
                     units::selection_gizmo,
+                    units::ring_follow,
                     units::animate_units,
                     cities::sync_city_visuals,
                     cities::city_visibility,
                     cities::maintain_city_screen,
                     cities::city_screen_input,
-                    cities::city_screen_buttons,
+                    (cities::city_screen_buttons, cities::update_panel_buttons).chain(),
                     features::sync_feature_sprites,
                     improvements::sync_improvement_sprites,
+                    borders::sync_borders,
                     render::update_fog,
                     render::sync_cover,
                     ui::update_hover_label,
@@ -156,6 +163,8 @@ fn setup_art(
     commands.insert_resource(cities::CityArt::load(&assets));
     commands.insert_resource(features::FeatureArt::load(&assets));
     commands.insert_resource(improvements::ImprovementArt::load(&assets));
+    commands.insert_resource(borders::BorderArt::load(&assets));
+    commands.insert_resource(units::SelectionRing::load(&assets));
     commands.insert_resource(cities::CapitalStar::generate(&mut images));
 }
 

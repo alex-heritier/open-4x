@@ -19,6 +19,17 @@
 //! The scenario dispatcher (`0x594290`) inventory and magic gate live here
 //! too (`SCENARIO_TAGS`, `magic_valid`), since the tag set defines what a
 //! decompressed stream may contain.
+//!
+//! **Correction (2026-09-29): the match-distance mask comes from `dict_bits`,
+//! not from the third header byte.** Init computes it at `0x649487`-`0x649490`
+//! (`mov eax,0xffff` / `mov cl,0x10` / `sub cl,dl` with `dl = [esi+0xc]` =
+//! dict bits / `sar eax,cl`), i.e. `(1 << dict_bits) - 1`. The third header
+//! byte is only the compressed stream's first byte (the init also copies it
+//! into the bit buffer at `0x64945C`; the distance step masks the *buffer*
+//! with it at `0x64988b`). Deriving the mask from that byte corrupts every
+//! file whose low 5 bits differ from its `dict_bits` — every Conquests `.biq`
+//! (`00 06 84`), while `EGYPT.SAV` (`00 06 86`) was accidentally right because
+//! `0x86 & 0x1F == 6`. See `../biq.md`.
 
 /// Scenario section tags accepted by the `0x594290` dispatcher, in raw
 /// `3D`-scan encounter order (28 tags; `CULT` compares twice).
@@ -45,6 +56,90 @@ pub fn loader_stride(tag: &str) -> Option<u32> {
         "PRTO" => Some(0x138),
         _ => None,
     }
+}
+
+/// One section of a decoded scenario stream, as framed on disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Section {
+    /// 4-byte ASCII tag (`GOOD`, `TERR`, `VER#`, …).
+    pub tag: [u8; 4],
+    /// `u32` count following the tag.
+    pub count: u32,
+    /// Offset of the section's first row (tag + 8).
+    pub rows_at: usize,
+    /// Offset just past the last row.
+    pub end: usize,
+}
+
+impl Section {
+    /// Tag as text.
+    pub fn tag_str(&self) -> String {
+        String::from_utf8_lossy(&self.tag).into_owned()
+    }
+
+    /// One row's data (past its `u32` length word).
+    pub fn row<'a>(&self, body: &'a [u8], i: u32) -> Option<&'a [u8]> {
+        let mut p = self.rows_at;
+        for _ in 0..i {
+            let len = u32::from_le_bytes(body.get(p..p + 4)?.try_into().ok()?) as usize;
+            p += 4 + len;
+        }
+        let len = u32::from_le_bytes(body.get(p..p + 4)?.try_into().ok()?) as usize;
+        body.get(p + 4..p + 4 + len)
+    }
+}
+
+/// Walk the section list of a decoded scenario stream (magic at 0).
+///
+/// Framing, verified on every shipped Conquests scenario: `[4B tag]
+/// [u32 count]`, then `count` rows of `[u32 len][len bytes]`. `0x594290`
+/// dispatches on the tag; each arm reads its own count with one `fread 4`
+/// (GOOD's arm at `0x59456B`, TERR's row loop at `0x596490`), and each row's
+/// `u32 len` is consumed by its row reader (`0x5e3860` GOOD, `0x5e9300`
+/// TERR).
+///
+/// The walk stops where the next bytes are no longer an uppercase tag with
+/// sane framing. In `conquests.biq` that is inside `FLAV`: its body is
+/// handed to `0x52d2c0` (`0x594cb8`) and is not count/row framed.
+pub fn sections(body: &[u8]) -> Vec<Section> {
+    let mut out = Vec::new();
+    let mut p = 4;
+    while p + 8 <= body.len() && out.len() < 256 {
+        let tag: [u8; 4] = body[p..p + 4].try_into().unwrap();
+        if !tag
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || *b == b'#' || b.is_ascii_digit())
+        {
+            break;
+        }
+        let count = u32::from_le_bytes(body[p + 4..p + 8].try_into().unwrap());
+        let rows_at = p + 8;
+        let mut q = rows_at;
+        let mut ok = true;
+        for _ in 0..count {
+            let Some(win) = body.get(q..q + 4) else {
+                ok = false;
+                break;
+            };
+            let len = u32::from_le_bytes(win.try_into().unwrap()) as usize;
+            if q + 4 + len > body.len() {
+                ok = false;
+                break;
+            }
+            q += 4 + len;
+        }
+        if !ok {
+            break;
+        }
+        out.push(Section {
+            tag,
+            count,
+            rows_at,
+            end: q,
+        });
+        p = q;
+    }
+    out
 }
 
 /// Code lengths for the 256 literal symbols (`0x73A520`).
@@ -220,29 +315,38 @@ pub enum DclError {
 
 /// Decompress one DCL stream (header at byte 0).
 ///
-/// `dict_bits` must be 4..=6; `mask` derives from the shift byte as
-/// `0xFFFF sar (16 - shift)` with x86 5-bit count masking (`0x64948C`).
+/// `dict_bits` must be 4..=6; `mask` derives from it as
+/// `0xFFFF sar (16 - dict_bits)` (`0x64948C`). The third header byte is not
+/// a mask parameter: it is the compressed stream's first byte, which the
+/// init also copies into the bit buffer (`0x64945C`).
 pub fn decompress(input: &[u8]) -> Result<Vec<u8>, DclError> {
+    decompress_prefix(input).map(|(out, _)| out)
+}
+
+/// Decompress one DCL stream, also returning the input bytes consumed
+/// (header + payload). The bit reader may over-read by a few bytes, so
+/// a concatenated second stream starts at or just before the returned
+/// offset — scan backwards for its header.
+pub fn decompress_prefix(input: &[u8]) -> Result<(Vec<u8>, usize), DclError> {
     if input.len() < 3 {
         return Err(DclError::TruncatedHeader);
     }
     let mode = input[0];
     let dict_bits = input[1];
-    let shift = input[2];
     if !(4..=6).contains(&dict_bits) {
         return Err(DclError::BadDictBits(dict_bits));
     }
     if mode > 1 {
         return Err(DclError::BadMode(mode));
     }
-    // x86 `sar eax, cl` masks the count to 5 bits (`0x64948E`).
-    let count = (16u32.wrapping_sub(shift as u32)) & 31;
-    let mask = 0xFFFFu32 >> count;
+    // `mov eax,0xffff` / `mov cl,0x10` / `sub cl,dl` (dl = dict bits) /
+    // `sar eax,cl` (`0x649487`-`0x649490`), i.e. (1 << dict_bits) - 1.
+    let mask = 0xFFFFu32 >> (16 - dict_bits as u32);
 
     let len_class = expand(16, &LEN_EXTRA_CNT, &LEN_LOCODE);
     let dist_class = expand(64, &DIST_LEN, &DIST_LOCODE);
 
-    // The bit buffer is seeded with the shift byte itself (`0x64945C`:
+    // The bit buffer is seeded with the third header byte itself (`0x64945C`:
     // `[esi+0x14] = byte2`), so the stream starts at byte 2, not byte 3.
     let mut bits = Bits::new(&input[2..]);
     let mut out: Vec<u8> = Vec::new();
@@ -295,7 +399,7 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, DclError> {
             }
         }
     }
-    Ok(out)
+    Ok((out, 2 + bits.pos))
 }
 
 /// Match distance (`0x649830`): peek class, consume its code bits, then
@@ -355,6 +459,61 @@ mod tests {
         assert!(has(b"VER#"), "no VER# section");
     }
 
+    /// The game's own decode of `conquests.biq`, byte-for-byte.
+    ///
+    /// `save1.tmp` is the temp file the loader writes while reading the
+    /// default rules (`0x5F76C0` inlines the DCL stream into it, then
+    /// `0x594290` parses that file). It was captured live under winedbg on
+    /// 2026-09-29 (`/tmp/civ3dbg/save1.tmp`, 209 222 B) and this decode
+    /// compares equal to it byte for byte. The whole-file byte sum pins the
+    /// distance handling, which is what the old mask bug corrupted.
+    const BIQ_BYTE_SUM: u64 = 0x56_866f;
+
+    #[test]
+    fn conquests_biq_matches_game_staging() {
+        let out = decompress(&read_biq("conquests.biq")).expect("biq decodes");
+        assert_eq!(out.len(), 209_222);
+        assert_eq!(out.iter().map(|&b| b as u64).sum::<u64>(), BIQ_BYTE_SUM);
+        // Resource names are IN the file; the older "conquests.biq GOOD is
+        // nameless and u16-framed" reading was an artifact of the mask bug.
+        assert!(out.windows(12).any(|w| w == b"GOOD_Horses\0"));
+        assert!(out.windows(10).any(|w| w == b"GOOD_Dye\0\0"));
+        assert!(out.windows(12).any(|w| w == b"TERR_Desert\0"));
+    }
+
+    #[test]
+    fn conquests_biq_section_walk() {
+        let out = decompress(&read_biq("conquests.biq")).expect("biq decodes");
+        let secs = sections(&out);
+        let walk: Vec<(String, u32, usize, usize)> = secs
+            .iter()
+            .map(|s| (s.tag_str(), s.count, s.rows_at, s.end))
+            .collect();
+        assert_eq!(
+            walk,
+            vec![
+                ("VER#".into(), 1, 12, 736),
+                ("BLDG".into(), 83, 744, 23_320),
+                ("CTZN".into(), 6, 23_328, 24_096),
+                ("CULT".into(), 6, 24_104, 24_656),
+                ("DIFF".into(), 8, 24_664, 25_656),
+                ("ERAS".into(), 4, 25_664, 26_736),
+                ("ESPN".into(), 9, 26_744, 28_868),
+                ("EXPR".into(), 4, 28_876, 29_052),
+                ("GOOD".into(), 26, 29_060, 31_452),
+                ("GOVT".into(), 8, 31_460, 36_036),
+                ("RULE".into(), 1, 36_044, 36_768),
+                ("PRTO".into(), 141, 36_776, 74_971),
+                ("RACE".into(), 32, 74_979, 184_667),
+                ("TECH".into(), 83, 184_675, 194_303),
+                ("TFRM".into(), 13, 194_311, 195_819),
+                ("TERR".into(), 14, 195_827, 199_145),
+                ("WSIZ".into(), 5, 199_153, 199_573),
+                ("FLAV".into(), 1, 199_581, 199_592),
+            ]
+        );
+    }
+
     #[test]
     fn conquests_biq_opens_with_magic() {
         let out = decompress(&read_biq("conquests.biq")).expect("biq decodes");
@@ -394,6 +553,23 @@ mod tests {
         };
         let out = decompress(&raw).expect("bic decodes");
         assert_scenario(&out);
+        // Second `00 06 84` file (so also hit by the old mask bug).
+        assert_eq!(out.len(), 111_308);
+        assert_eq!(out.iter().map(|&b| b as u64).sum::<u64>(), 0x31_0158);
+        assert!(out.windows(12).any(|w| w == b"GOOD_Horses\0"));
+        // Older framing: 22 goods, 12 terrains, `GAME` (not `FLAV`) last.
+        let secs = sections(&out);
+        let tags: Vec<String> = secs.iter().map(|s| s.tag_str()).collect();
+        assert_eq!(
+            tags,
+            vec![
+                "VER#", "BLDG", "CTZN", "CULT", "DIFF", "ERAS", "ESPN", "EXPR", "GOOD",
+                "GOVT", "RULE", "PRTO", "RACE", "TECH", "TFRM", "TERR", "WSIZ", "GAME"
+            ]
+        );
+        let count_of = |t: &[u8; 4]| secs.iter().find(|s| &s.tag == t).unwrap().count;
+        assert_eq!(count_of(b"GOOD"), 22);
+        assert_eq!(count_of(b"TERR"), 12);
     }
 
     #[test]

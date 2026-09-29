@@ -99,6 +99,64 @@ Slot numbers collide with the `Cell` vtable by design (different classes);
 a `0xC4`-shaped call on a view object is not `Cell::secondaryClass`. Tile
 data always enters through the view object's `+4` cell pointer.
 
+## Cultural border sheet (`Territory.pcx`, verified this session)
+
+One xref: the art-init routine pushes `str.ArtTerrainTerritory.pcx`
+(`0x728640`) at `0x4C6A41`. The sheet is 256x288 = **2 columns x 4 rows of
+128x72 cells** — the slice loop at `0x4C6A4B` steps x by `0x80` and y by
+`0x48` into sprite records of stride `0x2c` at object `+0x1859c`, so the
+cell height is 72, not the 64 a plain tile diamond needs. Each cell holds
+one tile diamond inset 4 px top and bottom (apex y=4, left and right
+vertices y=36, bottom vertex y=68), which puts the diamond's center on the
+cell's center: a border sprite needs no anchor offset.
+
+Transparency: right after loading, `0x4C6A8F`..`0x4C6AAA` call the sheet
+method `0x5FFED0` with (0, 0xff) and (1, 0xff), i.e. the art makes palette
+indices 0 and 1 transparent alongside the purple index 255. Index 1 is the
+gray (177,177,177) diamond that fills every cell, so the gray is an
+artist's tile template and only the ribbon survives; index 0 is unused.
+
+What survives is a dashed ribbon of beads on a thread, running along one
+edge of the cell's diamond. Each cell holds exactly 64 pixels of each of
+four colors: yellow `(236,255,0)` index 64 is the bead core, red
+`(255,0,0)` 65 the bead's rim, and `(255,163,255)` 249 with
+`(255,218,255)` 252 the thread and the bead's soft edge. All four paint in
+the **owner's color**, not fixed art: a game screenshot of an orange
+(Scandinavian) civ shows orange beads, a darker orange rim of the same
+hue, and a nearly neutral dark thread, so 64/65 are the color and its dark
+shade while 249/252 are a translucent black.
+
+The dash pattern along an edge repeats every 9 px of arc length (4 pixel
+rows): 3 px of thread, then 6 px of bead (rim, core, rim). One tile edge
+is 71.5 px, so a border run shows beads roughly every 9 px.
+
+| sheet row | edge of the diamond | map neighbor across it |
+|---|---|---|
+| 0 | upper-left (left vertex -> apex) | `(x-1, y)` |
+| 1 | upper-right (apex -> right vertex) | `(x, y-1)` |
+| 2 | lower-left (left vertex -> bottom vertex) | `(x, y+1)` |
+| 3 | lower-right (right vertex -> bottom vertex) | `(x+1, y)` |
+
+The mapping follows the clone's `tile_to_world`, which is Bevy world space
+with y up: `(x+1, y)` draws at `(+64, -32)`, down and to the right on
+screen, `(x, y+1)` down and to the left, and so on, so the neighbor sits
+across the edge named in the table. (An earlier revision read the offsets
+as y-down screen space and mirrored every row vertically, which left the
+outline as scattered dashes.) The ribbon always lies
+just **inside** the cell's diamond, which is why the game draws it only on
+the owned tile of a border and why a territory outline hugs its tiles from
+within.
+
+Column 1 is a second variant of the same four edges whose ribbon leaves
+the edge near the upper vertex and bulges into the tile. It is a
+hand-drawn arc, not a straight line: the row-0 pixels fit a circle of
+radius ~72 centered near the tile's bottom vertex. No screenshot of the
+game shows it, and a territory assembled from the straight column
+reproduces the game's zigzag at every corner, so what column 1 is for
+stays open. `tools/prep_assets.py borders` ships the four straight cells
+as `gen/borders/border_{yp,xp,xm,ym}.png` and asserts each ribbon lands in
+the quadrant its name claims.
+
 ## Blending (owned by [`blending.md`](blending.md))
 
 Display and seamless blending — sprite addressing `(sheet*81+cell)*44`,
@@ -113,3 +171,8 @@ road < pollution < FogOfWar), river variant selector, sheet-grid constants.
 The filename table is observed inventory; the stacking order is inferred
 from file roles, not disassembly. The renderer slot map above has no Rust
 counterpart (dispatch tables, not algorithms).
+
+`civ3-clone`'s counterpart is `src/borders.rs` (art, the per-edge rule,
+the sprite sync) with the plot model in `cities::{culture_level,
+culture_radius, territory}` and the prep stage `borders`. The straight
+column is what ships.

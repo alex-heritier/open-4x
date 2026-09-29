@@ -511,8 +511,80 @@ Record layout (`0x40` bytes): `+0x28 = [ebp+0x20] +
 
 Sibling `0x470A60` repeats the shape (SEH, `0x47B550` gate, phase-2 gate)
 with a `0x30` record and kind `0x0C`: the sequencer is a family of
-per-kind step executors, not one loop. The 8 callers' dispatch outward
-(which caller handles which phase) is still open.
+per-kind step executors, not one loop. Their callers are *producers*; the
+kind dispatch happens later, in the queue pump — see the turn sequencer
+section below.
+
+## Turn sequencer: record queue + kind dispatch (verified 2026-09-29)
+
+The two step executors do not run an action; they **create a record and
+commit it to a turn-slice-ordered queue**, which a pump drains in slice
+order. This is the turn-loop root `README.md` listed as open.
+
+Record (built by `0x47B420`, committed by `0x47B490(0, rec, 8)`): kind at
+`+0x04` (`0x11` = 17 from `0x4708B0`, `0x0C` = 12 from `0x470A60`), turn
+slice at `+0x28`/`+0x2C`, owner at `+0x30`, **unit index at `+0x34`**, unit
+`+0x24`/`+0x28` echoed at `+0x38`/`+0x3C`.
+
+Pump, inside the turn processor `0x468210` (`0x468CAA`-`0x468D2B`):
+
+```asm
+0x468cc7  mov edx,[esi+0x20]        ; current turn slice
+0x468cca  lea ebx,[esi+0x216c]      ; the queue
+0x468cd3  call 0x484260             ; pop next record with slice <= edx
+0x468cf2  call 0x46f8b0             ; execute it
+0x468d26  call 0x47b480             ; advance/retire it
+```
+
+`0x46F8B0(record)` is the kind dispatcher (`ret 4`, one arg):
+
+```asm
+0x46f8c0  mov  eax,[ebx+4]          ; kind
+0x46f8c4  add  eax,-11
+0x46f8c9  cmp  eax,0x68             ; 104
+0x46f8cc  ja   0x47054c             ; default handler (epilogue only)
+0x46f8d2  jmp  dword [eax*4 + 0x47055c]
+```
+
+So the 105-entry dword handler table at **`0x47055C`** covers kinds 11..115
+(default `0x47054C`), and every entry is a 4-instruction thunk
+(`push ebx; mov ecx,esi; call <body>`). Sampled bodies:
+
+| kind | handler | body | what the body does |
+|---|---|---|---|
+| 12 | `0x46F8EE` | `0x476330` | faction upkeep loop (`call 0x469B70`, budget 500, `0x1064` frame) |
+| 17 | `0x46F9B8` | `0x476FB0` | resolve `[record+0x34]` as a **unit index** in table `0xA52E84`/count `0xA52E90`, `lea unit,[entry-0x1C]`, then act |
+| 18, 19, 29, 31, 32, 33 | `0x47054C` | — | not implemented (default) |
+
+Kind 17's body reading the unit index back out of the record is the proof
+that the executors only *enqueue* per-unit work: `0x4708B0` writes the unit
+index into `+0x34`, and the pump's handler resolves it later.
+
+The companion **eligibility byte table** is `0x470A10` (76 entries, indexed
+`kind - 9`, read at `0x4709CA`): `0` = the step may commit on its own,
+`1` = only when `[ebp+0x2060] > 2`. That agrees with the kind list above
+(9, 10, 14, 17, 18, 19, 29, 31, 32, 33, 81, 82, 84 are the `0` entries).
+
+**Producers** (12 sites in 5 routines — the "8 callers" question):
+
+| routine | step sites | upkeep sites | reached from |
+|---|---|---|---|
+| `0x468210` | `0x46F598` | `0x46F522` | thunk `0x4681F0` (scalar-deleting-destructor shape) |
+| `0x4742B0` | `0x476F4C`, `0x477055`, `0x4772E8`, `0x4775E4` | `0x4763AF` | `0x4E9F9C`, inside the `MP_ABANDON_CITY_TIMER` event path |
+| `0x477E90` | `0x478211`, `0x478300` | — | thunk `0x46FB9C`, slot 17 of the table above |
+| `0x4ACF40` | `0x4B90B5` | — | 6+ callers; the city-production processor (`CityProd`, `CITYPRODUCE`, `IMPROVEMENT_COMPLETE`, `WONDERCHANGE`) |
+| `0x446840` | — | `0x467F92` | `0x476571`, `0x47665D`, `0x4F5D45`, `0x4F5F9D` |
+
+There is no phase table at these sites: each routine iterates its own
+population (units / one faction / the production queue) and steps it. One
+site does pick between executors: `0x46F596` calls `0x4708B0` when
+`[unit+0x64] != 0`, else `0x470700` (a third executor with 8 callers of its
+own).
+
+Still open: semantic names for `0x468210`, `0x4742B0`, `0x477E90` and
+`0x446840` (they read as the turn processor, an event-driven city/unit
+processor, a table-dispatched processor, and a faction/upkeep driver), and
+what `[unit+0x64]` selects.
 
 ## Next targets (concrete)
 
@@ -525,11 +597,22 @@ per-kind step executors, not one loop. The 8 callers' dispatch outward
    founding-gate caller `0x5B9F90` is order *execution* (`push
    0x20000002; call 0x5C1AD0`, then `0x4E69D0` commit), not site
    choice. The scorer (where to send the settler) is still open.
-3. Turn-step executor `0x4708B0`: mapped (section above), including the
-   neutered `0x46F7D0` stub and the 13 committable kinds. Sibling
-   `0x470A60` mapped (upkeep executor section above); `0x6389DD`
-   reseed outward mapped (reseed section above). Remaining: the 8
-   callers' outward dispatch (which caller drives which phase/kind).
+   New anchors (2026-09-29): the AI actually **founds** through the order
+   gate `0x5C1AD0` with id `0x2000_0002` at `0x46A9A8` (after
+   `0x46BE30`) and `0x470D02` (inside the turn processor `0x468210`), and
+   the AI's *goto* issuer is `0x4225FB` (id `4`, gated on
+   `[unit+0x64] != 1`). Those name the *commit* points; the *where* is still
+   decided upstream.
+   The PRTO row's AI-strategy bits are now bit-mapped (`editor.md` "Units
+   page"): `row+0x8c` bit 0 `Offense`, 3 `Explore`, 12 `Terraform`,
+   13 `Settle`, 14 `Leader`, … — use them when reading the scorer that
+   picks a settler's destination.
+3. Turn-step executor `0x4708B0`: DONE (section above), including the
+    neutered `0x46F7D0` stub, the 13 committable kinds and the caller map.
+    Sibling `0x470A60` mapped; `0x6389DD` reseed outward mapped (reseed
+    section above). The record queue + kind dispatch is mapped too (turn
+    sequencer section). Remaining: semantic names for the four producer
+    routines and what `[unit+0x64]` selects.
 
 ## Reference implementation
 

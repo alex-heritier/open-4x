@@ -111,28 +111,56 @@ overrules raw disassembly.
   tables live in heap singletons (`0x9Cxxxx`, `0xA5xxxx`), not file-backed
   sections. Do not expect them in the image.
 
-## Dynamic tracing
+## Dynamic tracing (live debugging the running exe)
 
-Full runbook: `reverse-engineering/dynamic-tracing.md`. The settled mechanics:
+Full trace specs: `reverse-engineering/dynamic-tracing.md`. The mechanics
+below are settled and load-bearing; follow them exactly.
 
 - Runtime: `.runtime/Wine Staging.app/.../bin/wine` (Staging 11.16),
   prefix `.civ3-prefix/`, game dir `civ3-gog/app/Conquests/`.
   Snapshot or copy the prefix before running; the game writes saves.
-- Launch the game *under* `winedbg` from the start
-  (`winedbg ./Civ3Conquests.exe`), stdin on a held-open fifo, stdout to a
-  log. While the debuggee runs, queued commands execute at the next stop.
+  Image base is `0x400000`: static VAs are runtime VAs.
+- Launch the game *under* `winedbg` from the start, stdin on a
+  held-open fifo, stdout to a log. `scripts/live_dbg.sh` does this:
+  `sh live_dbg.sh launch <tag>` (background it), then
+  `sh live_dbg.sh send <tag> 'break *0xADDR\ncont\n'` per batch.
+  While the debuggee runs, queued commands execute at the next stop.
+  A non-held fifo EOFs winedbg the moment it stops and the debugger
+  silently exits, stranding the game.
 - Never attach: `lldb -p` is denied by macOS policy, `winedbg attach`
-  page-faults in wow64 glue. First launch under winedbg can crash pre-menu;
-  retry.
-- winedbg quirks: `display` auto-print silently fails, use explicit `x` and
-  `info reg` per stop or bulk `stepi` traces. Conditional breakpoints with
-  `&`/`==` are rejected. Breakpoints stall save loads, so `disable` them to
-  let a load finish. `bt` needs args; module list is `info share`.
-- Drive the GUI with foreground clicks/keys plus `screencapture -l
-  <window-id>`; `press_key return` beats clicks for dialogs.
+  page-faults in wow64 glue and the stop is unresumable (`cont`
+  re-faults, `detach` suspends threads, `quit` kills the game).
+  First launch under winedbg often crashes pre-menu; `wineserver -k`
+  and retry with a fresh tag.
+- **Never `cont` from an enabled breakpoint.** winedbg emulates the
+  breakpoint instruction to step over it, chokes on unhandled opcodes,
+  and resumes with a garbage EIP (data address) into an illegal
+  instruction. Per stop: capture (`info reg` + `x/Nx` dumps), then
+  `stepi` once past the site and `cont` (bp stays armed), or
+  `disable N` + `cont` (+ `enable N` when it must fire again).
+  Break on post-`call` instructions (e.g. post-`fopen`), never on the
+  `call` itself.
+- winedbg dialect: `x ADDR` prints ONE dword; use `x/Nx` for dumps
+  (`x/8x $ebx` for a path string). Register expressions resolve
+  (`x $esi+0x3ccc`). `info reg` (whole dump; per-register is
+  rejected). `display` auto-print silently fails. Conditional
+  breakpoints with `&`/`==` are rejected. `bt` at a stop is often
+  garbage (argument bytes as return address): read args and registers,
+  not the backtrace. Module list is `info share`. `x/s` untested.
+- Settled breakpoint sites (`GOOD` load, verified live 2026-09-29):
+  `*0x5942CF` reader post-`fopen` (`EAX` = `FILE*`, path in `EBX`,
+  mode at `[ESP+8]`); `*0x5945B3` GOOD loop exit (`ESI` = reader,
+  live table at `[ESI+0x3CCC]`, `EDI` = the GOOD stream's `FILE*`,
+  `EBP` = count, `EBX` = 92xcount); `*0x5970AD` writer post-`fopen`
+  (path in `EBP`, `FILE*` in `EAX`). Open trace sites: river
+  `*0x57FEE4`, combat `0x5BBBC0`, settler `0x5C1AD0` / `TUT_*`.
+- There is no headless load: CLI save arguments are ignored, so every
+  trace needs GUI driving (Load Game dialog) by a human or the CUA
+  driver. `press_key return` beats clicks for dialogs. Never
+  foreground-drive while the user works in another window.
 - Record results back into the owning system file with addresses, then
-  extend the Rust module to match. Headless CI cannot do this; it needs a
-  display plus the GOG assets on a Mac.
+  extend the Rust module to match. Headless CI cannot do this; it needs
+  a display plus the GOG assets on a Mac.
 
 ## Pixel and asset forensics
 
@@ -242,6 +270,8 @@ python3 $S/scans.py pushes GOOD           # 68 push-imm refs
 python3 $S/scans.py tags                  # 3D cmp FOURCC inventory
 python3 $S/scans.py slots                 # indirect-call slot census
 python3 $S/scans.py buckets               # 64KB string clustering
+sh $S/live_dbg.sh launch 7               # game under winedbg (background it)
+sh $S/live_dbg.sh send 7 'break *0x5942cf\ncont\n'
 cd civ3-clone/reverse-engineering/rust && cargo test --release
 ```
 
@@ -255,6 +285,9 @@ cd civ3-clone/reverse-engineering/rust && cargo test --release
 - `scripts/scans.py`: stdlib-only `calls`/`pushes`/`tags`/`slots`/`buckets`
   scans over any PE32 exe (`--exe` overrides the default search).
 - `scripts/r2q.sh`: quiet r2 one-liner wrapper (no color, no WARN lines).
+- `scripts/live_dbg.sh`: `launch <tag>` runs the game under winedbg with
+  a held-open fifo (`/tmp/civ3dbg/in<tag>`, log `/tmp/civ3dbg/log<tag>`);
+  `send <tag> 'cmd\n...'` writes one command batch; `tail <tag>` follows.
 - `re/tools/`: `pe.py`, `xrefs.py`, `relx.py` on `re/.venv` (needs the venv;
   `xrefs.py` undercounts, prefer `scripts/scans.py calls`).
 - `re/allstr.txt`, `re/strings_all.txt`: string dumps for census greps.

@@ -1584,7 +1584,7 @@ at VA `0x739B10`.
 
 ### 15.4 What is not solved
 
-**The `.biq` header framing.** The file begins `00 06 84 24 19 82 C5 4A …`. Taking
+**The `.biq` header framing.** ~~The file begins `00 06 84 24 19 82 C5 4A …`. Taking
 the first three bytes as the header gives mode 0 (stored) and dict bits 6, but
 byte 3 would then be the first output byte and it is `0x24`, not the `BICQ` magic
 that `0x594290` requires. No offset in the first 20 bytes yields a valid
@@ -1592,7 +1592,13 @@ mode/window/mask triple with the right magic, and the file has no section tags a
 all, so it is definitely compressed.
 
 `work/dcl.py` is a faithful reimplementation of the decompressor, complete except
-for this framing question. It is not yet usable end to end.
+for this framing question. It is not yet usable end to end.~~
+
+**SOLVED** in `biq.md` (and corrected on 2026-09-29): the three-byte header
+is `mode / dict_bits / <first stream byte>` and the bitstream starts at byte
+2. The "no section tags" observation was an artifact of the wrong distance
+mask (`biq.md` correction): the decoded file is a normal tag-plus-count
+section list from offset 4.
 
 ### 15.5 Why the `.biq` matters, and what it does not block
 
@@ -1673,35 +1679,105 @@ the existing pipeline.
    three-byte header with the bitstream starting at file byte 2; both
    shipped scenario files decode end to end. What remains is the GOOD/TERR
    variable-length file-row parse, not the container framing.
+
+   **Follow-up (2026-09-29): the mask was wrong too.** Init derives the
+   distance mask from `dict_bits`, not from the third byte (`0x649487`-
+   `0x649492`); reading the third byte corrupted every `00 06 84` file
+   (all Conquests `.biq`s) while leaving `EGYPT.SAV` (`00 06 86`)
+   accidentally correct. Fixed in `rust/src/dcl.rs`; the decode is now
+   byte-identical to the game's own `save1.tmp`. The GOOD/TERR file rows
+   are length-prefixed `[u32 len][body]` (26 GOOD rows, TERR with its
+   allow-mask) — see `biq.md` and `resources.md`.
 3. **The river system.** `byte[cell+5]` (slot 38) is confirmed as the render
    path's per-tile mask getter, with the overlay gate and table `0xA53BC8`
    dumped live (`rivers.md`); the render path lives at `0x57Fxxx/0x580xxx`.
    Still open: which value (mask low nibble vs `[cell+0x2C]` nibbles)
    selects the river segment — one live trace (`dynamic-tracing.md` Q1).
-4. **The `this->[0x3C]` allocation size** in `0x5eb580` — reads use map-sized
-   indices but the caller's `malloc` looks like `numPlayers * 2`.
-5. **`0x5D16A0` / the `Map` vtable base.** The complete-object vtable at `0x670120`
-   (41 entries) overlaps the `numPlayers` field at `+0x40`, which is impossible for
-   a single MSVC object. The table actually used at run time is most likely the
-   derived table at `0x6707D0`. Slot *roles* above were established from behaviour
-   and hold either way.
-6. **The semantic mapping of the six option fields** onto the UI labels. `[0x20]`
-   (0..4) and `[0x28]` (0..2, "None/Normal/Plentiful") are confident, `[0x18]`
-   (0..2, continent-balance behaviour) is the Landmass slider, and the remaining
-   four are ordered but not individually confirmed.
-7. **The meaning of `vfunc(0xb8)`** (`word[cell+0x1e]`). It is *written* by
-   `finalizeMap` as a continent id and *read* by the resource and region stages as a
-   terrain grouping key. Both readings are consistent only if the id is reused as a
-   partition label after `finalizeMap` has run — the placement stages all run after
-   it, so that is almost certainly the intent, but it is not proven.
-   Supporting read: the `0x5f1ce0` flood requires `0xB8` equality between
-   center and neighbour (§11.5), a third consumer treating it as a grouping
-   key. The write side (`finalizeMap` numbering) is the unproven half.
-8. **The three resource-class predicates** `0x5e3700` / `0x5e3730` / `0x5e3720`
-   gate the three placement blocks in `0x5f22a0`; their UI meaning is unidentified.
-9. **The meaning of the `0x80000` marker** in `0x5eeee0`, and of the `+0x16C` /
-   `+0x170` civ lists. They are very likely the engine's barbarian-camp list and
-   settler-start list, but that is inference.
-10. **Whether the `>= 32` civ guard** on `0x5f21b0` and block 3 of `0x5f22a0` is a
-    multiplayer-era leftover or a genuine 32-player feature. As written, both are
-    no-ops in every normal Civ3 game.
+4. ~~**The `this->[0x3C]` allocation size**~~ ~~in `0x5eb580`~~ **SOLVED
+   (2026-09-29): both arrays are per-cell and `[+0x40]` is the cell count.**
+   `0x5EB5E8`: `[+0x38] = malloc(2 * vfunc(0x88)())`, zero-filled;
+   `0x5EB623`: `ax = u16[+0x40]`, `[+0x3C] = malloc(2 * ax)`, filled with
+   `0xFFFF`. The same u16 is the **loop bound of the cell iteration** in the
+   continent pass (`0x5EB824`: `cmp ax,bp; jbe end`, body calls
+   `vfunc(0x34)(i)` to fetch cell `i`), so it is the cell count (`W/2 * H`),
+   not `numPlayers * 2`. Both arrays are 2 bytes per cell.
+5. **`0x5D16A0` / the `Map` vtable base** — **PARTLY SOLVED (2026-09-29):**
+   both tables are real and belong to different classes, and the *accessor*
+   table is `0x670120`:
+   * `0x5D8A09` (`mov [esi],0x670120`, next to `push "wrld"` and
+     `mov [edi],0x67010C`) is a constructor called from `0x4C930B` on the
+     map-view object's `+0x3E40` sub-object.
+   * `0x5F3AE6` / `0x5F3BC9` install `0x6707D0`, zeroing `+0x3C` / `+0x14C`.
+   * `0x670120` carries the implementations: slot `0x88` = `0x5DC360`,
+     slot `0x8C` = `0x5D90D0` (the FOURCC list accessor `resources.md`
+     documents). In `0x6707D0` those same slots (+ `0x08/0x18/0x1C/0x20`) are
+     the CRT `_purecall` (`0x64A3E7`), so it is an interface copy for a
+     different class. The earlier guess ("`0x6707D0` is the live Map table")
+     is not supported. Remaining: which global (`0x9C3508` scenario /
+     `0x9C736C` world) holds which object.
+   The `+0x40` overlap worry is moot under item 4: `+0x40` is a u16 *data*
+   field (the cell count), not part of any vtable.
+6. **The semantic mapping of the six option fields** onto the UI labels —
+   **the label side is SOLVED (2026-09-29):** the world-setup screen reads the
+   option globals directly, in this label order (`0x586D20`-`0x586ECE`, the
+   `0x5878xx` cluster is the refresh twin):
+
+   | global | label |
+   |---|---|
+   | `0x9C7374` | `ActualWorldAridity` (the Climate slider) |
+   | `0x9C7378` | `BarbarianActivity` |
+   | `0x9C737C` | `ActualBarbarianActivity` |
+   | `0x9C7380` | `WorldLandmass` |
+   | `0x9C7384` | `ActualWorldLandmass` |
+   | `0x9C7388` | `WorldOceanCoverage` |
+   | `0x9C738C` | `ActualWorldOceanCoverage` |
+   | `0x9C7390` | `WorldTemperature` |
+   | `0x9C7394` | `ActualWorldTemperature` |
+   | `0x9C7398` | `WorldAge` |
+   | `0x9C739C` | `ActualWorldAge` |
+   | `0x9C73A0` | `WorldSize` **and** `ActualWorldSize` (one global) |
+
+   Remaining: tie each global to the map object's option fields (`[+0x18]`,
+   `[+0x20]`, `[+0x28]`, …) by following the copy from global to field.
+7. **The meaning of `vfunc(0xb8)`** (`word[cell+0x1e]`) — **write side SOLVED
+   (2026-09-29):** the slot pair is `0x5EAAF0` (getter, `0x6701C8+0xB8`) and
+   `0x5EACA0` (setter, `+0xE8`). The numbering pass is `0x5EB7D0`:
+
+   1. `malloc(2 * u16[+0x40])` — a per-cell queue array;
+   2. reset: for every cell `vfunc(0x34)(i`) → `cell->vfunc(0xE8)(-1)`
+      (`0x5EB83E`), i.e. every cell starts at `-1`;
+   3. flood fill: each cell that joins a region gets
+      `cell->vfunc(0xE8)(region_id)` (`0x5EB8C8`, `0x5EBA3B`, …) while the
+      region's cell counter increments.
+
+   So `cell+0x1E` is a *region id assigned by a flood fill over the cell
+   graph*, starting at `-1`; the same word is what `0x5BA0E4`/`0x5BA0F1`
+   compare to decide "same region ⇒ step allowed", what `0x5F1CE0` requires
+   to be equal across neighbours, and what the resource stages group by.
+8. ~~**The three resource-class predicates**~~ **SOLVED (2026-09-29): they test
+   the GOOD row's class field `+0x3C`** (see `resources.md` for the file
+   layout): `0x5E3720` = `cls == 1` (luxury), `0x5E3730` = `cls == 2`
+   (strategic), `0x5E3700` = `cls == 1 || cls == 2` (not a bonus resource).
+   Their use in `0x5F22A0`: block 1 gates on luxury (`0x5F23CB`, skip target
+   `0x5F282E`), block 2 on strategic (`0x5F287D`, skip `0x5F2A44`), block 3 on
+   non-bonus (`0x5F2A93`, skip via the `0x5F2C06` loop advance) — the same
+   three values the editor's Good tab shows as bonus/luxury/strategic.
+9. **The `0x80000` marker** and the `+0x16C`/`+0x170` lists — **PARTLY
+   (2026-09-29):** the marker is a *cell property value*, written through the
+   cell setter slot `0xE0` (`0x5DA2A0`) as
+   `cell->vfunc(0xE0)(2, 0x80000, -1, -1)` — e.g. from the tiny cell method at
+   `0x5E9D95` (whole body: the call + `ret 4`) and from the mapgen loop site
+   `0x5EF5DB`-`0x5EF5EA`. Slot `0xE0` branches on the *low two bits of the
+   value* (`0x5DA2B0: test byte [esp+0x18],3`), so the argument packs a type
+   with the value. `+0x16C`/`+0x170` are two adjacent u32 arrays of the same
+   object, both indexed `[esi + idx*4 + 0x16C]`, the first reset to
+   `0xFFFFFFFF` at `0x5EF086`. Which property `0x80000` marks, and which
+   two lists these are (the camp/settler-start reading stays inference),
+   still needs a live check: break on `0x5E9D95` and read the cell's fields.
+10. ~~**Whether the `>= 32` civ guard**~~ **SOLVED (2026-09-29): it is not a
+   civ guard at all — it is the cell count.** Both sites read
+   `word [esi+0x40]` (= the u16 cell count of item 4): `0x5F21B6`ff masks
+   `& 0xFFE0` and skips when the result is zero, i.e. "fewer than 32 cells";
+   block 3's loop bound is `cell_count >> 5` (`0x5F2C29: shr edx,5`), a
+   map-proportional extra-placement budget. So the guards scale placements
+   with map size — no 32-player feature, no MP leftover.

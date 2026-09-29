@@ -48,13 +48,14 @@ zero hits for `dsound`/`DSOUND`/`DirectSound`/`waveOut`/`PlaySound`).
 65 `.wav` + 21 `.mp3` filename strings cluster at file `0x32B342–0x32B689`
 (VA `0x72B342–0x72B6C9`); 11 `.text` push-imm refs into that table:
 
-* `0x536540`: `music.txt` playlist loader (HYPOTHESIS: function start —
-  `sub esp,0x20C; push esi`). Pushes `text\music.txt` (`0x72B60C`) with
-  `mov ecx,0x9C3508; call 0x598580` (standard art-loader shape), gates on
-  `call 0x64BE95` returning nonzero, then pushes `"r"` (`0x72B608`) +
-  `call 0x64B09F` (HYPOTHESIS: fopen-style open) and loops on
-  `call 0x64BE33` with `MAX_PATH 0x104` (HYPOTHESIS: readline) +
-  string helpers `0x601DE0`/`0x601DC0`.
+* `0x536540`: `music.txt` playlist loader — **confirmed 2026-09-29**: the
+  body opens with `sub esp,0x20C; push esi` and `push 0;
+  push "text\\music.txt" (0x72B60C); mov ecx,0x9C3508; call 0x598580`
+  (the standard art loader on the art singleton), then `push 4; push esi;
+  call 0x64BE95` and compares the result with `-1` — so the handle comes
+  straight from the asset loader and the `cmp eax,-1` gates the "no
+  playlist" path. Slot positions of `"r"` (`0x72B608`) + `0x64B09F`
+  (open) and `0x64BE33` (`MAX_PATH 0x104` readline) are as recorded.
 * `0x537363–0x5374F9`: 9 pushes of `Sounds\Ambience Sfx\*.wav`
   (e.g. `Woodlark.wav` at `0x72B6BC`) — ambience table consumer,
   function start open.

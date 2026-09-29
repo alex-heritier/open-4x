@@ -97,6 +97,12 @@ child-reported.
   `GCON_Moods` (`0x4200CF…`).
 * Culture advisor UI: `CULTURE_ADVISOR*` + `cultureometer.pcx` pushed
   at `0x4FA5BD…` (`0x4F` thin bucket).
-* Open: per-tile gross summation, mood engine `0x4BE440`, slider
-  dialog writer, trade-route income, palace-as-capitalIdx only (no
-  separate palace flag found).
+* `0x4BE440` is a **per-city pass, not a free-standing mood solver**
+  (2026-09-29): `this` is a city (`[this+0x138]` compared against the
+  global `[0x9C72D4]` — a turn-like counter — and an array at `+0xDC`
+  with count `+0xEC` is iterated). Sole caller `0x4BEB15`. So the mood
+  math proper is inside that loop, not in the head; the "mood engine"
+  label should be narrowed to "per-city mood/happiness update".
+* Open: per-tile gross summation, the mood loop inside `0x4BE440`,
+  slider dialog writer, trade-route income, palace-as-capitalIdx only
+  (no separate palace flag found).

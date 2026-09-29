@@ -144,9 +144,13 @@ for gameplay randomness, worker auto-mode.
   correct `buildings-small.pcx` cells (32-px grid). The screen rebuilds only
   when the city, menu or its radius tiles change.
 - `CIV3_SCRIPT` input driver for unattended captures (`src/script.rs`).
-- Open: `conquests.biq` decodes to corrupt records past the first few BLDG
-  entries (names cut, zero lengths), so rule numbers stay hardcoded; Civ3's
-  Worker pop cost and the governor's food-first weighting are unverified.
+- Open (partly resolved 2026-09-29): rule numbers stay hardcoded. The old
+  "`conquests.biq` decodes to corrupt records" note was a `.biq` decode bug
+  (`reverse-engineering/biq.md`): the file now parses cleanly and carries
+  the GOOD names/frequencies and the 14 TERR resource allow-masks, so the
+  hardcoded tables can be replaced by the real rules — that wiring is not
+  done yet. Civ3's Worker pop cost and the governor's food-first weighting
+  are still unverified.
 
 ### Civ3 map HUD and selection (landed)
 
@@ -165,3 +169,100 @@ chosen from the four vertex terrains (cell = (3S+E)*9 + 3W+N; see
 `reverse-engineering/blending.md` update). Ice keeps its unblended art;
 overlays (hills, forest, mountains) are unchanged. City screen uses the
 same cells. Deviations: vertex priority and sheet selection are inferred.
+
+### Civ3 city panel (landed)
+
+The city screen now presents Civ3's own city panel rather than a bespoke
+layout: the top bar carries the civ's strategic resources (one count per
+good in the workable radius of the cities) and the city's readout (name,
+founded turn, treasury, government, population, turn, and culture with its
+next border expansion and powers-of-ten total), plus the previous/next
+city arrows and the close button from `cityMgmtButtons.pcx` (three states
+each, hover/press art via `update_panel_buttons`). The city's land stays in
+the middle with the citizen heads along the bottom (`popHeads.pcx`), and
+the bottom panel holds the improvements list (Palace for the capital, then
+each owned building with its culture notes, upkeep figure and happy face),
+luxuries by source count, the list's scrollbar, pollution, the garrison,
+and the production, food and commerce rows: one icon per unit of per-turn
+output, commerce split into tax, science and luxury (Civ3's 50/50/0, each
+share rounded down), the food box and granary grids, the current build's
+shield grid, and Civ3's production button with its "Complete in N turns".
+The prep `cities` stage also bakes the fade bars' Alpha sheets into the
+alpha channel and crops the scrollbar from `Art/scroll.pcx`.
+
+Model pieces added as the panel's data sources: `cities::tile_commerce` /
+`city_commerce` (water yields commerce, roads add one, the city tile always
+one), `commerce_split`, `Production::{upkeep, culture, happy}`,
+`City::{culture, founded}` with `culture_thresholds` powers of ten, and a
+`Treasury` that accumulates the tax share each turn.
+Deviations to revisit: no happiness model, so luxury rows show one face per
+pair of sources; population shows the citizen count rather than Civ3's
+scaled figure; the calendar is the turn number; government is fixed to
+despotism; the scrollbar is chrome, since at most four improvements exist.
+Verified: `cargo test` 78/78, `cargo build` clean, and screenshots of
+Kyoto (granary, roads, garrison, culture box, shield grid) plus the top
+bar's arrows walking Kyoto <-> Osaka.
+
+### Cultural borders (landed)
+
+Cities now claim plots on the map and the map draws Civ3's dashed border
+ribbon around them. `cities::{culture_level, culture_radius, territory}`
+turn culture into a radius: level 1 (the founding state, culture < 10)
+reaches every tile within two tiles — the same 21 tiles the work radius
+has — and each further power of ten adds a ring, to Civ3's five-tile cap.
+The nearest city owns a tile; on a tie the city with more culture wins,
+then the older one, so ownership is stable frame to frame. `resources_owned`
+counts goods inside the real borders now instead of standing in the work
+radius, which is the same set until a city's culture passes 10.
+
+`src/borders.rs` draws a ribbon on a tile edge only when the tile is owned
+and the tile across that edge belongs to another city or nobody, which
+keeps the ribbon inside its own territory and gives two cities of one civ
+a line down the middle, the way Civ3 shows internal borders. Art is
+Civ3's own `Art/Terrain/Territory.pcx` (prep stage `borders`): the four
+straight cells of its 2x4 sheet, baked white and tinted with the civ's map
+color, `cities::CIV_BADGE` (Japan's white). Ribbons hide on never-seen
+tiles and the fog diamonds dim remembered ones; they sit above the
+improvement overlays and below units and cities.
+
+Deviations to revisit: the sheet's second column (a curved variant of each
+edge) is unused — no game screenshot shows it, and the straight column
+reproduces the game's zigzag at every corner; the shape of a growing
+border is Euclidean distance, which fits the 21-tile start and Civ3's
+first small expansion, but the later rings are unverified; water tiles are
+claimed by distance like land, with no coast rule.
+Verified: `cargo test` 83/83, `cargo build` clean, and screenshots of
+Kyoto's border at level 1 and again after 30 turns of culture, one ring
+further out.
+
+### Unit selection ring and the move preview (landed)
+
+Selection now looks like Civ3's. The selected unit wears the game's own
+dashed ellipse, `Art/Animations/Cursor/Cursor.flc` (prep stage `cursor`:
+31 frames of a 93x46 crawl, 175 ms each per `Cursor.ini`; the red under
+the dashes is Civ3's shadow, so it bakes to a translucent dark outline) —
+not the interface art, which has no selection sprite. `units::SelectionRing`
+loops those frames and `units::ring_follow` keeps it under the selected
+unit. A plain hover no longer draws a route: with a unit selected the tile
+cursor is the destination marker, so it only appears while a route is
+being aimed.
+`input::MovePreview` is the single source for that: the armed Go-to
+command previews under the pointer, and otherwise only a press held on a
+tile for `input::HOLD_SECS` (0.3 s) does — a quick click still just
+orders the move, and the preview follows the pointer while the button is
+down. The left button never pans the map, as in Civ3: panning is W/A/S/D
+and the wheel zoom (`input::camera_control`). The route line and the end
+marker (`units::selection_gizmo`) and the "path N steps, M
+turns" readout (`ui::update_hover_label`) both follow the preview, so
+they show for Go-to, for the held press, and never for a hover.
+
+Deviations to revisit: Civ3 also draws the selected unit's readout (moves
+left, home city) in its bottom-right box, which the clone already labels
+with the unit and its turns; the ring has no civ color, matching the
+game's white ellipse; the hold delay is a guess (0.3 s) set by feel; the
+ring's 4 dark notches are part of the FLC's frame and are left as drawn.
+Verified: `cargo test` 92/92 (7 hold/preview and 2 ring tests), `cargo build`
+clean, unattended captures of the plain selection, the held preview, the
+move after release and the armed Go-to preview, plus a live cliclick
+press-and-hold on the running game showing the route appear and the unit
+move on release.

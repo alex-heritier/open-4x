@@ -31,7 +31,14 @@ the desktop-capture fallback.
 
 ## Controls
 
-- Click: select unit, order move, open city. Right-click: move.
+- Click: select unit, order move, open city; the selected unit wears
+  Civ3's white selection ring. Right-click: move. Hold the left button on
+  a tile and the route appears after a moment — the same path line and
+  destination marker the Go-to button shows (G arms it, ESC cancels) —
+  and releasing orders the move. A plain hover shows no route, as in
+  Civ3.
+- W/A/S/D: pan the camera; wheel: zoom. The left button never pans, as in
+  Civ3, so a press and drag is only ever a move.
 - Unit action buttons float over the bottom of the map, as in Civ3; hovering one names the command
   and its key, unavailable ones are darkened.
 - Worker: R road, I irrigate, M mine, C clear forest/jungle. Road to road
@@ -56,5 +63,6 @@ shield boxes, Warrior/Settler/Worker production, Tokugawa splash, UI and
 unit sounds, the Asian peace music loop, plus goody huts (poppable for
 units, maps, or settlers), capturable barbarian camps, and 22 placed
 resources with bonus yields, worker improvements (roads, irrigation, mines,
-clearing), and city production of units and buildings with a queue. Out of
+clearing), city production of units and buildings with a queue, and cultural
+borders that grow a ring at each culture level. Out of
 scope: AI, tech, diplomacy, trade, combat, save/load, minimap.

@@ -14,7 +14,7 @@ cross-references it instead of duplicating it.
 | [`NOTES.md`](NOTES.md) | Map generation: 12-stage pipeline, fractal, `Cell` layout, PRNGs, tile record, `.biq` codec, open questions |
 | [`resources.md`](resources.md) | Resource placement stage `0x5f22a0` (`GOOD`/`TERR` data path) → `rust/src/resources.rs` |
 | [`rivers.md`](rivers.md) | River system (not a mapgen stage) and river art path → `rust/src/rivers.rs` |
-| [`graphics-terrain.md`](graphics-terrain.md) | Terrain art table, sprite inventory, sheet geometry, map-view renderer class → `rust/src/graphics.rs` |
+| [`graphics-terrain.md`](graphics-terrain.md) | Terrain art table, sprite inventory, sheet geometry, cultural border sheet, map-view renderer class → `rust/src/graphics.rs` |
 | [`blending.md`](blending.md) | Terrain display and blending: sprite addressing, neighbor masks, painter order, context variants → `rust/src/blend.rs` |
 | [`graphics-units.md`](graphics-units.md) | Unit `.ini` slot universe, FLC format sample → `rust/src/graphics.rs` |
 | [`graphics-city.md`](graphics-city.md) | City-view backgrounds, screen chrome, map-view cities → `rust/src/graphics.rs` |
@@ -29,7 +29,7 @@ cross-references it instead of duplicating it.
 | [`multiplayer.md`](multiplayer.md) | Multiplayer: mode global, net gates → `rust/src/net.rs` |
 | [`air.md`](air.md) | Air combat: move dispatch, bombard-move log stub → `rust/src/air.rs` |
 | [`media.md`](media.md) | Movies/victory media: intro gate, selectors, wonder art → `rust/src/media.rs` |
-| [`rust/`](rust/) | Reference implementation. 167 tests (`cargo test --release`: 160 lib + 5 bin + 2 doc) |
+| [`rust/`](rust/) | Reference implementation. 174 tests (`cargo test --release`: 167 lib + 5 bin + 2 doc) |
 
 ## Quick start
 
@@ -60,11 +60,22 @@ intended behaviour, or a subset like `--bugs contour-equality`.
   `rand`/`srand` pair (`0x64A20E`/`0x64A201`, state at owner `+0x14`) is never
   touched by map generation, which uses its own LCG (`0x60BA80`). See
   [`ai.md`](ai.md).
+* **The `.biq` codec is now validated against the game itself.** The PKWARE
+  DCL distance mask comes from `dict_bits`, not from the third header byte
+  (`biq.md` correction, 2026-09-29): the old reading corrupted every
+  `00 06 84` file — every Conquests `.biq` — while `EGYPT.SAV` happened to be
+  unaffected, so the `.sav` golden tests stayed green. With the fix, the
+  decode of `conquests.biq` is byte-identical to the temp file the game
+  itself writes while loading its rules, and the rules data (`GOOD` names and
+  frequencies, the 14 `TERR` resource allow-masks) can be read from the file
+  instead of hardcoded. See [`biq.md`](biq.md), [`resources.md`](resources.md).
 
 ## Scope (non-goals)
 
-* Combat odds math proper and the full turn-loop root are open; [`ai.md`](ai.md)
-  lists them as concrete next targets. Nothing else in this directory claims them.
+* Combat odds math proper is open; the turn-loop root is now mapped (record
+  queue pump `0x468210`, kind dispatch `0x46F8B0` + table `0x47055C`), leaving
+  only semantic names for its four producer routines. [`ai.md`](ai.md) lists both
+  as concrete next targets. Nothing else in this directory claims them.
 * Byte[cell+4] vs byte[cell+5] river-candidacy and the river-grained
   renderer mapping are marked `HYPOTHESIS` in [`rivers.md`](rivers.md) and
   `rust/src/rivers.rs`. Do not treat them as verified.

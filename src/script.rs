@@ -13,7 +13,10 @@
 //! Coordinates written `@dx,dy` are relative to the first city.
 //! - `city`: open the first city's screen.
 //! - `btn <name>`: press a city-screen button: `Change`, `Close`,
-//!   `Governor`, `CloseMenu`, `Pick:<item>`, `Queue:<item>`, `Unqueue:<i>`.
+//!   `Governor`, `CloseMenu`, `Prev`, `Next`, `Pick:<item>`,
+//!   `Queue:<item>`, `Unqueue:<i>`.
+//! - `hover <x>,<y>` / `unhover`: pin the map hover (no mouse in captures).
+//! - `down` / `up`: press and release the left mouse button.
 //! - `tile <rx>,<ry>`: click a tile of the open city's radius.
 //!
 //! Example: `CIV3_SCRIPT='20:key B;40:city;60:btn Change'`.
@@ -101,6 +104,8 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
         ScreenButton::CloseMenu => kind == "CloseMenu",
         ScreenButton::Pick(p) => kind == "Pick" && p.name() == arg,
         ScreenButton::Queue(p) => kind == "Queue" && p.name() == arg,
+        ScreenButton::PrevCity => kind == "Prev",
+        ScreenButton::NextCity => kind == "Next",
         ScreenButton::Unqueue(i) => kind == "Unqueue" && arg.parse() == Ok(*i),
     }
 }
@@ -111,6 +116,8 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
 pub fn drive_script(
     script: Option<ResMut<Script>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut pin: ResMut<crate::input::HoverPin>,
     mut turn_end: MessageWriter<TurnEnded>,
     mut selected: ResMut<Selected>,
     mut units: Query<(Entity, &mut Unit)>,
@@ -187,6 +194,13 @@ pub fn drive_script(
                     }
                 }
             }
+            "hover" => match coord(arg) {
+                Some(p) => pin.0 = Some(p),
+                None => eprintln!("script: bad hover {arg}"),
+            },
+            "unhover" => pin.0 = None,
+            "down" => mouse.press(MouseButton::Left),
+            "up" => mouse.release(MouseButton::Left),
             "city" => view.0 = city_ids.iter().next(),
             "btn" => {
                 match buttons.iter_mut().find(|(_, b)| button_matches(b, arg)) {
