@@ -6,12 +6,11 @@ use bevy::window::PrimaryWindow;
 
 use crate::audio::{self, GameAudio};
 use crate::cities::{City, CityView};
-use crate::features::{post, MessageBoard};
-use crate::improvements::{action_slot, can_irrigate, can_road, work_turns, Work, WorkAction};
+use crate::actionbar::{key_commands, GotoMode, UnitCommand};
 use crate::map::*;
 use crate::render::RevealAll;
 use crate::splash::SplashUp;
-use crate::units::{self, Selected, TurnEnded, Unit, UnitAnim, UnitType};
+use crate::units::{self, Selected, TurnEnded, Unit};
 
 #[derive(Resource, Default)]
 pub struct Hovered(pub Option<(i32, i32)>);
@@ -94,7 +93,13 @@ pub fn hover(
     map: Res<GameMap>,
     mut hovered: ResMut<Hovered>,
     mut gizmos: Gizmos,
+    ui: Query<&Interaction, With<Button>>,
 ) {
+    // The pointer is over a UI button: map picking is off.
+    if ui.iter().any(|i| *i != Interaction::None) {
+        hovered.0 = None;
+        return;
+    }
     let Ok((camera, gt)) = cam.single() else {
         return;
     };
@@ -164,13 +169,35 @@ pub fn orders(
     mut view: ResMut<CityView>,
     audio: Res<GameAudio>,
     splash: Res<SplashUp>,
-    mut board: ResMut<MessageBoard>,
+    mut goto: ResMut<GotoMode>,
+    mut cmds: MessageWriter<UnitCommand>,
 ) {
     if view.0.is_some() || splash.0 {
         return;
     }
+    if keys.just_pressed(KeyCode::Escape) {
+        goto.0 = false;
+    }
+    for c in key_commands(&keys) {
+        cmds.write(c);
+    }
+    // V: open the city under the selected unit.
+    if keys.just_pressed(KeyCode::KeyV) {
+        let at = selected.0.and_then(|s| units.get(s).ok()).map(|(_, u)| (u.x, u.y));
+        if let Some((e, _)) = cities.iter().find(|(_, c)| Some((c.x, c.y)) == at) {
+            view.0 = Some(e);
+            audio::sfx(&mut commands, &audio, "City View");
+        }
+    }
     if buttons.just_released(MouseButton::Left) && !drag.moved {
         if let Some((x, y)) = hovered.0 {
+            if goto.0 {
+                goto.0 = false;
+                if let Some(s) = selected.0 {
+                    order_with_sfx(&mut commands, &audio, &map, &mut units, s, (x, y));
+                }
+                return;
+            }
             let stack: Vec<Entity> = units
                 .iter()
                 .filter(|(_, u)| u.x == x && u.y == y)
@@ -192,6 +219,7 @@ pub fn orders(
                 };
                 if let Ok((_, mut u)) = units.get_mut(next) {
                     u.fortified = false;
+                    u.sentry = false;
                 }
                 selected.0 = Some(next);
                 audio::sfx(&mut commands, &audio, "Select");
@@ -221,81 +249,6 @@ pub fn orders(
             if let Ok((_, u)) = units.get(s) {
                 let dest = (map.wrap_x(u.x + dx), (u.y + dy).clamp(0, map.h - 1));
                 order_with_sfx(&mut commands, &audio, &map, &mut units, s, dest);
-            }
-        }
-        if keys.just_pressed(KeyCode::KeyF) {
-            if let Ok((_, mut u)) = units.get_mut(s) {
-                let warrior = u.utype == units::UnitType::Warrior;
-                u.fortified = true;
-                u.moves = 0;
-                u.path.clear();
-                u.work = None;
-                u.anim = UnitAnim::OneShot {
-                    slot: "FORTIFY",
-                    t: 0.0,
-                };
-                if warrior {
-                    commands.spawn(AudioPlayer(audio.fortify.clone()));
-                }
-            }
-        }
-        if keys.just_pressed(KeyCode::Space) {
-            if let Ok((_, mut u)) = units.get_mut(s) {
-                u.moves = 0;
-                u.path.clear();
-                u.work = None;
-            }
-        }
-        for (key, action) in [
-            (KeyCode::KeyR, WorkAction::Road),
-            (KeyCode::KeyI, WorkAction::Irrigate),
-        ] {
-            if !keys.just_pressed(key) {
-                continue;
-            }
-            let Ok((_, mut u)) = units.get_mut(s) else {
-                continue;
-            };
-            if u.utype != UnitType::Worker {
-                post(&mut board, "Only Workers can build improvements.");
-                continue;
-            }
-            if u.moves == 0 {
-                post(&mut board, "That unit has no moves left.");
-                continue;
-            }
-            let ok = match action {
-                WorkAction::Road => can_road(&map, u.x, u.y),
-                WorkAction::Irrigate => can_irrigate(&map, u.x, u.y),
-            };
-            if !ok {
-                match action {
-                    WorkAction::Road => post(&mut board, "A road cannot be built here."),
-                    WorkAction::Irrigate => {
-                        post(&mut board, "Irrigation needs fresh water or a chain.")
-                    }
-                }
-                continue;
-            }
-            u.work = Some(Work {
-                action,
-                turns_left: work_turns(action),
-            });
-            u.moves = 0;
-            u.path.clear();
-            u.fortified = false;
-            u.anim = UnitAnim::OneShot {
-                slot: action_slot(action),
-                t: 0.0,
-            };
-            let handle = match action {
-                WorkAction::Road => &audio.work_road,
-                WorkAction::Irrigate => &audio.work_irrigate,
-            };
-            commands.spawn(AudioPlayer(handle.clone()));
-            match action {
-                WorkAction::Road => post(&mut board, "Building road..."),
-                WorkAction::Irrigate => post(&mut board, "Building irrigation..."),
             }
         }
     }

@@ -81,6 +81,7 @@ pub struct UnitClipSet {
 #[derive(Resource, Default)]
 pub struct UnitArt {
     pub sets: HashMap<UnitType, UnitClipSet>,
+    pub font: Handle<Font>,
 }
 
 impl UnitArt {
@@ -118,7 +119,10 @@ impl UnitArt {
             }
             sets.insert(t, UnitClipSet { clips });
         }
-        Self { sets }
+        Self {
+            sets,
+            font: asset_server.load("gen/fonts/lsans.ttf"),
+        }
     }
 
     pub fn clip(&self, t: UnitType, slot: &str) -> Option<&Clip> {
@@ -137,6 +141,8 @@ pub struct Unit {
     pub path: VecDeque<(i32, i32)>,
     pub anim: UnitAnim,
     pub work: Option<Work>,
+    /// Sentried: skipped by auto-select like fortified, but not dug in.
+    pub sentry: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -206,8 +212,22 @@ pub(crate) fn spawn_unit(
                 path: VecDeque::new(),
                 anim: UnitAnim::Idle { t: 0.0 },
                 work: None,
+                sentry: false,
             },
         ))
+        .with_children(|c| {
+            c.spawn((
+                Text2d::new(""),
+                TextFont {
+                    font: art.font.clone(),
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.95, 0.4)),
+                Transform::from_xyz(16.0, 26.0, 0.1),
+                StackBadge,
+            ));
+        })
         .id()
 }
 
@@ -245,6 +265,27 @@ pub fn order_move(map: &GameMap, u: &mut Unit, dest: (i32, i32)) {
     }
 }
 
+/// Extra turns a unit needs to walk `path` (0 = arrives this turn),
+/// under the "any movement left may enter" rule.
+pub fn path_turns(
+    map: &GameMap,
+    moves_now: u8,
+    moves_max: u8,
+    path: &[(i32, i32)],
+) -> u32 {
+    let mut mv = moves_now;
+    let mut turns = 0;
+    for &(x, y) in path {
+        let cost = map.get(x, y).and_then(move_cost).unwrap_or(1);
+        if mv == 0 {
+            turns += 1;
+            mv = moves_max;
+        }
+        mv -= cost.min(mv);
+    }
+    turns
+}
+
 pub fn end_turn_units(
     mut events: MessageReader<TurnEnded>,
     mut turn: ResMut<Turn>,
@@ -274,10 +315,9 @@ pub fn drive_movement(map: Res<GameMap>, mut units: Query<(Entity, &mut Unit)>) 
             u.path.clear();
             continue;
         };
-        if cost > u.moves {
-            continue;
-        }
-        u.moves -= cost;
+        // Civ3 rule: any unit with movement left may enter, spending it all
+        // when the tile costs more than it has.
+        u.moves -= cost.min(u.moves);
         u.facing = facing_for_step(nx - u.x, ny - u.y);
         let from = tile_to_world(u.x, u.y);
         let to = tile_to_world(nx, ny);
@@ -387,34 +427,55 @@ pub fn refresh_visibility(mut map: ResMut<GameMap>, units: Query<&Unit>) {
     }
 }
 
-pub fn restack(mut q: Query<(Entity, &mut Unit, &mut Transform)>) {
-    let mut groups: HashMap<(i32, i32), Vec<Entity>> = HashMap::new();
-    for (e, u, _) in q.iter() {
-        groups.entry((u.x, u.y)).or_default().push(e);
-    }
-    for ((x, y), mut members) in groups {
-        members.sort();
-        let n = members.len();
-        for (slot, e) in members.iter().enumerate() {
-            let Ok((_, u, mut tf)) = q.get_mut(*e) else {
-                continue;
-            };
-            if !matches!(u.anim, UnitAnim::Idle { .. }) {
-                continue;
-            }
-            let pos = tile_to_world(x, y);
-            tf.translation.x =
-                pos.x + (slot as f32 - (n - 1) as f32 / 2.0) * 26.0;
-            tf.translation.y = pos.y
-                + if n > 1 {
-                    (slot % 2) as f32 * 10.0 - 5.0
-                } else {
-                    0.0
-                };
-            tf.translation.z = sprite_z(x, y, 4.0) + slot as f32 * 0.0001;
-        }
+/// Civ3 shows one unit per tile: the selected one, else the best
+/// defender, with a count badge for the rest.
+fn defender_rank(t: UnitType) -> u8 {
+    match t {
+        UnitType::Warrior => 3,
+        UnitType::Scout => 2,
+        UnitType::Settler => 1,
+        UnitType::Worker => 0,
     }
 }
+
+fn stack_tops(
+    units: &Query<(Entity, &Unit)>,
+    selected: Option<Entity>,
+) -> HashMap<(i32, i32), (Entity, usize)> {
+    let mut best: HashMap<(i32, i32), (Entity, usize, (bool, u8))> = HashMap::new();
+    for (e, u) in units.iter() {
+        let key = (Some(e) == selected, defender_rank(u.utype));
+        let entry = best.entry((u.x, u.y)).or_insert((e, 0, key));
+        entry.1 += 1;
+        if key > entry.2 || (key == entry.2 && e < entry.0) {
+            entry.0 = e;
+            entry.2 = key;
+        }
+    }
+    best.into_iter().map(|(k, (e, n, _))| (k, (e, n))).collect()
+}
+
+/// Keep stacked units on the tile center; the top unit sorts above.
+pub fn restack(
+    mut q: Query<(Entity, &Unit, &mut Transform)>,
+    selected: Res<Selected>,
+    stack_q: Query<(Entity, &Unit)>,
+) {
+    let tops = stack_tops(&stack_q, selected.0);
+    for (e, u, mut tf) in q.iter_mut() {
+        if !matches!(u.anim, UnitAnim::Idle { .. }) {
+            continue;
+        }
+        let pos = tile_to_world(u.x, u.y);
+        tf.translation.x = pos.x;
+        tf.translation.y = pos.y;
+        let top = tops.get(&(u.x, u.y)).is_some_and(|(t, _)| *t == e);
+        tf.translation.z = sprite_z(u.x, u.y, 4.0) + if top { 0.0005 } else { 0.0 };
+    }
+}
+
+#[derive(Component)]
+pub struct StackBadge;
 
 pub fn auto_select(
     units: Query<(Entity, &Unit)>,
@@ -440,16 +501,39 @@ pub fn auto_select(
 pub fn unit_visibility(
     map: Res<GameMap>,
     reveal: Res<RevealAll>,
-    mut q: Query<(&Unit, &mut Visibility)>,
+    selected: Res<Selected>,
+    stack_q: Query<(Entity, &Unit)>,
+    mut q: Query<(Entity, &Unit, &mut Visibility, Option<&Children>)>,
+    mut badges: Query<&mut Text2d, With<StackBadge>>,
 ) {
-    for (u, mut v) in q.iter_mut() {
-        let show =
-            reveal.0 || map.get(u.x, u.y).is_some_and(|t| t.visible);
-        *v = if show {
+    let tops = stack_tops(&stack_q, selected.0);
+    for (e, u, mut v, children) in q.iter_mut() {
+        let seen = reveal.0 || map.get(u.x, u.y).is_some_and(|t| t.visible);
+        let (top, n) = tops
+            .get(&(u.x, u.y))
+            .map(|(t, n)| (*t == e, *n))
+            .unwrap_or((true, 1));
+        // Moving units stay visible; idle stack members hide behind the top.
+        let moving = !matches!(u.anim, UnitAnim::Idle { .. });
+        *v = if seen && (top || moving) {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+        if let Some(children) = children {
+            for c in children.iter() {
+                if let Ok(mut t) = badges.get_mut(c) {
+                    let want = if top && n > 1 && !moving {
+                        format!("x{n}")
+                    } else {
+                        String::new()
+                    };
+                    if t.0 != want {
+                        t.0 = want;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -467,11 +551,36 @@ mod tests {
         assert_eq!(facing_for_step(1, 1), 2); // diagonal S
         assert_eq!(facing_for_step(-1, -1), 6); // diagonal N
     }
+
+    #[test]
+    fn path_turns_counts_turn_boundaries() {
+        let map = GameMap::generate();
+        let (sx, sy) = map.start;
+        // straight run over land tiles found near the start
+        let mut path = vec![];
+        for dx in 1..=3 {
+            if map.get(sx + dx, sy).and_then(move_cost).is_some() {
+                path.push((sx + dx, sy));
+            }
+        }
+        if path.len() == 3 {
+            let costs: u32 = path
+                .iter()
+                .map(|&(x, y)| map.get(x, y).and_then(move_cost).unwrap() as u32)
+                .sum();
+            assert!(path_turns(&map, 1, 1, &path) >= 2 || costs > 3);
+            assert_eq!(path_turns(&map, 0, 1, &[]), 0);
+        }
+        // a full-move unit with nothing left waits a turn for a 1-step path
+        assert_eq!(path_turns(&map, 0, 1, &[(sx, sy)]), 1);
+    }
 }
 
 pub fn selection_gizmo(
     selected: Res<Selected>,
     units: Query<&Unit>,
+    map: Res<GameMap>,
+    hovered: Res<crate::input::Hovered>,
     mut gizmos: Gizmos,
 ) {
     let Some(s) = selected.0 else {
@@ -494,5 +603,19 @@ pub fn selection_gizmo(
     }
     for (x, y) in u.path.iter() {
         gizmos.circle_2d(tile_to_world(*x, *y), 4.0, Color::WHITE);
+    }
+    // Preview of the route a click would take.
+    if let Some(dest) = hovered.0 {
+        if dest != (u.x, u.y) {
+            if let Some(p) = map.find_path((u.x, u.y), dest) {
+                let mut prev = tile_to_world(u.x, u.y);
+                for (x, y) in p {
+                    let cur = tile_to_world(x, y);
+                    gizmos.line_2d(prev, cur, Color::srgba(1.0, 1.0, 0.3, 0.8));
+                    prev = cur;
+                }
+                gizmos.circle_2d(prev, 8.0, Color::srgb(1.0, 1.0, 0.3));
+            }
+        }
     }
 }

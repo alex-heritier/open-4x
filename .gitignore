@@ -1,5 +1,7 @@
 target/
 assets/gen/
 .DS_Store
+shot-*.png
+/shots/
 __pycache__/
 *.py[cod]

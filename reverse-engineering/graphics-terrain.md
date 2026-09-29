@@ -17,7 +17,8 @@ tile-record fields the renderer consumes.
 |---|---|---|
 | `x` | `xtgc xpgc xdgc xdpc xdgp xggc xhills` | base land tiles (grass/plains/desert/tundra/hills variants) |
 | `w` | `wCSO wSSS wOOO` | water (coast/sea/ocean) |
-| `l` | `lxtgc lxpgc lxdgc lxdpc lxggc` (+`lwCSO lwOOO lwSSS` in Conquests/) | alternate/LM set |
+| `l` | none in base — full set in `Conquests/Art/Terrain/`: `lxtgc lxpgc lxdgc lxdpc lxggc lxdgp lwCSO lwOOO lwSSS` | alternate/LM set (expansion terrain) |
+| LM extras | `Conquests/Art/Terrain/` only: `LMForests LMHills LMMountains Volcanos(-snow/-forests/-jungles) marsh craters landmark_terrain EditFog x_victory` | landmark/volcano/marsh overlays |
 | overlays | `irrigation*.pcx roads.pcx railroads.pcx pollution.pcx goodyhuts.pcx` | improvements |
 | forests | `grassland/hill/mountain/plains/tundra forests.pcx`, `hill/mountain jungle.pcx` | cover per base |
 | rivers | `deltaRivers mtnRivers waterfalls.pcx` | river segments |
@@ -39,6 +40,11 @@ terrain class word (bits 12..15 = BIQ terrain id via `vfunc 0xC8`).
 ## Tile-sheet geometry (verified this session by decoding PCX headers + pixels)
 
 All sheets are 8-bit single-plane PCX. Diamonds are 128x64 px.
+Header dimensions re-verified 2026-09-29 via PCX header bytes 4..12
+(`xmin,ymin,xmax,ymax`): `xtgc`/`wCSO` 1152x576, `deltaRivers` 512x256,
+`roads` 2048x1024, `irrigation` 512x256, `goodyhuts` 384x192, `FogOfWar`
+1152x576, `pollution` 640x320, `railroads` 2048x1088, `waterfalls` 512x64 —
+every entry in the table below reproduces byte-exact from disk.
 
 | sheet | size | grid | tiles | reading |
 |---|---|---|---|---|
@@ -80,6 +86,12 @@ Object is large (fields out to at least `+0x3EB0`).
 Slot numbers collide with the `Cell` vtable by design (different classes);
 a `0xC4`-shaped call on a view object is not `Cell::secondaryClass`. Tile
 data always enters through the view object's `+4` cell pointer.
+
+## Blending (owned by [`blending.md`](blending.md))
+
+Display and seamless blending — sprite addressing `(sheet*81+cell)*44`,
+the neighbor-mask builder, painter's order, context variants — live in
+[`blending.md`](blending.md) and `rust/src/blend.rs`, not here.
 
 ## Reference implementation
 

@@ -49,6 +49,7 @@ pub struct Tile {
     pub resource: Option<u8>,
     pub road: bool,
     pub irrigation: bool,
+    pub mine: bool,
 }
 
 #[derive(Resource)]
@@ -236,6 +237,7 @@ impl GameMap {
                     resource: None,
                     road: false,
                     irrigation: false,
+                    mine: false,
                 });
             }
         }
@@ -326,6 +328,12 @@ pub fn yields(t: &Tile) -> (u8, u8) {
     if t.irrigation {
         f += 1;
     }
+    // Mines: +2 shields on hills/mountains, +1 on desert.
+    let s = if t.mine {
+        s + if t.relief == Relief::Flat { 1 } else { 2 }
+    } else {
+        s
+    };
     (f, s)
 }
 
@@ -438,6 +446,7 @@ mod tests {
             resource: None,
             road: false,
             irrigation: false,
+            mine: false,
         }
     }
 
@@ -550,5 +559,63 @@ mod tests {
             assert_eq!(world_to_tile(&map, p), Some((x, y)));
         }
         assert_eq!(world_to_tile(&map, Vec2::new(1e6, 1e6)), None);
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    #[test]
+    fn probe_biome_locations() {
+        let map = GameMap::generate();
+        println!("start={:?} seed={}", map.start, map.seed);
+        let mut show: Vec<(&str, i32, i32)> = vec![];
+        for y in (0..map.h).step_by(4) {
+            for x in (0..map.w).step_by(4) {
+                let t = &map.tiles[map.idx(x, y)];
+                let tag = match (t.base, t.relief) {
+                    (Base::Ocean, _) => "ocean",
+                    (Base::Ice, _) => "ice",
+                    (Base::Tundra, _) => "tundra",
+                    (_, Relief::Mountain) => "mtn",
+                    (_, Relief::Hill) => "hill",
+                    (Base::Desert, _) => "desert",
+                    _ => continue,
+                };
+                if show.iter().filter(|(t, _, _)| *t == tag).count() < 3 {
+                    show.push((tag, x, y));
+                }
+            }
+        }
+        for (tag, x, y) in &show {
+            let w = tile_to_world(*x, *y);
+            println!("{tag} tile=({x},{y}) world=({:.0},{:.0})", w.x, w.y);
+        }
+        let s = tile_to_world(map.start.0, map.start.1);
+        println!("start world=({:.0},{:.0})", s.x, s.y);
+        let (mut hills, mut mtns) = (0, 0);
+        for t in &map.tiles {
+            match t.relief { Relief::Hill => hills += 1, Relief::Mountain => mtns += 1, _ => {} }
+        }
+        println!("relief hills={hills} mountains={mtns}");
+        let mut lone = 0;
+        let mut lone_by_base = std::collections::HashMap::new();
+        for y in 0..map.h { for x in 0..map.w {
+            let b = map.tiles[map.idx(x, y)].base;
+            let same = map.neighbors(x, y).iter()
+                .filter(|(nx, ny)| map.tiles[map.idx(*nx, *ny)].base == b).count();
+            if same == 0 { lone += 1; *lone_by_base.entry(format!("{b:?}")).or_insert(0) += 1; }
+        }}
+        println!("lone tiles (no same-base neighbor): {lone} {lone_by_base:?}");
+        let mut first_mtn = None;
+        for y in 0..map.h { for x in 0..map.w {
+            if map.tiles[map.idx(x, y)].relief == Relief::Mountain && first_mtn.is_none() {
+                first_mtn = Some((x, y));
+            }
+        }}
+        if let Some((x, y)) = first_mtn {
+            let w = tile_to_world(x, y);
+            println!("first_mtn tile=({x},{y}) world=({:.0},{:.0})", w.x, w.y);
+        }
     }
 }

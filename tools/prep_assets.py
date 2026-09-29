@@ -3,7 +3,8 @@
 
 The game never reads PCX, FLC, or MP3. Run from civ3-clone/:
     python3 tools/prep_assets.py [stage ...]
-Stages: terrain units cities cityscreen splash audio all (default: all)
+Stages: terrain units cities cityscreen splash audio fonts features
+improvements unitbuttons (default: all)
 
 Engine color rules (verified by probe):
 - magenta (255,0,255) and palette index 255: transparent
@@ -498,6 +499,38 @@ RESOURCES = ["horse", "diamonds", "saltpetre", "coal", "oil", "iron",
              "fish", "cattle", "wheat", "gold"]
 
 
+BTN_SHEETS = [("NormButtons.PCX", "unitbtns_norm.png"),
+              ("rolloverbuttons.PCX", "unitbtns_over.png"),
+              ("highlightedbuttons.PCX", "unitbtns_down.png")]
+
+
+def stage_unitbuttons():
+    """Unit action buttons: gold discs, 32-px cells in an 8x10 grid.
+
+    The Conquests sheets override the base game's, and their cell order is the
+    `#UNIT_ACTIONS` order of `Conquests/Text/labels.txt` row-major (checked
+    against in-game screenshots: a Warrior's seven buttons are cells 0-6).
+    Magenta is transparent, the black surround is opaque: the disc shape comes
+    from ButtonAlpha.pcx, so alpha = sheet alpha * ButtonAlpha.
+    """
+    d = os.path.join(OUT, "ui")
+    os.makedirs(d, exist_ok=True)
+    alpha = Image.open(os.path.join(
+        GOG, "Conquests", "Art", "interface", "ButtonAlpha.pcx")).convert("L")
+    # Hard alpha: the sheet's own edge pixels are anti-aliased against its
+    # black surround, which glows against the bar's parchment background.
+    alpha = alpha.point(lambda v: 255 if v > 160 else 0)
+    for src, dst in BTN_SHEETS:
+        im = Image.open(os.path.join(
+            GOG, "Conquests", "Art", "interface", src))
+        im.load()
+        im = to_rgba(im)
+        im.putalpha(ImageChops.multiply(im.getchannel("A"), alpha))
+        im.save(os.path.join(d, dst))
+        print(f"  ui/{dst}: {im.size}")
+    print(f"unitbuttons: {len(BTN_SHEETS)} sheets")
+
+
 def stage_features():
     outdir = os.path.join(OUT, "features")
     os.makedirs(outdir, exist_ok=True)
@@ -583,7 +616,8 @@ def stage_improvements():
 STAGES = {"terrain": stage_terrain, "units": stage_units,
           "cities": stage_cities, "cityscreen": stage_cityscreen,
           "splash": stage_splash, "audio": stage_audio, "fonts": stage_fonts,
-          "features": stage_features, "improvements": stage_improvements}
+          "features": stage_features, "improvements": stage_improvements,
+          "unitbuttons": stage_unitbuttons}
 
 
 def main():

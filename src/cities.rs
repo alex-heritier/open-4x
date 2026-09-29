@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use crate::audio::{self, GameAudio};
+use crate::features::{post, MessageBoard};
 use crate::map::*;
 use crate::render::{sprite_z, RevealAll};
 use crate::splash::SplashUp;
@@ -27,49 +28,100 @@ pub const CITY_NAMES: [&str; 20] = [
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Production {
     Warrior,
+    Scout,
     Settler,
     Worker,
+    Barracks,
+    Granary,
+    Temple,
 }
 
 impl Production {
+    pub const ALL: [Production; 7] = [
+        Production::Warrior,
+        Production::Scout,
+        Production::Settler,
+        Production::Worker,
+        Production::Barracks,
+        Production::Granary,
+        Production::Temple,
+    ];
+
     pub fn cost(self) -> u8 {
         match self {
             Production::Warrior => 10,
+            Production::Scout => 20,
             Production::Settler => 30,
             Production::Worker => 10,
+            Production::Barracks => 30,
+            Production::Granary => 40,
+            Production::Temple => 30,
         }
     }
 
-    pub fn unit(self) -> UnitType {
+    pub fn unit(self) -> Option<UnitType> {
         match self {
-            Production::Warrior => UnitType::Warrior,
-            Production::Settler => UnitType::Settler,
-            Production::Worker => UnitType::Worker,
+            Production::Warrior => Some(UnitType::Warrior),
+            Production::Scout => Some(UnitType::Scout),
+            Production::Settler => Some(UnitType::Settler),
+            Production::Worker => Some(UnitType::Worker),
+            _ => None,
         }
+    }
+
+    pub fn is_building(self) -> bool {
+        self.unit().is_none()
     }
 
     pub fn name(self) -> &'static str {
         match self {
             Production::Warrior => "Warrior",
+            Production::Scout => "Scout",
             Production::Settler => "Settler",
             Production::Worker => "Worker",
+            Production::Barracks => "Barracks",
+            Production::Granary => "Granary",
+            Production::Temple => "Temple",
+        }
+    }
+
+    /// One-line effect blurb for the build list.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Production::Warrior => "Attack 1, Defense 1",
+            Production::Scout => "Moves 2, sees 2",
+            Production::Settler => "Founds a city (costs 2 pop)",
+            Production::Worker => "Builds improvements",
+            Production::Barracks => "Trains veteran land units",
+            Production::Granary => "Keeps half the food box on growth",
+            Production::Temple => "Adds culture; 1 upkeep",
         }
     }
 
     pub fn icon(self) -> &'static str {
         match self {
             Production::Warrior => "gen/ui/uniticon_warrior.png",
+            Production::Scout => "gen/ui/uniticon_scout.png",
             Production::Settler => "gen/ui/uniticon_settler.png",
             Production::Worker => "gen/ui/uniticon_worker.png",
+            _ => "",
         }
     }
 
-    pub fn cycle(self) -> Self {
+    /// Row of `buildings-small.png` (64x66 cells, 33px label margin).
+    pub fn building_row(self) -> Option<u32> {
         match self {
-            Production::Warrior => Production::Settler,
-            Production::Settler => Production::Worker,
-            Production::Worker => Production::Warrior,
+            Production::Barracks => Some(1),
+            Production::Granary => Some(2),
+            Production::Temple => Some(3),
+            _ => None,
         }
+    }
+
+    /// Sprite rect inside `buildings-small.png`.
+    pub fn building_rect(self) -> Option<Rect> {
+        let r = self.building_row()? as f32;
+        Some(Rect::new(34.0, 34.0 + r * 66.0, 97.0, 98.0 + r * 66.0))
     }
 }
 
@@ -82,6 +134,9 @@ pub struct City {
     pub food: u8,
     pub shields: u8,
     pub production: Production,
+    /// Items queued after the current build.
+    pub queue: Vec<Production>,
+    pub buildings: Vec<Production>,
     pub worked: HashSet<(i32, i32)>,
 }
 
@@ -204,6 +259,64 @@ pub enum CityEvent {
     Grew,
     Starved,
     Completed(UnitType),
+    Built(Production),
+}
+
+impl City {
+    pub fn has(&self, p: Production) -> bool {
+        self.buildings.contains(&p)
+    }
+
+    /// Items offered in the build list: every unit, plus buildings not
+    /// yet owned.
+    pub fn buildable(&self) -> Vec<Production> {
+        Production::ALL
+            .iter()
+            .copied()
+            .filter(|p| !(p.is_building() && self.has(*p)))
+            .collect()
+    }
+
+    /// Change the current build. Switching between unit and building
+    /// classes forfeits half the stored shields, as in Civ3.
+    pub fn change_build(&mut self, p: Production) {
+        if p == self.production {
+            return;
+        }
+        if p.is_building() != self.production.is_building() {
+            self.shields /= 2;
+        }
+        self.production = p;
+    }
+
+    /// Queue an item (buildings are queued at most once).
+    pub fn enqueue(&mut self, p: Production) -> bool {
+        if self.queue.len() >= 6
+            || (p.is_building()
+                && (self.has(p) || self.production == p || self.queue.contains(&p)))
+        {
+            return false;
+        }
+        self.queue.push(p);
+        true
+    }
+
+    pub fn dequeue(&mut self, i: usize) {
+        if i < self.queue.len() {
+            self.queue.remove(i);
+        }
+    }
+
+    /// After completing the current build: repeat units, or take the
+    /// next queued item. Buildings with an empty queue fall back to a
+    /// Warrior.
+    fn advance_queue(&mut self, done: Production) {
+        if !self.queue.is_empty() {
+            self.production = self.queue.remove(0);
+        } else if done.is_building() {
+            self.production = Production::Warrior;
+        }
+    }
 }
 
 pub fn process_city_turn(map: &GameMap, city: &mut City) -> Vec<CityEvent> {
@@ -212,7 +325,11 @@ pub fn process_city_turn(map: &GameMap, city: &mut City) -> Vec<CityEvent> {
     let food = city.food as i16 + net_food;
     if food >= FOOD_BOX as i16 {
         city.size += 1;
-        city.food = 0;
+        city.food = if city.has(Production::Granary) {
+            FOOD_BOX / 2
+        } else {
+            0
+        };
         governor_assign(map, city);
         events.push(CityEvent::Grew);
     } else if food < 0 {
@@ -227,13 +344,19 @@ pub fn process_city_turn(map: &GameMap, city: &mut City) -> Vec<CityEvent> {
     }
     city.shields += shields;
     if city.shields >= city.production.cost() {
-        city.shields = 0;
-        let unit = city.production.unit();
-        if city.production == Production::Settler {
-            city.size = (city.size.saturating_sub(2)).max(1);
-            governor_assign(map, city);
+        let done = city.production;
+        city.shields -= done.cost();
+        if let Some(unit) = done.unit() {
+            if done == Production::Settler {
+                city.size = (city.size.saturating_sub(2)).max(1);
+                governor_assign(map, city);
+            }
+            events.push(CityEvent::Completed(unit));
+        } else {
+            city.buildings.push(done);
+            events.push(CityEvent::Built(done));
         }
-        events.push(CityEvent::Completed(unit));
+        city.advance_queue(done);
     }
     events
 }
@@ -327,7 +450,7 @@ pub fn spawn_city_visuals(
 /// Found a city with the selected settler (B key).
 pub fn found_city(
     mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
+    mut cmds: MessageReader<crate::actionbar::UnitCommand>,
     selected: Res<Selected>,
     units: Query<(Entity, &Unit)>,
     cities: Query<&City>,
@@ -339,7 +462,10 @@ pub fn found_city(
     splash: Res<SplashUp>,
     audio: Res<GameAudio>,
 ) {
-    if view.0.is_some() || splash.0 || !keys.just_pressed(KeyCode::KeyB) {
+    let asked = cmds
+        .read()
+        .any(|c| *c == crate::actionbar::UnitCommand::FoundCity);
+    if !asked || view.0.is_some() || splash.0 {
         return;
     }
     let Some(s) = selected.0 else {
@@ -370,6 +496,8 @@ pub fn found_city(
         food: 0,
         shields: 0,
         production: Production::Warrior,
+        queue: vec![],
+        buildings: vec![],
         worked: HashSet::new(),
     };
     governor_assign(&map, &mut city);
@@ -385,13 +513,21 @@ pub fn end_turn_cities(
     mut cities: Query<&mut City>,
     art: Res<UnitArt>,
     audio: Res<GameAudio>,
+    mut board: ResMut<MessageBoard>,
 ) {
     for _ in events.read() {
         for mut city in cities.iter_mut() {
             for event in process_city_turn(&map, &mut city) {
-                if let CityEvent::Completed(unit) = event {
-                    units::spawn_unit(&mut commands, &art, unit, city.x, city.y);
-                    audio::sfx(&mut commands, &audio, "WhatToBuild");
+                match event {
+                    CityEvent::Completed(unit) => {
+                        units::spawn_unit(&mut commands, &art, unit, city.x, city.y);
+                        audio::sfx(&mut commands, &audio, "WhatToBuild");
+                    }
+                    CityEvent::Built(p) => {
+                        audio::sfx(&mut commands, &audio, "WhatToBuild");
+                        post(&mut board, format!("{} completes {}.", city.name, p.name()));
+                    }
+                    _ => {}
                 }
             }
         }
@@ -465,6 +601,134 @@ pub(crate) struct TileCluster;
 pub(crate) enum ScreenButton {
     Close,
     Change,
+    Governor,
+    Pick(Production),
+    Queue(Production),
+    Unqueue(usize),
+    CloseMenu,
+}
+
+/// Whether the build-list modal is open over the city screen.
+#[derive(Resource, Default)]
+pub struct BuildMenu(pub bool);
+
+fn txt(
+    parent: &mut ChildSpawnerCommands<'_>,
+    font: &Handle<Font>,
+    s: &str,
+    size: f32,
+    x: f32,
+    y: f32,
+    color: Color,
+) {
+    parent.spawn((
+        Text::new(s),
+        TextFont { font: font.clone(), font_size: size, ..default() },
+        TextColor(color),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(x),
+            top: Val::Px(y),
+            ..default()
+        },
+    ));
+}
+
+/// Unit icon or cropped `buildings-small.png` cell for a build item.
+fn build_icon(assets: &AssetServer, p: Production) -> ImageNode {
+    match p.building_rect() {
+        Some(rect) => {
+            let mut n = ImageNode::new(assets.load("gen/cityscreen/buildings-small.png"));
+            n.rect = Some(rect);
+            n
+        }
+        None => ImageNode::new(assets.load(p.icon())),
+    }
+}
+
+fn turns_for(cost: u8, have: u8, rate: u8) -> String {
+    if rate == 0 {
+        "never".into()
+    } else {
+        format!("{}t", ceil_div(cost.saturating_sub(have), rate))
+    }
+}
+
+fn build_menu(
+    content: &mut ChildSpawnerCommands<'_>,
+    assets: &AssetServer,
+    font: &Handle<Font>,
+    city: &City,
+    rate: u8,
+) {
+    let items = city.buildable();
+    let ink = Color::srgb(0.95, 0.9, 0.7);
+    content
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(212.0),
+                top: Val::Px(100.0),
+                width: Val::Px(600.0),
+                height: Val::Px(54.0 + items.len() as f32 * 48.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.05, 0.03, 0.96)),
+        ))
+        .with_children(|m| {
+            txt(m, font, &format!("What should {} build?", city.name), 20.0, 16.0, 10.0, ink);
+            m.spawn((
+                Button,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(520.0), top: Val::Px(8.0),
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.35, 0.22, 0.1)),
+                ScreenButton::CloseMenu,
+            ))
+            .with_children(|b| {
+                b.spawn((Text::new("Close"), TextFont { font: font.clone(), font_size: 16.0, ..default() }, TextColor(ink)));
+            });
+            for (n, p) in items.iter().enumerate() {
+                let top = 44.0 + n as f32 * 48.0;
+                let have = if *p == city.production { city.shields } else { 0 };
+                m.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(12.0), top: Val::Px(top + 2.0),
+                        width: Val::Px(42.0), height: Val::Px(42.0),
+                        ..default()
+                    },
+                    build_icon(assets, *p),
+                ));
+                let mark = if *p == city.production { "  [building]" } else { "" };
+                txt(m, font, &format!("{}{}   cost {}  ({})", p.name(), mark, p.cost(), turns_for(p.cost(), have, rate)), 17.0, 64.0, top + 2.0, ink);
+                txt(m, font, p.blurb(), 13.0, 64.0, top + 24.0, Color::srgb(0.75, 0.7, 0.55));
+                for (label, left, kind) in [
+                    ("Build now", 400.0, ScreenButton::Pick(*p)),
+                    ("Queue", 500.0, ScreenButton::Queue(*p)),
+                ] {
+                    m.spawn((
+                        Button,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(left), top: Val::Px(top + 6.0),
+                            width: Val::Px(90.0), height: Val::Px(30.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.35, 0.22, 0.1)),
+                        kind,
+                    ))
+                    .with_children(|b| {
+                        b.spawn((Text::new(label), TextFont { font: font.clone(), font_size: 15.0, ..default() }, TextColor(ink)));
+                    });
+                }
+            }
+        });
 }
 
 const CONTENT_W: f32 = 1024.0;
@@ -530,7 +794,16 @@ fn tile_node(
             ..default()
         })
         .with_children(|tile| {
-            tile.spawn(ImageNode::new(tiles.defs[&base].image.clone()));
+            match crate::blend::cell_for(map, nx, ny) {
+                Some((stem, col, row)) => {
+                    let mut n = ImageNode::new(_assets.load(crate::blend::sheet_path(stem)));
+                    n.rect = Some(crate::blend::cell_rect(col, row));
+                    tile.spawn(n);
+                }
+                None => {
+                    tile.spawn(ImageNode::new(tiles.defs[&base].image.clone()));
+                }
+            }
             if rx == 0 && ry == 0 {
                 tile.spawn((
                     ImageNode::new(city_art.graphic(city.size)),
@@ -540,6 +813,21 @@ fn tile_node(
                         top: Val::Px(64.0 - 95.0 - 4.0),
                         width: Val::Px(167.0),
                         height: Val::Px(95.0),
+                        ..default()
+                    },
+                ));
+            } else if let Some(c) = crate::blend::cover_sprite(map, nx, ny) {
+                let size = c.rect.size();
+                let mut n = ImageNode::new(_assets.load(&c.path));
+                n.rect = Some(c.rect);
+                tile.spawn((
+                    n,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(64.0 - c.anchor_px.x),
+                        top: Val::Px(32.0 - c.anchor_px.y),
+                        width: Val::Px(size.x),
+                        height: Val::Px(size.y),
                         ..default()
                     },
                 ));
@@ -599,6 +887,7 @@ fn build_city_screen(
     city_art: &CityArt,
     map: &GameMap,
     city: &City,
+    menu: bool,
 ) {
     let font = assets.load("gen/fonts/lsans.ttf");
     let (net_food, shields_pt) = city_income(map, city);
@@ -629,6 +918,7 @@ fn build_city_screen(
                 ..default()
             },
             CityScreenRoot,
+            GlobalZIndex(10),
         ))
         .with_children(|root| {
             root.spawn((
@@ -660,34 +950,6 @@ fn build_city_screen(
                     Node {
                         position_type: PositionType::Absolute,
                         top: Val::Px(18.0),
-                        left: Val::Px(0.0),
-                        right: Val::Px(0.0),
-                        ..default()
-                    },
-                    TextLayout::new_with_justify(Justify::Center),
-                ));
-                content.spawn((
-                    Text::new(format!(
-                        "Food {}/{} ({:+}) grows in {}    Shields {}/{} ({:+}/t)  {} in {}",
-                        city.food,
-                        FOOD_BOX,
-                        net_food,
-                        grow_in,
-                        city.shields,
-                        city.production.cost(),
-                        shields_pt,
-                        city.production.name(),
-                        prod_in,
-                    )),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 17.0,
-                        ..default()
-                    },
-                    TextColor(PARCHMENT_TEXT),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        top: Val::Px(58.0),
                         left: Val::Px(0.0),
                         right: Val::Px(0.0),
                         ..default()
@@ -742,130 +1004,180 @@ fn build_city_screen(
                             TileCluster,
                         ));
                     });
-                // citizens row
+                let bar_cover = Color::srgb(0.98, 0.91, 0.73);
+                // food box (blue bar) and shield box (yellow bar): cover
+                // the unfilled tail of the baked-in bar art
+                let food_frac = city.food as f32 / FOOD_BOX as f32;
+                let shield_frac = (city.shields as f32
+                    / city.production.cost() as f32)
+                    .min(1.0);
+                for (x0, x1, y0, h, frac) in [
+                    (290.0, 908.0, 522.0, 24.0, food_frac),
+                    (290.0, 778.0, 570.0, 24.0, shield_frac),
+                ] {
+                    let fill = (x1 - x0) * frac;
+                    content.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(x0 + fill),
+                            top: Val::Px(y0),
+                            width: Val::Px(x1 - x0 - fill + 6.0),
+                            height: Val::Px(h),
+                            ..default()
+                        },
+                        BackgroundColor(bar_cover),
+                    ));
+                }
+                txt(content, &font, &format!(
+                    "Food {}/{}  ({:+}/t)  grows in {}", city.food, FOOD_BOX, net_food, grow_in),
+                    17.0, 300.0, 524.0, PARCHMENT_TEXT);
+                txt(content, &font, &format!(
+                    "{} {}/{}  (+{}/t)  done in {}",
+                    city.production.name(), city.shields, city.production.cost(), shields_pt, prod_in),
+                    17.0, 300.0, 572.0, PARCHMENT_TEXT);
+                // citizens (first green bar)
                 content
                     .spawn(Node {
                         position_type: PositionType::Absolute,
-                        top: Val::Px(520.0),
-                        left: Val::Px(60.0),
-                        width: Val::Px(560.0),
-                        height: Val::Px(60.0),
+                        top: Val::Px(624.0),
+                        left: Val::Px(292.0),
+                        width: Val::Px(380.0),
+                        height: Val::Px(22.0),
                         flex_direction: FlexDirection::Row,
                         align_items: AlignItems::Center,
                         ..default()
                     })
                     .with_children(|row| {
-                        row.spawn((
-                            Text::new("Citizens: "),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 18.0,
-                                ..default()
-                            },
-                            TextColor(PARCHMENT_TEXT),
-                        ));
-                        for _ in 0..city.size.min(12) {
+                        for _ in 0..city.size.min(14) {
                             row.spawn((
-                                ImageNode::new(
-                                    assets.load("gen/ui/citizen.png"),
-                                ),
+                                ImageNode::new(assets.load("gen/ui/citizen.png")),
                                 Node {
-                                    width: Val::Px(34.0),
-                                    height: Val::Px(34.0),
-                                    margin: UiRect::left(Val::Px(2.0)),
+                                    width: Val::Px(22.0),
+                                    height: Val::Px(22.0),
+                                    margin: UiRect::right(Val::Px(2.0)),
                                     ..default()
                                 },
                             ));
                         }
-                        if city.size > 12 {
-                            row.spawn((
-                                Text::new(format!(" +{}", city.size - 12)),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 18.0,
-                                    ..default()
-                                },
+                    });
+                // buildings + tile totals (second and third green bars)
+                let owned = if city.buildings.is_empty() {
+                    "Buildings: none".to_string()
+                } else {
+                    format!(
+                        "Buildings: {}",
+                        city.buildings.iter().map(|b| b.name()).collect::<Vec<_>>().join(", ")
+                    )
+                };
+                txt(content, &font, &owned, 16.0, 296.0, 656.0, PARCHMENT_TEXT);
+                let (mut tf, mut ts) = (2i32, 1i32);
+                for (x, y) in city.worked.iter() {
+                    let (f, s) = yields(&map.tiles[map.idx(*x, *y)]);
+                    tf += f as i32;
+                    ts += s as i32;
+                }
+                txt(content, &font, &format!(
+                    "Tiles yield {tf} food, {ts} shields; citizens eat {}", 2 * city.size as i32),
+                    16.0, 296.0, 688.0, PARCHMENT_TEXT);
+                // left column: current build + change/governor buttons
+                content.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(20.0), top: Val::Px(522.0),
+                        width: Val::Px(66.0), height: Val::Px(66.0),
+                        ..default()
+                    },
+                    build_icon(assets, city.production),
+                ));
+                txt(content, &font, city.production.name(), 18.0, 20.0, 594.0, PARCHMENT_TEXT);
+                for (label, top, kind) in [
+                    ("Change build", 616.0, ScreenButton::Change),
+                    ("Governor", 676.0, ScreenButton::Governor),
+                ] {
+                    content
+                        .spawn((
+                            Button,
+                            ImageNode::new(assets.load("gen/ui/prod_0.png")),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(8.0), top: Val::Px(top),
+                                width: Val::Px(140.0), height: Val::Px(56.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            kind,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(label),
+                                TextFont { font: font.clone(), font_size: 16.0, ..default() },
                                 TextColor(PARCHMENT_TEXT),
                             ));
+                        });
+                }
+                // right panel over the black view: production queue
+                content.spawn((
+                    ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(812.0), top: Val::Px(98.0),
+                        width: Val::Px(203.0), height: Val::Px(360.0),
+                        ..default()
+                    },
+                ));
+                txt(content, &font, "Production queue", 15.0, 830.0, 106.0, PARCHMENT_TEXT);
+                let mut rows: Vec<(String, Option<usize>)> =
+                    vec![(format!("> {}", city.production.name()), None)];
+                for (i, q) in city.queue.iter().enumerate() {
+                    rows.push((format!("{}. {}", i + 1, q.name()), Some(i)));
+                }
+                for (n, (label, qi)) in rows.iter().enumerate() {
+                    let top = 132.0 + n as f32 * 30.0;
+                    match qi {
+                        Some(i) => {
+                            content
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        left: Val::Px(826.0), top: Val::Px(top),
+                                        width: Val::Px(176.0), height: Val::Px(26.0),
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.4, 0.25, 0.1, 0.25)),
+                                    ScreenButton::Unqueue(*i),
+                                ))
+                                .with_children(|b| {
+                                    b.spawn((
+                                        Text::new(format!("{label}  (click: remove)")),
+                                        TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                                        TextColor(PARCHMENT_TEXT),
+                                    ));
+                                });
                         }
-                    });
-                // production row
-                content.spawn((
-                    ImageNode::new(
-                        assets.load(city.production.icon()),
-                    ),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(660.0),
-                        top: Val::Px(520.0),
-                        width: Val::Px(48.0),
-                        height: Val::Px(48.0),
-                        ..default()
-                    },
-                ));
-                content.spawn((
-                    Text::new(format!(
-                        "{} ({}t)",
-                        city.production.name(),
-                        prod_in
-                    )),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(PARCHMENT_TEXT),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(716.0),
-                        top: Val::Px(528.0),
-                        ..default()
-                    },
-                ));
-                content
-                    .spawn((
-                        Button,
-                        ImageNode::new(assets.load("gen/ui/prod_0.png")),
+                        None => txt(content, &font, label, 16.0, 830.0, top + 2.0, PARCHMENT_TEXT),
+                    }
+                }
+                // left panel over the black view: owned buildings
+                txt(content, &font, "Buildings", 15.0, 18.0, 104.0, Color::srgb(0.95, 0.9, 0.7));
+                for (n, b) in city.buildings.iter().enumerate() {
+                    content.spawn((
                         Node {
                             position_type: PositionType::Absolute,
-                            left: Val::Px(660.0),
-                            top: Val::Px(580.0),
-                            width: Val::Px(200.0),
-                            height: Val::Px(60.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
+                            left: Val::Px(16.0), top: Val::Px(128.0 + n as f32 * 70.0),
+                            width: Val::Px(63.0), height: Val::Px(64.0),
                             ..default()
                         },
-                        ScreenButton::Change,
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("Change build"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 18.0,
-                                ..default()
-                            },
-                            TextColor(PARCHMENT_TEXT),
-                        ));
-                    });
-                content.spawn((
-                    Text::new("Click tiles to assign workers.  ESC closes."),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(PARCHMENT_TEXT),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        top: Val::Px(700.0),
-                        left: Val::Px(0.0),
-                        right: Val::Px(0.0),
-                        ..default()
-                    },
-                    TextLayout::new_with_justify(Justify::Center),
-                ));
+                        build_icon(assets, *b),
+                    ));
+                    txt(content, &font, b.name(), 15.0, 84.0, 150.0 + n as f32 * 70.0, Color::srgb(0.95, 0.9, 0.7));
+                }
+                // modal build list
+                if menu {
+                    build_menu(content, assets, &font, city, shields_pt);
+                }
                 content.spawn((
                     Button,
                     ImageNode::new(assets.load("gen/ui/x_0.png")),
@@ -894,8 +1206,9 @@ pub fn maintain_city_screen(
     tiles: Res<TileArt>,
     city_art: Res<CityArt>,
     map: Res<GameMap>,
+    menu: Res<BuildMenu>,
 ) {
-    if view.0 == *last && changed.is_empty() {
+    if view.0 == *last && changed.is_empty() && !menu.is_changed() {
         return;
     }
     for r in roots.iter() {
@@ -908,7 +1221,7 @@ pub fn maintain_city_screen(
     let Ok(city) = cities.get(e) else {
         return;
     };
-    build_city_screen(&mut commands, &assets, &tiles, &city_art, &map, city);
+    build_city_screen(&mut commands, &assets, &tiles, &city_art, &map, city, menu.0);
 }
 
 pub fn city_screen_input(
@@ -962,23 +1275,47 @@ pub fn city_screen_input(
 pub fn city_screen_buttons(
     mut commands: Commands,
     mut views: ResMut<CityView>,
+    mut menu: ResMut<BuildMenu>,
     mut cities: Query<&mut City>,
     buttons: Query<(&Interaction, &ScreenButton), Changed<Interaction>>,
     audio: Res<GameAudio>,
+    map: Res<GameMap>,
+    mut board: ResMut<MessageBoard>,
 ) {
     for (interaction, button) in buttons.iter() {
         if *interaction != Interaction::Pressed {
             continue;
         }
         audio::sfx(&mut commands, &audio, "Button OK");
+        let mut city = views.0.and_then(|e| cities.get_mut(e).ok());
         match button {
-            ScreenButton::Close => views.0 = None,
-            ScreenButton::Change => {
-                if let Some(e) = views.0 {
-                    if let Ok(mut city) = cities.get_mut(e) {
-                        city.production = city.production.cycle();
-                        city.shields = 0;
+            ScreenButton::Close => {
+                views.0 = None;
+                menu.0 = false;
+            }
+            ScreenButton::Change => menu.0 = true,
+            ScreenButton::CloseMenu => menu.0 = false,
+            ScreenButton::Governor => {
+                if let Some(c) = city.as_mut() {
+                    governor_assign(&map, c);
+                }
+            }
+            ScreenButton::Pick(p) => {
+                if let Some(c) = city.as_mut() {
+                    c.change_build(*p);
+                }
+                menu.0 = false;
+            }
+            ScreenButton::Queue(p) => {
+                if let Some(c) = city.as_mut() {
+                    if !c.enqueue(*p) {
+                        post(&mut board, "Cannot queue that item.");
                     }
+                }
+            }
+            ScreenButton::Unqueue(i) => {
+                if let Some(c) = city.as_mut() {
+                    c.dequeue(*i);
                 }
             }
         }
@@ -1003,6 +1340,8 @@ mod tests {
             food: 0,
             shields: 0,
             production: Production::Warrior,
+            queue: vec![],
+            buildings: vec![],
             worked: HashSet::new(),
         };
         governor_assign(map, &mut city);
@@ -1105,7 +1444,9 @@ mod tests {
             e,
             CityEvent::Completed(UnitType::Warrior)
         )));
-        assert_eq!(city.shields, 0);
+        // surplus shields carry into the next build
+        let (_, income) = city_income(&map, &city);
+        assert_eq!(city.shields, income);
         // settler costs 2 pop, clamped at 1
         city.production = Production::Settler;
         city.size = 4;
@@ -1160,5 +1501,54 @@ mod tests {
         assert_eq!(c, Some((1, 0)));
         // far corner is outside
         assert_eq!(cluster_pick(1280.0, 800.0, Vec2::new(10.0, 10.0)), None);
+    }
+
+    #[test]
+    fn building_completes_queue_advances_and_granary_keeps_food() {
+        let map = test_map();
+        let mut city = test_city(&map);
+        city.production = Production::Granary;
+        city.queue = vec![Production::Temple, Production::Worker];
+        city.shields = Production::Granary.cost();
+        let events = process_city_turn(&map, &mut city);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CityEvent::Built(Production::Granary))));
+        assert!(city.has(Production::Granary));
+        assert_eq!(city.production, Production::Temple);
+        assert_eq!(city.queue, vec![Production::Worker]);
+        assert!(!city.buildable().contains(&Production::Granary));
+        // granary keeps half the food box on growth
+        city.food = FOOD_BOX - 1;
+        let (net, _) = city_income(&map, &city);
+        if net >= 1 {
+            process_city_turn(&map, &mut city);
+            assert_eq!(city.food, FOOD_BOX / 2);
+        }
+    }
+
+    #[test]
+    fn change_build_penalizes_class_switch_and_queue_rules() {
+        let map = test_map();
+        let mut city = test_city(&map);
+        city.production = Production::Warrior;
+        city.shields = 8;
+        city.change_build(Production::Worker);
+        assert_eq!(city.shields, 8);
+        city.change_build(Production::Barracks);
+        assert_eq!(city.shields, 4);
+        assert!(city.enqueue(Production::Temple));
+        assert!(!city.enqueue(Production::Temple));
+        assert!(!city.enqueue(Production::Barracks));
+        assert!(city.enqueue(Production::Warrior));
+        assert!(city.enqueue(Production::Warrior));
+        city.dequeue(0);
+        assert_eq!(city.queue[0], Production::Warrior);
+        // building with empty queue falls back to a Warrior
+        city.queue.clear();
+        city.production = Production::Temple;
+        city.shields = Production::Temple.cost();
+        process_city_turn(&map, &mut city);
+        assert_eq!(city.production, Production::Warrior);
     }
 }

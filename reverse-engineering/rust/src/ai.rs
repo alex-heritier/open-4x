@@ -3,15 +3,23 @@
 //! See `../ai.md`. The game RNG at `0x64A20E` is verified by disassembly;
 //! everything else here is observed-string inventory with open mechanics.
 
-/// The game RNG (`0x64A20E`): MSVC-compatible `rand()`.
+/// The game RNG (`0x64A20E`): MSVC-compatible `rand()`, paired with
+/// `srand` at `0x64A201` (back to back, classic MSVC layout).
 ///
 /// ```asm
+/// ; 0x64A201 srand(seed):
+/// call 0x64dc93                  ; owner object in eax
+/// mov ecx, [esp+4]                ; seed argument
+/// mov [eax+0x14], ecx             ; store into owner state
+/// ret
+/// ; 0x64A20E rand():
+/// mov ecx, [eax+0x14]             ; same state word
 /// imul ecx, ecx, 0x343fd   ; a = 214013
 /// add  ecx, 0x269ec3       ; c = 2531011
 /// shr eax, 16 / and 0x7FFF
 /// ```
-/// State lives in the owner object at `+0x14`; seeded from `timeGetTime()`
-/// in `main` (`0x56C1F9`) and at game start (`0x6389DD`).
+/// Seeded from `timeGetTime()` in `main` (`0x56C1F9`) and at game start
+/// (`0x6389DD`: `push eax; call 0x64A201`, then flags `[esi+0xAF8] = 1`).
 /// Map generation never uses it (it uses `0x60BA80`); the streams are
 /// independent by construction.
 #[derive(Clone, Debug)]
@@ -23,6 +31,11 @@ impl GameRng {
     /// Fresh game RNG with the given seed word.
     pub fn new(seed: u32) -> Self {
         GameRng { state: seed }
+    }
+
+    /// Re-seed live state (`0x64A201`: overwrite the `+0x14` state word).
+    pub fn reseed(&mut self, seed: u32) {
+        self.state = seed;
     }
 
     /// One `rand()` draw, range `0..32768`.
@@ -134,6 +147,129 @@ pub fn action_available(
         && in_bounds(x, y, dims)
 }
 
+/// AI score jitter at `0x4D7F16` (verified by r2 disassembly).
+///
+/// `delta = rand() % 1200 - 600`, i.e. uniform in `[-600, +599]`, pushed to
+/// the clamped accumulator `0x5FACC0`. The `and edx, 0xFFFF` in the
+/// disassembly is a no-op on the `[0, 1200)` idiv remainder (kept by MSVC),
+/// so the model is exactly modulo-then-recenter.
+pub fn score_jitter(draw: u32) -> i32 {
+    (draw % 1200) as i32 - 600
+}
+
+/// Clamped score store (`0x5FACC0` head): saturate to `[-1200, +1200]`
+/// (`cmp 0xFFFFFB50` / `cmp 0x4B0`) and write to `[ecx+0x5C]`.
+pub fn clamp_score(v: i32) -> i32 {
+    v.clamp(-1200, 1200)
+}
+
+/// Random-Nth passing candidate (`0x5AF703–0x5AFB1E` scan loops).
+///
+/// The engine draws `countdown = rand() % mask` once, then walks candidates
+/// in table order; each candidate that passes all gates decrements the
+/// countdown, and the candidate that drives it below zero is selected.
+/// Returns the index of the selected candidate, or `None` when fewer than
+/// `countdown + 1` candidates pass. The per-candidate predicate
+/// (`0x501B80` and friends) is the caller's `passes` closure.
+pub fn random_nth_passing(countdown: u32, passes: &[bool]) -> Option<usize> {
+    let mut remaining = countdown;
+    for (i, pass) in passes.iter().enumerate() {
+        if !pass {
+            continue;
+        }
+        if remaining == 0 {
+            return Some(i);
+        }
+        remaining -= 1;
+    }
+    None
+}
+
+/// Unit-effect descriptor selection (`0x5C7C7B` disease instance).
+///
+/// When the unit's direct selector byte (`+0x74`, passed as `direct`) is
+/// nonzero it is used as-is; otherwise the descriptor comes from the
+/// unit's action record (`+0x40` base, 312-byte stride into `[0x9C71E0]`,
+/// field at `+8`), passed here as `table_entry`. Either way the chosen
+/// descriptor feeds the shared applicator `0x61C5A0`.
+pub fn effect_descriptor(direct: u32, table_entry: u32) -> u32 {
+    if direct != 0 {
+        direct
+    } else {
+        table_entry
+    }
+}
+
+/// AI flavor percent-to-fraction (`0x4406E0`): integer percent loaded
+/// via `0x585B00`, `fild` to x87, times the 0.01 **double** constant
+/// (`[0x666AC8]`), stored to float. Observed: 90 → 0x3F666666
+/// (`[0x6849B0]`), 30 → 0x3E99999A (`[0x684A40]`) — only the double
+/// intermediate reproduces both bit-exact.
+pub fn flavor_fraction(percent: i32) -> f32 {
+    (f64::from(percent) * 0.01) as f32
+}
+
+/// Hurry gate (`0x4B5290`): city flags word bit 0 set means civil
+/// disorder, which rejects hurrying with `HURRY_CIVIL_DISORDER`.
+pub fn hurry_blocked_by_disorder(city_flags: u32) -> bool {
+    city_flags & 1 == 1
+}
+
+/// Riot-sound selector (`0x4BE1CF`/`0x4BE3B2`): `rand() % 3`, decoded by
+/// dec/je into three arms; the selected arm feeds `0x535D20` (arg 3/2/1).
+pub fn riot_select(draw: u32) -> u32 {
+    draw % 3
+}
+
+/// Assassin outcome dispatch (`0x5B63DB`, after `call 0x4A53A0`):
+/// `sub al,0; je A; dec al; jne C` — three arms on the resolve byte.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AssassinOutcome {
+    /// `al == 0` after the no-op sub.
+    Arm0,
+    /// `al == 1` (dec reaches zero).
+    Arm1,
+    /// Any other value.
+    ArmOther,
+}
+
+/// Classify the assassin dispatch byte.
+pub fn assassin_branch(al: u8) -> AssassinOutcome {
+    match al {
+        0 => AssassinOutcome::Arm0,
+        1 => AssassinOutcome::Arm1,
+        _ => AssassinOutcome::ArmOther,
+    }
+}
+
+/// City-name uniqueness scan (`0x4D9DDE` founding validation).
+///
+/// The candidate name is byte-compared against every existing city name
+/// (table base `[0xA52E6C]`, bound `[0xA52E78]`); any exact match routes to
+/// the `BADCITYNAME` dialog instead of the `0x611530` commit.
+pub fn city_name_taken(existing: &[&str], candidate: &str) -> bool {
+    existing.iter().any(|name| *name == candidate)
+}
+
+/// Shuffled 6-of-8 picker (`0x4AEC48-0x4AECAB`).
+///
+/// Draws `rand() % 8` (MSVC signed-mod idiom; `rand()` is never negative
+/// so plain `% 8`) with rejection re-draws until 6 distinct values fill
+/// the slots (init `-1`). HYPOTHESIS: randomized neighbor/move-direction
+/// order for unit AI; the mechanic is exact either way.
+pub fn shuffled6(rng: &mut GameRng) -> [u32; 6] {
+    let mut slots = [u32::MAX; 6];
+    let mut filled = 0;
+    while filled < 6 {
+        let v = rng.draw() % 8;
+        if !slots[..filled].contains(&v) {
+            slots[filled] = v;
+            filled += 1;
+        }
+    }
+    slots
+}
+
 /// Per-faction turn-slice counter, from the upkeep format string at
 /// `0x684C70` (`m_iTurnSlice`, `GetTurnSlicesBetweenFactionUpkeep()`).
 #[derive(Clone, Copy, Debug, Default)]
@@ -158,6 +294,15 @@ mod tests {
         // seed 0: state = 2531011; 2531011>>16 & 0x7FFF = 38.
         let mut rng = GameRng::new(0);
         assert_eq!(rng.draw(), 38);
+    }
+
+    #[test]
+    fn srand_reseed_restarts_sequence() {
+        // 0x64A201 overwrites the same +0x14 word rand() reads.
+        let mut rng = GameRng::new(999);
+        rng.draw();
+        rng.reseed(0);
+        assert_eq!(rng.draw(), 38); // same first draw as a fresh seed-0 RNG
     }
 
     #[test]
@@ -225,10 +370,101 @@ mod tests {
     }
 
     #[test]
+    fn score_jitter_range_and_recenter() {
+        // 0x4D7F16: rand() % 1200, minus 600 -> [-600, +599].
+        assert_eq!(score_jitter(0), -600);
+        assert_eq!(score_jitter(599), -1);
+        assert_eq!(score_jitter(600), 0);
+        assert_eq!(score_jitter(1199), 599);
+        assert_eq!(score_jitter(1200), -600); // modulo wraps
+        // Jitter never escapes the accumulator's clamp window.
+        for d in (0..32768).step_by(137) {
+            assert!((-600..600).contains(&score_jitter(d)));
+        }
+    }
+
+    #[test]
+    fn score_clamp_saturates() {
+        // 0x5FACC0: saturate both ends at +/-1200.
+        assert_eq!(clamp_score(-1201), -1200);
+        assert_eq!(clamp_score(-1200), -1200);
+        assert_eq!(clamp_score(0), 0);
+        assert_eq!(clamp_score(1200), 1200);
+        assert_eq!(clamp_score(1201), 1200);
+    }
+
+    #[test]
+    fn random_nth_selection() {
+        // Countdown 0 selects the first passing candidate.
+        assert_eq!(random_nth_passing(0, &[false, true, true]), Some(1));
+        // Countdown 1 skips one passing candidate, fails on gated ones.
+        assert_eq!(random_nth_passing(1, &[false, true, false, true]), Some(3));
+        // Exhausted table: fewer passers than countdown + 1.
+        assert_eq!(random_nth_passing(2, &[true, false, true]), None);
+        assert_eq!(random_nth_passing(0, &[false, false]), None);
+        assert_eq!(random_nth_passing(0, &[]), None);
+    }
+
+    #[test]
+    fn effect_descriptor_selection() {
+        // Nonzero +0x74 bypasses the action-table lookup.
+        assert_eq!(effect_descriptor(0x1234, 0xAAAA), 0x1234);
+        assert_eq!(effect_descriptor(0, 0xAAAA), 0xAAAA);
+    }
+
+    #[test]
+    fn flavor_fractions_match_binary() {
+        // Bit-exact: [0x6849B0]=3F666666, [0x684A40]=3E99999A.
+        assert_eq!(flavor_fraction(90).to_bits(), 0x3F66_6666);
+        assert_eq!(flavor_fraction(30).to_bits(), 0x3E99_999A);
+        assert_eq!(flavor_fraction(0).to_bits(), 0x0000_0000);
+    }
+
+    #[test]
+    fn hurry_and_riot_gates() {
+        assert!(hurry_blocked_by_disorder(0x01));
+        assert!(hurry_blocked_by_disorder(0xFF));
+        assert!(!hurry_blocked_by_disorder(0x00));
+        assert!(!hurry_blocked_by_disorder(0xFE));
+        assert_eq!(riot_select(0), 0);
+        assert_eq!(riot_select(1), 1);
+        assert_eq!(riot_select(2), 2);
+        assert_eq!(riot_select(3), 0);
+        assert_eq!(assassin_branch(0), AssassinOutcome::Arm0);
+        assert_eq!(assassin_branch(1), AssassinOutcome::Arm1);
+        assert_eq!(assassin_branch(7), AssassinOutcome::ArmOther);
+    }
+
+    #[test]
+    fn city_name_uniqueness_scan() {
+        // 0x4D9DDE: byte-compare the candidate against every existing name.
+        let existing = ["Rome", "Veii", "Antium"];
+        assert!(city_name_taken(&existing, "Rome"));
+        assert!(!city_name_taken(&existing, "Cumae"));
+        assert!(!city_name_taken(&[], "Rome"));
+    }
+
+    #[test]
     fn upkeep_slices() {
         let t = TurnSlice { slice: 6 };
         assert!(t.owes_upkeep(3));
         assert!(!t.owes_upkeep(4));
         assert!(!t.owes_upkeep(0));
+    }
+
+    #[test]
+    fn shuffled_six_of_eight() {
+        // 0x4AEC63: rand()%8 rejection-sampled to 6 distinct slots.
+        let mut rng = GameRng::new(0);
+        let a = shuffled6(&mut rng);
+        // First draw for seed 0 is 38, so slot 0 is 38 % 8.
+        assert_eq!(a[0], 38 % 8);
+        let mut sorted = a;
+        sorted.sort_unstable();
+        assert!(sorted.windows(2).all(|w| w[0] != w[1]));
+        assert!(a.iter().all(|&v| v < 8));
+        // Deterministic: same seed replays the same shuffle.
+        let mut rng2 = GameRng::new(0);
+        assert_eq!(shuffled6(&mut rng2), a);
     }
 }

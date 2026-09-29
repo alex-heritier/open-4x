@@ -87,3 +87,48 @@ ROAD/MINE/IRRIGATE/FORTRESS/JUNGLE/FOREST/PLANT. Also port `GameRng`
 (`ai.rs`, exact) for gameplay randomness. Deferred: terrain blending
 (letter mapping still inference), rivers (hypothesis), combat/AI
 (strings only), BIQ data (DCL mode 0 done, `biq.md` pending).
+
+### Phase 3 progress
+
+Landed: roads, irrigation, mines (M: hills/mountains +2 shields, desert +1,
+6 turns), and clearing forest/jungle/pine on flat land (C, 4 turns). Work
+sounds per action via `GameAudio::work_sfx`. Not yet: mine overlay art
+(state only, shown in hover text), fortress, plant-forest, `GameRng` use
+for gameplay randomness, worker auto-mode.
+
+### Unit controls, pathfinding, action bar, city management (landed)
+
+- `actionbar.rs`: `UnitCommand` messages from keys or the bottom bar
+  (Go to, Skip, Sentry, Fortify, Wake, Found City, Road, Irrigate, Mine,
+  Clear, Disband); buttons show per unit type and dim when unavailable.
+  Go to (G) then click; Esc cancels. Map picking is off over the whole bar,
+  so clicks on the strip or the 3-px gaps between discs never reach the map.
+- Bar art is Civ3's own: `Conquests/Art/interface/{NormButtons,
+  rolloverbuttons,highlightedbuttons}.PCX`, with `ButtonAlpha.pcx` for the
+  disc shape, converted by `tools/prep_assets.py unitbuttons` into
+  `gen/ui/unitbtns_{norm,over,down}.png` (an 8x10 grid of 32-px cells). Cell
+  order is the `#UNIT_ACTIONS` order of `Conquests/Text/labels.txt`
+  row-major, checked against gameplay screenshots: a Warrior's seven buttons
+  are cells 0-6 (skip, wait, fortify, disband, go to, explore, sentry). The
+  bar packs the discs edge to edge in that order, hover shows the rollover
+  art, a held or armed button the blue "highlighted" art, and unavailable
+  ones are darkened. The hovered command's name replaces the unit readout,
+  as Civ3's help line does. Deviation: Civ3 has no Wake button on the map
+  panel (Wake is a right-click entry there), so Wake reuses Explore's
+  circular-arrow art, the one action this clone has no command for.
+- Pathfinding: hover shows a route preview and step/turn estimate;
+  units with any movement left may enter a costlier tile (fixes 1-MP
+  units never entering hills/forest).
+- Cities: buildings (Barracks, Granary, Temple), production queue,
+  change-build modal (Build now / Queue), class-switch shield penalty,
+  surplus shield carry-over, Granary keeps half the food box. City screen
+  has food/shield fill bars, citizens, owned buildings, queue panel,
+  Governor button. V opens the city under the selected unit.
+
+### Terrain blending (landed)
+
+`src/blend.rs`: base tiles draw a cell of the 9x9 transition sheets
+chosen from the four vertex terrains (cell = (3S+E)*9 + 3W+N; see
+`reverse-engineering/blending.md` update). Ice keeps its unblended art;
+overlays (hills, forest, mountains) are unchanged. City screen uses the
+same cells. Deviations: vertex priority and sheet selection are inferred.

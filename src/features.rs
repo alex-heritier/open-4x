@@ -148,6 +148,7 @@ pub fn terr_score(id: u8) -> u32 {
                 resource: None,
                 road: false,
                 irrigation: false,
+                mine: false,
             };
             if suitable(id, &t) {
                 score += 1;
@@ -167,6 +168,7 @@ pub fn terr_score(id: u8) -> u32 {
             resource: None,
             road: false,
             irrigation: false,
+            mine: false,
         };
         if suitable(id, &t) {
             score += 1 + 4;
@@ -684,6 +686,7 @@ mod tests {
             resource: None,
             road: false,
             irrigation: false,
+            mine: false,
         }
     }
 
@@ -844,6 +847,8 @@ mod tests {
             fortify: Handle::default(),
             work_road: Handle::default(),
             work_irrigate: Handle::default(),
+            work_mine: Handle::default(),
+            work_clear: Handle::default(),
             music: None,
         });
         app.insert_resource(MessageBoard::default());
@@ -858,6 +863,7 @@ mod tests {
             path: Default::default(),
             anim: crate::units::UnitAnim::Idle { t: 0.0 },
             work: None,
+            sentry: false,
         });
         app.add_systems(Update, resolve_features);
         app.update();

@@ -1344,7 +1344,7 @@ The only per-tile record reader in the binary. It is what shows which field any
 given feature occupies.
 
 ```
-Map/scenario loader   0x594290   ('BIC '|'BIX '|'BIQ ' magic, then 4-byte section tags)
+Map/scenario loader   0x594290   ('BIC '|'BICX'|'BICQ' magic — whole-`.text` tag scan finds zero 'BIX '/'BIQ '/'CIV3' compares — then 4-byte section tags)
   'TILE'  -> FUN_00596ce0   (gated on param_2[1] >> 6 & 1)
   FUN_00596ce0  -> FUN_005f3cc0(count)          allocate/refresh the cell array
                 -> loop i in 0 .. word[0x9c73ac]:
@@ -1454,7 +1454,7 @@ must read the field and would settle the bit order.
 | `RiverBack.pcx` | `0x680D6C` | `0x408246`, inside `0x407C30` |
 | `NOTtheRiver.pcx` | `0x680DB8` | the same art table |
 | `RiverFore.pcx` | `0x680DDC` | the same art table |
-| `TERR_River` | `0x728D91` | `0x4D2800` ← `0x4C9930`, a civilopedia/editor path |
+| `TERR_River` | `0x728D8C` (string start; `0x728D91` is +5, `River`) | `0x4D2800` ← `0x4C9930` (sole caller at function granularity), a civilopedia/editor path |
 
 `0x407C30` turned out to be the **city view** background loader — its art list is
 `BLDG_Courthouse … BLDG_Palace, RiverBack.pcx, Harbor.pcx, IslandLeft.pcx,

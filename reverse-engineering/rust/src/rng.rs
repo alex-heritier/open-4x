@@ -56,11 +56,15 @@ impl Rng {
         f64::from(bits) * SCALE
     }
 
-    /// `rand_int(n)` — returns `(int)(n * rand01())`, i.e. a value in
-    /// `0..n`. Truncation is toward zero, matching MSVC's `_ftol2`.
+    /// `rand_int(n)` — returns `(int)((n & 0xFFFF) * rand01())`, i.e. a
+    /// value in `0..(n & 0xFFFF)`. `0x60BAB0` masks the argument to 16 bits
+    /// (`AND EAX,0xFFFF`) before the multiply; truncation is toward zero,
+    /// matching MSVC's `_ftol2`. No immediate-arg caller passes `n > 0xFFFF`
+    /// (233 direct call sites scanned), so the mask is unobservable in
+    /// practice — but it is part of the contract.
     #[inline]
     pub fn below(&mut self, n: u32) -> i32 {
-        (f64::from(n) * self.next_f64()) as i32
+        (f64::from(n & 0xFFFF) * self.next_f64()) as i32
     }
 
     /// Returns `true` with probability `1/n`.
@@ -148,5 +152,17 @@ mod tests {
                 "bin {i} has {c}, mean {mean}"
             );
         }
+    }
+
+    #[test]
+    fn below_masks_argument_to_16_bits() {
+        // 0x60BAB0 ANDs n with 0xFFFF: n and n&0xFFFF draw identically.
+        let mut a = Rng::new(42);
+        let mut b = Rng::new(42);
+        for _ in 0..50 {
+            assert_eq!(a.below(0x1_0000 | 100), b.below(100));
+        }
+        let mut c = Rng::new(7);
+        assert_eq!(c.below(0x1_0000), 0); // masked to 0: (int)(0*x) == 0
     }
 }

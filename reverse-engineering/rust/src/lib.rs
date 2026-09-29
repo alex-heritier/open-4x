@@ -91,18 +91,25 @@
 #![warn(missing_docs)]
 
 pub mod ai;
+pub mod air;
+pub mod blend;
 pub mod bugs;
 pub mod cell;
 pub mod dcl;
+pub mod diplomacy;
+pub mod economy;
 pub mod fractal;
 pub mod graphics;
 pub mod landmass;
+pub mod media;
+pub mod net;
 pub mod options;
 pub mod pipeline;
 pub mod resources;
 pub mod rivers;
 pub mod rng;
 pub mod spiral;
+pub mod ui;
 
 pub use bugs::OriginalBugs;
 pub use cell::{Cell, MapGrid};

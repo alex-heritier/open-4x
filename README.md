@@ -16,15 +16,27 @@ Prereqs: Rust, Python 3 with PIL, ffmpeg.
    `python3 tools/prep_assets.py`
 3. Run: `cargo run`
 
-`MAP_SEED` overrides the fixed default map seed.
+`MAP_SEED` overrides the fixed default map seed; `MAP_CENTER=x,y` and
+`MAP_ZOOM=<0.35..2.5>` frame the starting camera, `CIV3_REVEAL=1` starts with
+fog off and `CIV3_NO_SPLASH=1` skips the greeting.
+
+For testing and debugging, `CIV3_SHOT=out.png CIV3_SHOT_FRAME=120 cargo run`
+writes the window to `out.png` and exits; `CIV3_SHOT_FRAME=30,120` (or `{}` in
+the path) grabs several frames, and `CIV3_SHOT_KEEP=1` leaves the game open.
+See `.agents/skills/game-screenshotting/SKILL.md` for the wrapper script and
+the desktop-capture fallback.
 
 ## Controls
 
 - Click: select unit, order move, open city. Right-click: move.
+- Bottom bar: Civ3's unit action buttons; hovering one names the command
+  and its key, unavailable ones are darkened.
+- Worker: R road, I irrigate, M mine, C clear forest/jungle.
 - Arrow keys: step. Tab: cycle units. F: fortify. Space: skip.
 - B: found city with the settler. Enter or End Turn button: end turn.
 - City screen: click tiles to assign workers, Change build, X or ESC closes.
-- R: reveal-all debug toggle.
+- P: save a window screenshot as `shot-<unix>.png`.
+- F9: reveal-all debug toggle.
 
 ## Scope
 

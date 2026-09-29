@@ -150,6 +150,14 @@ math above), block-3 acceptance probabilities, region-equality check.
 Fully specified stages `placeGoodyHuts`/`placeBarbarianCamps` are there too
 (no `.biq` data needed).
 
+## Alternate GOOD accessor `0x5D90D0` (verified: region sweep)
+
+`0x4E54C3` pushes `'GOOD'` (`0x444F4F47`) with `ecx=0x9C736C` and calls
+`0x5D90D0` directly — not the `0x599600`/vfunc-`0x8C` path documented
+above — then reads `GOOD` row `+0x48` (unmapped u32). Preceded by index
+math onto table `0xA52E98` gated by `0x561440`. The two accessors'
+relationship: open.
+
 ## Open
 
 * UI meaning of the three class predicates `0x5E3700/30/20`.

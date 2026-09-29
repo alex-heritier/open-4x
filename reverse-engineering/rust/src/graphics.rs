@@ -28,8 +28,9 @@ pub const OVERLAY_ORDER: &[&str] = &[
     "FogOfWar",
 ];
 
-/// Unit animation slots: union of keys in `Art/Units/*/​*.ini` (Settler read
-/// in full). Empty value = unit lacks the action.
+/// Unit animation slots: exact key universe over all 76 shipped
+/// `Art/Units/*/*.ini` files (case-insensitive scan, 30 keys).
+/// Empty value = unit lacks the action.
 pub const UNIT_ANIM_SLOTS: &[&str] = &[
     "BLANK",
     "DEFAULT",
@@ -56,7 +57,48 @@ pub const UNIT_ANIM_SLOTS: &[&str] = &[
     "STOP_AT_LAST_FRAME",
     "JUNGLE",
     "FOREST",
+    "PLANT",
+    "PauseROAD",
+    "PauseMINE",
+    "PauseIRRIGATE",
+    "PauseFOREST",
 ];
+
+/// Slots present as keys but never filled in any shipped ini:
+/// engine-supported actions the data never uses.
+pub const NEVER_FILLED_SLOTS: &[&str] = &[
+    "ATTACK3",
+    "DEFEND",
+    "WALK",
+    "FORTIFYHOLD",
+    "BLANK",
+    "STOP_AT_LAST_FRAME",
+    "TURNLEFT",
+    "TURNRIGHT",
+    "PauseROAD",
+    "PauseMINE",
+    "PauseIRRIGATE",
+    "PauseFOREST",
+];
+
+/// City-view background prefix: the city's base-terrain class.
+/// Observed on disk as `Art\City View\Backgrounds\<P>-...` (48 files).
+pub const CITY_BG_PREFIXES: &[&str] = &["D", "G", "P", "T"];
+
+/// City-view background filename: `<P>-<feature>.pcx` for water/feature
+/// layers, `<P>-<SML|MED|LRG|UNCLEAR>.pcx` for plain size backgrounds.
+/// Only the `D-` row ships a `-FP` floodplain variant.
+pub fn city_background(prefix: &str, feature: &str) -> String {
+    format!("Art\\City View\\Backgrounds\\{prefix}-{feature}.pcx")
+}
+
+/// BLDG resolver table shape (`0x407070`): ids `0..=78` dispatch through
+/// the jump table; holes (29, 64–73) and anything above 78 fall through to
+/// the `BLDG_Empty` default. Idx 78 is a valid duplicate of the idx-0
+/// Palace case. Returns false for ids that resolve to `BLDG_Empty`.
+pub fn bldg_key_valid(id: u32) -> bool {
+    id <= 78 && id != 29 && !(64..=73).contains(&id)
+}
 
 /// Minimal parse of a unit `.ini` `[Animations]` section: slot -> file.
 /// Returns the filled (non-empty) slots.
@@ -162,5 +204,59 @@ mod tests {
     fn city_size_fragments() {
         assert_eq!(CitySize::Small.file_fragment(), "SML");
         assert_eq!(CitySize::Large.file_fragment(), "LRG");
+    }
+
+    #[test]
+    fn slot_universe_is_thirty_keys() {
+        assert_eq!(UNIT_ANIM_SLOTS.len(), 30);
+        assert!(UNIT_ANIM_SLOTS.contains(&"PLANT"));
+        assert!(UNIT_ANIM_SLOTS.contains(&"PauseFOREST"));
+        // Every never-filled slot is still a known key.
+        assert!(NEVER_FILLED_SLOTS
+            .iter()
+            .all(|s| UNIT_ANIM_SLOTS.contains(s)));
+    }
+
+    #[test]
+    fn full_settler_ini_parses_to_six_filled() {
+        // Mirrors Settler/settler.ini [Animations]: 30 keys, 6 filled.
+        let ini = "[Animations]\nBLANK=\nDEFAULT=settDefault.flc\nWALK=\n\
+                   RUN=settRun.flc\nATTACK1=\nATTACK2=\nATTACK3=\nDEFEND=\n\
+                   DEATH=settDeath.flc\nDEAD=\nFORTIFY=\nFORTIFYHOLD=\n\
+                   FIDGET=settFidget.flc\nVICTORY=\nTURNLEFT=\nTURNRIGHT=\n\
+                   BUILD=settBuild.flc\nROAD=\nMINE=\nIRRIGATE=\nFORTRESS=\n\
+                   CAPTURE=SettlerCaptured.flc\nSTOP_AT_LAST_FRAME=\n\
+                   PauseROAD=\nPauseMINE=\nPauseIRRIGATE=\nJUNGLE=\nFOREST=\n\
+                   PLANT=\nPauseFOREST=\n";
+        let slots = parse_anim_slots(ini);
+        assert_eq!(slots.len(), 6);
+        assert!(slots.iter().all(|(k, _)| UNIT_ANIM_SLOTS.contains(&k.as_str())));
+        assert!(slots
+            .iter()
+            .all(|(k, _)| !NEVER_FILLED_SLOTS.contains(&k.as_str())));
+    }
+
+    #[test]
+    fn bldg_table_shape() {
+        assert!(bldg_key_valid(0)); // Palace
+        assert!(!bldg_key_valid(29)); // hole
+        assert!(!bldg_key_valid(64));
+        assert!(!bldg_key_valid(73));
+        assert!(bldg_key_valid(74));
+        assert!(bldg_key_valid(78)); // Palace duplicate
+        assert!(!bldg_key_valid(79)); // above 0x4E -> default
+    }
+
+    #[test]
+    fn city_background_names_match_disk() {
+        assert_eq!(
+            city_background("D", "H2O-RiverFore-FP"),
+            "Art\\City View\\Backgrounds\\D-H2O-RiverFore-FP.pcx"
+        );
+        assert_eq!(
+            city_background("G", "SML"),
+            "Art\\City View\\Backgrounds\\G-SML.pcx"
+        );
+        assert_eq!(CITY_BG_PREFIXES.len(), 4);
     }
 }

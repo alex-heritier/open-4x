@@ -19,7 +19,17 @@ pub fn setup_splash(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut splash: ResMut<SplashUp>,
+    mut audio: Option<ResMut<GameAudio>>,
 ) {
+    // Debug: CIV3_NO_SPLASH=1 starts straight on the map. Any key or click
+    // dismisses the greeting, so screenshot runs would otherwise need input.
+    if std::env::var("CIV3_NO_SPLASH").is_ok() {
+        splash.0 = false;
+        if let Some(audio) = audio.as_mut() {
+            audio::start_peace_music(&mut commands, audio);
+        }
+        return;
+    }
     splash.0 = true;
     let font = assets.load("gen/fonts/lsans.ttf");
     commands

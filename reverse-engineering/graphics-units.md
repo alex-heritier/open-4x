@@ -1,25 +1,68 @@
 # Unit graphics and animation
 
-## Per-unit directory (`civ3-gog/app/Art/Units/<Name>/`, 80 units)
+## Per-unit directory (`civ3-gog/app/Art/Units/<Name>/`, 77 unit dirs)
 
-Each unit is a directory: one `.ini`, one or more `.flc` animations, combat
-sounds. `Settler/` (complete example):
+77 subdirectories + 3 loose files at `Units/` root (`units_32.pcx`,
+`s_Planes.pcx`, `Planes.pcx`). 76 dirs hold one `.ini` (mixed `.ini`/`.INI`
+case); `Palettes/` holds only palette files. Each unit dir: one `.ini`, one
+or more `.flc` animations, combat sounds. `Settler/settler.ini` (complete,
+verified 2026-09-29):
 
 ```ini
+[Speed]
+Normal Speed=225
+Fast Speed=225
 [Animations]
-DEFAULT=settDefault.flc   RUN=settRun.flc      DEATH=settDeath.flc
-FIDGET=settFidget.flc     BUILD=settBuild.flc  CAPTURE=SettlerCaptured.flc
-; ATTACK1/2/3, DEFEND, FORTIFY, ... all empty (non-combat unit)
-[Sound Effects]
-RUN=SettlerRun.amb  FIDGET=SettlerFidget.wav  BUILD=SettlerBuild.wav
-[Speed] Normal Speed=225  Fast Speed=225
+BLANK=                        ; 30 keys total (full universe below)
+DEFAULT=settDefault.flc
+WALK=
+RUN=settRun.flc
+ATTACK1=                      ; empty = Settler cannot attack
+ATTACK2=
+ATTACK3=
+DEFEND=
+DEATH=settDeath.flc
+DEAD=
+FORTIFY=
+FORTIFYHOLD=
+FIDGET=settFidget.flc
+VICTORY=
+TURNLEFT=
+TURNRIGHT=
+BUILD=settBuild.flc
+ROAD=
+MINE=
+IRRIGATE=
+FORTRESS=
+CAPTURE=SettlerCaptured.flc
+STOP_AT_LAST_FRAME=
+PauseROAD=                    ; pause-variant keys, always empty in data
+PauseMINE=
+PauseIRRIGATE=
+JUNGLE=
+FOREST=
+PauseFOREST=
+[Timing]                      ; every animation key repeated, all `0.500000`
+[Sound Effects]               ; RUN=SettlerRun.amb FIDGET=SettlerFidget.wav
+                              ; BUILD=SettlerBuild.wav, rest empty
+[Version]
+VERSION=1
+[Palette]
+PALETTE=                      ; empty = default unit palette
 ```
 
-Slot table (union over units): `BLANK DEFAULT WALK RUN ATTACK1..3 DEFEND
-DEATH DEAD FORTIFY FORTIFYHOLD FIDGET VICTORY TURNLEFT TURNRIGHT BUILD ROAD
-MINE IRRIGATE FORTRESS CAPTURE STOP_AT_LAST_FRAME Pause* JUNGLE FOREST`.
-Empty slot = no file = unit cannot do that action. Combat units fill
-`ATTACK1..3/DEFEND`; workers fill `ROAD/MINE/IRRIGATE/FORTRESS/FOREST`.
+Slot universe over all 76 inis (case-insensitive scan, verified 2026-09-29):
+`ATTACK1 ATTACK2 ATTACK3 BLANK BUILD CAPTURE DEAD DEATH DEFAULT DEFEND
+FIDGET FOREST FORTIFY FORTIFYHOLD FORTRESS IRRIGATE JUNGLE MINE PLANT
+PauseFOREST PauseIRRIGATE PauseMINE PauseROAD ROAD RUN STOP_AT_LAST_FRAME
+TURNLEFT TURNRIGHT VICTORY WALK` (30 keys). Slots filled in at least one
+shipped ini: `ATTACK1 ATTACK2 BUILD CAPTURE DEAD DEATH DEFAULT FIDGET FOREST
+FORTIFY FORTRESS IRRIGATE JUNGLE MINE PLANT ROAD RUN VICTORY`. Never filled
+anywhere: `ATTACK3 DEFEND WALK FORTIFYHOLD BLANK STOP_AT_LAST_FRAME
+TURNLEFT TURNRIGHT Pause*` — engine-supported slots the shipped data never
+uses. Empty slot = no file = unit cannot do that action. Combat units fill
+`ATTACK1/ATTACK2`; workers fill `ROAD/MINE/IRRIGATE/FORTRESS/FOREST/JUNGLE/
+PLANT`.
 
 ## Engine side (verified this session)
 
@@ -37,8 +80,18 @@ Empty slot = no file = unit cannot do that action. Combat units fill
   table. `RankView\warrior_{death,victory,scratch,smash}.flc`
   (`0x732D49C`...) are the combat-preview copies.
 
+## FLC animation format (observed sample)
+
+`Settler/settDefault.flc` header: magic `0xAF12`, 120 frames, 30x55 px, 8
+bpp, speed 125. Small unit-faced sprites; 476 `.flc` files ship under
+`Units/`. Combat example `warrior/`: two attacks (`warriorAttackA.flc` +
+`warriorAttackB.flc`, each with `.amb` + Foot/Grunt/Slash/Whoosh wavs),
+`warriorDeath/Default/Fidget/Fortify/Run/Victory.flc` — matching the filled
+combat slots above.
+
 ## Reference implementation
 
-`rust/src/graphics.rs`, `UnitAnimSet`: parse the `.ini` slot table
-(exact key set above), `has_action()` from slot emptiness, icon path
-builder. Tested against the Settler inventory (6 filled / rest empty).
+`rust/src/graphics.rs`: `UNIT_ANIM_SLOTS` (exact 30-key universe),
+`parse_anim_slots()` over `[Animations]`, `has_action()` from slot
+emptiness, icon path builder. Tested against the full Settler ini (6 filled
+slots) and the never-filled slot set.

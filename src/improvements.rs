@@ -27,12 +27,17 @@ use crate::units::{Unit, UnitAnim};
 pub enum WorkAction {
     Road,
     Irrigate,
+    Mine,
+    /// Clear forest, jungle or pine cover back to bare ground.
+    Clear,
 }
 
 pub fn work_turns(a: WorkAction) -> u8 {
     match a {
         WorkAction::Road => 4,
         WorkAction::Irrigate => 5,
+        WorkAction::Mine => 6,
+        WorkAction::Clear => 4,
     }
 }
 
@@ -40,6 +45,8 @@ fn action_name(a: WorkAction) -> &'static str {
     match a {
         WorkAction::Road => "road",
         WorkAction::Irrigate => "irrigation",
+        WorkAction::Mine => "mine",
+        WorkAction::Clear => "clearing",
     }
 }
 
@@ -47,6 +54,8 @@ pub fn action_slot(a: WorkAction) -> &'static str {
     match a {
         WorkAction::Road => "ROAD",
         WorkAction::Irrigate => "IRRIGATE",
+        WorkAction::Mine => "MINE",
+        WorkAction::Clear => "FOREST",
     }
 }
 
@@ -88,6 +97,23 @@ pub fn is_water_base(b: Base) -> bool {
 pub fn can_road(map: &GameMap, x: i32, y: i32) -> bool {
     map.get(x, y).is_some_and(|t| {
         map.is_land(x, y) && t.relief != Relief::Mountain && !t.road
+    })
+}
+
+/// Mines go on hills, mountains and bare desert (Civ3 mine terrain).
+pub fn can_mine(map: &GameMap, x: i32, y: i32) -> bool {
+    map.get(x, y).is_some_and(|t| {
+        !t.mine
+            && map.is_land(x, y)
+            && (t.relief != Relief::Flat
+                || (t.base == Base::Desert && t.cover == Cover::Bare))
+    })
+}
+
+/// Forest, jungle and pine cover on flat land can be cleared.
+pub fn can_clear(map: &GameMap, x: i32, y: i32) -> bool {
+    map.get(x, y).is_some_and(|t| {
+        map.is_land(x, y) && t.relief == Relief::Flat && t.cover != Cover::Bare
     })
 }
 
@@ -160,12 +186,15 @@ fn irr_sheet(t: &Tile) -> &'static str {
 
 /// Hover suffix for a tile's improvements.
 pub fn describe(t: &Tile) -> Option<String> {
-    match (t.road, t.irrigation) {
-        (true, true) => Some("Road, Irrigated".to_string()),
-        (true, false) => Some("Road".to_string()),
-        (false, true) => Some("Irrigated".to_string()),
-        (false, false) => None,
-    }
+    let parts: Vec<&str> = [
+        (t.road, "Road"),
+        (t.irrigation, "Irrigated"),
+        (t.mine, "Mine"),
+    ]
+    .iter()
+    .filter_map(|(on, name)| on.then_some(*name))
+    .collect();
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
 /// Advance worker jobs on end turn; complete and apply to the map.
@@ -192,16 +221,14 @@ pub fn end_turn_work(
             match w.action {
                 WorkAction::Road => map.tiles[i].road = true,
                 WorkAction::Irrigate => map.tiles[i].irrigation = true,
+                WorkAction::Mine => map.tiles[i].mine = true,
+                WorkAction::Clear => map.tiles[i].cover = Cover::Bare,
             }
             u.anim = UnitAnim::OneShot {
                 slot: action_slot(w.action),
                 t: 0.0,
             };
-            let sfx = match w.action {
-                WorkAction::Road => &audio.work_road,
-                WorkAction::Irrigate => &audio.work_irrigate,
-            };
-            commands.spawn(AudioPlayer(sfx.clone()));
+            commands.spawn(AudioPlayer(audio.work_sfx(w.action)));
             post(
                 &mut board,
                 format!("Workers complete {} ({},{}).", action_name(w.action), u.x, u.y),
@@ -368,7 +395,7 @@ mod tests {
         // Northwest corner of the block: E, SE, S neighbors only.
         assert_eq!(road_mask(&map, &[], cx - 1, cy - 1), 0b00011100);
         // Cities connect as hubs.
-        let mut map = GameMap::generate();
+        let map = GameMap::generate();
         assert_eq!(road_mask(&map, &[(cx + 1, cy)], cx, cy), 0b00000100);
     }
 
@@ -542,6 +569,8 @@ mod tests {
             fortify: Handle::default(),
             work_road: Handle::default(),
             work_irrigate: Handle::default(),
+            work_mine: Handle::default(),
+            work_clear: Handle::default(),
             music: None,
         });
         app.add_message::<crate::units::TurnEnded>();
@@ -554,6 +583,7 @@ mod tests {
             facing: 2,
             path: Default::default(),
             anim: UnitAnim::Idle { t: 0.0 },
+            sentry: false,
             work: Some(Work {
                 action: WorkAction::Road,
                 turns_left: 1,
@@ -568,5 +598,32 @@ mod tests {
         assert!(map.tiles[map.idx(sx, sy)].road);
         let board = app.world().resource::<MessageBoard>();
         assert!(board.text.contains("road"), "got: {}", board.text);
+    }
+
+    #[test]
+    fn mine_and_clear_rules_and_effects() {
+        let mut map = GameMap::generate();
+        let find = |map: &GameMap, f: &dyn Fn(&Tile) -> bool| {
+            (0..map.h)
+                .flat_map(|y| (0..map.w).map(move |x| (x, y)))
+                .find(|(x, y)| map.get(*x, *y).is_some_and(|t| f(t)))
+        };
+        let hill = find(&map, &|t| {
+            t.relief == Relief::Hill && !matches!(t.base, Base::Ocean | Base::Sea | Base::Coast)
+        })
+        .expect("map has hills");
+        assert!(can_mine(&map, hill.0, hill.1));
+        let before = crate::map::yields(map.get(hill.0, hill.1).unwrap()).1;
+        let i = map.idx(hill.0, hill.1);
+        map.tiles[i].mine = true;
+        assert_eq!(crate::map::yields(&map.tiles[i]).1, before + 2);
+        assert!(!can_mine(&map, hill.0, hill.1));
+        assert_eq!(describe(&map.tiles[i]).as_deref(), Some("Mine"));
+        let wood = find(&map, &|t| {
+            t.relief == Relief::Flat && t.cover != Cover::Bare && !matches!(t.base, Base::Ocean | Base::Sea | Base::Coast | Base::Ice)
+        })
+        .expect("map has flat cover");
+        assert!(can_clear(&map, wood.0, wood.1));
+        assert!(!can_clear(&map, map.start.0, map.start.1) || map.get(map.start.0, map.start.1).unwrap().cover != Cover::Bare);
     }
 }

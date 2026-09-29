@@ -78,6 +78,61 @@ Saves are scenario streams with `CIV3` magic, stored raw or DCL-wrapped —
 the loader sniffs the magic. The 20 000-tag TILE array corroborates the
 per-tile record work (`NOTES.md` §13): saves carry the live map.
 
+## Scenario load sequence `0x59AB50` (verified: region sweep)
+
+SEH prologue; logs `\nBeginning scenario load sequence ( %s )...\n`
+(`0x72E53C` via `0x5F9920`); `call 0x5F7800`, `call 0x5F76C0` (DCL/temp-path
+wrapper), `call 0x594290` (dispatcher — exactly 1 caller in `.text`, the
+single-caller claim confirmed). Fallbacks: `civ3F.bix` (`0x6855D8`),
+`conquests.biq` (`0x68529C`). `0x59AB50` itself has 4 callers
+(`0x59AD22`/`0x59B105`/`0x59B2F0`/`0x59B494`); `0x5F76C0` has 7.
+
+Dispatcher `0x594290`: `fopen "rb"` + fread/fseek, magic gate on `BIC `/
+`BICX`/`BICQ` (else `Scenario::load ERROR _ Invalid scenario file format`),
+then per-tag `cmp` arms over the full inventory (raw `3D`-scan):
+`PRTO GAME GOOD VER# SLOC LEAD RACE TILE RULE TFRM DIFF BLDG TECH ESPN
+CTZN CULT TERR WMAP WCHR EXPR ERAS UNIT CLNY CONT GOVT FLAV CITY WSIZ`.
+Sampled arms: `UNIT` (`0x594AC8` → flag gate → `0x596DE0` loadUNIT, or-bit
+8 into `[esi+0x84C]`), `BLDG` (`0x59472C` → `0x594FF0`, or-bit 1 into
+`[esi+0x848]`), `PRTO` (`0x594399` → `0x595C40`, or-bit into `[esi+0x848]`),
+`VER#` (logs `Loading version %d.%02d BIC file`, float version check into
+`[esi+0xBA0]`). Worker bodies (`0x596DE0`/`0x594FF0`/`0x595C40`): open.
+Getter `0x599600` has zero direct callers — indirect/virtual only
+(`Map::vfunc(0x8C)`). Save path lead: `0x59F752–0x59F930` (`BIC ` compares,
+`BICX` mem-compare, `call 0x597E20`). Duplicate `CULT` compare
+(`0x594EA4` vs `0x59494E`): unexplained.
+
+## Loader worker bodies (verified: sweep + parent spot-checks)
+
+All three share a prologue shape (`fread` via `0x64B3E3`, then an
+alloc call) and a single caller each from their dispatch arm:
+
+| worker | sole caller | count | base | stride | per-item |
+|---|---|---|---|---|---|
+| loadUNIT `0x596DE0` | `0x594AE4` | `[esi+0x8C0]` | `[esi+0x3E24]` | `0x7C` (`add ebp`) | `0x5EADA0` |
+| loadBLDG `0x594FF0` | `0x5947E3` | `[esi+0x878]` | `[esi+0xBA4]` | `0x110` (`add edi`) | `0x5DFF40` |
+| loadPRTO `0x595C40` | `0x594935` | `[esi+0x8A8]` | `[esi+0x3CD8]` | `0x138` (`add edi` @`0x595CED`, parent-verified) | `0x5E54B0` |
+
+Version gates: UNIT compares `percent*0.01` (`fild`/`fiadd`/`fmul
+[0x666AC8]`), BLDG `fcomp [0x66E9D4]=2.08`, PRTO `fcomp
+[0x665838]=10.0` (parent-verified at `0x595CFB`, followed by the
+`[Scenario::loadPRTO()]: Translating Civ3 unit actions to Civ3X unit
+actions` log). PRTO counts `[item+0xA0]==-1` into `[esi+0x874]`
+(HYPOTHESIS: `-1` = no prerequisite). BLDG first-settled fixup
+(tests/clears bit 0 at `[eax+0xEC]`) and `-1` normalize at
+`[eax+0xD8]`: child-reported. PRTO v11.01/11.03/11.05 arms past
+`0x595F9A`: open.
+
+`rust/src/dcl.rs`: `SCENARIO_TAGS` inventory + `magic_valid()`, tested.
+
+## No scenario editor in this binary (verified: byte grep)
+
+Case-insensitive `editor` scan of the whole image finds exactly 3 hits, all
+uppercase data tags — `EDITORBLDG` (`0x684020`, pushed at `0x41FC75`),
+`EDITORWHO` (`0x72951C`, pushed at `0x4E33D0`), `EDITORUNIT` (`0x729528`,
+pushed at `0x4E3701`). Zero hits for `Civ3Edit`/`civ3edit`/`Scenario
+Editor`/lowercase `editor`. The editor is a separate binary — confirmed.
+
 ## Open
 
 * Mode-1 (tree-literal) streams: implemented per disassembly, unverified.

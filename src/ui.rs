@@ -18,9 +18,6 @@ pub(crate) struct HoverLabel;
 pub(crate) struct TurnLabel;
 
 #[derive(Component)]
-pub(crate) struct SelLabel;
-
-#[derive(Component)]
 pub(crate) struct MessageLabel;
 
 #[derive(Component)]
@@ -46,7 +43,7 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
         HoverLabel,
     ));
     commands.spawn((
-        Text::new("click: select/move/open city | right-click: move | B: found city | F: fortify | R: road | I: irrigate | Space: skip | Tab: cycle | Enter: end turn"),
+        Text::new("click: select/move/open city | right-click: move | G: go to | Tab: cycle | Enter: end turn | WASD/wheel: camera"),
         TextFont {
             font: font.clone(),
             font_size: 14.0,
@@ -55,7 +52,7 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
         TextColor(Color::srgb(0.8, 0.8, 0.8)),
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(8.0),
+            bottom: Val::Px(90.0),
             left: Val::Px(8.0),
             ..default()
         },
@@ -81,30 +78,13 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
         Text::new(""),
         TextFont {
             font: font.clone(),
-            font_size: 16.0,
-            ..default()
-        },
-        TextColor(Color::srgb(1.0, 1.0, 0.6)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(8.0),
-            right: Val::Px(12.0),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-        SelLabel,
-    ));
-    commands.spawn((
-        Text::new(""),
-        TextFont {
-            font: font.clone(),
             font_size: 17.0,
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.95, 0.7)),
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(36.0),
+            bottom: Val::Px(116.0),
             left: Val::Px(8.0),
             ..default()
         },
@@ -116,7 +96,7 @@ pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(40.0),
+                bottom: Val::Px(16.0),
                 right: Val::Px(12.0),
                 padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
                 ..default()
@@ -159,6 +139,8 @@ pub fn end_turn_button(
 pub fn update_hover_label(
     map: Res<GameMap>,
     hovered: Res<Hovered>,
+    selected: Res<Selected>,
+    units: Query<&Unit>,
     mut q: Query<&mut Text, With<HoverLabel>>,
 ) {
     let Ok(mut text) = q.single_mut() else {
@@ -174,6 +156,30 @@ pub fn update_hover_label(
             }
             if let Some(i) = improvements::describe(t) {
                 parts.push(i);
+            }
+            if let Some(u) = selected.0.and_then(|s| units.get(s).ok()) {
+                if (u.x, u.y) != (x, y) {
+                    match map.find_path((u.x, u.y), (x, y)) {
+                        Some(p) => {
+                            let extra = units::path_turns(
+                                &map,
+                                u.moves,
+                                units::def(u.utype).moves,
+                                &p,
+                            );
+                            parts.push(format!(
+                                "path {} steps, {}",
+                                p.len(),
+                                if extra == 0 {
+                                    "this turn".to_string()
+                                } else {
+                                    format!("{} turns", extra + 1)
+                                }
+                            ));
+                        }
+                        None => parts.push("no path".to_string()),
+                    }
+                }
             }
             parts.join(" | ")
         }
@@ -213,29 +219,5 @@ pub fn update_turn_label(
         format!("Turn {}  |  ENTER: end turn", turn.0)
     } else {
         format!("Turn {}", turn.0)
-    };
-}
-
-pub fn update_sel_label(
-    selected: Res<Selected>,
-    units: Query<&Unit>,
-    mut q: Query<&mut Text, With<SelLabel>>,
-) {
-    let Ok(mut text) = q.single_mut() else {
-        return;
-    };
-    text.0 = match selected.0.and_then(|s| units.get(s).ok()) {
-        Some(u) => {
-            let d = units::def(u.utype);
-            let extra = if u.fortified {
-                " (fortified)"
-            } else if u.moves == 0 {
-                " (done)"
-            } else {
-                ""
-            };
-            format!("{}  {}/{} MP{extra}", d.name, u.moves, d.moves)
-        }
-        None => String::new(),
     };
 }

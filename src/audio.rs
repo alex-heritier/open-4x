@@ -17,6 +17,8 @@ pub struct GameAudio {
     pub fortify: Handle<AudioSource>,
     pub work_road: Handle<AudioSource>,
     pub work_irrigate: Handle<AudioSource>,
+    pub work_mine: Handle<AudioSource>,
+    pub work_clear: Handle<AudioSource>,
     pub music: Option<Entity>,
 }
 
@@ -61,6 +63,8 @@ impl GameAudio {
             fortify: assets.load("gen/audio/units/warrior/WarriorFortify.wav"),
             work_road: assets.load("gen/audio/units/Worker/WorkRoadShovelIn.wav"),
             work_irrigate: assets.load("gen/audio/units/Worker/WorkIrrigateHoe1.wav"),
+            work_mine: assets.load("gen/audio/units/Worker/WorkMinePickAxe.wav"),
+            work_clear: assets.load("gen/audio/units/Worker/WorkForestAxe.wav"),
             music: None,
         }
     }
@@ -92,4 +96,16 @@ pub fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
     let e = commands.spawn(AudioPlayer(audio.menu.clone())).id();
     audio.music = Some(e);
     commands.insert_resource(audio);
+}
+
+impl GameAudio {
+    pub fn work_sfx(&self, a: crate::improvements::WorkAction) -> Handle<AudioSource> {
+        use crate::improvements::WorkAction::*;
+        match a {
+            Road => self.work_road.clone(),
+            Irrigate => self.work_irrigate.clone(),
+            Mine => self.work_mine.clone(),
+            Clear => self.work_clear.clone(),
+        }
+    }
 }

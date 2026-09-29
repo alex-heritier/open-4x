@@ -15,6 +15,37 @@
 //! locally, and the `0x649980` build writes `0xFF` markers at full-code
 //! indices that can overlap the lens copies — mirrored here by using the
 //! exe's exact flat table layout, benign or not.
+//!
+//! The scenario dispatcher (`0x594290`) inventory and magic gate live here
+//! too (`SCENARIO_TAGS`, `magic_valid`), since the tag set defines what a
+//! decompressed stream may contain.
+
+/// Scenario section tags accepted by the `0x594290` dispatcher, in raw
+/// `3D`-scan encounter order (28 tags; `CULT` compares twice).
+pub const SCENARIO_TAGS: &[&str] = &[
+    "PRTO", "GAME", "GOOD", "VER#", "SLOC", "LEAD", "RACE", "TILE", "RULE",
+    "TFRM", "DIFF", "BLDG", "TECH", "ESPN", "CTZN", "CULT", "TERR", "WMAP",
+    "WCHR", "EXPR", "ERAS", "UNIT", "CLNY", "CONT", "GOVT", "FLAV", "CITY",
+    "WSIZ",
+];
+
+/// Scenario magic gate (`0x59432D` ff): exactly `BIC `/`BICX`/`BICQ`.
+/// No `BIX `/`BIQ `/`CIV3` compares exist anywhere in `.text`.
+pub fn magic_valid(magic: &[u8; 4]) -> bool {
+    matches!(magic, b"BIC " | b"BICX" | b"BICQ")
+}
+
+/// Per-record stride of the three decoded loader workers
+/// (`biq.md`): UNIT `0x7C`, BLDG `0x110`, PRTO `0x138`.
+/// All other tags: unknown (`None`).
+pub fn loader_stride(tag: &str) -> Option<u32> {
+    match tag {
+        "UNIT" => Some(0x7C),
+        "BLDG" => Some(0x110),
+        "PRTO" => Some(0x138),
+        _ => None,
+    }
+}
 
 /// Code lengths for the 256 literal symbols (`0x73A520`).
 pub const LIT_LEN: [u8; 256] = [
@@ -368,5 +399,29 @@ mod tests {
         let kraft = |lens: &[u8]| lens.iter().map(|&l| 2f64.powi(-(l as i32))).sum::<f64>();
         assert!((kraft(&LIT_LEN) - 1.0).abs() < 1e-9);
         assert!((kraft(&DIST_LEN) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dispatcher_inventory_and_magic() {
+        assert_eq!(SCENARIO_TAGS.len(), 28);
+        assert!(SCENARIO_TAGS.contains(&"UNIT"));
+        assert!(SCENARIO_TAGS.contains(&"TERR"));
+        assert!(SCENARIO_TAGS.contains(&"FLAV"));
+        assert!(magic_valid(b"BIC "));
+        assert!(magic_valid(b"BICX"));
+        assert!(magic_valid(b"BICQ"));
+        assert!(!magic_valid(b"BIX "));
+        assert!(!magic_valid(b"BIQ "));
+        assert!(!magic_valid(b"CIV3"));
+    }
+
+    #[test]
+    fn loader_strides_match_workers() {
+        // Loop increments from the three worker bodies (biq.md).
+        assert_eq!(loader_stride("UNIT"), Some(0x7C));
+        assert_eq!(loader_stride("BLDG"), Some(0x110));
+        assert_eq!(loader_stride("PRTO"), Some(0x138));
+        assert_eq!(loader_stride("TERR"), None);
+        assert_eq!(loader_stride("NOPE"), None);
     }
 }
