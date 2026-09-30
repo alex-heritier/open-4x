@@ -22,6 +22,7 @@ cross-references it instead of duplicating it.
 | [`biq.md`](biq.md) | `.biq` container framing → `rust/src/dcl.rs` |
 | [`editor.md`](editor.md) | Conquests scenario editor image: tag census, `3D` dispatch map, save-path mirror (open) |
 | [`economy.md`](economy.md) | Culture/corruption/trade economy: border event, culture/corruption/split math → `rust/src/economy.rs` |
+| [`stacking.md`](stacking.md) | Per-tile unit stacks: the `Cell+0x0C` list, the pool at `0xA52DD4`, placement order, consumers → `rust/src/stack.rs` |
 | [`workers.md`](workers.md) | Unit orders/worker automation: string-negative verdict, goto enumerator, struct head (no Rust module yet) |
 | [`dynamic-tracing.md`](dynamic-tracing.md) | Live-debugging runbook (Wine/winedbg); static analysis is exhausted for its questions |
 | [`ui.md`](ui.md) | UI text: civilopedia hypertext tokenizer → `rust/src/ui.rs` |
@@ -29,7 +30,7 @@ cross-references it instead of duplicating it.
 | [`multiplayer.md`](multiplayer.md) | Multiplayer: mode global, net gates → `rust/src/net.rs` |
 | [`air.md`](air.md) | Air combat: move dispatch, bombard-move log stub → `rust/src/air.rs` |
 | [`media.md`](media.md) | Movies/victory media: intro gate, selectors, wonder art → `rust/src/media.rs` |
-| [`rust/`](rust/) | Reference implementation. 174 tests (`cargo test --release`: 167 lib + 5 bin + 2 doc) |
+| [`rust/`](rust/) | Reference implementation. 182 tests (`cargo test --release`: 175 lib + 5 bin + 2 doc) |
 
 ## Quick start
 
@@ -73,6 +74,12 @@ intended behaviour, or a subset like `--bugs contour-equality`.
   itself writes while loading its rules, and the rules data (`GOOD` names and
   frequencies, the 14 `TERR` resource allow-masks) can be read from the file
   instead of hardcoded. See [`biq.md`](biq.md), [`resources.md`](resources.md).
+* **A tile's units are one list, newest placement first.** The list head sits
+  in `Cell+0x0C`; `Unit::setPosition` (`0x5BD220`) pushes each placed unit at
+  the head, and nothing else reorders a tile (no "fortify to the bottom").
+  Every query and panel walks from the head, while the display path that draws
+  a *single* unit sprite for a tile keeps the last entry — the tile's oldest
+  resident. See [`stacking.md`](stacking.md).
 
 ## Scope (non-goals)
 

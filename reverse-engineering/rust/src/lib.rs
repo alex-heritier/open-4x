@@ -109,6 +109,7 @@ pub mod resources;
 pub mod rivers;
 pub mod rng;
 pub mod spiral;
+pub mod stack;
 pub mod ui;
 
 pub use bugs::OriginalBugs;
