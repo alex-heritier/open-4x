@@ -1,9 +1,11 @@
-//! Tokugawa greeting splash. Shows once at startup over the new game;
-//! any click or key dismisses it and starts the peace music loop.
+//! Greeting splash for the hotseat game. Shows once at startup over the
+//! new game; any click or key dismisses it and starts the peace music
+//! loop. The portrait art is still Tokugawa's.
 
 use bevy::prelude::*;
 
 use crate::audio::{self, GameAudio};
+use crate::civs::{CIV_COUNT, CIVS};
 
 #[derive(Resource, Default)]
 pub struct SplashUp(pub bool);
@@ -11,9 +13,17 @@ pub struct SplashUp(pub bool);
 #[derive(Component)]
 pub(crate) struct SplashRoot;
 
-const GREETING: &str = "Greetings. I am Tokugawa Ieyasu of the Japanese. \
-    Our people have wandered long enough. It is time to build Kyoto, \
-    explore these lands, and make them ours.";
+/// Hotseat greeting: the chair is shared, so the splash names every
+/// civilization that will act rather than speaking for one leader. The
+/// portrait art stays Tokugawa's.
+fn greeting() -> String {
+    let list = CIVS.iter().map(|c| c.name).collect::<Vec<_>>().join(", ");
+    format!(
+        "Greetings. {CIV_COUNT} civilizations share this world, and each \
+         takes the chair in turn: {list}. Found your first city, explore \
+         these lands, and make them yours."
+    )
+}
 
 pub fn setup_splash(
     mut commands: Commands,
@@ -65,7 +75,7 @@ pub fn setup_splash(
             ))
             .with_children(|col| {
                 col.spawn((
-                    Text::new(GREETING),
+                    Text::new(greeting()),
                     TextFont {
                         font: font.clone(),
                         font_size: 22.0,
@@ -103,10 +113,7 @@ pub fn dismiss_splash(
         return;
     }
     for r in roots.iter() {
-        commands
-            .entity(r)
-            .despawn_related::<Children>()
-            .despawn();
+        commands.entity(r).despawn_related::<Children>().despawn();
     }
     commands.insert_resource(SplashUp(false));
     if let Some(audio) = audio.as_mut() {

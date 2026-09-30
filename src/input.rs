@@ -7,9 +7,9 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use crate::actionbar::{GotoMode, UnitCommand, key_commands};
 use crate::audio::{self, GameAudio};
 use crate::cities::{City, CityView};
-use crate::actionbar::{key_commands, GotoMode, UnitCommand};
 use crate::map::*;
 use crate::render::RevealAll;
 use crate::splash::SplashUp;
@@ -69,8 +69,7 @@ pub fn camera_control(
         dir.x += 1.0;
     }
     if dir != Vec2::ZERO {
-        tf.translation +=
-            (dir.normalize() * 700.0 * ortho.scale * time.delta_secs()).extend(0.0);
+        tf.translation += (dir.normalize() * 700.0 * ortho.scale * time.delta_secs()).extend(0.0);
     }
 }
 
@@ -121,7 +120,6 @@ pub fn hover(
         gizmos.line_2d(corners[i], corners[(i + 1) % 4], Color::WHITE);
     }
 }
-
 
 /// Work out whether the route is being aimed, and for which tile: the
 /// armed Go-to command previews under the pointer, and otherwise only a
@@ -176,6 +174,7 @@ mod tests {
 
     fn unit_at(x: i32, y: i32) -> Unit {
         Unit {
+            civ: 0,
             utype: UnitType::Scout,
             x,
             y,
@@ -308,6 +307,7 @@ fn order_with_sfx(
 
 pub fn orders(
     mut commands: Commands,
+    civs: Res<crate::civs::Civilizations>,
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     hovered: Res<Hovered>,
@@ -334,8 +334,14 @@ pub fn orders(
     }
     // V: open the city under the selected unit.
     if keys.just_pressed(KeyCode::KeyV) {
-        let at = selected.0.and_then(|s| units.get(s).ok()).map(|(_, u)| (u.x, u.y));
-        if let Some((e, _)) = cities.iter().find(|(_, c)| Some((c.x, c.y)) == at) {
+        let at = selected
+            .0
+            .and_then(|s| units.get(s).ok())
+            .map(|(_, u)| (u.x, u.y));
+        if let Some((e, _)) = cities
+            .iter()
+            .find(|(_, c)| c.civ == civs.active && Some((c.x, c.y)) == at)
+        {
             view.0 = Some(e);
             audio::sfx(&mut commands, &audio, "City View");
         }
@@ -352,10 +358,14 @@ pub fn orders(
             // Units that spent their moves cannot be selected, as in Civ3.
             let stack: Vec<Entity> = units
                 .iter()
-                .filter(|(_, u)| u.x == x && u.y == y && units::selectable(u))
+                .filter(|(_, u)| {
+                    u.civ == civs.active && u.x == x && u.y == y && units::selectable(u)
+                })
                 .map(|(e, _)| e)
                 .collect();
-            if let Some((e, _)) = cities.iter().find(|(_, c)| c.x == x && c.y == y)
+            if let Some((e, _)) = cities
+                .iter()
+                .find(|(_, c)| c.civ == civs.active && c.x == x && c.y == y)
             {
                 // cities open first, as in Civ3; garrisoned units cycle via Tab
                 view.0 = Some(e);
@@ -411,7 +421,7 @@ pub fn orders(
     if keys.just_pressed(KeyCode::Tab) {
         let cands: Vec<Entity> = units
             .iter()
-            .filter(|(_, u)| units::needs_orders(u))
+            .filter(|(_, u)| u.civ == civs.active && units::needs_orders(u))
             .map(|(e, _)| e)
             .collect();
         if !cands.is_empty() {

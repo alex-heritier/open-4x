@@ -1,10 +1,19 @@
 # Civ3 Clone
 
-A solo Japan sandbox built with Rust Bevy, using art and audio converted
-from a local Civilization 3 GOG install. No AI, no tech, no diplomacy:
-found Kyoto, explore, pop goody huts, disperse barbarian camps, work
+A three-civilization hotseat sandbox built with Rust Bevy, using art and audio
+converted from a local Civilization 3 GOG install. Japan, Rome, and Egypt are
+all human-controlled. No AI, no tech, no diplomacy:
+found cities, explore, pop goody huts, disperse barbarian camps, work
 resources, grow cities, end turns. Map-feature placement follows the
 reverse-engineered mapgen stages (see `reverse-engineering/NOTES.md`).
+
+Each civilization starts with its own Settler, Worker, Warrior, and Scout on
+separate land tiles. Units, cities, capitals, gold, resources, and explored
+terrain belong to their civilization. City badges and borders use its color.
+End Turn advances only that civilization's cities and worker jobs, then passes
+control and the camera to the next civilization. The turn number increases
+after all three have played. Only the active civilization's units and cities
+can receive orders; production decisions wait for their owner's next turn.
 
 ## Setup
 
@@ -48,7 +57,8 @@ the desktop-capture fallback.
   Units with no moves left cannot be selected; when none need orders the
   selection clears and the bottom-right box blinks its next-turn prompt.
 - B: found city with the settler. Enter, the next-turn disc, or the
-  bottom-right box (when it shows the prompt): end turn.
+  bottom-right box (when it shows the prompt): end the active civilization's
+  turn and pass control to Japan, Rome, or Egypt in that order.
 - City screen: click tiles to assign workers (yields show as Civ3's food
   and shield icons; roads, irrigation and mines are drawn; tiles another
   city works are dimmed), Change build (Build now / Queue), Governor, X or
@@ -58,11 +68,11 @@ the desktop-capture fallback.
 
 ## Scope
 
-MVP plus the features slice: terrain, movement, fog, settling, food and
+Three human-controlled civilizations, terrain, movement, private fog, settling, food and
 shield boxes, Warrior/Settler/Worker production, Tokugawa splash, UI and
 unit sounds, the Asian peace music loop, plus goody huts (poppable for
 units, maps, or settlers), capturable barbarian camps, and 22 placed
 resources with bonus yields, worker improvements (roads, irrigation, mines,
 clearing), city production of units and buildings with a queue, and cultural
-borders that grow a ring at each culture level. Out of
+borders that start as a nine-tile diamond and expand at culture thresholds. Out of
 scope: AI, tech, diplomacy, trade, combat, save/load, minimap.

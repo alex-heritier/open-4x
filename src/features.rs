@@ -22,7 +22,7 @@
 
 use std::collections::HashSet;
 
-use crate::map::{move_cost, Base, Cover, GameMap, Relief, Tile};
+use crate::map::{Base, Cover, GameMap, Relief, Tile, move_cost};
 use crate::rng::MapRng;
 
 /// Stage seeds from the binary (`water_level + K`).
@@ -59,28 +59,160 @@ pub struct Good {
 }
 
 pub const GOODS: [Good; 22] = [
-    Good { name: "Horses", art: "horse", kind: GoodKind::Strategic, freq: 80, bonus: (0, 0) },
-    Good { name: "Diamonds", art: "diamonds", kind: GoodKind::Luxury, freq: 80, bonus: (0, 0) },
-    Good { name: "Saltpeter", art: "saltpetre", kind: GoodKind::Strategic, freq: 60, bonus: (0, 0) },
-    Good { name: "Coal", art: "coal", kind: GoodKind::Strategic, freq: 60, bonus: (0, 0) },
-    Good { name: "Oil", art: "oil", kind: GoodKind::Strategic, freq: 50, bonus: (0, 0) },
-    Good { name: "Iron", art: "iron", kind: GoodKind::Strategic, freq: 80, bonus: (0, 0) },
-    Good { name: "Aluminum", art: "aluminum", kind: GoodKind::Strategic, freq: 40, bonus: (0, 0) },
-    Good { name: "Uranium", art: "uranium", kind: GoodKind::Strategic, freq: 35, bonus: (0, 0) },
-    Good { name: "Wine", art: "wine", kind: GoodKind::Luxury, freq: 70, bonus: (0, 0) },
-    Good { name: "Furs", art: "furs", kind: GoodKind::Luxury, freq: 60, bonus: (0, 0) },
-    Good { name: "Dyes", art: "dye", kind: GoodKind::Luxury, freq: 70, bonus: (0, 0) },
-    Good { name: "Incense", art: "incense", kind: GoodKind::Luxury, freq: 60, bonus: (0, 0) },
-    Good { name: "Spices", art: "spice", kind: GoodKind::Luxury, freq: 60, bonus: (0, 0) },
-    Good { name: "Ivory", art: "ivory", kind: GoodKind::Luxury, freq: 60, bonus: (0, 0) },
-    Good { name: "Silks", art: "silk", kind: GoodKind::Luxury, freq: 70, bonus: (0, 0) },
-    Good { name: "Rubber", art: "rubber", kind: GoodKind::Strategic, freq: 50, bonus: (0, 0) },
-    Good { name: "Whales", art: "whales", kind: GoodKind::Bonus, freq: 60, bonus: (1, 1) },
-    Good { name: "Game", art: "game", kind: GoodKind::Bonus, freq: 90, bonus: (1, 0) },
-    Good { name: "Fish", art: "fish", kind: GoodKind::Bonus, freq: 100, bonus: (2, 0) },
-    Good { name: "Cattle", art: "cattle", kind: GoodKind::Bonus, freq: 100, bonus: (1, 0) },
-    Good { name: "Wheat", art: "wheat", kind: GoodKind::Bonus, freq: 120, bonus: (2, 0) },
-    Good { name: "Gold", art: "gold", kind: GoodKind::Luxury, freq: 60, bonus: (0, 0) },
+    Good {
+        name: "Horses",
+        art: "horse",
+        kind: GoodKind::Strategic,
+        freq: 80,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Diamonds",
+        art: "diamonds",
+        kind: GoodKind::Luxury,
+        freq: 80,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Saltpeter",
+        art: "saltpetre",
+        kind: GoodKind::Strategic,
+        freq: 60,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Coal",
+        art: "coal",
+        kind: GoodKind::Strategic,
+        freq: 60,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Oil",
+        art: "oil",
+        kind: GoodKind::Strategic,
+        freq: 50,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Iron",
+        art: "iron",
+        kind: GoodKind::Strategic,
+        freq: 80,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Aluminum",
+        art: "aluminum",
+        kind: GoodKind::Strategic,
+        freq: 40,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Uranium",
+        art: "uranium",
+        kind: GoodKind::Strategic,
+        freq: 35,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Wine",
+        art: "wine",
+        kind: GoodKind::Luxury,
+        freq: 70,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Furs",
+        art: "furs",
+        kind: GoodKind::Luxury,
+        freq: 60,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Dyes",
+        art: "dye",
+        kind: GoodKind::Luxury,
+        freq: 70,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Incense",
+        art: "incense",
+        kind: GoodKind::Luxury,
+        freq: 60,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Spices",
+        art: "spice",
+        kind: GoodKind::Luxury,
+        freq: 60,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Ivory",
+        art: "ivory",
+        kind: GoodKind::Luxury,
+        freq: 60,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Silks",
+        art: "silk",
+        kind: GoodKind::Luxury,
+        freq: 70,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Rubber",
+        art: "rubber",
+        kind: GoodKind::Strategic,
+        freq: 50,
+        bonus: (0, 0),
+    },
+    Good {
+        name: "Whales",
+        art: "whales",
+        kind: GoodKind::Bonus,
+        freq: 60,
+        bonus: (1, 1),
+    },
+    Good {
+        name: "Game",
+        art: "game",
+        kind: GoodKind::Bonus,
+        freq: 90,
+        bonus: (1, 0),
+    },
+    Good {
+        name: "Fish",
+        art: "fish",
+        kind: GoodKind::Bonus,
+        freq: 100,
+        bonus: (2, 0),
+    },
+    Good {
+        name: "Cattle",
+        art: "cattle",
+        kind: GoodKind::Bonus,
+        freq: 100,
+        bonus: (1, 0),
+    },
+    Good {
+        name: "Wheat",
+        art: "wheat",
+        kind: GoodKind::Bonus,
+        freq: 120,
+        bonus: (2, 0),
+    },
+    Good {
+        name: "Gold",
+        art: "gold",
+        kind: GoodKind::Luxury,
+        freq: 60,
+        bonus: (0, 0),
+    },
 ];
 
 /// Art manifest key for a good id.
@@ -101,29 +233,26 @@ pub fn suitable(id: u8, t: &Tile) -> bool {
         2 => matches!(t.base, Desert | Plains | Grassland | Tundra) && flat || hill, // saltpeter
         3 => hill || gp && flat && t.cover == Cover::Bare, // coal
         4 => t.base == Base::Sea || matches!(t.base, Desert | Tundra) && flat, // oil
-        5 => land && (hill || flat), // iron
+        5 => land && (hill || flat),               // iron
         6 => matches!(t.base, Desert | Tundra) && flat || hill, // aluminum
-        7 => t.relief == Relief::Mountain || t.relief == Relief::Hill
-            || matches!(t.base, Desert | Tundra) && flat, // uranium
-        8 => gp && flat || hill && land, // wine
-        9 => t.base == Tundra && flat || t.cover == Cover::Forest
-            || t.cover == Cover::Pine, // furs
+        7 => {
+            t.relief == Relief::Mountain
+                || t.relief == Relief::Hill
+                || matches!(t.base, Desert | Tundra) && flat
+        } // uranium
+        8 => gp && flat || hill && land,           // wine
+        9 => t.base == Tundra && flat || t.cover == Cover::Forest || t.cover == Cover::Pine, // furs
         10 => gp && flat || t.cover == Cover::Forest || t.cover == Cover::Jungle, // dyes
         11 => matches!(t.base, Desert | Plains) && flat && t.cover == Cover::Bare, // incense
         12 => t.cover == Cover::Jungle || t.base == Grassland && flat, // spices
-        13 => matches!(t.base, Grassland | Plains | Desert)
-            && flat
-            && t.cover == Cover::Bare, // ivory
+        13 => matches!(t.base, Grassland | Plains | Desert) && flat && t.cover == Cover::Bare, // ivory
         14 => gp && flat && t.cover == Cover::Bare, // silks
-        15 => t.cover == Cover::Jungle
-            || t.cover == Cover::Forest
-            || t.base == Grassland && flat, // rubber
+        15 => t.cover == Cover::Jungle || t.cover == Cover::Forest || t.base == Grassland && flat, // rubber
         16 => matches!(t.base, Base::Sea | Base::Ocean), // whales
-        17 => t.cover == Cover::Forest
-            || matches!(t.base, Grassland | Plains | Tundra) && flat, // game
+        17 => t.cover == Cover::Forest || matches!(t.base, Grassland | Plains | Tundra) && flat, // game
         18 => matches!(t.base, Base::Coast | Base::Sea), // fish
         19 | 20 => gp && flat && t.cover == Cover::Bare, // cattle, wheat
-        21 => t.base == Desert && flat || hill, // gold
+        21 => t.base == Desert && flat || hill,          // gold
         _ => false,
     }
 }
@@ -237,9 +366,7 @@ fn place_cluster(map: &mut GameMap, id: u8, n: u32, rng: &mut MapRng) {
             let same = map
                 .neighbors(x, y)
                 .iter()
-                .filter(|(nx, ny)| {
-                    map.get(*nx, *ny).is_some_and(|nb| nb.resource == Some(id))
-                })
+                .filter(|(nx, ny)| map.get(*nx, *ny).is_some_and(|nb| nb.resource == Some(id)))
                 .count();
             if same < 3 {
                 let i = map.idx(x, y);
@@ -257,16 +384,16 @@ fn place_cluster(map: &mut GameMap, id: u8, n: u32, rng: &mut MapRng) {
 
 /// Block 2/3: scattered singles over a Fisher-Yates shuffle with the
 /// block-3 acceptance coin (33 % / 50 % / 100 % by score).
-fn place_scattered(
-    map: &mut GameMap,
-    id: u8,
-    n: u32,
-    score: u32,
-    rng: &mut MapRng,
-) {
+fn place_scattered(map: &mut GameMap, id: u8, n: u32, score: u32, rng: &mut MapRng) {
     let mut cands = suitable_tiles(map, id);
     rng.shuffle(&mut cands);
-    let m = if score < 2 { 6 } else if score < 4 { 4 } else { 2 };
+    let m = if score < 2 {
+        6
+    } else if score < 4 {
+        4
+    } else {
+        2
+    };
     let mut placed = 0;
     for (x, y) in cands {
         if placed >= n {
@@ -285,12 +412,16 @@ fn place_scattered(
 
 /// Stage 10 (`0x5f22a0`): resources for every GOOD id in order.
 pub fn place_resources(map: &mut GameMap, water_level: u32) {
-    let land = map.tiles.iter().filter(|t| {
-        matches!(
-            t.base,
-            Base::Grassland | Base::Plains | Base::Desert | Base::Tundra
-        )
-    }).count() as u32;
+    let land = map
+        .tiles
+        .iter()
+        .filter(|t| {
+            matches!(
+                t.base,
+                Base::Grassland | Base::Plains | Base::Desert | Base::Tundra
+            )
+        })
+        .count() as u32;
     let area_factor = (land / 800).max(1);
     let mut rng = MapRng::new(water_level.wrapping_add(RESOURCE_SEED));
     for (id, good) in GOODS.iter().enumerate() {
@@ -305,9 +436,7 @@ pub fn place_resources(map: &mut GameMap, water_level: u32) {
         }
         match good.kind {
             GoodKind::Bonus => place_cluster(map, id, n, &mut rng),
-            GoodKind::Luxury | GoodKind::Strategic => {
-                place_scattered(map, id, n, score, &mut rng)
-            }
+            GoodKind::Luxury | GoodKind::Strategic => place_scattered(map, id, n, score, &mut rng),
         }
     }
 }
@@ -321,10 +450,7 @@ pub fn place_goody_huts(map: &mut GameMap, water_level: u32) {
         let r = rng.below(total) as i32;
         let (x, y) = (r % map.w, r / map.w);
         let ok = map.get(x, y).is_some_and(|t| {
-            map.is_land(x, y)
-                && move_cost(t).is_some()
-                && is_empty(t)
-                && (x, y) != map.start
+            map.is_land(x, y) && move_cost(t).is_some() && is_empty(t) && (x, y) != map.start
         });
         if ok {
             let i = map.idx(x, y);
@@ -342,9 +468,9 @@ pub fn place_barbarian_camps(map: &mut GameMap, water_level: u32) {
     for y in 0..map.h {
         for x in 0..map.w {
             let far = (x - sx).abs().max((y - sy).abs()) >= CAMP_START_DIST;
-            let ok = map.get(x, y).is_some_and(|t| {
-                map.is_land(x, y) && move_cost(t).is_some() && is_empty(t)
-            });
+            let ok = map
+                .get(x, y)
+                .is_some_and(|t| map.is_land(x, y) && move_cost(t).is_some() && is_empty(t));
             if far && ok {
                 cands.push((x, y));
             }
@@ -453,7 +579,13 @@ struct FeatureEntry {
 
 #[derive(bevy::prelude::Resource)]
 pub struct FeatureArt {
-    defs: std::collections::HashMap<String, (bevy::prelude::Handle<bevy::prelude::Image>, bevy::sprite::Anchor)>,
+    defs: std::collections::HashMap<
+        String,
+        (
+            bevy::prelude::Handle<bevy::prelude::Image>,
+            bevy::sprite::Anchor,
+        ),
+    >,
 }
 
 impl FeatureArt {
@@ -479,7 +611,13 @@ impl FeatureArt {
         Self { defs }
     }
 
-    fn get(&self, name: &str) -> &(bevy::prelude::Handle<bevy::prelude::Image>, bevy::sprite::Anchor) {
+    fn get(
+        &self,
+        name: &str,
+    ) -> &(
+        bevy::prelude::Handle<bevy::prelude::Image>,
+        bevy::sprite::Anchor,
+    ) {
         &self.defs[name]
     }
 }
@@ -510,7 +648,10 @@ pub fn spawn_features(
             let (image, anchor) = art.get(&key).clone();
             let pos = tile_to_world(x, y);
             commands.spawn((
-                bevy::prelude::Sprite { image, ..Default::default() },
+                bevy::prelude::Sprite {
+                    image,
+                    ..Default::default()
+                },
                 anchor,
                 bevy::prelude::Transform::from_xyz(pos.x, pos.y, sprite_z(x, y, layer)),
                 FeatureSprite { x, y, kind },
@@ -524,7 +665,11 @@ pub fn sync_feature_sprites(
     mut commands: bevy::prelude::Commands,
     map: bevy::prelude::Res<GameMap>,
     reveal: bevy::prelude::Res<crate::render::RevealAll>,
-    mut q: bevy::prelude::Query<(bevy::prelude::Entity, &FeatureSprite, &mut bevy::prelude::Sprite)>,
+    mut q: bevy::prelude::Query<(
+        bevy::prelude::Entity,
+        &FeatureSprite,
+        &mut bevy::prelude::Sprite,
+    )>,
 ) {
     let mut dead = vec![];
     for (e, fs, mut sprite) in q.iter_mut() {
@@ -552,6 +697,7 @@ pub fn sync_feature_sprites(
 /// so rewards trigger on arrival, not on step start.
 pub fn resolve_features(
     mut commands: bevy::prelude::Commands,
+    civs: bevy::prelude::Res<crate::civs::Civilizations>,
     mut map: bevy::prelude::ResMut<GameMap>,
     units: bevy::prelude::Query<&crate::units::Unit>,
     art: bevy::prelude::Res<crate::units::UnitArt>,
@@ -564,7 +710,7 @@ pub fn resolve_features(
     // Collect arrivals first; rewards mutate the map.
     let mut arrivals: Vec<(i32, i32)> = vec![];
     for u in units.iter() {
-        if !matches!(u.anim, UnitAnim::Idle { .. }) {
+        if u.civ != civs.active || !matches!(u.anim, UnitAnim::Idle { .. }) {
             continue;
         }
         arrivals.push((u.x, u.y));
@@ -582,6 +728,7 @@ pub fn resolve_features(
                         crate::units::UnitType::Warrior,
                         x,
                         y,
+                        civs.active,
                     );
                     post(&mut board, "Goody hut: a Warrior joins your cause!");
                 }
@@ -592,6 +739,7 @@ pub fn resolve_features(
                         crate::units::UnitType::Scout,
                         x,
                         y,
+                        civs.active,
                     );
                     post(&mut board, "Goody hut: a Scout joins your cause!");
                 }
@@ -614,6 +762,9 @@ pub fn resolve_features(
                 HutReward::Growth => {
                     let mut best: Option<(bevy::prelude::Entity, i32, String)> = None;
                     for (e, c) in cities.iter() {
+                        if c.civ != civs.active {
+                            continue;
+                        }
                         let dx = (x - c.x).abs();
                         let dx = dx.min(map.w - dx);
                         let d = dx + (y - c.y).abs();
@@ -640,6 +791,7 @@ pub fn resolve_features(
                             crate::units::UnitType::Scout,
                             x,
                             y,
+                            civs.active,
                         );
                         post(&mut board, "Goody hut: a Scout joins your cause!");
                     }
@@ -650,6 +802,9 @@ pub fn resolve_features(
             map.tiles[i].camp = false;
             let mut best: Option<(bevy::prelude::Entity, i32, String)> = None;
             for (e, c) in cities.iter() {
+                if c.civ != civs.active {
+                    continue;
+                }
                 let dx = (x - c.x).abs();
                 let dx = dx.min(map.w - dx);
                 let d = dx + (y - c.y).abs();
@@ -858,7 +1013,9 @@ mod tests {
         });
         app.insert_resource(MessageBoard::default());
         app.insert_resource(crate::rng::GameRng::new(2));
+        app.init_resource::<crate::civs::Civilizations>();
         app.world_mut().spawn(crate::units::Unit {
+            civ: 0,
             utype: crate::units::UnitType::Scout,
             x: sx,
             y: sy,

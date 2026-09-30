@@ -21,9 +21,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::audio::GameAudio;
 use crate::cities::City;
-use crate::features::{post, MessageBoard};
-use crate::map::{tile_to_world, Base, Cover, GameMap, Relief, Tile};
-use crate::render::{fog_for, tile_z, Fog, RevealAll};
+use crate::features::{MessageBoard, post};
+use crate::map::{Base, Cover, GameMap, Relief, Tile, tile_to_world};
+use crate::render::{Fog, RevealAll, fog_for, tile_z};
 use crate::units::{Unit, UnitAnim};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -98,9 +98,8 @@ pub fn is_water_base(b: Base) -> bool {
 
 /// Roads go on passable land (mountains excluded, forest/jungle kept).
 pub fn can_road(map: &GameMap, x: i32, y: i32) -> bool {
-    map.get(x, y).is_some_and(|t| {
-        map.is_land(x, y) && t.relief != Relief::Mountain && !t.road
-    })
+    map.get(x, y)
+        .is_some_and(|t| map.is_land(x, y) && t.relief != Relief::Mountain && !t.road)
 }
 
 /// Mines go on hills, mountains and bare desert (Civ3 mine terrain). A
@@ -109,16 +108,14 @@ pub fn can_mine(map: &GameMap, x: i32, y: i32) -> bool {
     map.get(x, y).is_some_and(|t| {
         !t.mine
             && map.is_land(x, y)
-            && (t.relief != Relief::Flat
-                || (t.base == Base::Desert && t.cover == Cover::Bare))
+            && (t.relief != Relief::Flat || (t.base == Base::Desert && t.cover == Cover::Bare))
     })
 }
 
 /// Forest, jungle and pine cover on flat land can be cleared.
 pub fn can_clear(map: &GameMap, x: i32, y: i32) -> bool {
-    map.get(x, y).is_some_and(|t| {
-        map.is_land(x, y) && t.relief == Relief::Flat && t.cover != Cover::Bare
-    })
+    map.get(x, y)
+        .is_some_and(|t| map.is_land(x, y) && t.relief == Relief::Flat && t.cover != Cover::Bare)
 }
 
 /// Irrigation needs flat, clear, farmable land plus water access: an
@@ -138,9 +135,8 @@ pub fn can_irrigate(map: &GameMap, x: i32, y: i32) -> bool {
         return false;
     }
     map.neighbors(x, y).iter().any(|(nx, ny)| {
-        map.get(*nx, *ny).is_some_and(|nb| {
-            is_water_base(nb.base) || nb.irrigation
-        })
+        map.get(*nx, *ny)
+            .is_some_and(|nb| is_water_base(nb.base) || nb.irrigation)
     })
 }
 
@@ -153,10 +149,7 @@ pub fn road_mask(map: &GameMap, cities: &[(i32, i32)], x: i32, y: i32) -> u8 {
         if ny < 0 || ny >= map.h {
             continue;
         }
-        let linked = map
-            .get(nx, ny)
-            .is_some_and(|t| t.road)
-            || cities.contains(&(nx, ny));
+        let linked = map.get(nx, ny).is_some_and(|t| t.road) || cities.contains(&(nx, ny));
         if linked {
             m |= 1 << i;
         }
@@ -239,7 +232,10 @@ pub fn advance_work(units: &mut [Mut<Unit>]) -> Vec<(i32, i32, WorkAction)> {
         let (left, workers) = groups[&key];
         let left = left.saturating_sub(workers);
         if left > 0 {
-            u.work = Some(Work { turns_left: left, ..w });
+            u.work = Some(Work {
+                turns_left: left,
+                ..w
+            });
             continue;
         }
         u.work = None;
@@ -257,14 +253,14 @@ pub fn advance_work(units: &mut [Mut<Unit>]) -> Vec<(i32, i32, WorkAction)> {
 /// Advance worker jobs on end turn; complete and apply to the map.
 pub fn end_turn_work(
     mut commands: Commands,
-    mut end: MessageReader<crate::units::TurnEnded>,
+    mut end: MessageReader<crate::civs::CivilizationEnded>,
     mut map: ResMut<GameMap>,
     mut units: Query<&mut Unit>,
     mut board: ResMut<MessageBoard>,
     audio: Res<GameAudio>,
 ) {
-    for _ in end.read() {
-        let mut all: Vec<Mut<Unit>> = units.iter_mut().collect();
+    for event in end.read() {
+        let mut all: Vec<Mut<Unit>> = units.iter_mut().filter(|u| u.civ == event.0).collect();
         for (x, y, action) in advance_work(&mut all) {
             let i = map.idx(x, y);
             apply_work(&mut map.tiles[i], action);
@@ -394,12 +390,7 @@ pub fn sync_improvement_sprites(
     art: Res<ImprovementArt>,
     reveal: Res<RevealAll>,
     cities: Query<&City>,
-    mut q: Query<(
-        Entity,
-        &mut ImprovementSprite,
-        &mut Sprite,
-        &mut Visibility,
-    )>,
+    mut q: Query<(Entity, &mut ImprovementSprite, &mut Sprite, &mut Visibility)>,
 ) {
     let hubs: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
     let mut have: HashSet<(i32, i32, ImpLayer)> = HashSet::new();
@@ -442,10 +433,7 @@ pub fn sync_improvement_sprites(
                     _ => Visibility::Visible,
                 };
                 commands.spawn((
-                    Sprite {
-                        image,
-                        ..default()
-                    },
+                    Sprite { image, ..default() },
                     anchor,
                     vis,
                     Transform::from_xyz(pos.x, pos.y, tile_z(x, y, layer.z())),
@@ -503,9 +491,7 @@ mod tests {
         assert!(can_road(&map, sx, sy));
         let ocean = (0..map.h)
             .flat_map(|y| (0..map.w).map(move |x| (x, y)))
-            .find(|(x, y)| {
-                matches!(map.get(*x, *y).map(|t| t.base), Some(Base::Ocean))
-            })
+            .find(|(x, y)| matches!(map.get(*x, *y).map(|t| t.base), Some(Base::Ocean)))
             .expect("map has ocean");
         assert!(!can_road(&map, ocean.0, ocean.1));
     }
@@ -524,8 +510,7 @@ mod tests {
                     ) && t.relief == Relief::Flat
                         && t.cover == Cover::Bare
                         && map.neighbors(*x, *y).iter().any(|(nx, ny)| {
-                            map.get(*nx, *ny)
-                                .is_some_and(|nb| is_water_base(nb.base))
+                            map.get(*nx, *ny).is_some_and(|nb| is_water_base(nb.base))
                         })
                 })
             })
@@ -538,8 +523,7 @@ mod tests {
                 map.get(*x, *y).is_some_and(|t| {
                     t.cover == Cover::Forest
                         && map.neighbors(*x, *y).iter().any(|(nx, ny)| {
-                            map.get(*nx, *ny)
-                                .is_some_and(|nb| is_water_base(nb.base))
+                            map.get(*nx, *ny).is_some_and(|nb| is_water_base(nb.base))
                         })
                 })
             });
@@ -549,9 +533,7 @@ mod tests {
         // Ocean never irrigates.
         let ocean = (0..map.h)
             .flat_map(|y| (0..map.w).map(move |x| (x, y)))
-            .find(|(x, y)| {
-                matches!(map.get(*x, *y).map(|t| t.base), Some(Base::Ocean))
-            })
+            .find(|(x, y)| matches!(map.get(*x, *y).map(|t| t.base), Some(Base::Ocean)))
             .expect("map has ocean");
         assert!(!can_irrigate(&map, ocean.0, ocean.1));
     }
@@ -571,8 +553,7 @@ mod tests {
                     ) && t.relief == Relief::Flat
                         && t.cover == Cover::Bare
                         && !map.neighbors(*x, *y).iter().any(|(nx, ny)| {
-                            map.get(*nx, *ny)
-                                .is_some_and(|nb| is_water_base(nb.base))
+                            map.get(*nx, *ny).is_some_and(|nb| is_water_base(nb.base))
                         })
                 })
             })
@@ -600,9 +581,7 @@ mod tests {
                     if y < 0 || y >= map.h {
                         continue;
                     }
-                    if can_irrigate(&map, x, y)
-                        && map.find_path((sx, sy), (x, y)).is_some()
-                    {
+                    if can_irrigate(&map, x, y) && map.find_path((sx, sy), (x, y)).is_some() {
                         found = Some((seed, (sx, sy), (x, y)));
                         break 'tiles;
                     }
@@ -625,10 +604,7 @@ mod tests {
         map.tiles[i].road = true;
         assert_eq!(describe(&map.tiles[i]).as_deref(), Some("Road"));
         map.tiles[i].irrigation = true;
-        assert_eq!(
-            describe(&map.tiles[i]).as_deref(),
-            Some("Road, Irrigated")
-        );
+        assert_eq!(describe(&map.tiles[i]).as_deref(), Some("Road, Irrigated"));
         map.tiles[i].road = false;
         assert_eq!(describe(&map.tiles[i]).as_deref(), Some("Irrigated"));
     }
@@ -654,8 +630,9 @@ mod tests {
             work_clear: Handle::default(),
             music: None,
         });
-        app.add_message::<crate::units::TurnEnded>();
+        app.add_message::<crate::civs::CivilizationEnded>();
         app.world_mut().spawn(Unit {
+            civ: 0,
             utype: crate::units::UnitType::Worker,
             x: sx,
             y: sy,
@@ -673,8 +650,8 @@ mod tests {
         });
         app.add_systems(Update, end_turn_work);
         app.world_mut()
-            .resource_mut::<Messages<crate::units::TurnEnded>>()
-            .write(crate::units::TurnEnded);
+            .resource_mut::<Messages<crate::civs::CivilizationEnded>>()
+            .write(crate::civs::CivilizationEnded(0));
         app.update();
         let map = app.world().resource::<GameMap>();
         assert!(map.tiles[map.idx(sx, sy)].road);
@@ -699,13 +676,14 @@ mod tests {
             work_clear: Handle::default(),
             music: None,
         });
-        app.add_message::<crate::units::TurnEnded>();
+        app.add_message::<crate::civs::CivilizationEnded>();
         app.add_systems(Update, end_turn_work);
         app
     }
 
     fn worker(x: i32, y: i32, action: WorkAction, turns_left: u8) -> Unit {
         Unit {
+            civ: 0,
             utype: crate::units::UnitType::Worker,
             x,
             y,
@@ -722,8 +700,8 @@ mod tests {
 
     fn end_turn(app: &mut App) {
         app.world_mut()
-            .resource_mut::<Messages<crate::units::TurnEnded>>()
-            .write(crate::units::TurnEnded);
+            .resource_mut::<Messages<crate::civs::CivilizationEnded>>()
+            .write(crate::civs::CivilizationEnded(0));
         app.update();
     }
 
@@ -733,15 +711,38 @@ mod tests {
         let (sx, sy) = map.start;
         let mut app = test_app(map);
         let n = work_turns(WorkAction::Road);
-        let a = app.world_mut().spawn(worker(sx, sy, WorkAction::Road, n)).id();
-        let b = app.world_mut().spawn(worker(sx, sy, WorkAction::Road, n)).id();
+        let a = app
+            .world_mut()
+            .spawn(worker(sx, sy, WorkAction::Road, n))
+            .id();
+        let b = app
+            .world_mut()
+            .spawn(worker(sx, sy, WorkAction::Road, n))
+            .id();
         // a lone worker elsewhere is not helped
-        let c = app.world_mut().spawn(worker(sx + 1, sy, WorkAction::Road, n)).id();
+        let c = app
+            .world_mut()
+            .spawn(worker(sx + 1, sy, WorkAction::Road, n))
+            .id();
+        let mut foreign_worker = worker(sx, sy, WorkAction::Road, n);
+        foreign_worker.civ = 1;
+        let foreign = app.world_mut().spawn(foreign_worker).id();
         end_turn(&mut app);
-        let left = |app: &App, e| app.world().get::<Unit>(e).unwrap().work.map(|w| w.turns_left);
+        let left = |app: &App, e| {
+            app.world()
+                .get::<Unit>(e)
+                .unwrap()
+                .work
+                .map(|w| w.turns_left)
+        };
         assert_eq!(left(&app, a), Some(n - 2));
         assert_eq!(left(&app, b), Some(n - 2));
         assert_eq!(left(&app, c), Some(n - 1));
+        assert_eq!(
+            left(&app, foreign),
+            Some(n),
+            "other civ workers neither contribute nor progress"
+        );
         end_turn(&mut app);
         assert_eq!(left(&app, a), None, "two workers halve a 4-turn road");
         assert_eq!(left(&app, b), None);
@@ -784,10 +785,15 @@ mod tests {
         assert!(!can_mine(&map, hill.0, hill.1));
         assert_eq!(describe(&map.tiles[i]).as_deref(), Some("Mine"));
         let wood = find(&map, &|t| {
-            t.relief == Relief::Flat && t.cover != Cover::Bare && !matches!(t.base, Base::Ocean | Base::Sea | Base::Coast | Base::Ice)
+            t.relief == Relief::Flat
+                && t.cover != Cover::Bare
+                && !matches!(t.base, Base::Ocean | Base::Sea | Base::Coast | Base::Ice)
         })
         .expect("map has flat cover");
         assert!(can_clear(&map, wood.0, wood.1));
-        assert!(!can_clear(&map, map.start.0, map.start.1) || map.get(map.start.0, map.start.1).unwrap().cover != Cover::Bare);
+        assert!(
+            !can_clear(&map, map.start.0, map.start.1)
+                || map.get(map.start.0, map.start.1).unwrap().cover != Cover::Bare
+        );
     }
 }

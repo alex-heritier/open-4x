@@ -6,10 +6,12 @@ mod audio;
 mod blend;
 mod borders;
 mod cities;
+mod civs;
 mod features;
 mod improvements;
 mod input;
 mod map;
+mod production_prompt;
 mod render;
 mod rng;
 mod screenshot;
@@ -36,6 +38,8 @@ fn main() {
                 .set(ImagePlugin::default_nearest()),
         )
         .add_message::<units::TurnEnded>()
+        .add_message::<civs::CivilizationEnded>()
+        .init_resource::<civs::Civilizations>()
         .add_message::<actionbar::UnitCommand>()
         .init_resource::<actionbar::GotoMode>()
         .insert_resource(GameMap::generate())
@@ -50,6 +54,7 @@ fn main() {
         .init_resource::<cities::Capital>()
         .init_resource::<cities::Treasury>()
         .init_resource::<cities::BuildMenu>()
+        .init_resource::<production_prompt::ProductionPrompts>()
         .init_resource::<splash::SplashUp>()
         .init_resource::<features::MessageBoard>()
         .init_resource::<screenshot::Shots>()
@@ -81,20 +86,21 @@ fn main() {
                     input::camera_control,
                     input::hover,
                     input::hold_preview,
-                    input::orders,
-                    actionbar::run_commands,
-                    cities::found_city,
+                    input::orders.run_if(production_prompt::inactive),
+                    actionbar::run_commands.run_if(production_prompt::inactive),
+                    cities::found_city.run_if(production_prompt::inactive),
                     units::end_turn_units,
                     cities::end_turn_cities,
                     improvements::end_turn_work,
+                    units::refresh_visibility,
                     units::drive_movement,
                     units::advance_anims,
                     features::resolve_features,
-                    units::refresh_visibility,
                     units::restack,
                     units::auto_select,
+                    civs::focus_active_civ,
                     splash::dismiss_splash,
-                    ui::end_turn_button,
+                    ui::end_turn_button.run_if(production_prompt::inactive),
                     screenshot::drive_shots,
                 )
                     .chain(),
@@ -106,8 +112,9 @@ fn main() {
                     cities::sync_city_visuals,
                     cities::city_visibility,
                     cities::maintain_city_screen,
-                    cities::city_screen_input,
+                    cities::city_screen_input.run_if(production_prompt::city_input_allowed),
                     (cities::city_screen_buttons, cities::update_panel_buttons).chain(),
+                    (production_prompt::respond, production_prompt::show).chain(),
                     features::sync_feature_sprites,
                     improvements::sync_improvement_sprites,
                     borders::sync_borders,
@@ -153,11 +160,7 @@ fn setup_camera_zoom(mut cam: Query<&mut Projection, With<Camera2d>>) {
     }
 }
 
-fn setup_art(
-    mut commands: Commands,
-    assets: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-) {
+fn setup_art(mut commands: Commands, assets: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(tiles::TileArt::load(&assets));
     commands.insert_resource(units::UnitArt::load(&assets));
     commands.insert_resource(cities::CityArt::load(&assets));

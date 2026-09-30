@@ -67,13 +67,32 @@ fn key_code(name: &str) -> Option<KeyCode> {
                 return None;
             }
             let keys = [
-                KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD,
-                KeyCode::KeyE, KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH,
-                KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL,
-                KeyCode::KeyM, KeyCode::KeyN, KeyCode::KeyO, KeyCode::KeyP,
-                KeyCode::KeyQ, KeyCode::KeyR, KeyCode::KeyS, KeyCode::KeyT,
-                KeyCode::KeyU, KeyCode::KeyV, KeyCode::KeyW, KeyCode::KeyX,
-                KeyCode::KeyY, KeyCode::KeyZ,
+                KeyCode::KeyA,
+                KeyCode::KeyB,
+                KeyCode::KeyC,
+                KeyCode::KeyD,
+                KeyCode::KeyE,
+                KeyCode::KeyF,
+                KeyCode::KeyG,
+                KeyCode::KeyH,
+                KeyCode::KeyI,
+                KeyCode::KeyJ,
+                KeyCode::KeyK,
+                KeyCode::KeyL,
+                KeyCode::KeyM,
+                KeyCode::KeyN,
+                KeyCode::KeyO,
+                KeyCode::KeyP,
+                KeyCode::KeyQ,
+                KeyCode::KeyR,
+                KeyCode::KeyS,
+                KeyCode::KeyT,
+                KeyCode::KeyU,
+                KeyCode::KeyV,
+                KeyCode::KeyW,
+                KeyCode::KeyX,
+                KeyCode::KeyY,
+                KeyCode::KeyZ,
             ];
             keys[(c.to_ascii_uppercase() as u8 - b'A') as usize]
         }
@@ -115,6 +134,7 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
 /// `Changed<Interaction>` for the rest of the frame.
 pub fn drive_script(
     script: Option<ResMut<Script>>,
+    civs: Res<crate::civs::Civilizations>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut pin: ResMut<crate::input::HoverPin>,
@@ -130,7 +150,10 @@ pub fn drive_script(
     let Some(mut script) = script else {
         return;
     };
-    let origin = cities.iter().next().map(|c| (c.x, c.y));
+    let origin = cities
+        .iter()
+        .find(|c| c.civ == civs.active)
+        .map(|c| (c.x, c.y));
     let w = map.w;
     let coord = |s: &str| match s.strip_prefix('@') {
         Some(rel) => {
@@ -169,7 +192,7 @@ pub fn drive_script(
                 let t = unit_type(arg);
                 selected.0 = units
                     .iter()
-                    .find(|(_, u)| Some(u.utype) == t)
+                    .find(|(_, u)| u.civ == civs.active && Some(u.utype) == t)
                     .map(|(e, _)| e);
             }
             "tp" => {
@@ -201,13 +224,15 @@ pub fn drive_script(
             "unhover" => pin.0 = None,
             "down" => mouse.press(MouseButton::Left),
             "up" => mouse.release(MouseButton::Left),
-            "city" => view.0 = city_ids.iter().next(),
-            "btn" => {
-                match buttons.iter_mut().find(|(_, b)| button_matches(b, arg)) {
-                    Some((mut i, _)) => *i = Interaction::Pressed,
-                    None => eprintln!("script: no button {arg}"),
-                }
+            "city" => {
+                view.0 = city_ids
+                    .iter()
+                    .find(|e| cities.get(*e).is_ok_and(|c| c.civ == civs.active))
             }
+            "btn" => match buttons.iter_mut().find(|(_, b)| button_matches(b, arg)) {
+                Some((mut i, _)) => *i = Interaction::Pressed,
+                None => eprintln!("script: no button {arg}"),
+            },
             "tile" => {
                 if let (Some((rx, ry)), Some(e)) = (pair(arg), view.0) {
                     if !cities::click_cluster(&map, &mut cities, e, rx, ry) {

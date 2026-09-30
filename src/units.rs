@@ -6,9 +6,9 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 
-use crate::improvements::{action_slot, Work};
+use crate::improvements::{Work, action_slot};
 use crate::map::*;
-use crate::render::{sprite_z, RevealAll};
+use crate::render::{RevealAll, sprite_z};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum UnitType {
@@ -21,7 +21,6 @@ pub enum UnitType {
 pub struct UnitDef {
     pub moves: u8,
     pub sight: u8,
-    pub can_found: bool,
     pub dir: &'static str,
     pub name: &'static str,
 }
@@ -31,28 +30,24 @@ pub fn def(t: UnitType) -> UnitDef {
         UnitType::Settler => UnitDef {
             moves: 1,
             sight: 1,
-            can_found: true,
             dir: "Settler",
             name: "Settler",
         },
         UnitType::Worker => UnitDef {
             moves: 1,
             sight: 1,
-            can_found: false,
             dir: "Worker",
             name: "Worker",
         },
         UnitType::Warrior => UnitDef {
             moves: 1,
             sight: 1,
-            can_found: false,
             dir: "warrior",
             name: "Warrior",
         },
         UnitType::Scout => UnitDef {
             moves: 2,
             sight: 2,
-            can_found: false,
             dir: "Scout",
             name: "Scout",
         },
@@ -94,18 +89,14 @@ impl UnitArt {
             UnitType::Scout,
         ] {
             let dir = def(t).dir;
-            let text = fs::read_to_string(format!(
-                "assets/gen/units/{dir}/manifest.json"
-            ))
-            .expect("run from civ3-clone/ after tools/prep_assets.py");
+            let text = fs::read_to_string(format!("assets/gen/units/{dir}/manifest.json"))
+                .expect("run from civ3-clone/ after tools/prep_assets.py");
             let raw: HashMap<String, ClipEntry> =
                 serde_json::from_str(&text).expect("unit manifest parses");
             let mut clips = HashMap::new();
             for (slot, e) in raw {
                 let strips: Vec<Handle<Image>> = (0..8)
-                    .map(|d| {
-                        asset_server.load(format!("gen/units/{dir}/{slot}_d{d}.png"))
-                    })
+                    .map(|d| asset_server.load(format!("gen/units/{dir}/{slot}_d{d}.png")))
                     .collect();
                 clips.insert(
                     slot,
@@ -132,6 +123,7 @@ impl UnitArt {
 
 #[derive(Component)]
 pub struct Unit {
+    pub civ: usize,
     pub utype: UnitType,
     pub x: i32,
     pub y: i32,
@@ -150,9 +142,19 @@ pub struct Unit {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum UnitAnim {
-    Idle { t: f32 },
-    Stepping { from: Vec2, to: Vec2, t: f32, dur: f32 },
-    OneShot { slot: &'static str, t: f32 },
+    Idle {
+        t: f32,
+    },
+    Stepping {
+        from: Vec2,
+        to: Vec2,
+        t: f32,
+        dur: f32,
+    },
+    OneShot {
+        slot: &'static str,
+        t: f32,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -197,6 +199,7 @@ pub(crate) fn spawn_unit(
     utype: UnitType,
     x: i32,
     y: i32,
+    civ: usize,
 ) -> Entity {
     let clip = art.clip(utype, "DEFAULT").expect("DEFAULT clip");
     let pos = tile_to_world(x, y);
@@ -211,6 +214,7 @@ pub(crate) fn spawn_unit(
             Anchor(Vec2::new(0.0, -0.5 + 6.0 / h)),
             Transform::from_xyz(pos.x, pos.y, sprite_z(x, y, 4.0)),
             Unit {
+                civ,
                 utype,
                 x,
                 y,
@@ -241,7 +245,6 @@ pub(crate) fn spawn_unit(
 }
 
 pub fn spawn_party(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>) {
-    let (sx, sy) = map.start;
     let party = [
         UnitType::Settler,
         UnitType::Worker,
@@ -249,10 +252,15 @@ pub fn spawn_party(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>)
         UnitType::Scout,
     ];
     let mut first = None;
-    for (i, t) in party.iter().enumerate() {
-        let e = spawn_unit(&mut commands, &art, *t, sx, sy);
-        if i == 0 {
-            first = Some(e);
+    for (civ, (sx, sy)) in crate::civs::starting_positions(&map)
+        .into_iter()
+        .enumerate()
+    {
+        for (i, t) in party.iter().enumerate() {
+            let e = spawn_unit(&mut commands, &art, *t, sx, sy, civ);
+            if civ == 0 && i == 0 {
+                first = Some(e);
+            }
         }
     }
     commands.insert_resource(Selected(first));
@@ -351,18 +359,37 @@ pub fn fmt_moves(thirds: u8) -> String {
 pub fn end_turn_units(
     mut events: MessageReader<TurnEnded>,
     mut turn: ResMut<Turn>,
+    mut civs: ResMut<crate::civs::Civilizations>,
+    mut ended: MessageWriter<crate::civs::CivilizationEnded>,
+    mut selected: ResMut<Selected>,
+    mut goto: ResMut<crate::actionbar::GotoMode>,
     mut units: Query<&mut Unit>,
 ) {
     for _ in events.read() {
-        turn.0 += 1;
+        ended.write(crate::civs::CivilizationEnded(civs.active));
+        civs.active = (civs.active + 1) % crate::civs::CIV_COUNT;
+        if civs.active == 0 {
+            turn.0 += 1;
+        }
+        selected.0 = None;
+        goto.0 = false;
         for mut u in units.iter_mut() {
-            u.moves = def(u.utype).moves * MP;
+            if u.civ == civs.active {
+                u.moves = def(u.utype).moves * MP;
+            }
         }
     }
 }
 
-pub fn drive_movement(map: Res<GameMap>, mut units: Query<(Entity, &mut Unit)>) {
+pub fn drive_movement(
+    map: Res<GameMap>,
+    civs: Res<crate::civs::Civilizations>,
+    mut units: Query<(Entity, &mut Unit)>,
+) {
     for (_, mut u) in units.iter_mut() {
+        if u.civ != civs.active {
+            continue;
+        }
         if !matches!(u.anim, UnitAnim::Idle { .. }) {
             continue;
         }
@@ -427,8 +454,7 @@ pub fn advance_anims(
             }
             UnitAnim::OneShot { slot, t } => {
                 *t += time.delta_secs();
-                let frames =
-                    art.clip(utype, *slot).map(|c| c.frames).unwrap_or(8) as f32;
+                let frames = art.clip(utype, *slot).map(|c| c.frames).unwrap_or(8) as f32;
                 if *t * 12.0 >= frames {
                     u.anim = UnitAnim::Idle { t: 0.0 };
                 }
@@ -464,8 +490,7 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
                 // run cycle syncs to the step duration
                 let clip = art.clip(u.utype, "RUN");
                 let fps = clip.map(|c| c.frames as f32 / dur).unwrap_or(20.0);
-                let Some(clip) = clip.or_else(|| art.clip(u.utype, "DEFAULT"))
-                else {
+                let Some(clip) = clip.or_else(|| art.clip(u.utype, "DEFAULT")) else {
                     continue;
                 };
                 let f = ((t * fps) as usize) % clip.frames;
@@ -475,8 +500,9 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
             }
             UnitAnim::OneShot { slot, t } => (slot, t, 12.0, false),
         };
-        let Some(clip) =
-            art.clip(u.utype, slot).or_else(|| art.clip(u.utype, "DEFAULT"))
+        let Some(clip) = art
+            .clip(u.utype, slot)
+            .or_else(|| art.clip(u.utype, "DEFAULT"))
         else {
             continue;
         };
@@ -492,13 +518,28 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
 
 pub fn refresh_visibility(
     mut map: ResMut<GameMap>,
+    civs: Res<crate::civs::Civilizations>,
+    mut explored: Local<[Vec<bool>; crate::civs::CIV_COUNT]>,
+    mut previous: Local<Option<usize>>,
     units: Query<&Unit>,
     cities: Query<&crate::cities::City>,
 ) {
-    for t in map.tiles.iter_mut() {
+    if let Some(civ) = *previous {
+        for (seen, tile) in explored[civ].iter_mut().zip(&map.tiles) {
+            *seen = tile.seen;
+        }
+    }
+    *previous = Some(civs.active);
+    let memory = &mut explored[civs.active];
+    memory.resize(map.tiles.len(), false);
+    for (t, &seen) in map.tiles.iter_mut().zip(memory.iter()) {
         t.visible = false;
+        t.seen = seen;
     }
     for u in units.iter() {
+        if u.civ != civs.active {
+            continue;
+        }
         let bonus = match map.get(u.x, u.y).map(|t| t.relief) {
             Some(Relief::Hill) | Some(Relief::Mountain) => 1,
             _ => 0,
@@ -520,6 +561,9 @@ pub fn refresh_visibility(
     }
     // Cities light their workable radius, as in Civ3.
     for c in cities.iter() {
+        if c.civ != civs.active {
+            continue;
+        }
         let mut tiles = crate::cities::radius_tiles(&map, c.x, c.y);
         tiles.push((c.x, c.y));
         for (nx, ny) in tiles {
@@ -528,6 +572,9 @@ pub fn refresh_visibility(
             t.visible = true;
             t.seen = true;
         }
+    }
+    for (seen, tile) in memory.iter_mut().zip(&map.tiles) {
+        *seen = tile.seen;
     }
 }
 
@@ -589,11 +636,7 @@ pub fn selectable(u: &Unit) -> bool {
 /// A unit "requires attention": it can act and has no standing order
 /// (fortify, sentry, explore, a worker job or a go-to route).
 pub fn needs_orders(u: &Unit) -> bool {
-    selectable(u)
-        && !u.fortified
-        && !u.exploring
-        && u.work.is_none()
-        && u.path.is_empty()
+    selectable(u) && !u.fortified && !u.exploring && u.work.is_none() && u.path.is_empty()
 }
 
 /// Keep the selection while the unit can still act (or is still walking a
@@ -601,19 +644,20 @@ pub fn needs_orders(u: &Unit) -> bool {
 /// with nothing selected the HUD invites the player to end the turn.
 pub fn auto_select(
     units: Query<(Entity, &Unit)>,
+    civs: Res<crate::civs::Civilizations>,
     mut selected: ResMut<Selected>,
     mut last_pos: Local<(i32, i32)>,
 ) {
     if let Some((_, u)) = selected.0.and_then(|s| units.get(s).ok()) {
         *last_pos = (u.x, u.y);
-        if needs_orders(u) || (selectable(u) && !u.path.is_empty()) {
+        if u.civ == civs.active && (needs_orders(u) || (selectable(u) && !u.path.is_empty())) {
             return;
         }
     }
     let (lx, ly) = *last_pos;
     selected.0 = units
         .iter()
-        .filter(|(_, u)| needs_orders(u))
+        .filter(|(_, u)| u.civ == civs.active && needs_orders(u))
         .min_by_key(|(_, u)| (u.x - lx).abs().max((u.y - ly).abs()))
         .map(|(e, _)| e);
 }
@@ -662,6 +706,84 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hotseat_refreshes_only_incoming_units_and_counts_full_rounds() {
+        let mut app = App::new();
+        app.add_message::<TurnEnded>();
+        app.add_message::<crate::civs::CivilizationEnded>();
+        app.init_resource::<crate::civs::Civilizations>();
+        app.init_resource::<Selected>();
+        app.init_resource::<crate::actionbar::GotoMode>();
+        app.insert_resource(Turn(1));
+        app.add_systems(Update, end_turn_units);
+        let ids: Vec<_> = (0..crate::civs::CIV_COUNT)
+            .map(|civ| {
+                let mut unit = scout_at(civ as i32, 0);
+                unit.civ = civ;
+                unit.moves = 0;
+                app.world_mut().spawn(unit).id()
+            })
+            .collect();
+        app.world_mut().resource_mut::<Selected>().0 = Some(ids[0]);
+        for incoming in [1, 2, 0] {
+            app.world_mut().write_message(TurnEnded);
+            app.update();
+            assert_eq!(
+                app.world().resource::<crate::civs::Civilizations>().active,
+                incoming
+            );
+            assert_eq!(
+                app.world().resource::<Turn>().0,
+                if incoming == 0 { 2 } else { 1 }
+            );
+            assert_eq!(
+                app.world().get::<Unit>(ids[incoming]).unwrap().moves,
+                def(UnitType::Scout).moves * MP
+            );
+            assert_eq!(app.world().resource::<Selected>().0, None);
+            if incoming != 0 {
+                assert_eq!(app.world().get::<Unit>(ids[0]).unwrap().moves, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn fog_is_private_and_remembers_exploration_after_handoff() {
+        let map = GameMap::generate();
+        let starts = crate::civs::starting_positions(&map);
+        let mut app = App::new();
+        app.insert_resource(map);
+        app.init_resource::<crate::civs::Civilizations>();
+        app.add_systems(Update, refresh_visibility);
+        for (civ, (x, y)) in starts.into_iter().enumerate() {
+            let mut unit = scout_at(x, y);
+            unit.civ = civ;
+            app.world_mut().spawn(unit);
+        }
+        app.update();
+        let extra = {
+            let map = app.world().resource::<GameMap>();
+            let japan = map.idx(starts[0].0, starts[0].1);
+            let rome = map.idx(starts[1].0, starts[1].1);
+            assert!(map.tiles[japan].visible);
+            assert!(!map.tiles[rome].seen);
+            map.tiles.iter().position(|t| !t.seen).unwrap()
+        };
+        app.world_mut().resource_mut::<GameMap>().tiles[extra].seen = true;
+        app.world_mut()
+            .resource_mut::<crate::civs::Civilizations>()
+            .active = 1;
+        app.update();
+        let map = app.world().resource::<GameMap>();
+        assert!(!map.tiles[map.idx(starts[0].0, starts[0].1)].seen);
+        assert!(map.tiles[map.idx(starts[1].0, starts[1].1)].visible);
+        app.world_mut()
+            .resource_mut::<crate::civs::Civilizations>()
+            .active = 0;
+        app.update();
+        assert!(app.world().resource::<GameMap>().tiles[extra].seen);
+    }
+
+    #[test]
     fn facing_matches_flc_order() {
         // d0=S d1=SE d2=E d3=NE d4=N d5=NW d6=W d7=SW
         assert_eq!(facing_for_step(0, 1), 0); // south walks at the camera
@@ -703,6 +825,7 @@ mod tests {
 
     fn scout_at(x: i32, y: i32) -> Unit {
         Unit {
+            civ: 0,
             utype: UnitType::Scout,
             x,
             y,
@@ -781,11 +904,7 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         let unit = app
             .world_mut()
-            .spawn((
-                scout_at(10, 10),
-                Visibility::Visible,
-                Transform::default(),
-            ))
+            .spawn((scout_at(10, 10), Visibility::Visible, Transform::default()))
             .id();
         let ring = app
             .world_mut()

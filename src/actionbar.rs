@@ -7,10 +7,11 @@
 use bevy::prelude::*;
 
 use crate::audio::{self, GameAudio};
-use crate::cities::{can_found, City};
-use crate::features::{post, MessageBoard};
+use crate::cities::{City, can_found};
+use crate::civs::{CIVS, Civilizations};
+use crate::features::{MessageBoard, post};
 use crate::improvements::{
-    action_slot, can_clear, can_irrigate, can_mine, can_road, work_turns, WorkAction,
+    WorkAction, action_slot, can_clear, can_irrigate, can_mine, can_road, work_turns,
 };
 use crate::map::{Cover, GameMap};
 use crate::units::{self, Selected, Unit, UnitAnim, UnitType};
@@ -66,9 +67,7 @@ impl UnitCommand {
     pub fn enabled(self, map: &GameMap, cities: &[(i32, i32)], u: &Unit) -> bool {
         let idle = u.work.is_none();
         match self {
-            UnitCommand::Wake => {
-                u.fortified || u.sentry || u.exploring || u.work.is_some()
-            }
+            UnitCommand::Wake => u.fortified || u.sentry || u.exploring || u.work.is_some(),
             UnitCommand::Explore => idle && (u.moves > 0 || u.exploring),
             UnitCommand::Fortify | UnitCommand::Sentry => u.moves > 0 && !u.fortified,
             UnitCommand::Skip | UnitCommand::Goto => u.moves > 0 || !u.path.is_empty(),
@@ -139,6 +138,7 @@ pub fn run_commands(
     mut cmds: MessageReader<UnitCommand>,
     selected: Res<Selected>,
     mut units: Query<(Entity, &mut Unit)>,
+    civs: Res<Civilizations>,
     cities: Query<&City>,
     map: Res<GameMap>,
     audio: Res<GameAudio>,
@@ -153,6 +153,12 @@ pub fn run_commands(
         let Ok((e, mut u)) = units.get_mut(s) else {
             continue;
         };
+        // Hotseat: only the chair in play gives orders. A stale selection
+        // left from the previous civilization is ignored, so a queued key
+        // can never move the other side's unit.
+        if u.civ != civs.active {
+            continue;
+        }
         if !cmd.relevant(u.utype) {
             if let UnitCommand::Work(_) = cmd {
                 post(&mut board, "Only Workers can build improvements.");
@@ -174,7 +180,10 @@ pub fn run_commands(
                     },
                 );
             } else if cmd == UnitCommand::FoundCity {
-                post(&mut board, "Cities need open land, two tiles from another city.");
+                post(
+                    &mut board,
+                    "Cities need open land, two tiles from another city.",
+                );
             }
             continue;
         }
@@ -187,7 +196,10 @@ pub fn run_commands(
                 u.path.clear();
                 u.work = None;
                 u.exploring = false;
-                u.anim = UnitAnim::OneShot { slot: "FORTIFY", t: 0.0 };
+                u.anim = UnitAnim::OneShot {
+                    slot: "FORTIFY",
+                    t: 0.0,
+                };
                 if warrior {
                     commands.spawn(AudioPlayer(audio.fortify.clone()));
                 }
@@ -200,7 +212,10 @@ pub fn run_commands(
                 u.work = None;
                 u.exploring = false;
                 // Sentry strikes the same dug-in pose as fortify.
-                u.anim = UnitAnim::OneShot { slot: "FORTIFY", t: 0.0 };
+                u.anim = UnitAnim::OneShot {
+                    slot: "FORTIFY",
+                    t: 0.0,
+                };
             }
             UnitCommand::Skip => {
                 u.moves = 0;
@@ -213,8 +228,8 @@ pub fn run_commands(
                 u.sentry = false;
                 u.exploring = false;
                 u.work = None;
-                u.moves = (units::def(u.utype).moves * crate::map::MP)
-                    .min(u.moves.max(crate::map::MP));
+                u.moves =
+                    (units::def(u.utype).moves * crate::map::MP).min(u.moves.max(crate::map::MP));
             }
             UnitCommand::Goto => {
                 goto.0 = !goto.0;
@@ -246,7 +261,10 @@ pub fn run_commands(
                 u.fortified = false;
                 u.sentry = false;
                 u.exploring = false;
-                u.anim = UnitAnim::OneShot { slot: action_slot(action), t: 0.0 };
+                u.anim = UnitAnim::OneShot {
+                    slot: action_slot(action),
+                    t: 0.0,
+                };
                 commands.spawn(AudioPlayer(audio.work_sfx(action)));
                 post(
                     &mut board,
@@ -351,7 +369,9 @@ pub fn spawn_bar(
         None,
     ));
     let sheets = ["norm", "over", "down"].map(|s| assets.load(format!("gen/ui/unitbtns_{s}.png")));
-    commands.insert_resource(ButtonArt { sheets: sheets.clone() });
+    commands.insert_resource(ButtonArt {
+        sheets: sheets.clone(),
+    });
     let turn_art = [0, 1, 2].map(|i| assets.load(format!("gen/ui/nextturn_{i}.png")));
     commands.insert_resource(NextTurnArt(turn_art.clone()));
     // Civ3's bottom-right box: unit readout, or the end-turn prompt.
@@ -374,7 +394,11 @@ pub fn spawn_bar(
         .with_children(|b| {
             b.spawn((
                 Text::new(""),
-                TextFont { font: font.clone(), font_size: 15.0, ..default() },
+                TextFont {
+                    font: font.clone(),
+                    font_size: 15.0,
+                    ..default()
+                },
                 TextColor(ink),
                 TextLayout::new_with_justify(Justify::Center),
                 Node {
@@ -388,7 +412,11 @@ pub fn spawn_bar(
             ));
             b.spawn((
                 Text::new(""),
-                TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
                 TextColor(ink),
                 TextLayout::new_with_justify(Justify::Center),
                 Node {
@@ -442,23 +470,26 @@ pub fn spawn_bar(
                     align_items: AlignItems::Center,
                     ..default()
                 },))
-                .with_children(|row| {
-                    for cmd in cmds {
-                        row.spawn((
-                            Button,
-                            BarButton(*cmd),
-                            ImageNode::from_atlas_image(
-                                sheets[0].clone(),
-                                TextureAtlas { layout: layout.clone(), index: 0 },
-                            ),
-                            Node {
-                                width: Val::Px(BTN_PX),
-                                height: Val::Px(BTN_PX),
-                                ..default()
-                            },
-                        ));
-                    }
-                });
+                    .with_children(|row| {
+                        for cmd in cmds {
+                            row.spawn((
+                                Button,
+                                BarButton(*cmd),
+                                ImageNode::from_atlas_image(
+                                    sheets[0].clone(),
+                                    TextureAtlas {
+                                        layout: layout.clone(),
+                                        index: 0,
+                                    },
+                                ),
+                                Node {
+                                    width: Val::Px(BTN_PX),
+                                    height: Val::Px(BTN_PX),
+                                    ..default()
+                                },
+                            ));
+                        }
+                    });
             }
         });
 }
@@ -503,9 +534,15 @@ pub fn update_bar(
     mut out: MessageWriter<UnitCommand>,
     time: Res<Time>,
     turn: Res<units::Turn>,
+    civs: Res<Civilizations>,
 ) {
     let spots: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
-    let unit = selected.0.and_then(|s| units.get(s).ok());
+    // The bar belongs to the chair in play: another civilization's unit
+    // (a stale selection) gets no buttons and the end-turn prompt.
+    let unit = selected
+        .0
+        .and_then(|s| units.get(s).ok())
+        .filter(|u| u.civ == civs.active);
     let mut hint = None;
     for (b, interaction, mut node, mut img) in buttons.iter_mut() {
         let Some(u) = unit else {
@@ -518,8 +555,8 @@ pub fn update_bar(
             Display::None
         };
         let ok = b.0.enabled(&map, &spots, u);
-        let active = (b.0 == UnitCommand::Goto && goto.0)
-            || (b.0 == UnitCommand::Explore && u.exploring);
+        let active =
+            (b.0 == UnitCommand::Goto && goto.0) || (b.0 == UnitCommand::Explore && u.exploring);
         // Civ3's states: gold idle, orange hover, blue held or toggled on.
         let state = match (*interaction, ok) {
             (Interaction::Pressed, true) => 2,
@@ -532,7 +569,11 @@ pub fn update_bar(
             atlas.index = action_cell(b.0, cover_at(&map, u)) as usize;
         }
         // Civ3's greyed look darkens the disc instead of fading it out.
-        img.color = if ok { Color::WHITE } else { Color::srgb(0.62, 0.58, 0.52) };
+        img.color = if ok {
+            Color::WHITE
+        } else {
+            Color::srgb(0.62, 0.58, 0.52)
+        };
         if ok && !matches!(*interaction, Interaction::None) {
             hint = Some(b.0.label());
         }
@@ -559,7 +600,11 @@ pub fn update_bar(
                 } else if u.exploring {
                     "exploring".to_string()
                 } else if !u.path.is_empty() {
-                    format!("going to ({},{})", u.path.back().unwrap().0, u.path.back().unwrap().1)
+                    format!(
+                        "going to ({},{})",
+                        u.path.back().unwrap().0,
+                        u.path.back().unwrap().1
+                    )
                 } else {
                     "ready".to_string()
                 };
@@ -581,7 +626,7 @@ pub fn update_bar(
         });
     }
     if let Ok(mut t) = status.single_mut() {
-        t.0 = format!("Japanese  -  Turn {}", turn.0);
+        t.0 = format!("{}  -  Turn {}", CIVS[civs.active].adjective, turn.0);
     }
 }
 
@@ -600,7 +645,10 @@ mod tests {
                 let cell = action_cell(*cmd, cover);
                 assert!(cell < BTN_COLS * BTN_ROWS, "{cmd:?} cell {cell} off sheet");
             }
-            assert!(seen.insert(action_cell(*cmd, Cover::Bare)), "{cmd:?} reuses a cell");
+            assert!(
+                seen.insert(action_cell(*cmd, Cover::Bare)),
+                "{cmd:?} reuses a cell"
+            );
         }
         assert_eq!(seen.len(), BAR_ROW_MAIN.len() + BAR_ROW_UNIT.len());
     }
@@ -610,9 +658,11 @@ mod tests {
     #[test]
     fn bar_rows_follow_civ3_action_order() {
         for row in [BAR_ROW_MAIN.as_slice(), BAR_ROW_UNIT.as_slice()] {
-            let cells: Vec<u32> =
-                row.iter().map(|c| action_cell(*c, Cover::Forest)).collect();
-            assert!(cells.windows(2).all(|w| w[0] < w[1]), "out of order: {cells:?}");
+            let cells: Vec<u32> = row.iter().map(|c| action_cell(*c, Cover::Forest)).collect();
+            assert!(
+                cells.windows(2).all(|w| w[0] < w[1]),
+                "out of order: {cells:?}"
+            );
         }
     }
 
@@ -648,7 +698,13 @@ mod tests {
     fn clear_art_follows_cover() {
         let clear = UnitCommand::Work(WorkAction::Clear);
         assert_eq!(action_cell(clear, Cover::Jungle), 28);
-        assert_eq!(action_cell(clear, Cover::Forest), action_cell(clear, Cover::Pine));
-        assert_ne!(action_cell(clear, Cover::Jungle), action_cell(clear, Cover::Forest));
+        assert_eq!(
+            action_cell(clear, Cover::Forest),
+            action_cell(clear, Cover::Pine)
+        );
+        assert_ne!(
+            action_cell(clear, Cover::Jungle),
+            action_cell(clear, Cover::Forest)
+        );
     }
 }
