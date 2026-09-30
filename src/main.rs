@@ -19,6 +19,7 @@ mod script;
 mod splash;
 mod tiles;
 mod ui;
+mod unit_picker;
 mod units;
 
 use map::GameMap;
@@ -46,6 +47,7 @@ fn main() {
         // Debug: CIV3_REVEAL=1 starts with fog off, like the F9 toggle.
         .insert_resource(render::RevealAll(std::env::var("CIV3_REVEAL").is_ok()))
         .insert_resource(units::Turn(1))
+        .init_resource::<unit_picker::UnitPicker>()
         .init_resource::<input::Hovered>()
         .init_resource::<input::HoverPin>()
         .init_resource::<input::MovePreview>()
@@ -83,10 +85,12 @@ fn main() {
             (
                 (
                     script::drive_script,
-                    input::camera_control,
-                    input::hover,
-                    input::hold_preview,
-                    input::orders.run_if(production_prompt::inactive),
+                    input::camera_control.run_if(unit_picker::inactive),
+                    (input::hover, unit_picker::update).chain(),
+                    input::hold_preview.run_if(unit_picker::inactive),
+                    input::orders
+                        .run_if(production_prompt::inactive)
+                        .run_if(unit_picker::inactive),
                     actionbar::run_commands.run_if(production_prompt::inactive),
                     cities::found_city.run_if(production_prompt::inactive),
                     units::end_turn_units,
@@ -105,7 +109,7 @@ fn main() {
                 )
                     .chain(),
                 (
-                    units::unit_visibility,
+                    (unit_picker::style_and_scroll, units::unit_visibility).chain(),
                     units::selection_gizmo,
                     units::ring_follow,
                     units::animate_units,

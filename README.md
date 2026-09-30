@@ -41,7 +41,9 @@ the desktop-capture fallback.
 ## Controls
 
 - Click: select unit, order move, open city; the selected unit wears
-  Civ3's white selection ring. Right-click: move. Hold the left button on
+  Civ3's white selection ring. Left-click selects the displayed stack unit
+  without cycling. Right-click a unit or stack: open the unit picker.
+  Hold the left button on
   a tile and the route appears after a moment — the same path line and
   destination marker the Go-to button shows (G arms it, ESC cancels) —
   and releasing orders the move. A plain hover shows no route, as in

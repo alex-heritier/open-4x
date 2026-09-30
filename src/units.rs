@@ -76,7 +76,6 @@ pub struct UnitClipSet {
 #[derive(Resource, Default)]
 pub struct UnitArt {
     pub sets: HashMap<UnitType, UnitClipSet>,
-    pub font: Handle<Font>,
 }
 
 impl UnitArt {
@@ -110,10 +109,7 @@ impl UnitArt {
             }
             sets.insert(t, UnitClipSet { clips });
         }
-        Self {
-            sets,
-            font: asset_server.load("gen/fonts/lsans.ttf"),
-        }
+        Self { sets }
     }
 
     pub fn clip(&self, t: UnitType, slot: &str) -> Option<&Clip> {
@@ -228,19 +224,6 @@ pub(crate) fn spawn_unit(
                 exploring: false,
             },
         ))
-        .with_children(|c| {
-            c.spawn((
-                Text2d::new(""),
-                TextFont {
-                    font: art.font.clone(),
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.95, 0.4)),
-                Transform::from_xyz(16.0, 26.0, 0.1),
-                StackBadge,
-            ));
-        })
         .id()
 }
 
@@ -578,8 +561,6 @@ pub fn refresh_visibility(
     }
 }
 
-/// Civ3 shows one unit per tile: the selected one, else the best
-/// defender, with a count badge for the rest.
 fn defender_rank(t: UnitType) -> u8 {
     match t {
         UnitType::Warrior => 3,
@@ -589,21 +570,26 @@ fn defender_rank(t: UnitType) -> u8 {
     }
 }
 
+/// Display units with moves left first, then the selection and best defender.
+/// The original view-side sprite priority remains open in reverse-engineering/stacking.md.
+pub(crate) fn stack_priority(e: Entity, u: &Unit, selected: Option<Entity>) -> (bool, bool, u8) {
+    (u.moves > 0, Some(e) == selected, defender_rank(u.utype))
+}
+
 fn stack_tops(
     units: &Query<(Entity, &Unit)>,
     selected: Option<Entity>,
-) -> HashMap<(i32, i32), (Entity, usize)> {
-    let mut best: HashMap<(i32, i32), (Entity, usize, (bool, u8))> = HashMap::new();
+) -> HashMap<(i32, i32), Entity> {
+    let mut best: HashMap<(i32, i32), (Entity, (bool, bool, u8))> = HashMap::new();
     for (e, u) in units.iter() {
-        let key = (Some(e) == selected, defender_rank(u.utype));
-        let entry = best.entry((u.x, u.y)).or_insert((e, 0, key));
-        entry.1 += 1;
-        if key > entry.2 || (key == entry.2 && e < entry.0) {
+        let key = stack_priority(e, u, selected);
+        let entry = best.entry((u.x, u.y)).or_insert((e, key));
+        if key > entry.1 || (key == entry.1 && e < entry.0) {
             entry.0 = e;
-            entry.2 = key;
+            entry.1 = key;
         }
     }
-    best.into_iter().map(|(k, (e, n, _))| (k, (e, n))).collect()
+    best.into_iter().map(|(k, (e, _))| (k, e)).collect()
 }
 
 /// Keep stacked units on the tile center; the top unit sorts above.
@@ -620,13 +606,10 @@ pub fn restack(
         let pos = tile_to_world(u.x, u.y);
         tf.translation.x = pos.x;
         tf.translation.y = pos.y;
-        let top = tops.get(&(u.x, u.y)).is_some_and(|(t, _)| *t == e);
+        let top = tops.get(&(u.x, u.y)).is_some_and(|t| *t == e);
         tf.translation.z = sprite_z(u.x, u.y, 4.0) + if top { 0.0005 } else { 0.0 };
     }
 }
-
-#[derive(Component)]
-pub struct StackBadge;
 
 /// Civ3 only lets a unit with movement left be selected.
 pub fn selectable(u: &Unit) -> bool {
@@ -667,16 +650,12 @@ pub fn unit_visibility(
     reveal: Res<RevealAll>,
     selected: Res<Selected>,
     stack_q: Query<(Entity, &Unit)>,
-    mut q: Query<(Entity, &Unit, &mut Visibility, Option<&Children>)>,
-    mut badges: Query<&mut Text2d, With<StackBadge>>,
+    mut q: Query<(Entity, &Unit, &mut Visibility)>,
 ) {
     let tops = stack_tops(&stack_q, selected.0);
-    for (e, u, mut v, children) in q.iter_mut() {
+    for (e, u, mut v) in q.iter_mut() {
         let seen = reveal.0 || map.get(u.x, u.y).is_some_and(|t| t.visible);
-        let (top, n) = tops
-            .get(&(u.x, u.y))
-            .map(|(t, n)| (*t == e, *n))
-            .unwrap_or((true, 1));
+        let top = tops.get(&(u.x, u.y)).is_none_or(|t| *t == e);
         // Moving units stay visible; idle stack members hide behind the top.
         let moving = !matches!(u.anim, UnitAnim::Idle { .. });
         *v = if seen && (top || moving) {
@@ -684,26 +663,41 @@ pub fn unit_visibility(
         } else {
             Visibility::Hidden
         };
-        if let Some(children) = children {
-            for c in children.iter() {
-                if let Ok(mut t) = badges.get_mut(c) {
-                    let want = if top && n > 1 && !moving {
-                        format!("x{n}")
-                    } else {
-                        String::new()
-                    };
-                    if t.0 != want {
-                        t.0 = want;
-                    }
-                }
-            }
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stack_displays_movable_unit_before_exhausted_selection() {
+        let mut app = App::new();
+        let mut exhausted = scout_at(10, 10);
+        exhausted.utype = UnitType::Warrior;
+        exhausted.moves = 0;
+        let exhausted = app.world_mut().spawn((exhausted, Visibility::Visible)).id();
+        let movable = app
+            .world_mut()
+            .spawn((scout_at(10, 10), Visibility::Visible))
+            .id();
+        let mut map = GameMap::generate();
+        let i = map.idx(10, 10);
+        map.tiles[i].visible = true;
+        app.insert_resource(map);
+        app.insert_resource(RevealAll(true));
+        app.insert_resource(Selected(Some(exhausted)));
+        app.add_systems(Update, unit_visibility);
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(movable).unwrap(),
+            Visibility::Visible
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(exhausted).unwrap(),
+            Visibility::Hidden
+        );
+    }
 
     #[test]
     fn hotseat_refreshes_only_incoming_units_and_counts_full_rounds() {

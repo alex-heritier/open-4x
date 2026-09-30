@@ -355,33 +355,29 @@ pub fn orders(
                 }
                 return;
             }
-            // Units that spent their moves cannot be selected, as in Civ3.
-            let stack: Vec<Entity> = units
+            let top = units
                 .iter()
-                .filter(|(_, u)| {
-                    u.civ == civs.active && u.x == x && u.y == y && units::selectable(u)
+                .filter(|(_, u)| u.x == x && u.y == y)
+                .max_by_key(|(e, u)| {
+                    (
+                        units::stack_priority(*e, u, selected.0),
+                        std::cmp::Reverse(*e),
+                    )
                 })
-                .map(|(e, _)| e)
-                .collect();
+                .filter(|(_, u)| u.civ == civs.active && units::selectable(u))
+                .map(|(e, _)| e);
             if let Some((e, _)) = cities
                 .iter()
                 .find(|(_, c)| c.civ == civs.active && c.x == x && c.y == y)
             {
-                // cities open first, as in Civ3; garrisoned units cycle via Tab
+                // Cities open first; right-click selects garrisoned units.
                 view.0 = Some(e);
                 audio::sfx(&mut commands, &audio, "City View");
-            } else if !stack.is_empty() {
+            } else if let Some(next) = top {
                 // selecting a fortified unit wakes it, as in Civ3; selecting
                 // an explorer stands down auto-explore, or a later click
                 // could never redirect it (auto-select gives the tile order
                 // to whoever still needs orders).
-                let next = match selected.0 {
-                    Some(s) if stack.contains(&s) => {
-                        let i = stack.iter().position(|&e| e == s).unwrap();
-                        stack[(i + 1) % stack.len()]
-                    }
-                    _ => stack[0],
-                };
                 if let Ok((_, mut u)) = units.get_mut(next) {
                     u.fortified = false;
                     u.sentry = false;
@@ -392,11 +388,6 @@ pub fn orders(
             } else if let Some(s) = selected.0 {
                 order_with_sfx(&mut commands, &audio, &map, &mut units, s, (x, y));
             }
-        }
-    }
-    if buttons.just_pressed(MouseButton::Right) {
-        if let (Some(dest), Some(s)) = (hovered.0, selected.0) {
-            order_with_sfx(&mut commands, &audio, &map, &mut units, s, dest);
         }
     }
     if let Some(s) = selected.0 {

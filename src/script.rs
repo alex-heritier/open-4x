@@ -222,6 +222,8 @@ pub fn drive_script(
                 None => eprintln!("script: bad hover {arg}"),
             },
             "unhover" => pin.0 = None,
+            "right" => mouse.press(MouseButton::Right),
+            "right-up" => mouse.release(MouseButton::Right),
             "down" => mouse.press(MouseButton::Left),
             "up" => mouse.release(MouseButton::Left),
             "city" => {
