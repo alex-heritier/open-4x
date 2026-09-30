@@ -30,8 +30,8 @@ from collections import Counter, defaultdict
 
 SPEC = os.path.dirname(os.path.abspath(__file__))
 CANDIDATES = (
-    "civ3-gog/app/Conquests/Civ3Conquests.exe",
-    "re/Civ3Conquests.exe",
+    "civ3/civ3-gog/app/Conquests/Civ3Conquests.exe",
+    "civ3/re/Civ3Conquests.exe",
 )
 
 
@@ -43,9 +43,9 @@ def resolve_exe(flag):
     for _ in range(6):
         roots.append(d)
         d = os.path.dirname(d)
-    # skill-anchored workspace root: scripts/RE/skills/.agents/civ3-clone/<root>
+    # skill-anchored repo root: scripts/RE/skills/.agents/<root>
     roots.append(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.dirname(SPEC))))))
+        os.path.dirname(SPEC)))))
     for root in roots:
         for cand in CANDIDATES:
             p = os.path.join(root, cand)

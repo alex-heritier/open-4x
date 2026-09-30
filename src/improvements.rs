@@ -290,7 +290,7 @@ pub struct ImprovementArt {
 impl ImprovementArt {
     pub fn load(asset_server: &AssetServer) -> Self {
         let text = std::fs::read_to_string("assets/gen/improvements/manifest.json")
-            .expect("run from civ3-clone/ after tools/prep_assets.py improvements");
+            .expect("run from the repo root after tools/prep_assets.py improvements");
         let raw: HashMap<String, ImpEntry> =
             serde_json::from_str(&text).expect("improvements manifest parses");
         let mut defs = HashMap::new();

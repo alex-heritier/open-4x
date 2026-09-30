@@ -66,7 +66,7 @@ So the sound/ambience loader lives in the `0x53` thin bucket, not near the
 
 ## `sound.dll` backend + version gate (verified: export table, byte scans)
 
-`civ3-gog/app/sound.dll` (454 656 B, md5 `f82a1295…`) is the mixer
+`civ3/civ3-gog/app/sound.dll` (454 656 B, md5 `f82a1295…`) is the mixer
 backend: it imports `DSOUND.dll` + `mss32.dll` (Miles Sound System) +
 `WINMM.dll` and exports 12 symbols — `create_sound`, `delete_sound`,
 `get_sound_version`, `init_sound_timer`, `release_sound`, plus

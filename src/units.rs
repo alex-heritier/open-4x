@@ -90,7 +90,7 @@ impl UnitArt {
         ] {
             let dir = def(t).dir;
             let text = fs::read_to_string(format!("assets/gen/units/{dir}/manifest.json"))
-                .expect("run from civ3-clone/ after tools/prep_assets.py");
+                .expect("run from the repo root after tools/prep_assets.py");
             let raw: HashMap<String, ClipEntry> =
                 serde_json::from_str(&text).expect("unit manifest parses");
             let mut clips = HashMap::new();
@@ -964,7 +964,7 @@ struct RingEntry {
 impl SelectionRing {
     pub fn load(asset_server: &AssetServer) -> Self {
         let text = fs::read_to_string("assets/gen/cursor/manifest.json")
-            .expect("run from civ3-clone/ after tools/prep_assets.py cursor");
+            .expect("run from the repo root after tools/prep_assets.py cursor");
         let raw: HashMap<String, RingEntry> =
             serde_json::from_str(&text).expect("cursor manifest parses");
         let e = &raw["ring"];

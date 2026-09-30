@@ -5,9 +5,9 @@ under the bundled Wine runtime. Q1's first half was executed live (Wine
 Staging 11.16, `EGYPT.SAV` loaded and rendering); the mechanics below
 are corrected for what actually works.
 
-Runtime: `.runtime/Wine Staging.app/.../bin/wine` (wine-11.16 Staging,
-verified `--version`), prefix `.civ3-prefix/`, exe
-`civ3-gog/app/Conquests/Civ3Conquests.exe`. Image base is `0x400000` —
+Runtime: `civ3/.runtime/Wine Staging.app/.../bin/wine` (wine-11.16 Staging,
+verified `--version`), prefix `civ3/.civ3-gog-prefix/`, exe
+`civ3/civ3-gog/app/Conquests/Civ3Conquests.exe`. Image base is `0x400000` —
 static VAs are runtime VAs (verified: `x/2c 0x400000` → `M Z`,
 module `civ3conquests`).
 
@@ -144,7 +144,7 @@ commands executes there. `info break` confirms the arm
 
 ## Hygiene
 
-* Snapshot or copy `.civ3-prefix/` before running; the game writes saves.
+* Snapshot or copy `civ3/.civ3-gog-prefix/` before running; the game writes saves.
 * Headless CI cannot do this (needs a display + GOG assets); run on a Mac
   with the Wine staging runtime above.
 * Record results back into `rivers.md` (Q1) and `ai.md` (Q2) with

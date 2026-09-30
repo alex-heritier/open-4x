@@ -510,6 +510,6 @@ and after the mask fix its decode of `conquests.biq` is BYTE-IDENTICAL to
 (Autosave `.SAV`s are stored
 raw/uncompressed, 1.3–1.7MB — `BadDictBits` under DCL.)
 
-Data-path note: the game reads code/DLLs from `civ3-gog/app/Conquests`
-but data files (`Sounds/`, `Text/version.txt`) from `civ3-complete/`
+Data-path note: the game reads code/DLLs from `civ3/civ3-gog/app/Conquests`
+but data files (`Sounds/`, `Text/version.txt`) from `civ3/civ3-complete/`
 — check both trees (the two `conquests.biq` copies are byte-identical).

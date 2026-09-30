@@ -11,7 +11,7 @@ tile-record fields the renderer consumes.
 `0x598580` with paths built from object fields (`+0x1801C`, `+0x3368`).
 `deltaRivers` enters the map view through this table (see `rivers.md`).
 
-## Sprite inventory (`civ3-gog/app/Art/Terrain/`, 37 files)
+## Sprite inventory (`civ3/civ3-gog/app/Art/Terrain/`, 37 files)
 
 | prefix | files | role |
 |---|---|---|

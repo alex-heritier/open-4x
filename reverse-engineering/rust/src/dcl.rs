@@ -436,7 +436,7 @@ mod tests {
 
     fn read_biq(name: &str) -> Vec<u8> {
         // Workspace GOG install, mirroring the game's own data path.
-        let p = crate_root().join("../../../civ3-gog/app/Conquests").join(name);
+        let p = crate_root().join("../../civ3/civ3-gog/app/Conquests").join(name);
         std::fs::read(&p).unwrap_or_else(|_| panic!("missing test input {}", p.display()))
     }
 
@@ -528,7 +528,7 @@ mod tests {
     fn compressed_save_opens_with_civ3_magic() {
         // Same 3-byte DCL framing as .biq; decompresses to a CIV3 save
         // stream carrying a full 20 000-tag TILE array.
-        let p = crate_root().join("../../../civ3-gog/app/Conquests/Saves/EGYPT.SAV");
+        let p = crate_root().join("../../civ3/civ3-gog/app/Conquests/Saves/EGYPT.SAV");
         let raw = std::fs::read(&p).unwrap_or_else(|_| panic!("missing {}", p.display()));
         let out = decompress(&raw).expect("sav decodes");
         assert_eq!(&out[..4], b"CIV3", "unexpected save magic {out:?}");
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn civ3mod_bic_opens_with_magic() {
         let raw = {
-            let p = crate_root().join("../../../civ3-gog/app/civ3mod.bic");
+            let p = crate_root().join("../../civ3/civ3-gog/app/civ3mod.bic");
             std::fs::read(&p).unwrap_or_else(|_| panic!("missing {}", p.display()))
         };
         let out = decompress(&raw).expect("bic decodes");

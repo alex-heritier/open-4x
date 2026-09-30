@@ -2,7 +2,7 @@
 
 Descriptive (not normative) documentation plus a dependency-free Rust
 reference implementation, recovered by static analysis of
-`civ3-gog/app/Conquests/Civ3Conquests.exe` (PE32, MSVC 6.0, 3 417 464
+`civ3/civ3-gog/app/Conquests/Civ3Conquests.exe` (PE32, MSVC 6.0, 3 417 464
 bytes). Each system owns exactly one findings file and one Rust module;
 `NOTES.md` remains the map-generation source of truth and everything else
 cross-references it instead of duplicating it.
@@ -38,6 +38,10 @@ cd rust
 cargo run --release -- --size 2 --water 50
 cargo test --release
 ```
+
+Paths in this directory are relative to the repo root (`open-4x/`). The GOG
+install, the `re/` scratch tree (exe copies, string dumps, `.venv` toolkit), the
+pinned Wine runtime and its prefix all live under `civ3/`.
 
 The renderer is faithful to the binary by default. Pass `--bugs none` for the
 intended behaviour, or a subset like `--bugs contour-equality`.

@@ -1,6 +1,6 @@
 # Unit graphics and animation
 
-## Per-unit directory (`civ3-gog/app/Art/Units/<Name>/`, 77 unit dirs)
+## Per-unit directory (`civ3/civ3-gog/app/Art/Units/<Name>/`, 77 unit dirs)
 
 77 subdirectories + 3 loose files at `Units/` root (`units_32.pcx`,
 `s_Planes.pcx`, `Planes.pcx`). 76 dirs hold one `.ini` (mixed `.ini`/`.INI`

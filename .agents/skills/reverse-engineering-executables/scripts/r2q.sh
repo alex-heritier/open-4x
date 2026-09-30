@@ -8,11 +8,11 @@ EXE=${2:-}
 if [ -z "$EXE" ]; then
   D=$PWD
   for _ in 1 2 3 4 5 6; do
-    if [ -f "$D/civ3-gog/app/Conquests/Civ3Conquests.exe" ]; then
-      EXE=$D/civ3-gog/app/Conquests/Civ3Conquests.exe; break
+    if [ -f "$D/civ3/civ3-gog/app/Conquests/Civ3Conquests.exe" ]; then
+      EXE=$D/civ3/civ3-gog/app/Conquests/Civ3Conquests.exe; break
     fi
-    if [ -f "$D/re/Civ3Conquests.exe" ]; then
-      EXE=$D/re/Civ3Conquests.exe; break
+    if [ -f "$D/civ3/re/Civ3Conquests.exe" ]; then
+      EXE=$D/civ3/re/Civ3Conquests.exe; break
     fi
     D=$(dirname "$D")
   done

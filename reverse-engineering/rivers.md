@@ -31,7 +31,7 @@ frame renderer is still unmapped.
 is likely constructed at runtime (cf. the `x`/`w`/`l` prefix scheme in
 `graphics-terrain.md`) or read from the second table. Unresolved.
 
-On disk (`civ3-gog/app/Art/Terrain/`): `deltaRivers.pcx`, `mtnRivers.pcx`,
+On disk (`civ3/civ3-gog/app/Art/Terrain/`): `deltaRivers.pcx`, `mtnRivers.pcx`,
 `waterfalls.pcx` — delta and mountain variants are separate sprites, so the
 renderer picks a river sprite by terrain context, not by one universal sheet.
 

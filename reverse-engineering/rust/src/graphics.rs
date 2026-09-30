@@ -2,7 +2,7 @@
 //!
 //! Covers `../graphics-terrain.md`, `../graphics-units.md`, and
 //! `../graphics-city.md`. Filename tables are observed inventory from
-//! `civ3-gog/app/Art/`; engine call sites (`0x4C5F9F` art table,
+//! `civ3/civ3-gog/app/Art/`; engine call sites (`0x4C5F9F` art table,
 //! `0x598580` loader, `0x407C30` city view) are cited where verified.
 
 /// Base land/water tile filename: `Art\Terrain\[l]<x|w><base>.pcx`.

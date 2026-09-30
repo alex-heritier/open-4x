@@ -591,7 +591,7 @@ pub struct FeatureArt {
 impl FeatureArt {
     pub fn load(asset_server: &bevy::prelude::AssetServer) -> Self {
         let text = std::fs::read_to_string("assets/gen/features/manifest.json")
-            .expect("run from civ3-clone/ after tools/prep_assets.py features");
+            .expect("run from the repo root after tools/prep_assets.py features");
         let raw: std::collections::HashMap<String, FeatureEntry> =
             serde_json::from_str(&text).expect("features manifest parses");
         let mut defs = std::collections::HashMap::new();

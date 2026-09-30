@@ -334,7 +334,7 @@ mod tests {
     /// file's GOOD rows are the memory rows.
     fn conquests_biq() -> Vec<u8> {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let p = root.join("../../../civ3-gog/app/Conquests/conquests.biq");
+        let p = root.join("../../civ3/civ3-gog/app/Conquests/conquests.biq");
         let raw = std::fs::read(&p).unwrap_or_else(|_| panic!("missing {}", p.display()));
         crate::dcl::decompress(&raw).expect("biq decodes")
     }
@@ -484,7 +484,7 @@ mod tests {
     fn ptw_bix_good_parses() {
         // Raw-BIC GOOD section: 29 len-88 rows with names inline.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let p = root.join("../../../civ3-gog/app/civ3PTW/Scenarios/Ancient Mediterranean.bix");
+        let p = root.join("../../civ3/civ3-gog/app/civ3PTW/Scenarios/Ancient Mediterranean.bix");
         let raw = std::fs::read(&p).unwrap_or_else(|_| panic!("missing {}", p.display()));
         let at = raw.windows(4).position(|w| w == b"GOOD").expect("GOOD section");
         let (count, rows) = parse_ptw_good_section(&raw[at + 4..]).expect("parses");
@@ -522,7 +522,7 @@ mod tests {
         // (save1.tmp) is the game's own decode of `conquests.biq`, not
         // save content — see `biq.md`.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let p = root.join("../../../civ3-gog/app/Conquests/Saves/EGYPT.SAV");
+        let p = root.join("../../civ3/civ3-gog/app/Conquests/Saves/EGYPT.SAV");
         let raw = std::fs::read(&p).unwrap_or_else(|_| panic!("missing {}", p.display()));
         let (save0, n1) = crate::dcl::decompress_prefix(&raw).expect("stream 1");
         assert_eq!(save0.len(), 1748113);

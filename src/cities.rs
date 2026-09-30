@@ -199,7 +199,7 @@ pub struct CityArt {
 impl CityArt {
     pub fn load(asset_server: &AssetServer) -> Self {
         let text = fs::read_to_string("assets/gen/cities/manifest.json")
-            .expect("run from civ3-clone/ after tools/prep_assets.py");
+            .expect("run from the repo root after tools/prep_assets.py");
         let raw: HashMap<String, CityEntry> =
             serde_json::from_str(&text).expect("cities manifest parses");
         let anchor = {

@@ -11,10 +11,10 @@
 # execute at the next stop. Never `cont` from an enabled breakpoint site:
 # `stepi` once past it first, or `disable N` + `cont`. See SKILL.md.
 set -u
-ROOT=$(cd "$(dirname "$0")/../../../../.." && pwd)
-GAMEDIR="$ROOT/civ3-gog/app/Conquests"
-PREFIX="$ROOT/.civ3-prefix"
-WINEBIN="$ROOT/.runtime/Wine Staging.app/Contents/Resources/wine/bin"
+ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
+GAMEDIR="$ROOT/civ3/civ3-gog/app/Conquests"
+PREFIX="$ROOT/civ3/.civ3-gog-prefix"
+WINEBIN="$ROOT/civ3/.runtime/Wine Staging.app/Contents/Resources/wine/bin"
 DBGDIR="/tmp/civ3dbg"
 
 cmd=${1-help}; tag=${2-}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert Civ3 GOG assets into runtime formats (RGBA PNG, OGG, WAV).
 
-The game never reads PCX, FLC, or MP3. Run from civ3-clone/:
+The game never reads PCX, FLC, or MP3. Run from the repo root:
     python3 tools/prep_assets.py [stage ...]
 Stages: terrain units cities cityscreen splash audio fonts features
 improvements unitbuttons fog borders cursor (default: all)
@@ -22,7 +22,7 @@ import tempfile
 
 from PIL import Image, ImageChops
 
-GOG = os.environ.get("CIV3_GOG", "../civ3-gog/app")
+GOG = os.environ.get("CIV3_GOG", "civ3/civ3-gog/app")
 OUT = "assets/gen"
 
 UNITS = ["Settler", "warrior", "Worker", "Scout"]

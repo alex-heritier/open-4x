@@ -6,26 +6,30 @@ description: Reverse-engineer the Civ3 Windows executable the way this repo does
 # Reverse-Engineering Executables
 
 How to reverse-engineer `Civ3Conquests.exe` (and its sibling binaries) and land
-findings in `civ3-clone/reverse-engineering/`, matching the method that produced
+findings in `reverse-engineering/`, matching the method that produced
 the existing notes. Read this before opening the binary.
 
 ## Targets and layout
 
-- Main target: `civ3-gog/app/Conquests/Civ3Conquests.exe`. PE32, MSVC 6.0,
+Paths below are relative to the repo root (`open-4x/`). The GOG install and
+the reverse-engineering scratch tree both live under `civ3/`.
+
+- Main target: `civ3/civ3-gog/app/Conquests/Civ3Conquests.exe`. PE32, MSVC 6.0,
   static CRT, image base `0x400000`, 3,417,464 bytes. Static VAs are runtime
-  VAs under Wine. A working copy also lives at `re/Civ3Conquests.exe`.
-- Editor: `re/Civ3ConquestsEdit.exe`. Separate binary. The main exe contains
-  no editor (verified: case-insensitive `editor` scan finds only 3 uppercase
-  data tags). Check which binary a question belongs to before digging.
-- Findings: `civ3-clone/reverse-engineering/*.md`, one file per system, plus
-  `rust/src/*.rs` reference implementations. `NOTES.md` is the map-generation
-  source of truth. `REGIONS.md` is the code atlas. `dynamic-tracing.md` is the
-  live-debugging runbook.
+  VAs under Wine. A working copy also lives at `civ3/re/Civ3Conquests.exe`.
+- Editor: `civ3/re/Civ3ConquestsEdit.exe`. Separate binary. The main exe
+  contains no editor (verified: case-insensitive `editor` scan finds only 3
+  uppercase data tags). Check which binary a question belongs to before
+  digging.
+- Findings: `reverse-engineering/*.md`, one file per system, plus
+  `reverse-engineering/rust/src/*.rs` reference implementations. `NOTES.md` is
+  the map-generation source of truth. `REGIONS.md` is the code atlas.
+  `dynamic-tracing.md` is the live-debugging runbook.
 - Scratch probes go in `/tmp` (`/tmp/re_probeN.py`, `/tmp/sweep_R*.txt`).
   Never commit them. They are evidence of method, not deliverables.
-- Static toolkit: `re/tools/` (`pe.py`, `xrefs.py`, `relx.py`) on
-  `re/.venv` (pefile + capstone). String dumps: `re/allstr.txt`,
-  `re/strings_all.txt` (r2 `iz` format: paddr, vaddr, section, string).
+- Static toolkit: `civ3/re/tools/` (`pe.py`, `xrefs.py`, `relx.py`) on
+  `civ3/re/.venv` (pefile + capstone). String dumps: `civ3/re/allstr.txt`,
+  `civ3/re/strings_all.txt` (r2 `iz` format: paddr, vaddr, section, string).
 
 ## The loop
 
@@ -55,7 +59,7 @@ the existing notes. Read this before opening the binary.
 Prefer `r2 -q -c '...'` one-liners with color stripped. The established idioms:
 
 ```bash
-Q=civ3-clone/.agents/skills/reverse-engineering-executables/scripts/r2q.sh
+Q=.agents/skills/reverse-engineering-executables/scripts/r2q.sh
 sh $Q 's 0x5EAA70; pd 120' | head -n 130
 sh $Q 'px 256 @ 0x6701C8' | head -n 20
 sh $Q 'e bin.relocs.apply=true; axt 0x6690B0' | head -n 20
@@ -64,10 +68,10 @@ sh $Q 'e bin.relocs.apply=true; axt 0x6690B0' | head -n 20
 - `pd N @ VA`: read function bodies. `px`: dump tables and vtables.
   `axt VA`: cross-references (needs `e bin.relocs.apply=true`).
   Filter `grep -v "^WARN"`.
-- `re/r2env` holds the standard r2 config (no color, bytes on, cache on).
-  `re/script1.r2` shows the flag-plus-xref habit (`f name = VA`, then `axt`).
+- `civ3/re/r2env` holds the standard r2 config (no color, bytes on, cache on).
+  `civ3/re/script1.r2` shows the flag-plus-xref habit (`f name = VA`, then `axt`).
 
-Python probes (`re/.venv/bin/python`) use `re/tools/pe.py` (`Image`: VA
+Python probes (`civ3/re/.venv/bin/python`) use `civ3/re/tools/pe.py` (`Image`: VA
 translation, `u32`/`cstr` reads, capstone disassembly). The standard scans:
 
 - **E8 census**: every `E8 rel32` in `.text` resolving to a target
@@ -75,7 +79,7 @@ translation, `u32`/`cstr` reads, capstone disassembly). The standard scans:
   an intermediate recount of 65 wrongly dropped 5 real sites (four `0x5A`
   branch-target draws plus one `0x5C` site), a caution against excluding
   sites by pattern instead of by evidence. Cite your count and your method
-  together. (`re/tools/xrefs.py` currently returns only 3 sites for this
+  together. (`civ3/re/tools/xrefs.py` currently returns only 3 sites for this
   target; do not trust it.)
 - **68 push-imm**: `push imm32` of a string VA or FOURCC tag, to find string
   users and tag dispatch (`GOOD` = `0x444F4F47`, `TERR` = `0x52524554`).
@@ -86,7 +90,7 @@ translation, `u32`/`cstr` reads, capstone disassembly). The standard scans:
 - **String clustering**: group `push`-immediate string refs per 64 KB text
   bucket to label regions (`/tmp/region_probe.py` pattern, reproducible).
 
-Probe shape, from `/tmp/re_probe.py`: `sys.path.insert(0, 're/tools')`, scan
+Probe shape, from `/tmp/re_probe.py`: `sys.path.insert(0, 'civ3/re/tools')`, scan
 `.text` once, print `name (hex): N refs [first 8 VAs]`, then disassemble 3-5
 key sites inline. One probe per question, numbered, thrown away after.
 
@@ -116,8 +120,8 @@ overrules raw disassembly.
 Full trace specs: `reverse-engineering/dynamic-tracing.md`. The mechanics
 below are settled and load-bearing; follow them exactly.
 
-- Runtime: `.runtime/Wine Staging.app/.../bin/wine` (Staging 11.16),
-  prefix `.civ3-prefix/`, game dir `civ3-gog/app/Conquests/`.
+- Runtime: `civ3/.runtime/Wine Staging.app/.../bin/wine` (Staging 11.16),
+  prefix `civ3/.civ3-gog-prefix/`, game dir `civ3/civ3-gog/app/Conquests/`.
   Snapshot or copy the prefix before running; the game writes saves.
   Image base is `0x400000`: static VAs are runtime VAs.
 - Launch the game *under* `winedbg` from the start, stdin on a
@@ -261,10 +265,10 @@ children sweep:
 ## Quick reference
 
 ```bash
-S=civ3-clone/.agents/skills/reverse-engineering-executables/scripts
+S=.agents/skills/reverse-engineering-executables/scripts
 sh $S/r2q.sh 'pd N @ VA' | head -n M
 sh $S/r2q.sh 'e bin.relocs.apply=true; axt VA' | head -n 20
-grep -i -m 40 "pattern" re/strings_all.txt
+grep -i -m 40 "pattern" civ3/re/strings_all.txt
 python3 $S/scans.py calls 0x64A20E        # E8 caller census
 python3 $S/scans.py pushes GOOD           # 68 push-imm refs
 python3 $S/scans.py tags                  # 3D cmp FOURCC inventory
@@ -272,22 +276,22 @@ python3 $S/scans.py slots                 # indirect-call slot census
 python3 $S/scans.py buckets               # 64KB string clustering
 sh $S/live_dbg.sh launch 7               # game under winedbg (background it)
 sh $S/live_dbg.sh send 7 'break *0x5942cf\ncont\n'
-cd civ3-clone/reverse-engineering/rust && cargo test --release
+cd reverse-engineering/rust && cargo test --release
 ```
 
 ## Files
 
-- `civ3-clone/reverse-engineering/README.md`: ownership table, quick start.
-- `civ3-clone/reverse-engineering/REGIONS.md`: code atlas and fan-out units.
-- `civ3-clone/reverse-engineering/NOTES.md`: mapgen source of truth, method.
-- `civ3-clone/reverse-engineering/dynamic-tracing.md`: Wine/winedbg runbook.
-- `civ3-clone/reverse-engineering/rust/`: reference implementation + tests.
+- `reverse-engineering/README.md`: ownership table, quick start.
+- `reverse-engineering/REGIONS.md`: code atlas and fan-out units.
+- `reverse-engineering/NOTES.md`: mapgen source of truth, method.
+- `reverse-engineering/dynamic-tracing.md`: Wine/winedbg runbook.
+- `reverse-engineering/rust/`: reference implementation + tests.
 - `scripts/scans.py`: stdlib-only `calls`/`pushes`/`tags`/`slots`/`buckets`
   scans over any PE32 exe (`--exe` overrides the default search).
 - `scripts/r2q.sh`: quiet r2 one-liner wrapper (no color, no WARN lines).
 - `scripts/live_dbg.sh`: `launch <tag>` runs the game under winedbg with
   a held-open fifo (`/tmp/civ3dbg/in<tag>`, log `/tmp/civ3dbg/log<tag>`);
   `send <tag> 'cmd\n...'` writes one command batch; `tail <tag>` follows.
-- `re/tools/`: `pe.py`, `xrefs.py`, `relx.py` on `re/.venv` (needs the venv;
-  `xrefs.py` undercounts, prefer `scripts/scans.py calls`).
-- `re/allstr.txt`, `re/strings_all.txt`: string dumps for census greps.
+- `civ3/re/tools/`: `pe.py`, `xrefs.py`, `relx.py` on `civ3/re/.venv` (needs the
+  venv; `xrefs.py` undercounts, prefer `scripts/scans.py calls`).
+- `civ3/re/allstr.txt`, `civ3/re/strings_all.txt`: string dumps for census greps.

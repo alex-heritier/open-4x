@@ -1,12 +1,12 @@
 # The Conquests scenario editor (second image)
 
-Owns: everything about `civ3-gog/app/Conquests/Civ3ConquestsEdit.exe`
+Owns: everything about `civ3/civ3-gog/app/Conquests/Civ3ConquestsEdit.exe`
 (1 824 120 B, md5 `249faa156f21b2492b3046f4bb793363`, MFC via
 `oledlg`/`OLEPRO32`/`COMCTL32`). Base `0x400000`, `.text`
 `0x401000–0x4D6E6B` (vsize `0xD5E6B`), `.rsrc` `0xBE6C0` (dialog-heavy).
 The game-exe atlas stays in `REGIONS.md`; this file owns the editor image
 only. Unprobed siblings: `Civ3Edit.exe` (1 258 872 B, md5 `45912d4b…`),
-`civ3PTW/Civ3XEdit.exe` (1 299 832 B, md5 `e8fd31e9…`).
+`civ3/civ3-gog/app/civ3PTW/Civ3XEdit.exe` (1 299 832 B, md5 `e8fd31e9…`).
 
 ## Why it matters
 
@@ -183,7 +183,7 @@ GUI session needed, the labels are bytes in the exe.
 
 Regenerate with `scripts/pe_dialogs.py`:
 
-    python3 scripts/pe_dialogs.py re/Civ3ConquestsEdit.exe [substring ...]
+    python3 scripts/pe_dialogs.py civ3/re/Civ3ConquestsEdit.exe [substring ...]
 
 It walks the PE resource tree (`RT_DIALOG` = type 5) and prints
 `id <n> <KIND> (<x>,<y>,<cx>,<cy>) '<text>'` per control; the **control id**
@@ -372,5 +372,5 @@ source. Same method with a different `--src` is the probe.
 
 Re-run / extend:
 
-    python3 scripts/edit_slots.py re/Civ3ConquestsEdit.exe \
+    python3 scripts/edit_slots.py civ3/re/Civ3ConquestsEdit.exe \
         --block 0x459e7f:0x45a3c0 --src 0x8c --dialog 151

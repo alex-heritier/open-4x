@@ -1,7 +1,8 @@
 # Civ3C map generator — reference implementation
 
 A reimplementation of the **Civilization III: Conquests** random map generator,
-recovered by static analysis of `civ3-gog/app/Conquests/Civ3Conquests.exe`.
+recovered by static analysis of
+`civ3/civ3-gog/app/Conquests/Civ3Conquests.exe`.
 
 Every constant and control-flow decision is annotated with the address it came
 from, so a claim can be checked against the disassembly. See

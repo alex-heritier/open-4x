@@ -24,7 +24,7 @@ the unclaimed-fog variant); the same art table holds `BLDG_Courthouse …
 BLDG_Palace` plus `Harbor.pcx`, `IslandLeft.pcx`, `CoastBack.pcx`,
 `CoastRight.pcx` (`NOTES.md` §14.4).
 
-## City screen chrome (`civ3-gog/app/Art/city screen/`, 22 files)
+## City screen chrome (`civ3/civ3-gog/app/Art/city screen/`, 22 files)
 
 `background.pcx TopFadeBar(+Alpha) BottomFadeBar(+Alpha) buildings-large.pcx
 buildings-small.pcx CityIcons.pcx CityIcons42x42.pcx cityMgmtButtons.pcx
@@ -35,7 +35,7 @@ ProductionQueueBar.pcx ProductionQueueBox.pcx queuebase.pcx XandView.pcx`.
 `governorBack.pcx` pairs with the `GOVERNOR_WIN` (`0x732BCE0`) and `Governor`
 (`0x732D2B0`) strings: the city governor panel.
 
-## Map-view cities (`civ3-gog/app/Art/Cities/`)
+## Map-view cities (`civ3/civ3-gog/app/Art/Cities/`)
 
 `city icons.pcx` + per-culture sprawl `rAMER/rASIAN/rEURO/rMIDEAST.PCX` and
 walls `AMERWALL/ASIANWALL/EUROWALL/MIDEASTWALL.PCX`: map cities are

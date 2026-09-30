@@ -1,7 +1,7 @@
 # Civilization III Conquests — how random map generation works
 
 Consolidated reverse-engineering notes for
-`civ3-gog/app/Conquests/Civ3Conquests.exe` (PE32, MSVC 6.0, static CRT, image base
+`civ3/civ3-gog/app/Conquests/Civ3Conquests.exe` (PE32, MSVC 6.0, static CRT, image base
 `0x400000`, 3 417 464 bytes), plus the `rust/` reference implementation in this
 directory.
 

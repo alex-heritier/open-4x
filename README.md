@@ -19,8 +19,8 @@ can receive orders; production decisions wait for their owner's next turn.
 
 Prereqs: Rust, Python 3 with PIL, ffmpeg.
 
-1. Point prep at the GOG install (default `../civ3-gog/app`):
-   `export CIV3_GOG=/path/to/civ3-gog/app`
+1. Point prep at the GOG install (default `civ3/civ3-gog/app`):
+   `export CIV3_GOG=$PWD/civ3/civ3-gog/app`
 2. Convert assets once (writes gitignored `assets/gen/`):
    `python3 tools/prep_assets.py`
 3. Run: `cargo run`
