@@ -5,3 +5,5 @@ shot-*.png
 /shots/
 __pycache__/
 *.py[cod]
+
+civ3/
