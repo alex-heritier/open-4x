@@ -106,7 +106,18 @@ Actions: `key <K>`, `end <n>`, `sel <UnitType>`, `tp <x>,<y>`,
 an attack), `report` (prints the units near the first city with their hit
 points: ground truth, since a captured image only shows so much),
 `imp <x>,<y> <road|irr|mine>`, `city`, `btn <Change|Close|Governor|CloseMenu|Pick:<item>|Queue:<item>|Unqueue:<i>>`,
-`tile <rx>,<ry>`. `@dx,dy` coordinates are relative to the first city. Each
+`tile <rx>,<ry>`. `@dx,dy` coordinates are relative to the first city.
+The diplomacy and wonder screens have their own verbs (the full list is the
+doc comment of `src/script.rs`): `meet <a> <b>` (first contact: the leader's
+greeting comes up once research is chosen, `adv Pick:<advance>`), `adv Talk:<civ>`
+and the table buttons (`Give:<advance>`, `Get:<advance>`, `Propose`),
+`propose <civ>` (that civ offers an advance for peace), `wonder <civ> <building>`
+(a finished wonder in that civ's first city: a splash for the human, a news line
+for a rival) and `build <civ> <building>`, `key F7` (Wonders window), `adv Zoom`.
+These screens are drawn on a 1024 x 768 stage: crop the shot to it (at 2x,
+`magick shot.png -crop 2048x1536+256+32 +repage -resize 1024x768 stage.png` in
+the default 1280 x 800 window) and compare against the frames in
+`assets/gen/diplomacy` and `assets/gen/wonders`. Each
 step prints `script: frame N: ...`; a missing button prints `script: no
 button ...` (for example, `Pick:` closes the build menu, so queue first).
 

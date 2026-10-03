@@ -383,6 +383,7 @@ pub fn orders(
                     u.fortified = false;
                     u.sentry = false;
                     u.exploring = false;
+                    u.auto = false;
                 }
                 selected.0 = Some(next);
                 audio::sfx(&mut commands, &audio, "Select");

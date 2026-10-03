@@ -4,7 +4,8 @@
 The game never reads PCX, FLC, or MP3. Run from the repo root:
     python3 tools/prep_assets.py [stage ...]
 Stages: terrain units cities cityscreen splash audio fonts features
-improvements unitbuttons fog borders cursor (default: all)
+improvements unitbuttons fog borders cursor leaders diplomacy wonders
+(default: all)
 
 Engine color rules (verified by probe):
 - magenta (255,0,255) and palette index 255: transparent
@@ -17,6 +18,7 @@ import json
 import os
 import shutil
 import struct
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,8 +28,20 @@ from PIL import Image, ImageChops
 GOG = os.environ.get("CIV3_GOG", "civ3/civ3-gog/app")
 OUT = "assets/gen"
 
-UNITS = ["Settler", "warrior", "Worker", "Scout", "Archer", "Spearman",
-         "Horseman"]
+def roster_units():
+    """`Art/Units` folders of the units the game plays with, read off the
+    generated roster (`src/rules_data.rs`, from `biq/examples/gen_game_rules.rs`),
+    so a unit is converted as soon as the roster gives it art."""
+    with open(os.path.join(os.path.dirname(__file__), "..", "src", "rules_data.rs")) as f:
+        text = f.read()
+    seen = []
+    for m in re.finditer(r'UnitRow \{ name: "[^"]*", art: "([^"]+)"', text):
+        if m.group(1) not in seen:
+            seen.append(m.group(1))
+    return seen
+
+
+UNITS = roster_units()
 UNIT_SLOTS = ["DEFAULT", "RUN", "FORTIFY", "FIDGET", "BUILD", "ROAD",
               "MINE", "IRRIGATE", "FORTRESS", "JUNGLE", "FOREST", "PLANT",
               "ATTACK1", "ATTACK2", "ATTACK3", "DEFEND", "DEATH", "VICTORY",
@@ -38,7 +52,8 @@ SOUND_SLOTS = {"ATTACK1", "ATTACK2", "ATTACK3", "DEFEND", "DEATH", "VICTORY",
                "CAPTURE"}
 UI_SOUNDS = ["Select.wav", "Button OK.wav", "Button Cancel .wav", "Check.wav",
              "EnterTurn.wav", "Hut.wav", "WhatToBuild.wav", "PopupInfo.wav",
-             "City View.wav", "Grid.wav", "PaperTurn.wav", "Barbarian Raid.wav"]
+             "City View.wav", "Grid.wav", "PaperTurn.wav", "Barbarian Raid.wav",
+             "Wonder.wav"]
 MUSIC = [("Diplomusic/DipASEarlyPeace.mp3", "as_early_peace"),
          ("Diplomusic/DipASLatePeace-2.mp3", "as_late_peace"),
          ("Menu/Menu1.mp3", "menu")]
@@ -430,7 +445,7 @@ def parse_amb(path):
     return sorted(out)
 
 
-def slot_sounds(cfg, udir, slot):
+def slot_sounds(cfg, locate, slot):
     """`[Sound Effects] <slot>` as a list of `(seconds, wav)`; `.amb` files
     expand to their schedule, a bare `.wav` starts with the clip."""
     if "Sound Effects" not in cfg:
@@ -439,21 +454,34 @@ def slot_sounds(cfg, udir, slot):
     if not name:
         return []
     if name.lower().endswith(".amb"):
-        return parse_amb(os.path.join(udir, name))
+        return parse_amb(locate(name))
     return [(0.0, name)]
 
 
+def unit_dirs(unit):
+    """The unit's art folders, Conquests first: it often holds only the INI
+    and sounds of a unit whose animations live in the base game's folder."""
+    return [d for d in (os.path.join(GOG, "Conquests", "Art", "Units", unit),
+                        os.path.join(GOG, "Art", "Units", unit))
+            if os.path.isdir(d)]
+
+
 def stage_units():
-    art = os.path.join(GOG, "Art", "Units")
     for unit in UNITS:
-        udir = os.path.join(art, unit)
-        ini = next(glob.iglob(os.path.join(udir, "*.ini")), None)
-        if ini is None:
-            ini = next(glob.iglob(os.path.join(udir, "*.INI")), None)
+        dirs = unit_dirs(unit)
+
+        def locate(name, dirs=dirs):
+            for d in dirs:
+                p = os.path.join(d, name)
+                if os.path.exists(p):
+                    return p
+            return os.path.join(dirs[0], name)
+
+        ini = next((p for d in dirs for p in glob.glob(os.path.join(d, "*.[iI][nN][iI]"))), None)
         if ini is None:
             print(f"  {unit}: no INI, skipped")
             continue
-        cfg = configparser.ConfigParser()
+        cfg = configparser.ConfigParser(strict=False)
         cfg.optionxform = str
         cfg.read(ini, encoding="latin-1")
         anims = dict(cfg["Animations"]) if "Animations" in cfg else {}
@@ -468,10 +496,12 @@ def stage_units():
                 pat = os.path.join(tmp, "f_%04d.png")
                 for old in glob.glob(os.path.join(tmp, "f_*.png")):
                     os.remove(old)
-                ffmpeg_frames(os.path.join(udir, flc), pat)
+                ffmpeg_frames(locate(flc), pat)
                 frames = sorted(glob.glob(os.path.join(tmp, "f_*.png")))
                 n = len(frames)
-                assert n % 8 == 0, f"{unit}/{slot}: {n} frames not divisible by 8"
+                if n == 0 or n % 8 != 0:
+                    print(f"  {unit}/{slot}: {n} frames not divisible by 8, skipped")
+                    continue
                 fpd = n // 8
                 w, h = Image.open(frames[0]).size
                 feet = []
@@ -493,17 +523,18 @@ def stage_units():
                             feet.append(h - box[3] if box else 0)
                     strip.save(os.path.join(outdir, f"{slot}_d{direction}.png"))
                 entry = {"frame": [w, h], "frames": fpd, "dirs": 8,
-                         "ms": flc_ms(os.path.join(udir, flc)), "feet": feet}
+                         "ms": flc_ms(locate(flc)), "feet": feet}
                 if slot in SOUND_SLOTS:
-                    entry["sounds"] = [list(s) for s in slot_sounds(cfg, udir, slot)]
+                    entry["sounds"] = [list(s) for s in slot_sounds(cfg, locate, slot)]
                 manifest[slot] = entry
                 print(f"  {unit}/{slot}: {w}x{h} x{fpd}f x8d {entry['ms']}ms")
         with open(os.path.join(outdir, "manifest.json"), "w") as f:
             json.dump(manifest, f, indent=1)
         adir = os.path.join(OUT, "audio", "units", unit)
         os.makedirs(adir, exist_ok=True)
-        for wav in glob.glob(os.path.join(udir, "*.wav")):
-            shutil.copy(wav, adir)
+        for d in reversed(dirs):
+            for wav in glob.glob(os.path.join(d, "*.wav")):
+                shutil.copy(wav, adir)
     print(f"units: {len(UNITS)} converted")
 
 
@@ -550,15 +581,10 @@ def crop_cities():
     for i in range(3):
         pb.crop((i * w, 0, (i + 1) * w, pb.height)).save(
             os.path.join(uid, f"prod_{i}.png"))
-    # unit icons for the production list
-    udir = os.path.join(GOG, "Art", "civilopedia", "icons", "units")
-    for src, name in [("00Settlersmall", "settler"), ("01Workersmall", "worker"),
-                      ("02scoutsmall", "scout"), ("06warriorsmall", "warrior"),
-                      ("07Archersmall", "archer"),
-                      ("08Spearmansmall", "spearman"),
-                      ("11Horsemansmall", "horseman")]:
-        convert_pcx(os.path.join(udir, src + ".pcx"),
-                    os.path.join(uid, f"uniticon_{name}.png"))
+    # unit icons for the production list: the Conquests sheet, indexed by
+    # PRTO.icon (14 columns of 32-px cells on a 33-px grid)
+    convert_pcx(os.path.join(GOG, "Conquests", "Art", "Units", "units_32.pcx"),
+                os.path.join(uid, "unit_icons.png"))
     # content Asian citizen head (row 0, col 4 of popHeads)
     heads = Image.open(os.path.join(GOG, "Art", "SmallHeads", "popHeads.pcx"))
     heads.load()
@@ -928,13 +954,268 @@ def stage_borders():
     print("borders: 4 edges from Territory.pcx")
 
 
+# --- leaders, diplomacy screens and wonders --------------------------------
+
+# `RACE.era_art` of conquests.biq (forward clips, one per era: ancient,
+# middle, industrial, modern; the second four paths are the reverse clips).
+# Checked against the file: Japan is row 9, Rome 1, Egypt 2, China 7.
+LEADER_CLIPS = {
+    "Japan": ["To_A01", "To_01", "To_C01", "To_D01"],
+    "Rome": ["Ce_01", "Ce_B01", "Ce_C01", "Ce_D01"],
+    "Egypt": ["Cl_01", "Cl_B01", "Cl_C01", "Cl_D01"],
+    "China": ["Mo_A01", "Mo_B01", "Mo_C01", "Mo_01"],
+}
+LEADER_COLS = 11  # 121 frames fill an 11 x 11 grid of 200 x 240 cells
+# The FLC header speed is 71 ms in Mo_01 and the Japan/Rome base clips but 0
+# or 20 in the rest (it is not what the game plays by); 71 ms is the clone's
+# rate for all.
+LEADER_MS = 71
+
+# `BLDG` name -> `civilopedia_entry` of every wonder row; the splash art is
+# `PediaIcons.txt #WON_SPLASH_<entry>`.
+WONDER_ENTRIES = {
+    "The Pyramids": "BLDG_Pyramids",
+    "The Hanging Gardens": "BLDG_Hanging_Gardens",
+    "The Colossus": "BLDG_Colossus",
+    "The Great Lighthouse": "BLDG_Lighthouse",
+    "The Great Library": "BLDG_Great_Library",
+    "The Oracle": "BLDG_Oracle",
+    "The Great Wall": "BLDG_Great_Wall",
+    "Sun Tzu's Art of War": "BLDG_Art_of_War",
+    "Sistine Chapel": "BLDG_Sistine_Chapel",
+    "Magellan's Voyage": "BLDG_Circumnavigation",
+    "Copernicus' Observatory": "BLDG_Solar_System",
+    "Shakespeare's Theater": "BLDG_Great_Playhouse",
+    "Leonardo's Workshop": "BLDG_Inventor's_Workshop",
+    "JS Bach's Cathedral": "BLDG_Grand_Cathedral",
+    "Newton's University": "BLDG_Great_University",
+    "Smith's Trading Company": "BLDG_Trading_Company",
+    "Universal Suffrage": "BLDG_Universal_Suffrage",
+    "Hoover Dam": "BLDG_Hoover_Dam",
+    "Theory of Evolution": "BLDG_Theory_of_Evolution",
+    "The United Nations": "BLDG_United_Nations",
+    "The Manhattan Project": "BLDG_Manhattan_Project",
+    "Cure for Cancer": "BLDG_Cure_for_Cancer",
+    "Longevity": "BLDG_Longevity",
+    "SETI program": "BLDG_SETI_Program",
+    "Heroic Epic": "BLDG_Epic",
+    "Iron Works": "BLDG_Great_Ironworks",
+    "Forbidden Palace": "BLDG_Forbidden_Palace",
+    "Military Academy": "BLDG_Military_Academy",
+    "The Pentagon": "BLDG_Pentagon",
+    "Wall Street": "BLDG_Wall_Street",
+    "Apollo Program": "BLDG_Apollo_Project",
+    "Strategic Missile Defense": "BLDG_SDI",
+    "Intelligence Agency": "BLDG_Intelligence_Center",
+    "Battlefield Medicine": "BLDG_Battlefield_Medicine",
+    "The Internet": "BLDG_Internet",
+    "The Temple of Artemis": "BLDG_Artemis",
+    "The Statue of Zeus": "BLDG_Zeus",
+    "The Mausoleum of Mausollos": "BLDG_Mausoleum",
+    "Knights Templar": "BLDG_Knights_Templar",
+    "Secret Police HQ": "BLDG_Secret_Police_HQ",
+}
+
+# The card of the Wonders window shows the art in a 190 x 132 well.
+WONDER_THUMB = (190, 132)
+
+
+def slug(name):
+    """`Sun Tzu's Art of War` -> `sun_tzu_s_art_of_war`; `src/wonders.rs`
+    computes the same."""
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def find_ci(bases, rel):
+    """The file `rel` (Windows separators, any case) under the first of
+    `bases` that has it."""
+    parts = rel.replace("\\", "/").split("/")
+    for base in bases:
+        here = base
+        for part in parts:
+            if not os.path.isdir(here):
+                here = None
+                break
+            hit = next((e for e in os.listdir(here) if e.lower() == part.lower()), None)
+            if hit is None:
+                here = None
+                break
+            here = os.path.join(here, hit)
+        if here is not None and os.path.exists(here):
+            return here
+    return None
+
+
+def conquests_first():
+    return [os.path.join(GOG, "Conquests"), GOG]
+
+
+def decode_flc(path, tmp):
+    """Decoded frames of an FLC; the last is the ring frame that returns to
+    the first."""
+    for old in glob.glob(os.path.join(tmp, "f_*.png")):
+        os.remove(old)
+    ffmpeg_frames(path, os.path.join(tmp, "f_%04d.png"))
+    frames = []
+    for f in sorted(glob.glob(os.path.join(tmp, "f_*.png"))):
+        im = Image.open(f)
+        im.load()
+        frames.append(im.convert("RGB"))
+    return frames
+
+
+def stage_leaders():
+    """The leaderhead animations of the diplomacy screens (`Art/Flics`).
+
+    Each civ has one clip per era (ancient, middle, industrial, modern),
+    200 x 240, 120 or 121 frames. The clip does not loop on its own: it
+    drifts away from its first frame the whole way (no cuts), and the `_02`
+    twin is the same frames in reverse (checked here: all but a few pixels
+    of a few frames), so the pair played back to back is a ping-pong over
+    one forward clip. Only the forward clips ship, one grid sheet each. The
+    ring frame FLC adds at the end (equal to the first) is dropped.
+    """
+    outdir = os.path.join(OUT, "leaders")
+    os.makedirs(outdir, exist_ok=True)
+    flics = os.path.join(GOG, "Art", "Flics")
+    manifest = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for civ, clips in LEADER_CLIPS.items():
+            manifest[civ] = []
+            for era, stem in enumerate(clips):
+                fwd = find_ci([flics], stem + ".flc")
+                rev = find_ci([flics], stem[:-2] + "02.flc")
+                assert fwd and rev, f"{civ}: no clip {stem}"
+                frames = decode_flc(fwd, tmp)
+                header_ms = flc_ms(fwd)
+                ring = frames.pop()
+                assert ring.tobytes() == frames[0].tobytes(), f"{stem}: ring frame is not frame 0"
+                back = decode_flc(rev, tmp)
+                back.pop()
+                assert len(back) == len(frames), f"{stem}: the _02 clip is {len(back)} frames"
+                # Not always byte for byte: Mo_B02 differs from the reversed
+                # Mo_B01 in 6 frames, by a few pixels near (55, 170).
+                odd = sum(a.tobytes() != b.tobytes() for a, b in zip(back, reversed(frames)))
+                assert odd * 10 <= len(frames), f"{stem}: the _02 clip is not the reverse ({odd})"
+                ms = LEADER_MS
+                w, h = frames[0].size
+                n = len(frames)
+                rows = -(-n // LEADER_COLS)
+                sheet = Image.new("RGB", (w * LEADER_COLS, h * rows), (0, 0, 0))
+                for i, f in enumerate(frames):
+                    sheet.paste(f, ((i % LEADER_COLS) * w, (i // LEADER_COLS) * h))
+                name = f"{civ.lower()}_{era}.png"
+                sheet.save(os.path.join(outdir, name), optimize=False)
+                manifest[civ].append({"file": name, "frame": [w, h], "cols": LEADER_COLS,
+                                      "frames": n, "ms": ms, "header_ms": header_ms})
+                print(f"  leaders/{name}: {w}x{h} x{n}f ({stem}, header says {header_ms} ms, "
+                      f"{odd} frames of the _02 clip differ)")
+    with open(os.path.join(outdir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=1)
+    print("leaders: 4 civs x 4 eras")
+
+
+def stage_diplomacy():
+    """The diplomacy screen frames and the leaders' speech.
+
+    `Art/Diplomacy/{talk_offer,consider,counter}.pcx` are 1024 x 768 with
+    the map showing through (magenta). All three hold the leader's frame, a
+    200 x 240 hole at (411, 59); `text/diplomacy.txt` is what they say
+    (Windows-1252 on disk, UTF-8 here).
+    """
+    d = os.path.join(OUT, "diplomacy")
+    os.makedirs(d, exist_ok=True)
+    for stem in ("talk_offer", "consider", "counter", "uparrow", "downarrow"):
+        size = convert_pcx(os.path.join(GOG, "Art", "Diplomacy", stem + ".pcx"),
+                           os.path.join(d, stem + ".png"))
+        print(f"  diplomacy/{stem}: {size}")
+    td = os.path.join(OUT, "text")
+    os.makedirs(td, exist_ok=True)
+    src = find_ci(conquests_first(), "Text/diplomacy.txt")
+    with open(src, "rb") as f:
+        text = f.read().decode("cp1252", errors="replace")
+    with open(os.path.join(td, "diplomacy.txt"), "w", encoding="utf-8") as f:
+        f.write(text)
+    print("diplomacy: frames + text/diplomacy.txt")
+
+
+def wonder_art_paths():
+    """`BLDG` name -> splash `.pcx` path, through `PediaIcons.txt`."""
+    pedia = find_ci(conquests_first(), "Text/PediaIcons.txt")
+    with open(pedia, "rb") as f:
+        lines = f.read().decode("cp1252", errors="replace").splitlines()
+    by_entry = {}
+    for i, line in enumerate(lines):
+        if line.startswith("#WON_SPLASH_"):
+            by_entry[line[len("#WON_SPLASH_"):].strip()] = lines[i + 1].strip()
+    out = {}
+    for name, entry in WONDER_ENTRIES.items():
+        rel = by_entry.get(entry)
+        out[name] = find_ci(conquests_first(), rel) if rel else None
+    return out
+
+
+def stage_wonders():
+    """The wonder splash and the Wonders of the World window.
+
+    `Art/Wonder Splash/wonderBackground.pcx`: 1024 x 768, a 320 x 320 hole
+    at (351, 109) for the wonder's picture (`<name>.pcx`, 320 x 320) and the
+    text below it. `Art/Advisors/wonders_background.pcx` is the F7 window,
+    `wondersBOX.pcx` the 370 x 200 card for one wonder, and
+    `wondersBOXoverlay.pcx` a copy of the card's picture well (190 x 132 at
+    (162, 47), the top right 66 x 47 cut out for the eye button) drawn over
+    the picture of a wonder that is not built. `wondersEye.pcx` is the eye
+    button, three 66 x 47 states stacked at x = 1.
+    """
+    d = os.path.join(OUT, "wonders")
+    sd = os.path.join(d, "splash")
+    td = os.path.join(d, "thumb")
+    for p in (sd, td):
+        os.makedirs(p, exist_ok=True)
+    pairs = [(os.path.join(GOG, "Art", "Wonder Splash", "wonderBackground.pcx"), "frame"),
+             (os.path.join(GOG, "Art", "Advisors", "wonders_background.pcx"), "window"),
+             (os.path.join(GOG, "Art", "Advisors", "wondersBOX.pcx"), "card"),
+             (os.path.join(GOG, "Art", "Advisors", "wondersBOXoverlay.pcx"), "card_hidden")]
+    for src, name in pairs:
+        print(f"  wonders/{name}: {convert_pcx(src, os.path.join(d, name + '.png'))}")
+    eye = Image.open(os.path.join(GOG, "Art", "interface", "wondersEye.pcx"))
+    eye.load()
+    eye = to_rgba(eye)
+    # The button is rounded: the corners of each 66 x 47 cell are pure green.
+    eye.putdata([(r, g, b, 0) if (r, g, b) == (0, 255, 0) else (r, g, b, a)
+                 for r, g, b, a in eye.getdata()])
+    eye.save(os.path.join(d, "eye.png"))
+    done = 0
+    missing = []
+    for name, src in wonder_art_paths().items():
+        if src is None:
+            missing.append(name)
+            continue
+        im = Image.open(src)
+        im.load()
+        assert im.size == (320, 320), f"{src}: {im.size}"
+        art = to_rgba(im)
+        art.save(os.path.join(sd, slug(name) + ".png"))
+        # The well is 190 x 132: the middle band of the picture, scaled.
+        tw, th = WONDER_THUMB
+        band = round(320 * th / tw)
+        top = (320 - band) // 2
+        thumb = art.convert("RGB").crop((0, top, 320, top + band)).resize(
+            (tw, th), Image.LANCZOS)
+        thumb.save(os.path.join(td, slug(name) + ".png"))
+        done += 1
+    print(f"wonders: frame, window, card, eye and {done} pictures"
+          + (f" (no art: {', '.join(missing)})" if missing else ""))
+
+
 STAGES = {"terrain": stage_terrain, "units": stage_units,
           "cities": stage_cities, "cityscreen": stage_cityscreen,
           "splash": stage_splash, "audio": stage_audio, "fonts": stage_fonts,
           "features": stage_features, "improvements": stage_improvements,
           "unitbuttons": stage_unitbuttons, "hud": stage_hud,
           "fog": stage_fog, "borders": stage_borders,
-          "cursor": stage_cursor}
+          "cursor": stage_cursor, "leaders": stage_leaders,
+          "diplomacy": stage_diplomacy, "wonders": stage_wonders}
 
 
 def main():

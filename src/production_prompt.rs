@@ -52,8 +52,9 @@ pub fn inactive(
     prompts: Res<ProductionPrompts>,
     civs: Res<Civilizations>,
     advisors: Res<crate::advisors::Advisors>,
+    domestic: Res<crate::domestic::Domestic>,
 ) -> bool {
-    !prompts.blocks(civs.active) && !advisors.is_open()
+    !prompts.blocks(civs.active) && !advisors.is_open() && !domestic.is_open()
 }
 
 pub fn city_input_allowed(
@@ -115,10 +116,11 @@ pub fn show(
     assets: Res<AssetServer>,
     civs: Res<Civilizations>,
     advisors: Res<crate::advisors::Advisors>,
+    domestic: Res<crate::domestic::Domestic>,
     roots: Query<Entity, With<PromptRoot>>,
 ) {
     // One modal at a time: a build decision waits for the advisor's.
-    if advisors.is_open() {
+    if advisors.is_open() || domestic.is_open() {
         return;
     }
     // A panel left over from the civ that just ended its turn comes down
@@ -151,7 +153,7 @@ pub fn show(
         let turns = if rate == 0 {
             "never".into()
         } else {
-            let n = u32::from(p.cost().saturating_sub(preview.shields)).div_ceil(u32::from(rate));
+            let n = u32::from(city.price(p).saturating_sub(preview.shields)).div_ceil(u32::from(rate));
             format!("{n} {}", if n == 1 { "turn" } else { "turns" })
         };
         format!("{} ({turns})", p.name())

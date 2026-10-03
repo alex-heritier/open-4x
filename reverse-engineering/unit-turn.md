@@ -416,7 +416,7 @@ status reset exactly **once per round**, in unit-id order within its owner's pas
 ## 9. Open items
 
 1. Setters of status bits `0x01` and `0x02` of `U.+0x48`; whether bit `0x01` means "rested" or "fortified".
-2. (Settled: `0x56D7D0` is the tile occupant resolver, `goody-huts.md` 6.1.) The border/territory owner code `0x5D4830`, `0x5D25F0` is still open.
+2. (Settled: `0x56D7D0` is the tile occupant resolver, `goody-huts.md` 6.1.) The border/territory owner code `0x5D4830` is now specified in `borders-culture.md` (the loader `0x5D25F0` remains open).
 3. `0x5BA1D0` argument semantics and the exact vision radius per unit type.
 4. The network handler that consumes the pending-event table, and the purpose of the other columns.
 5. Capture-mode details (section 5.1), the byte `[0x9C5B40]`, and the nationality field `U.+0x38`.

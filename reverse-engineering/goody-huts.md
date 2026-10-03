@@ -29,7 +29,7 @@ are different bits; barbarian camp sites exclude hut tiles (`barbarians.md`).
 * Trigger 1 has no domain, type or activity filter between the function entry and `0x5BDE63` that I traced
   (**O**: the head of `0x5BD220` was not read in full). The factory `0x5694D0` and the relocation paths reach
   `0x5BD220` as well (**H**), so a unit created or teleported onto a hut tile pops it.
-* Trigger 2 comes from the border code only (`0x5D3AB0` is called from `0x5D4830`, `barbarians.md` 8). The
+* Trigger 2 comes from the border code only (`0x5D3AB0` is called from `0x5D4830`; `borders-culture.md` 6 and 5, `barbarians.md` 8). The
   third argument is `0`, so the pop is **unitless** (section 3, `unit == 0`).
 * Slot 0 (barbarians) never pops a hut: `0x55C6B0` returns at once when `P.+0x1C == 0` (`0x55C6BA`).
 
@@ -603,8 +603,8 @@ the pick as the tribe id), `research.md` 10.5 (the outcome roll is now specified
 
 Open:
 
-1. `0x4AE2A0` is decoded (`city-founding.md`); its undecoded callees (`0x4B0470`, `0x4B10F0`, `0x55CB20`, `0x4ACF40`,
-   `0x5D4830`) are listed in `city-founding.md` 7.
+1. `0x4AE2A0` is decoded (`city-founding.md`); its undecoded callees (`0x4B0470`, `0x4B10F0`) are listed in
+   `city-founding.md` 7 (`0x55CB20`, `0x4ACF40` are in `city-buildings.md`; `0x5D4830` is in `borders-culture.md`).
 2. The scoring body of `0x442480` and its `0x443153` return.
 3. The unconfirmed trigger-1 filters (head of `0x5BD220`).
 4. The citizen record layout and the recompute routines called by `0x4B9F60` (6.7).

@@ -191,6 +191,10 @@ mod tests {
 
     fn city(name: &str, x: i32, y: i32, culture: u32, founded: u32) -> City {
         City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             name: name.to_string(),
             x,
             y,

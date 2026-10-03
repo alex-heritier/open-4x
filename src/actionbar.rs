@@ -28,6 +28,16 @@ pub enum UnitCommand {
     Disband,
     FoundCity,
     Work(WorkAction),
+    /// Gold upgrade of this unit (`U`).
+    Upgrade,
+    /// Gold upgrade of every unit of its type (`Shift+U`).
+    UpgradeAll,
+    /// A Settler or Worker adds its citizens to the city it stands in (`J`).
+    JoinCity,
+    /// Tear an improvement off the tile (`Shift+P`).
+    Pillage,
+    /// A Worker chooses its own jobs until told otherwise (`Z`).
+    Automate,
 }
 
 /// Next left click on the map sends the selected unit there.
@@ -49,6 +59,11 @@ impl UnitCommand {
             UnitCommand::Work(WorkAction::Irrigate) => "Irrigate (I)",
             UnitCommand::Work(WorkAction::Mine) => "Mine (M)",
             UnitCommand::Work(WorkAction::Clear) => "Clear (C)",
+            UnitCommand::Upgrade => "Upgrade (U)",
+            UnitCommand::UpgradeAll => "Upgrade all (Shift+U)",
+            UnitCommand::JoinCity => "Join City (J)",
+            UnitCommand::Pillage => "Pillage (Shift+P)",
+            UnitCommand::Automate => "Automate (Z)",
         }
     }
 
@@ -58,6 +73,12 @@ impl UnitCommand {
             UnitCommand::FoundCity => t == UnitType::Settler,
             UnitCommand::Work(_) => t == UnitType::Worker,
             UnitCommand::Fortify => t != UnitType::Scout,
+            // Only a type with a successor and the ability has the button.
+            UnitCommand::Upgrade => crate::upgrades::upgradable(t),
+            UnitCommand::UpgradeAll => crate::upgrades::upgradable(t),
+            UnitCommand::JoinCity => crate::actions::join_pop(t).is_some(),
+            UnitCommand::Pillage => crate::actions::can_pillage_type(t),
+            UnitCommand::Automate => crate::actions::can_automate(t),
             // Civ3's Explore is a recon order; settlers and workers hold.
             UnitCommand::Explore => {
                 matches!(t, UnitType::Warrior | UnitType::Scout | UnitType::Horseman)
@@ -75,6 +96,11 @@ impl UnitCommand {
             UnitCommand::Fortify | UnitCommand::Sentry => u.moves > 0 && !u.fortified,
             UnitCommand::Skip | UnitCommand::Goto => u.moves > 0 || !u.path.is_empty(),
             UnitCommand::Disband => true,
+            // Needs the city and the treasury: the caller asks `upgrades`.
+            UnitCommand::Upgrade | UnitCommand::UpgradeAll => u.moves > 0,
+            // The city and the tile decide: `actions::check`.
+            UnitCommand::JoinCity | UnitCommand::Pillage => u.moves > 0,
+            UnitCommand::Automate => u.auto || u.moves > 0,
             UnitCommand::FoundCity => can_found(map, cities, u.x, u.y),
             UnitCommand::Work(a) => {
                 u.moves > 0
@@ -96,20 +122,24 @@ impl UnitCommand {
 /// that. Civ3 stacks two rows: unit-specific actions (found, worker jobs) a
 /// row up, shared orders below. Wake has no button (in Civ3 it is a
 /// right-click entry), so it stays key-only.
-pub const BAR_ROW_MAIN: [UnitCommand; 6] = [
+pub const BAR_ROW_MAIN: [UnitCommand; 7] = [
     UnitCommand::Skip,
     UnitCommand::Fortify,
     UnitCommand::Disband,
     UnitCommand::Goto,
     UnitCommand::Explore,
     UnitCommand::Sentry,
+    UnitCommand::Pillage,
 ];
-pub const BAR_ROW_UNIT: [UnitCommand; 5] = [
+pub const BAR_ROW_UNIT: [UnitCommand; 8] = [
+    UnitCommand::Upgrade,
     UnitCommand::FoundCity,
     UnitCommand::Work(WorkAction::Road),
     UnitCommand::Work(WorkAction::Mine),
     UnitCommand::Work(WorkAction::Irrigate),
     UnitCommand::Work(WorkAction::Clear),
+    UnitCommand::Automate,
+    UnitCommand::JoinCity,
 ];
 
 /// Key bindings shared with the bar labels.
@@ -124,15 +154,24 @@ pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
         (KeyCode::Delete, UnitCommand::Disband),
         (KeyCode::Backspace, UnitCommand::Disband),
         (KeyCode::KeyB, UnitCommand::FoundCity),
+        (KeyCode::KeyU, UnitCommand::Upgrade),
+        (KeyCode::KeyJ, UnitCommand::JoinCity),
+        (KeyCode::KeyP, UnitCommand::Pillage),
+        (KeyCode::KeyZ, UnitCommand::Automate),
         (KeyCode::KeyR, UnitCommand::Work(WorkAction::Road)),
         (KeyCode::KeyI, UnitCommand::Work(WorkAction::Irrigate)),
         (KeyCode::KeyM, UnitCommand::Work(WorkAction::Mine)),
         (KeyCode::KeyC, UnitCommand::Work(WorkAction::Clear)),
     ];
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     table
         .iter()
-        .filter(|(k, _)| keys.just_pressed(*k))
-        .map(|(_, c)| *c)
+        .filter(|(k, c)| keys.just_pressed(*k) && (*c != UnitCommand::Pillage || shift))
+        // Shift+U is Upgrade All, not Upgrade.
+        .map(|(_, c)| match c {
+            UnitCommand::Upgrade if shift => UnitCommand::UpgradeAll,
+            c => *c,
+        })
         .collect()
 }
 
@@ -147,12 +186,28 @@ pub fn run_commands(
     audio: Res<GameAudio>,
     mut goto: ResMut<GotoMode>,
     mut board: ResMut<MessageBoard>,
+    mut treasury: ResMut<Treasury>,
 ) {
     let spots: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
     for cmd in cmds.read().copied() {
         let Some(s) = selected.0 else {
             continue;
         };
+        // Upgrades need the cities and the treasury as well as the unit.
+        if matches!(cmd, UnitCommand::Upgrade | UnitCommand::UpgradeAll) {
+            let mine = units
+                .get(s)
+                .is_ok_and(|(_, u)| u.civ == civs.active && cmd.relevant(u.utype));
+            if mine {
+                goto.0 = false;
+                if cmd == UnitCommand::Upgrade {
+                    crate::upgrades::run_one(s, &mut units, &cities, &mut treasury, &mut board);
+                } else {
+                    crate::upgrades::run_all(s, &mut units, &cities, &mut treasury, &mut board);
+                }
+            }
+            continue;
+        }
         let Ok((e, mut u)) = units.get_mut(s) else {
             continue;
         };
@@ -254,6 +309,8 @@ pub fn run_commands(
                 post(&mut board, "Unit disbanded.");
             }
             UnitCommand::FoundCity => {} // handled in cities::found_city
+            UnitCommand::Upgrade | UnitCommand::UpgradeAll => {} // `upgrades`, above
+            UnitCommand::JoinCity | UnitCommand::Pillage | UnitCommand::Automate => {} // `actions::run`
             UnitCommand::Work(action) => {
                 u.work = Some(crate::improvements::Work {
                     action,
@@ -308,6 +365,13 @@ fn action_cell(cmd: UnitCommand, cover: Cover) -> u32 {
         // is unused but the match must stay exhaustive.
         UnitCommand::Wake => 5,
         UnitCommand::Sentry => 6,
+        // "(U)pgrade unit" is the 16th label of `#UNIT_ACTIONS`.
+        UnitCommand::Upgrade | UnitCommand::UpgradeAll => 15,
+        // "(P)illage Improvement", "(A)utomate" and "Join City" are the 11th,
+        // 32nd and 33rd labels.
+        UnitCommand::Pillage => 10,
+        UnitCommand::Automate => 31,
+        UnitCommand::JoinCity => 32,
         UnitCommand::FoundCity => 21,
         UnitCommand::Work(WorkAction::Road) => 22,
         UnitCommand::Work(WorkAction::Mine) => 25,
@@ -573,6 +637,7 @@ pub fn update_bar(
     selected: Res<Selected>,
     units: Query<&Unit>,
     cities: Query<&City>,
+    treasury: Res<Treasury>,
     map: Res<GameMap>,
     goto: Res<GotoMode>,
     mut buttons: Query<(&BarButton, Ref<Interaction>, &mut Node, &mut ImageNode)>,
@@ -590,18 +655,27 @@ pub fn update_bar(
         .0
         .and_then(|s| units.get(s).ok())
         .filter(|u| u.civ == civs.active);
-    let mut hint = None;
+    // What an upgrade would do here: shown in a city with the facility,
+    // lit when the unit has movement left and the gold is there.
+    let here = unit.and_then(|u| cities.iter().find(|c| (c.x, c.y) == (u.x, u.y)));
+    let plan = unit.and_then(|u| crate::upgrades::plan(u, here));
+    let offer = unit.and_then(|u| crate::upgrades::offer(u, here, treasury.0[u.civ]));
+    let mut hint: Option<String> = None;
     for (b, interaction, mut node, mut img) in buttons.iter_mut() {
         let Some(u) = unit else {
             node.display = Display::None;
             continue;
         };
-        node.display = if b.0.relevant(u.utype) {
+        node.display = if b.0.relevant(u.utype) && (b.0 != UnitCommand::Upgrade || plan.is_some()) {
             Display::Flex
         } else {
             Display::None
         };
-        let ok = b.0.enabled(&map, &spots, u);
+        let ok = if b.0 == UnitCommand::Upgrade {
+            offer.is_some()
+        } else {
+            crate::actions::check(b.0, &map, u, here).unwrap_or_else(|| b.0.enabled(&map, &spots, u))
+        };
         let active =
             (b.0 == UnitCommand::Goto && goto.0) || (b.0 == UnitCommand::Explore && u.exploring);
         // Civ3's states: gold idle, orange hover, blue held or toggled on.
@@ -621,8 +695,10 @@ pub fn update_bar(
         } else {
             Color::srgb(0.62, 0.58, 0.52)
         };
-        if ok && !matches!(*interaction, Interaction::None) {
-            hint = Some(b.0.label());
+        if !matches!(*interaction, Interaction::None) && b.0 == UnitCommand::Upgrade {
+            hint = plan.map(|p| format!("Upgrade to {} for {} gold (U)", units::def(p.to).name, p.cost));
+        } else if ok && !matches!(*interaction, Interaction::None) {
+            hint = Some(b.0.label().to_string());
         }
         if interaction.is_changed() && *interaction == Interaction::Pressed && ok {
             out.write(b.0);
@@ -635,7 +711,7 @@ pub fn update_bar(
         } else {
             Color::srgb(0.23, 0.14, 0.06)
         };
-        t.0 = hint.map(str::to_string).unwrap_or_else(|| match unit {
+        t.0 = hint.unwrap_or_else(|| match unit {
             Some(u) => {
                 let d = units::def(u.utype);
                 let state = if let Some(w) = u.work {
@@ -787,13 +863,27 @@ mod tests {
     fn specific_actions_go_a_row_up() {
         for cmd in BAR_ROW_UNIT {
             assert!(
-                matches!(cmd, UnitCommand::FoundCity | UnitCommand::Work(_)),
+                matches!(
+                    cmd,
+                    UnitCommand::Upgrade
+                        | UnitCommand::FoundCity
+                        | UnitCommand::Work(_)
+                        | UnitCommand::Automate
+                        | UnitCommand::JoinCity
+                ),
                 "{cmd:?} is not unit-specific"
             );
         }
         for cmd in BAR_ROW_MAIN {
             assert!(
-                !matches!(cmd, UnitCommand::FoundCity | UnitCommand::Work(_)),
+                !matches!(
+                    cmd,
+                    UnitCommand::Upgrade
+                        | UnitCommand::FoundCity
+                        | UnitCommand::Work(_)
+                        | UnitCommand::Automate
+                        | UnitCommand::JoinCity
+                ),
                 "{cmd:?} belongs a row up"
             );
         }
@@ -837,6 +927,10 @@ mod tests {
         }
         let (x, y) = map.start;
         let mut city = City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ: 0,
             name: "Kyoto".to_string(),
             x,

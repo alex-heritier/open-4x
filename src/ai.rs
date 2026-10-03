@@ -23,6 +23,8 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::cities::{self, City, FoundCityOrder, Production};
+use crate::citycalc;
+use crate::roster;
 use crate::civs::{CIV_COUNT, Civilizations, is_ai};
 use crate::combat;
 use crate::economy;
@@ -267,22 +269,46 @@ impl Needs {
         !self.locked.contains(&p)
     }
 
+    /// The land unit of the roster the civ can build that is best at a
+    /// role (a `PRTO` AI strategy bit: 0x1 offense, 0x2 defense), by
+    /// `power` per shield, then raw power. What the computer may build is
+    /// already pruned of obsolete types (`Needs::locked`), so this finds
+    /// the newest of each line; `fast` asks for two or more moves.
+    fn best(&self, role: u32, fast: Option<bool>, power: impl Fn(&roster::UnitRow) -> i32) -> Option<Production> {
+        Production::all()
+            .filter_map(|p| Some((p, p.unit()?.row())))
+            .filter(|(p, r)| {
+                r.playable
+                    && r.class == 0
+                    && r.ai & role != 0
+                    && r.pop_cost == 0
+                    && power(r) > 0
+                    && fast.is_none_or(|f| (r.moves >= 2) == f)
+                    && self.can(*p)
+            })
+            .max_by_key(|(_, r)| (power(r) * 100 / r.cost.max(1), power(r), -r.cost))
+            .map(|(p, _)| p)
+    }
+
     /// The best defender the civ has the advance for.
     fn defender(&self) -> Production {
-        [Production::Spearman, Production::Archer, Production::Warrior]
-            .into_iter()
-            .find(|&p| self.can(p))
+        self.best(DEFENSE, None, |r| r.defense)
+            // Failing a defender, whatever stands its ground best per shield.
+            .or_else(|| self.best(u32::MAX, None, |r| r.defense))
             .unwrap_or(Production::Warrior)
     }
 }
 
+/// `PRTO` AI strategy bits (`ai.md`): what a unit type is for.
+const OFFENSE: u32 = 0x1;
+const DEFENSE: u32 = 0x2;
+
 /// Choose a city's build. Order of concern: a garrison, expansion, workers,
 /// an army, then buildings.
 pub fn choose_build(city: &City, n: &Needs) -> Production {
-    use Production::*;
     // 1. Nobody home: the quickest soldier available.
     if n.defenders_here == 0 {
-        return if n.soldiers == 0 { Warrior } else { n.defender() };
+        return if n.soldiers == 0 { Production::Warrior } else { n.defender() };
     }
     if n.defenders_here < n.garrison && n.threatened {
         return n.defender();
@@ -293,11 +319,11 @@ pub fn choose_build(city: &City, n: &Needs) -> Production {
         && n.settlers < 2
         && settler_ready(city, n)
     {
-        return Settler;
+        return Production::Settler;
     }
     // 3. Workers, about one per city.
     if n.workers < n.cities.min(3) {
-        return Worker;
+        return Production::Worker;
     }
     // 4. Soldiers up to the wanted count, defenders first.
     if n.soldiers < n.soldiers_wanted {
@@ -307,26 +333,22 @@ pub fn choose_build(city: &City, n: &Needs) -> Production {
         return attacker(city, n);
     }
     // 5. Buildings, when the treasury can carry their upkeep.
-    if n.rich {
-        if n.can(Temple) && !city.has(Temple) && city.size >= 3 {
-            return Temple;
-        }
-        if n.can(Granary) && !city.has(Granary) && city.size >= 4 {
-            return Granary;
-        }
-        if n.can(Barracks) && !city.has(Barracks) && n.turn >= AGGRESSION_TURN {
-            return Barracks;
-        }
+    if n.rich && let Some(b) = building(city, n) {
+        return b;
     }
     // 6. More army, within what the cities support for free.
     if (n.units < n.cities * 4 + 2 && n.soldiers < n.soldiers_cap) || n.threatened {
         return attacker(city, n);
     }
-    // Nothing worth adding: a hand or a spare soldier, never an endless army.
+    // Nothing worth adding: a hand, else coin for the treasury (Wealth
+    // turns the shields into gold, which pays for buildings later), never
+    // an endless army.
     if n.workers < n.cities * 2 {
-        Worker
+        Production::Worker
+    } else if city.can_build_here(Production::Wealth) {
+        Production::Wealth
     } else {
-        Warrior
+        Production::Warrior
     }
 }
 
@@ -346,22 +368,45 @@ fn settler_ready(city: &City, n: &Needs) -> bool {
         food_needed += economy::food_box(size) as i32;
     }
     let growth = (food_needed + n.net_food as i32 - 1) / n.net_food as i32;
-    let left = Production::Settler.cost() as i32 - city.shields as i32;
+    let left = city.price(Production::Settler) as i32 - city.shields as i32;
     let build = (left.max(0) + n.shield_rate.max(1) as i32 - 1) / n.shield_rate.max(1) as i32;
     growth <= build + 4
 }
 
 /// Archers hit hard, Horsemen run: alternate by how old the city is.
 fn attacker(city: &City, n: &Needs) -> Production {
-    let preferred = if (city.founded + n.soldiers as u32) % 3 == 0 {
-        Production::Horseman
-    } else {
-        Production::Archer
-    };
-    [preferred, Production::Archer, Production::Horseman, Production::Warrior]
-        .into_iter()
-        .find(|&p| n.can(p))
+    let fast = (city.founded + n.soldiers as u32) % 3 == 0;
+    n.best(OFFENSE, Some(fast), |r| r.attack)
+        .or_else(|| n.best(OFFENSE, Some(!fast), |r| r.attack))
         .unwrap_or(Production::Warrior)
+}
+
+/// The improvement worth its upkeep in a city with money to spare, if any:
+/// first what lifts a size limit the city has hit, then the contentment,
+/// science and trade buildings a growing city wants, the barracks of a
+/// civ going to war, and walls under threat.
+fn building(city: &City, n: &Needs) -> Option<Production> {
+    let want = |p: Production| n.can(p) && !city.has(p) && city.can_build_here(p);
+    if citycalc::growth_blocked(city) {
+        let lifts = Production::all().find(|&p| {
+            p.bldg().is_some_and(|b| b.flags & (roster::imp::ALLOWS_SIZE_LEVEL_2 | roster::imp::ALLOWS_SIZE_LEVEL_3) != 0)
+                && want(p)
+        });
+        if lifts.is_some() {
+            return lifts;
+        }
+    }
+    let wants = [
+        (Production::Temple, city.size >= 3),
+        (Production::Granary, city.size >= 4),
+        (Production::Barracks, n.turn >= AGGRESSION_TURN),
+        (Production::Walls, n.threatened && city.size >= 3),
+        (Production::Library, city.size >= 4),
+        (Production::Marketplace, city.size >= 5),
+        (Production::Harbor, city.coastal && city.size >= 3 && n.net_food <= 2),
+        (Production::Courthouse, city.size >= 6),
+    ];
+    wants.into_iter().find(|&(p, ok)| ok && want(p)).map(|(p, _)| p)
 }
 
 /// The most soldiers a civ with these garrisons keeps; the rest are upkeep.
@@ -386,6 +431,30 @@ fn threatened(map: &GameMap, board: &Board, civ: usize, tile: (i32, i32)) -> boo
 // ---------------------------------------------------------------------------
 // Orders for units
 // ---------------------------------------------------------------------------
+
+/// What an automated worker of `civ` does next, by the computer's own
+/// worker brain: `claimed` holds the tiles other workers are headed for
+/// (not this unit's own target), `target` is the tile this one was headed
+/// for. Returns the order and the tile it now means to work.
+pub fn worker_act(
+    map: &GameMap,
+    board: &Board,
+    u: &Unit,
+    target: Option<(i32, i32)>,
+    claimed: &HashSet<(i32, i32)>,
+) -> (Act, Option<(i32, i32)>) {
+    let mut brain = Brain {
+        map,
+        board,
+        civ: u.civ,
+        turn: 0,
+        known: &[],
+        surplus: 0,
+        garrisoned: HashMap::new(),
+        claimed: claimed.clone(),
+    };
+    brain.worker(u, target)
+}
 
 /// What a unit does with its turn.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -435,12 +504,12 @@ pub fn job_at(map: &GameMap, cities: &[(i32, i32)], tile: (i32, i32)) -> Option<
 
 /// Chance the attacker wins a fight against whatever defends `at`, or 1.0
 /// when nothing there can fight back (it is taken instead).
-pub fn attack_chance(map: &GameMap, att: &Unit, stack: &[(Entity, Unit)], city_size: Option<u8>) -> f64 {
-    let Some(d) = combat::pick_defender(map, att, city_size, stack) else {
+pub fn attack_chance(map: &GameMap, att: &Unit, stack: &[(Entity, Unit)], hold: Option<combat::Hold>) -> f64 {
+    let Some(d) = combat::pick_defender(map, att, hold, stack) else {
         return 1.0;
     };
     let dfn = &stack.iter().find(|(e, _)| *e == d).expect("picked from the stack").1;
-    let odds = combat::round_odds(map, att, dfn, city_size);
+    let odds = combat::round_odds(map, att, dfn, hold);
     1.0 - combat::defender_win_chance(odds, att.hp(), dfn.hp())
 }
 
@@ -658,7 +727,7 @@ impl Brain<'_> {
             let stack = self.board.foreign_at(t, self.civ);
             // Only a city whose owner differs is a city to take; a tile held
             // only by a city and no units is empty and falls.
-            let chance = attack_chance(self.map, u, &stack, city.map(|c| c.size));
+            let chance = attack_chance(self.map, u, &stack, city.map(combat::Hold::of));
             let value = match (city, stack.iter().any(|(_, s)| def(s.utype).defense > 0)) {
                 (Some(c), _) => 4.0 + 0.3 * c.size as f64,
                 (None, false) => 2.5,
@@ -893,7 +962,7 @@ pub fn play_turn(
                     economy::food_box(c.size),
                     f,
                     c.shields,
-                    c.production.cost(),
+                    c.price(c.production),
                     sh,
                     c.production,
                     c.worked.len()
@@ -1071,6 +1140,10 @@ mod tests {
 
     fn city_at(civ: usize, x: i32, y: i32, size: u8) -> City {
         City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ,
             name: format!("C{x},{y}"),
             x,
@@ -1104,8 +1177,20 @@ mod tests {
             net_food: 2,
             shield_rate: 2,
             threatened: false,
-            locked: vec![],
+            locked: bronze_age(),
         }
+    }
+
+    /// Everything but the first units and a few buildings: what a civ with
+    /// the earliest advances cannot build.
+    fn bronze_age() -> Vec<Production> {
+        use Production as P;
+        let known = [
+            P::Settler, P::Worker, P::Scout, P::Warrior, P::Archer, P::Horseman, P::Spearman,
+            P::Temple, P::Granary, P::Barracks, P::Library, P::Marketplace, P::Walls, P::Harbor,
+            P::Courthouse, P::Aqueduct,
+        ];
+        Production::all().filter(|p| !known.contains(p)).collect()
     }
 
     #[test]
@@ -1117,11 +1202,52 @@ mod tests {
         assert_eq!(choose_build(&city, &n), Production::Warrior);
         n.soldiers = 2;
         assert_eq!(choose_build(&city, &n), Production::Spearman);
-        // Without Bronze Working it settles for an Archer, then a Warrior.
-        n.locked = vec![Production::Spearman];
-        assert_eq!(choose_build(&city, &n), Production::Archer);
-        n.locked.push(Production::Archer);
+        // Without Bronze Working it settles for the cheapest thing that
+        // stands its ground.
+        n.locked.push(Production::Spearman);
         assert_eq!(choose_build(&city, &n), Production::Warrior);
+        // With Iron Working's Pikemen in place of the Spearman, they win.
+        n.locked.retain(|&p| p != Production::Pikeman);
+        n.locked.push(Production::Spearman);
+        assert_eq!(choose_build(&city, &n), Production::Pikeman);
+    }
+
+    #[test]
+    fn a_later_age_builds_its_own_units() {
+        use Production as P;
+        let city = city_at(1, 5, 5, 3);
+        let mut n = needs();
+        let only = [P::Settler, P::Worker, P::Pikeman, P::Knight, P::Longbowman];
+        n.locked = Production::all().filter(|p| !only.contains(p)).collect();
+        n.defenders_here = 0;
+        n.soldiers = 2;
+        assert_eq!(choose_build(&city, &n), P::Pikeman);
+        // The army alternates between the fast and the slow hitter.
+        n.defenders_here = 1;
+        n.settlers = 2;
+        n.workers = 3;
+        n.soldiers = 0;
+        n.soldiers_wanted = 3;
+        let picks: HashSet<Production> = (0..3)
+            .map(|k| {
+                n.soldiers = k;
+                choose_build(&city, &n)
+            })
+            .collect();
+        assert_eq!(picks, HashSet::from([P::Knight, P::Longbowman]));
+    }
+
+    #[test]
+    fn a_rich_city_at_its_size_limit_builds_what_lifts_it() {
+        let mut city = city_at(1, 5, 5, 6);
+        let mut n = needs();
+        n.room = false;
+        n.units = 20;
+        n.rich = true;
+        // A temple would do, but the Aqueduct comes first for a full town.
+        assert_eq!(choose_build(&city, &n), Production::Aqueduct);
+        city.buildings.push(Production::Aqueduct);
+        assert_ne!(choose_build(&city, &n), Production::Aqueduct);
     }
 
     #[test]
@@ -1249,8 +1375,8 @@ mod tests {
         let archer = Unit::new(1, UnitType::Archer, x, y);
         assert!(attack_chance(&map, &archer, &[weak.clone()], None) > 0.6);
         assert!(
-            attack_chance(&map, &att, &[strong], Some(3))
-                < attack_chance(&map, &att, &[weak], Some(3))
+            attack_chance(&map, &att, &[strong], Some(combat::Hold::bare(3)))
+                < attack_chance(&map, &att, &[weak], Some(combat::Hold::bare(3)))
         );
         // Nothing that can fight back: the tile is simply taken.
         let worker = (Entity::from_bits(3), Unit::new(0, UnitType::Worker, x + 1, y));

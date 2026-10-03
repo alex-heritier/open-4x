@@ -486,7 +486,7 @@ variant; both are **O**.
 3. `0x55A080` / `0x55A0E0`; `0x4DD420`; the meaning of the last-popup flags `+0x3B0`, `+0xA4`.
 4. The table `[0x9C40BC]` behind `0x4F8C50` (resister re-roll, 8.3), the meaning of `Player +0xD30`, and
    the writers of citizen `+0x144`/`+0x148` (the pending race change).
-5. `0x4B45A0` (disease), `0x4B28D0` (culture flip): covered only at the level of `ai.md` and `economy.md`.
+5. `0x4B45A0` (disease) is specified in `disease.md`; the culture flip `0x4B28D0` and the culture accumulation `0x4B2680` are in `borders-culture.md`.
 6. The AI/human difference in `0x4B9270` 6.2 (the double test of `canBuildImprovement`) is read exactly;
    its design intent is unknown.
 7. Hurry purchase cost (`0x4B5290`): decoded in [`hurry.md`](hurry.md); so is the citizen removal routine

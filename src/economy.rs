@@ -1,7 +1,8 @@
 //! The economy a civ runs on, kept in one place so the turn, the city
 //! screen and the bottom-right info box read the same numbers: the food
-//! box, Despotism's tile penalty, unit support, building upkeep and the
-//! treasury's turn.
+//! box, unit support, building upkeep and the treasury's turn. The tile
+//! penalty and the rates belong to the civ's government (`realm`,
+//! `citycalc`).
 //!
 //! Findings, addresses and what is still a guess: `reverse-engineering/
 //! economy.md` ("Growth and the food box", "Gold: unit support and
@@ -39,45 +40,24 @@ pub fn granary_keep(size: u8) -> u8 {
     food_box(size) / 2
 }
 
-/// Despotism's cap on a worked tile: a yield above two loses one, food,
-/// shields and commerce alike (Civilopedia `GOVT_Despotism`, manual
-/// "Despotism"). The city center is exempt: nobody works it. That
-/// exemption is the clone's choice; the sources only say "city production
-/// square".
-pub fn despotism(yield_: u8) -> u8 {
-    if yield_ > 2 { yield_ - 1 } else { yield_ }
+/// Gold a civ pays each turn for its units, by its government's terms
+/// (`0x53A960`, `0x55DFD0`): a free allowance made of the government's base
+/// and what each town, city or metropolis supports (Despotism: 4 each; the
+/// civ's total, not per city), then the government's gold per unit beyond
+/// it. Every unit counts, "even Settlers" (manual, "Paying for support").
+/// A civ without cities pays nothing: the binary's payer leaves when the city
+/// count is zero, which is why the starting party costs nothing before the
+/// capital stands. `sizes` are the sizes of the civ's cities.
+pub fn unit_support_cost(civ: usize, sizes: &[u8], units: usize) -> u32 {
+    let classes = sizes.iter().map(|&s| i32::from(size_class(s)));
+    let terms = crate::realm::govt(civ).support(classes);
+    civ3mapgen::economy::unit_support_charge(sizes.len() as i32, units as i32, 0, terms.free, terms.per_unit)
+        .max(0) as u32
 }
 
-/// Units each town, city and metropolis supports for free under
-/// Despotism (GOVT row, ints 135..137, all 4; the Civilopedia table says
-/// the same). The allowance is the civ's total, not per city.
-pub const FREE_UNITS_PER_CITY: u32 = 4;
-
-/// Gold per unit beyond the allowance, each turn (Civilopedia
-/// `GCON_Unit_Support`).
-pub const GOLD_PER_UNIT: u32 = 1;
-
-/// Units the civ supports at no cost. Zero cities gives zero, but see
-/// `unit_support_cost`: without cities nothing is charged at all.
-pub fn free_units(cities: usize) -> u32 {
-    FREE_UNITS_PER_CITY * cities as u32
-}
-
-/// Gold a civ pays each turn for its units. Every unit counts, "even
-/// Settlers" (manual, "Paying for support"); captured units would be free
-/// but the clone has none. A civ without cities pays nothing: the
-/// binary's payer (`0x55DFD0`) leaves when the city count is zero, which
-/// is why the starting party costs nothing before the capital stands.
-pub fn unit_support_cost(units: usize, cities: usize) -> u32 {
-    if cities == 0 {
-        return 0;
-    }
-    (units as u32).saturating_sub(free_units(cities)) * GOLD_PER_UNIT
-}
-
-/// Gold of upkeep a city's improvements cost each turn.
+/// Gold of upkeep a city's improvements cost each turn (none in Anarchy).
 pub fn building_upkeep(city: &City) -> u32 {
-    city.buildings.iter().map(|b| b.upkeep() as u32).sum()
+    crate::citycalc::upkeep(city).max(0) as u32
 }
 
 /// One civ's gold for a turn: what comes in and what goes out. The turn
@@ -107,16 +87,19 @@ pub fn finance<'a>(
     cities: impl IntoIterator<Item = &'a City>,
     units: usize,
 ) -> Finance {
-    let (mut tax, mut upkeep, mut count) = (0, 0, 0);
+    let (mut tax, mut upkeep) = (0, 0);
+    let mut sizes = vec![];
+    let mut civ = None;
     for c in cities {
         tax += city_tax(map, c);
         upkeep += building_upkeep(c);
-        count += 1;
+        sizes.push(c.size);
+        civ = Some(c.civ);
     }
     Finance {
         tax,
         upkeep,
-        unit_cost: unit_support_cost(units, count),
+        unit_cost: civ.map_or(0, |civ| unit_support_cost(civ, &sizes, units)),
     }
 }
 
@@ -150,21 +133,27 @@ pub fn pay(treasury: u32, bill: u32) -> Paid {
     }
 }
 
-/// Gold a sold improvement fetches: one per shield of its cost. The binary
-/// computes `cost * 10 / [0x9C7268]` (`0x4B32F0`; `0x569FE0` is the cost
-/// times the human 10), and that divisor is not pinned down, so one gold
-/// per shield is the clone's HYPOTHESIS.
-pub fn sale_price(improvement: Production) -> u32 {
-    improvement.cost() as u32
+/// RULE "Shield Cost Per Gold" (`[0x9C7268]`, body `+0xA4`).
+pub const SHIELDS_PER_GOLD: u32 = 4;
+
+/// Gold a sold improvement fetches: its shield cost over the RULE "Shield
+/// Cost Per Gold", 4 in `conquests.biq` (`0x4B32F0` is `0x569FE0(P; b, 0)
+/// / [0x9C7268]`, `yields.md` 5.6).
+pub fn sale_price(civ: usize, improvement: Production) -> u32 {
+    crate::cities::price_for(civ, improvement) as u32 / SHIELDS_PER_GOLD
 }
 
-/// How much a unit type is worth keeping: its shield cost, then its place
-/// in the build list. A type that cannot be built is worth the most.
-fn keep_rank(t: UnitType) -> (u8, usize) {
-    Production::ALL
-        .iter()
-        .position(|p| p.unit() == Some(t))
-        .map_or((u8::MAX, usize::MAX), |i| (Production::ALL[i].cost(), i))
+/// How much a unit type is worth keeping: its shield cost, then fighters
+/// before civilians (a Warrior goes before the Worker that keeps working),
+/// then its place in the roster. A type the game has no art for is worth
+/// the most.
+fn keep_rank(t: UnitType) -> (u16, bool, usize) {
+    let r = t.row();
+    if r.playable {
+        (Production::from_unit(t).cost(), r.attack == 0 && r.defense == 0, t.0 as usize)
+    } else {
+        (u16::MAX, true, usize::MAX)
+    }
 }
 
 /// The unit a broke civ gives up: the cheapest to rebuild, and at equal
@@ -226,21 +215,17 @@ mod tests {
     }
 
     #[test]
-    fn despotism_trims_only_what_exceeds_two() {
-        assert_eq!([0, 1, 2, 3, 4, 6].map(despotism), [0, 1, 2, 2, 3, 5]);
-    }
-
-    #[test]
     fn units_are_free_up_to_four_per_city_and_never_without_cities() {
         // The starting party, before the capital stands, costs nothing.
-        assert_eq!(unit_support_cost(4, 0), 0);
-        assert_eq!(unit_support_cost(40, 0), 0);
-        assert_eq!(unit_support_cost(4, 1), 0);
-        assert_eq!(unit_support_cost(5, 1), 1);
+        crate::realm::reset();
+        assert_eq!(unit_support_cost(0, &[], 4), 0);
+        assert_eq!(unit_support_cost(0, &[], 40), 0);
+        assert_eq!(unit_support_cost(0, &[1], 4), 0);
+        assert_eq!(unit_support_cost(0, &[1], 5), 1);
         // The allowance is pooled across the civ's cities.
-        assert_eq!(unit_support_cost(8, 2), 0);
-        assert_eq!(unit_support_cost(9, 2), 1);
-        assert_eq!(unit_support_cost(12, 2), 4);
+        assert_eq!(unit_support_cost(0, &[1, 1], 8), 0);
+        assert_eq!(unit_support_cost(0, &[1, 1], 9), 1);
+        assert_eq!(unit_support_cost(0, &[1, 1], 12), 4);
     }
 
     #[test]
@@ -255,10 +240,15 @@ mod tests {
     }
 
     #[test]
-    fn an_improvement_sells_for_its_shield_cost() {
-        assert_eq!(sale_price(Production::Temple), 30);
-        assert_eq!(sale_price(Production::Granary), 40);
-        assert_eq!(sale_price(Production::Barracks), 30);
+    fn an_improvement_sells_for_a_quarter_of_its_shield_cost() {
+        // 60, 60 and 40 shields over the 4 shields a gold costs, for a
+        // civ with neither of their traits (Rome: Militaristic and
+        // Commercial, so its Barracks are the one half-price building).
+        assert_eq!(sale_price(1, Production::Temple), 15);
+        assert_eq!(sale_price(1, Production::Granary), 15);
+        assert_eq!(sale_price(1, Production::Barracks), 5);
+        // Japan is Religious: its Temples cost half.
+        assert_eq!(sale_price(0, Production::Temple), 7);
     }
 
     #[test]
@@ -289,6 +279,10 @@ mod tests {
 
     fn city_at(map: &GameMap, civ: usize, x: i32, y: i32) -> City {
         let mut city = City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ,
             name: format!("C{x}"),
             x,
@@ -339,9 +333,10 @@ mod tests {
             (4, UnitType::Worker),
             (5, UnitType::Warrior),
         ];
-        // Warriors and Workers cost 10 shields, the least; a Warrior goes.
+        // Warriors, Scouts and Workers cost 10 shields, the least; fighters
+        // go first, so a Warrior goes.
         assert_eq!(disband_pick(units), Some((5, UnitType::Warrior)));
-        // Without them, the Scout (20) goes before the Settler (30).
+        // Without them, the Scout (10) goes before the Settler (30).
         assert_eq!(
             disband_pick(units[..2].iter().copied()),
             Some((2, UnitType::Scout))
@@ -359,7 +354,8 @@ mod tests {
                 "warrior {warrior}, worker {worker}"
             );
         }
-        // With no Warrior left the Worker is next, ahead of the dearer Scout.
+        // With no Warrior left the Worker is next, ahead of the Scout that
+        // costs the same but is listed after it.
         let rest = [(2u32, UnitType::Scout), (7, UnitType::Worker)];
         assert_eq!(disband_pick(rest), Some((7, UnitType::Worker)));
     }

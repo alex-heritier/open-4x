@@ -42,7 +42,8 @@ words). Pre-calls: `0x53AA50(this=0xA9590C)` + `0x61C5A0` twice.
   `[city+0x13C]`, loops BLDG table (`count [0x9C3D80]`, stride
   `0x110`) with has/obsolete/flag-`0xF0&4` gates; accumulation at
   `0x4B2897` adds into `[city+owner*4+0x140]` with `max(0,·)` clamp,
-  then calls the border check (child-reported).
+  then calls the border check (child-reported). **Superseded** by `borders-culture.md` 2 (verified body, including
+  the xenophobic gate and the obsolescence test).
 * Per-building `0x4F8CE0` (child-reported): base `BLDG+0x98`,
   doubled if age (`0x4C2420`) vs 1000, halved (`(ebp+1)/2`) when
   `[owner*8420+0xA52F3C]==1`. **Verified and extended** in
@@ -73,7 +74,11 @@ neighbour counts one step on each axis; in the save's doubled grid `d² =
 (dx² + dy²) / 2`). Inside the shape 3,045 of 3,061 sampled tiles belong to the
 city's civ, and **none** of the 41,790 tiles outside it do. The 16 misses are
 tiles another civ's older claim holds. No save has a city above level 3, so
-levels 4 to 6 (`17`, `26`, `37`) are **HYPOTHESIS**: the same rule, continued.
+levels 4 to 6 (`17`, `26`, `37`) were a **HYPOTHESIS** and are **wrong for levels 4 and 6**: the executed
+ring enumerator and the table `0x670540` give the squared reach `2, 5, 10, 18, 26, 41` in tile steps (the table holds
+twice these, in doubled-grid units; tile counts 9, 21, 37, 61, 89, 137; `borders-culture.md` 4).
+The shape is not `level² + 1` and the claiming procedure (cities in order, tie-break, ocean and bracket rules) is
+specified in `borders-culture.md` 5.
 
 Where the shapes of two civs overlap (`biq/examples/border_contest.rs`, 1,671
 tiles, 263 of them equally near), the nearer city's civ owns the tile in 89% of the 1,408
@@ -186,7 +191,8 @@ Trade").
 
 Mood flags `[city+0x30]` (bit0 disorder, bit1 celebration): verified in `happiness.md`. The
 culture-flip test `0x4B28D0` doubles an intermediate score for a city in disorder (`0x4B2AFF`) and
-halves it for a celebrating city (`0x4B2B6A`); the "distance" of the earlier note is that score.
+halves it for a celebrating city (`0x4B2B6A`); the "distance" of the earlier note is that score
+(full algorithm: `borders-culture.md` 9).
 
 ## Growth and the food box (verified: r2 + Civilopedia)
 

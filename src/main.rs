@@ -2,32 +2,43 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
 mod actionbar;
+mod actions;
 mod advisors;
 mod ai;
 mod audio;
 mod blend;
 mod borders;
 mod cities;
+mod citycalc;
 mod civs;
 mod combat;
 mod diplomacy;
+mod domestic;
 mod economy;
 mod features;
+mod govern;
 mod improvements;
 mod input;
+mod leaders;
 mod map;
 mod production_prompt;
 mod render;
+mod realm;
 mod research;
 mod rng;
+mod roster;
 mod rules_data;
 mod screenshot;
 mod script;
+mod speech;
 mod splash;
+mod stage;
 mod tiles;
 mod ui;
 mod unit_picker;
 mod units;
+mod upgrades;
+mod wonders;
 
 use map::GameMap;
 
@@ -57,6 +68,10 @@ fn main() {
         .insert_resource(research::Research::new())
         .insert_resource(diplomacy::Diplomacy::new())
         .init_resource::<advisors::Advisors>()
+        .init_resource::<domestic::Domestic>()
+        .insert_resource(speech::Speech::load())
+        .insert_resource(leaders::LeaderArt::load())
+        .init_resource::<wonders::Wonders>()
         .add_message::<actionbar::UnitCommand>()
         .init_resource::<actionbar::GotoMode>()
         .insert_resource(GameMap::generate())
@@ -95,7 +110,9 @@ fn main() {
                 script::setup_script,
                 diplomacy::setup,
                 research::begin,
+                leaders::preload,
                 advisors::spawn_buttons,
+                domestic::spawn_button,
             )
                 .chain(),
         )
@@ -108,10 +125,14 @@ fn main() {
                         diplomacy::refresh,
                         diplomacy::detect_contact,
                         research::refresh,
+                        realm::sync,
                         advisors::hotkeys,
                         advisors::open_buttons,
                         advisors::interrupt,
                         advisors::respond,
+                        domestic::hotkeys,
+                        domestic::open_button,
+                        domestic::respond,
                     )
                         .chain(),
                     input::camera_control.run_if(unit_picker::inactive),
@@ -124,7 +145,13 @@ fn main() {
                     actionbar::run_commands
                         .run_if(production_prompt::inactive)
                         .run_if(combat::idle),
+                    (actions::run, actions::auto_workers)
+                        .chain()
+                        .run_if(production_prompt::inactive)
+                        .run_if(combat::idle),
                     (
+                        govern::ai_turn,
+                        upgrades::ai_turn,
                         ai::play_turn,
                         cities::found_city.run_if(production_prompt::inactive),
                         civs::check_elimination,
@@ -138,6 +165,7 @@ fn main() {
                         research::end_turn,
                         diplomacy::end_turn,
                         cities::end_turn_cities,
+                        wonders::track,
                     )
                         .chain(),
                     improvements::end_turn_work,
@@ -173,7 +201,16 @@ fn main() {
                     render::update_fog,
                     render::sync_cover,
                     ui::update_hover_label,
-                    (actionbar::update_bar, actionbar::update_gold, advisors::update_science_line, advisors::show).chain(),
+                    (
+                        actionbar::update_bar,
+                        actionbar::update_gold,
+                        advisors::update_science_line,
+                        advisors::show,
+                        domestic::show,
+                        leaders::animate,
+                        wonders::fanfare,
+                    )
+                        .chain(),
                     actionbar::blink_next_turn,
                     ui::update_message_label,
                     ui::update_game_over,

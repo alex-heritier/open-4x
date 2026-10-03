@@ -365,9 +365,10 @@ Verified by reading in full: `0x5663C0`, `0x4AE2A0` (to its `ret 0x1C` at `0x4AE
    initial tile assignment. The first work-tile choice of a new city is therefore **not** specified.
 2. `0x55CB20` (capital registration) and `0x4ACF40` (add building) are now specified in `city-buildings.md` sections 4 and 6; `0x57E320` (list `0xB72888`), `0x578E90`,
    `0x58B5D0`.
-3. `0x5D4830` (borders, `0x5D3AB0`), see `goody-huts.md` and `unit-turn.md` open items.
-4. `0x5B5600` / `0x5B5790` (the border-intrusion hook and permission check: whether a civ may found a city on a
-   tile owned by another civ is therefore decided there and in the diplomacy state, **O**), `0x4B1DC0`, the three
+3. `0x5D4830` (borders, `0x5D3AB0`): now specified in `borders-culture.md`.
+4. `0x5B5600` / `0x5B5790` are not border hooks: they are "provoke" and "may this unit attack that civ"
+   (`combat.md` 14.3). Whether a civ may found a city on a tile owned by another civ is decided in the diplomacy
+   state and the callers (**O**). Also open: `0x4B1DC0`, the three
    display tests of `foundCity`, and the min-distance policy of the AI (`0x442480`).
 5. The meaning of `cell.vt+0x78()` (bit 29 of `vt+0xAC`), the TERR predicate `0x5DBF10`, the exact English
    string behind `prefix`, and the push side of the city free list.

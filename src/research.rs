@@ -17,14 +17,15 @@ use bevy::prelude::*;
 use civ3mapgen::research::{Ctx, Dice, Event, NONE, World};
 use civ3mapgen::research_ai::{Profile, Tables, Valuer, category_mask_from_flags};
 
-use crate::cities::{City, Production, city_commerce, commerce_split};
+use crate::cities::{City, Production};
 use crate::civs::{CIV_COUNT, CivilizationEnded, Civilizations, is_ai};
 use crate::combat::CombatRng;
 use crate::diplomacy::Diplomacy;
 use crate::features::{MessageBoard, post};
 use crate::map::GameMap;
 use crate::rng::MapRng;
-use crate::rules_data::{self, ERA_NAMES, RACES, TECH_NAMES, UNLOCKS};
+use crate::roster::{BLDG_COUNT, UNIT_COUNT, upgrade_chain};
+use crate::rules_data::{self, ERA_NAMES, RACES, TECH_NAMES};
 use crate::units::{Turn, Unit, def};
 
 impl Dice for MapRng {
@@ -45,52 +46,116 @@ pub fn civ_of(slot: u32) -> usize {
 }
 
 /// `DIFF[2]` (Regent) and the standard `WSIZ` row.
-const DIFFICULTY: usize = 2;
+pub const DIFFICULTY: usize = 2;
 const WORLD_SIZE: usize = 2;
 
-/// Productions each civ cannot build yet, one bit per `Production::ALL`
-/// entry. A process-wide setting like `civs::AI_MASK`: `City::buildable` is
-/// a plain function. Nothing is locked until the research world says so.
-#[cfg(not(test))]
-static LOCKED: [std::sync::atomic::AtomicU16; CIV_COUNT] = [const { std::sync::atomic::AtomicU16::new(0) }; CIV_COUNT];
+/// A set of productions, one bit per `Production::index`.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct Bits([u64; WORDS]);
 
-// Under test each thread has locks of its own, as with `civs::AI_MASK`.
+const WORDS: usize = (UNIT_COUNT + BLDG_COUNT).div_ceil(64);
+
+impl Bits {
+    const EMPTY: Bits = Bits([0; WORDS]);
+
+    pub fn get(&self, i: usize) -> bool {
+        self.0[i / 64] >> (i % 64) & 1 != 0
+    }
+
+    pub fn set(&mut self, i: usize, on: bool) {
+        if on {
+            self.0[i / 64] |= 1 << (i % 64);
+        } else {
+            self.0[i / 64] &= !(1 << (i % 64));
+        }
+    }
+}
+
+/// What the city layer's plain functions (`City::buildable`) have to know
+/// about the rest of the game without ECS access. A process-wide setting
+/// like `civs::AI_MASK`; nothing is locked until the research world says so.
+#[derive(Clone, Copy)]
+struct Access {
+    /// Productions each civ cannot build yet (advance, civ, obsolescence,
+    /// strategic resource).
+    locked: [Bits; CIV_COUNT],
+    /// Units each civ could not train even if nothing newer replaced them
+    /// (the upgrade walk asks for these: the advance, the race, the goods).
+    lacking: [Bits; CIV_COUNT],
+    /// Strategic and luxury goods each civ owns, one bit per `GOOD` row.
+    goods: [u32; CIV_COUNT],
+    /// Great wonders built anywhere: nobody builds them twice.
+    built: Bits,
+}
+
+impl Access {
+    const NONE: Access = Access { locked: [Bits::EMPTY; CIV_COUNT], lacking: [Bits::EMPTY; CIV_COUNT], goods: [0; CIV_COUNT], built: Bits::EMPTY };
+}
+
+#[cfg(not(test))]
+static ACCESS: std::sync::Mutex<Access> = std::sync::Mutex::new(Access::NONE);
+
+// Under test each thread has an access table of its own, as with
+// `civs::AI_MASK`.
 #[cfg(test)]
 thread_local! {
-    static LOCKED: [std::cell::Cell<u16>; CIV_COUNT] = const { [const { std::cell::Cell::new(0) }; CIV_COUNT] };
+    static ACCESS: std::cell::RefCell<Access> = const { std::cell::RefCell::new(Access::NONE) };
 }
 
-fn locked_bits(civ: usize) -> u16 {
+fn with_access<R>(f: impl FnOnce(&mut Access) -> R) -> R {
     #[cfg(not(test))]
-    return LOCKED[civ].load(std::sync::atomic::Ordering::Relaxed);
+    return f(&mut ACCESS.lock().unwrap());
     #[cfg(test)]
-    return LOCKED.with(|l| l[civ].get());
-}
-
-fn set_locked_bits(civ: usize, mask: u16) {
-    #[cfg(not(test))]
-    LOCKED[civ].store(mask, std::sync::atomic::Ordering::Relaxed);
-    #[cfg(test)]
-    LOCKED.with(|l| l[civ].set(mask));
-}
-
-fn index(p: Production) -> usize {
-    Production::ALL.iter().position(|&q| q == p).expect("every production is listed")
+    return ACCESS.with(|a| f(&mut a.borrow_mut()));
 }
 
 /// The advance a production needs, `-1` for none.
+#[cfg(test)]
 pub fn required_tech(p: Production) -> i32 {
-    UNLOCKS[index(p)].1
+    match p.unit() {
+        Some(u) => u.row().tech,
+        None => p.bldg().map_or(NONE, |b| b.tech),
+    }
 }
 
-/// Whether `civ` has the advance for `p`.
+/// Whether `civ` may build `p` at all: it has the advance, the production
+/// is its own (a unique unit is its race's alone), nothing newer on the
+/// upgrade chain replaces it, and the strategic resources are owned.
 pub fn can_build(civ: usize, p: Production) -> bool {
-    locked_bits(civ) >> index(p) & 1 == 0
+    with_access(|a| !a.locked[civ].get(p.index()) && !(p.is_building() && a.built.get(p.index())))
+}
+
+/// Whether `civ` could train unit row `u` but for its being obsolete: what
+/// the upgrade walk asks of each type on a chain (`unit-upgrades.md` 5).
+pub fn can_train(civ: usize, u: usize) -> bool {
+    with_access(|a| !a.lacking[civ].get(u))
+}
+
+/// Test hook: take a unit away from, or give it back to, a civ.
+#[cfg(test)]
+pub fn set_trainable(civ: usize, u: usize, on: bool) {
+    with_access(|a| a.lacking[civ].set(u, !on));
 }
 
 /// Everything `civ` cannot build yet.
 pub fn locked(civ: usize) -> Vec<Production> {
-    Production::ALL.iter().copied().filter(|&p| !can_build(civ, p)).collect()
+    Production::all().filter(|&p| !can_build(civ, p)).collect()
+}
+
+/// A great wonder has been built somewhere: nobody builds it again.
+pub fn set_wonder_built(p: Production, built: bool) {
+    with_access(|a| a.built.set(p.index(), built));
+}
+
+/// Goods `civ` owns inside its borders: a bit per `GOOD` row.
+pub fn owns_good(civ: usize, good: i32) -> bool {
+    good < 0 || with_access(|a| a.goods[civ] >> good & 1 != 0)
+}
+
+/// Replace the owned goods of `civ`. True when anything changed (the
+/// caller then re-syncs the locks).
+pub fn set_goods(civ: usize, goods: u32) -> bool {
+    with_access(|a| std::mem::replace(&mut a.goods[civ], goods) != goods)
 }
 
 /// Name of an advance.
@@ -193,18 +258,59 @@ impl Research {
         self.world.players[slot(civ) as usize].rate
     }
 
+    /// Does `civ` know tech `need` (`-1` is always met; the advance count
+    /// means "no advance grants it", never met)?
+    fn has_tech(&self, civ: usize, need: i32) -> bool {
+        need == NONE || (need < self.world.t() && self.knows(civ, need))
+    }
+
+    /// `City::canBuildUnit` without the city: the civ's race may build it,
+    /// it has the advance and the strategic resources (`buildable.md` 3).
+    fn unit_available(&self, civ: usize, u: usize) -> bool {
+        let r = crate::roster::unit(u);
+        r.playable
+            && r.races >> RACES[civ].race & 1 != 0
+            && self.has_tech(civ, r.tech)
+            && r.resources.iter().all(|&g| owns_good(civ, g))
+    }
+
+    /// Whether `p` is hidden from `civ`'s build list for a reason that is
+    /// the same in every city.
+    fn is_locked(&self, civ: usize, p: Production) -> bool {
+        if let Some(u) = p.unit() {
+            // A unit with a buildable upgrade is obsolete: "the city must
+            // build the upgrade instead" (`buildable.md` 3.1 step 2).
+            return !self.unit_available(civ, u.0 as usize)
+                || upgrade_chain(u.0 as usize).any(|n| self.unit_available(civ, n));
+        }
+        let Some(b) = p.bldg() else { return true };
+        !self.has_tech(civ, b.tech)
+            || (b.obsolete >= 0 && self.has_tech(civ, b.obsolete))
+            || b.resources.iter().any(|&g| !owns_good(civ, g))
+    }
+
     /// Refresh the bits `City::buildable` reads.
     fn sync_locks(&self) {
         for civ in 0..CIV_COUNT {
-            let mut mask = 0u16;
-            for (i, &p) in Production::ALL.iter().enumerate() {
-                let need = required_tech(p);
-                if need != NONE && !self.knows(civ, need) {
-                    mask |= 1 << i;
+            let mut mask = Bits::EMPTY;
+            let mut lacking = Bits::EMPTY;
+            for p in Production::all() {
+                mask.set(p.index(), self.is_locked(civ, p));
+                if let Some(u) = p.unit() {
+                    lacking.set(p.index(), !self.unit_available(civ, u.0 as usize));
                 }
             }
-            set_locked_bits(civ, mask);
+            with_access(|a| {
+                a.locked[civ] = mask;
+                a.lacking[civ] = lacking;
+            });
         }
+    }
+
+    /// The goods of `civ` changed; unit and improvement availability may
+    /// have with them.
+    pub fn goods_changed(&self) {
+        self.sync_locks();
     }
 
     /// Game start: the free advances of each civilization (`Player::init`,
@@ -350,7 +456,7 @@ pub fn refresh(
     let mut count = [0i32; CIV_COUNT];
     let mut defenders = [0i32; CIV_COUNT];
     for c in &cities {
-        rate[c.civ] += i32::from(commerce_split(city_commerce(&map, c)).1);
+        rate[c.civ] += crate::citycalc::totals(&map, c).sci;
         count[c.civ] += 1;
     }
     for u in &units {
@@ -428,10 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn the_unlock_table_lists_the_productions_in_order() {
-        for (p, (name, _)) in Production::ALL.iter().zip(UNLOCKS.iter()) {
-            assert_eq!(p.name(), *name);
-        }
+    fn production_prerequisites_come_from_the_roster() {
         assert_eq!(required_tech(Production::Warrior), NONE);
         assert_eq!(required_tech(Production::Archer), tech("Warrior Code"));
         assert_eq!(required_tech(Production::Spearman), tech("Bronze Working"));
@@ -578,12 +681,49 @@ mod tests {
         assert!(!japan.contains(&Production::Warrior));
         assert!(!japan.contains(&Production::Settler));
         assert!(!locked(1).contains(&Production::Archer));
-        // Every locked production names an advance the civ lacks.
+        // Every locked building lacks its advance, is obsolete, or needs a
+        // good the civ does not own.
         for civ in 0..CIV_COUNT {
-            for p in locked(civ) {
-                assert!(!r.knows(civ, required_tech(p)));
+            for p in locked(civ).into_iter().filter(|p| p.is_building()) {
+                let b = p.bldg().unwrap();
+                let lacks = b.tech != NONE && !r.knows(civ, b.tech);
+                let obsolete = b.obsolete >= 0 && r.knows(civ, b.obsolete);
+                let goods = b.resources.iter().any(|&g| !owns_good(civ, g));
+                assert!(lacks || obsolete || goods, "{} is locked for no reason", b.name);
             }
         }
+    }
+
+    #[test]
+    fn a_unique_unit_is_its_races_alone_and_a_resource_is_a_requirement() {
+        let mut r = game();
+        let mut dice = Rng::new(5);
+        r.begin(&mut dice);
+        for t in ["Bronze Working", "Iron Working"] {
+            for civ in [0, 1] {
+                if !r.knows(civ, tech(t)) {
+                    r.award(civ, tech(t), &mut dice);
+                }
+            }
+        }
+        // Without Iron nobody can arm a Swordsman or a Legionary.
+        assert!(!can_build(0, Production::Swordsman));
+        assert!(!can_build(1, Production::Legionary));
+        const IRON: u32 = 1 << 1;
+        for civ in [0, 1] {
+            assert!(set_goods(civ, IRON));
+        }
+        r.goods_changed();
+        // Japan has the plain Swordsman, Rome its Legionary instead.
+        assert!(can_build(0, Production::Swordsman));
+        assert!(!can_build(0, Production::Legionary));
+        assert!(can_build(1, Production::Legionary));
+        assert!(!can_build(1, Production::Swordsman));
+        // A wonder is built once.
+        assert!(!can_build(0, Production::ThePyramids) || required_tech(Production::ThePyramids) != NONE);
+        set_wonder_built(Production::ThePyramids, true);
+        assert!(!can_build(0, Production::ThePyramids));
+        set_wonder_built(Production::ThePyramids, false);
     }
 
     #[test]

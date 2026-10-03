@@ -18,22 +18,30 @@
 //! Coordinates written `@dx,dy` are relative to the first city.
 //! - `city`: open the first city's screen.
 //! - `btn <name>`: press a city-screen button: `Change`, `Close`,
-//!   `Governor`, `CloseMenu`, `Prev`, `Next`, `Pick:<item>`,
+//!   `Governor`, `CloseMenu`, `PageNext`, `PagePrev`, `Prev`, `Next`, `Pick:<item>`,
 //!   `Queue:<item>`, `Unqueue:<i>`.
 //! - `adv <name>`: press an advisor button: `Science`, `Foreign`, `Close`,
 //!   `Pick:<advance>`, `Talk:<civ>`, `Treaty:<clause>`, `Give:<advance>`,
 //!   `Get:<advance>`, `GiveGold:<delta>`, `GetGold:<delta>`, `Propose`,
-//!   `DeclareWar`, `Accept`, `Decline`, `WarYes`, `WarNo`. `key F6` and
-//!   `key F4` open the Science and Foreign Advisors.
+//!   `DeclareWar`, `Accept`, `Decline`, `WarYes`, `WarNo`, `Wonders`,
+//!   `Page:<1|-1>`, `Zoom`. `key F6`, `key F4` and `key F7` open the Science
+//!   and Foreign Advisors and the Wonders window.
+//! - `meet <a> <b>`: the civs (indices as for `spawn`) make contact, which
+//!   brings up the leader's greeting.
+//! - `wonder <civ> <building name>`: put a wonder (or any improvement) into
+//!   the first city of that civ, as if it had just been completed.
+//! - `propose <civ>`: that civ offers the human an advance for a peace treaty.
+//! - `build <civ> <building name>`: set what the first city of that civ builds.
 //! - `hover <x>,<y>` / `unhover`: pin the map hover (no mouse in captures).
 //! - `down` / `up`: press and release the left mouse button.
 //! - `tile <rx>,<ry>`: click a tile of the open city's radius.
 //!
 //! Example: `CIV3_SCRIPT='20:key B;40:city;60:btn Change'`.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use crate::cities::{self, City, CityView, ScreenButton};
+use crate::cities::{self, City, CityView, Production, ScreenButton};
 use crate::map::GameMap;
 use crate::units::{self, Selected, TurnEnded, Unit, UnitArt, UnitType};
 
@@ -70,8 +78,10 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Down" => KeyCode::ArrowDown,
         "Left" => KeyCode::ArrowLeft,
         "Right" => KeyCode::ArrowRight,
+        "F1" => KeyCode::F1,
         "F4" => KeyCode::F4,
         "F6" => KeyCode::F6,
+        "F7" => KeyCode::F7,
         "F9" => KeyCode::F9,
         _ => {
             let c = name.chars().next()?;
@@ -116,17 +126,10 @@ fn pair(s: &str) -> Option<(i32, i32)> {
     Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
 }
 
+/// A unit type by its roster name ("Settler", "Spearman", "Three-Man
+/// Chariot").
 fn unit_type(name: &str) -> Option<UnitType> {
-    Some(match name {
-        "Settler" => UnitType::Settler,
-        "Worker" => UnitType::Worker,
-        "Warrior" => UnitType::Warrior,
-        "Scout" => UnitType::Scout,
-        "Archer" => UnitType::Archer,
-        "Spearman" => UnitType::Spearman,
-        "Horseman" => UnitType::Horseman,
-        _ => return None,
-    })
+    UnitType::all().find(|u| u.row().playable && u.row().name.eq_ignore_ascii_case(name))
 }
 
 fn button_matches(b: &ScreenButton, name: &str) -> bool {
@@ -136,12 +139,29 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
         ScreenButton::Change => kind == "Change",
         ScreenButton::Governor => kind == "Governor",
         ScreenButton::CloseMenu => kind == "CloseMenu",
+        ScreenButton::MenuPage(d) => kind == if *d > 0 { "PageNext" } else { "PagePrev" },
         ScreenButton::Pick(p) => kind == "Pick" && p.name() == arg,
         ScreenButton::Queue(p) => kind == "Queue" && p.name() == arg,
         ScreenButton::PrevCity => kind == "Prev",
         ScreenButton::NextCity => kind == "Next",
         ScreenButton::Unqueue(i) => kind == "Unqueue" && arg.parse() == Ok(*i),
     }
+}
+
+/// What the script presses and reaches into besides the cities and the units
+/// (a system takes 16 parameters at most).
+#[derive(SystemParam)]
+pub struct Reach<'w, 's> {
+    mouse: ResMut<'w, ButtonInput<MouseButton>>,
+    pin: ResMut<'w, crate::input::HoverPin>,
+    diplomacy: ResMut<'w, crate::diplomacy::Diplomacy>,
+    research: Res<'w, crate::research::Research>,
+    domestic_buttons: Query<
+        'w,
+        's,
+        (&'static mut Interaction, &'static crate::domestic::Click),
+        (Without<ScreenButton>, Without<crate::advisors::Action>),
+    >,
 }
 
 /// Runs first in `Update`, after input and UI focus have run in `PreUpdate`,
@@ -153,8 +173,7 @@ pub fn drive_script(
     script: Option<ResMut<Script>>,
     civs: Res<crate::civs::Civilizations>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
-    mut mouse: ResMut<ButtonInput<MouseButton>>,
-    mut pin: ResMut<crate::input::HoverPin>,
+    mut reach: Reach,
     mut turn_end: MessageWriter<TurnEnded>,
     mut selected: ResMut<Selected>,
     mut units: Query<(Entity, &mut Unit)>,
@@ -162,8 +181,14 @@ pub fn drive_script(
     mut cities: Query<&mut City>,
     city_ids: Query<Entity, With<City>>,
     mut view: ResMut<CityView>,
-    mut buttons: Query<(&mut Interaction, &ScreenButton), Without<crate::advisors::Action>>,
-    mut advisor_buttons: Query<(&mut Interaction, &crate::advisors::Action), Without<ScreenButton>>,
+    mut buttons: Query<
+        (&mut Interaction, &ScreenButton),
+        (Without<crate::advisors::Action>, Without<crate::domestic::Click>),
+    >,
+    mut advisor_buttons: Query<
+        (&mut Interaction, &crate::advisors::Action),
+        (Without<ScreenButton>, Without<crate::domestic::Click>),
+    >,
 ) {
     let Some(mut script) = script else {
         return;
@@ -277,14 +302,14 @@ pub fn drive_script(
                 }
             }
             "hover" => match coord(arg) {
-                Some(p) => pin.0 = Some(p),
+                Some(p) => reach.pin.0 = Some(p),
                 None => eprintln!("script: bad hover {arg}"),
             },
-            "unhover" => pin.0 = None,
-            "right" => mouse.press(MouseButton::Right),
-            "right-up" => mouse.release(MouseButton::Right),
-            "down" => mouse.press(MouseButton::Left),
-            "up" => mouse.release(MouseButton::Left),
+            "unhover" => reach.pin.0 = None,
+            "right" => reach.mouse.press(MouseButton::Right),
+            "right-up" => reach.mouse.release(MouseButton::Right),
+            "down" => reach.mouse.press(MouseButton::Left),
+            "up" => reach.mouse.release(MouseButton::Left),
             "city" => {
                 view.0 = city_ids
                     .iter()
@@ -298,6 +323,48 @@ pub fn drive_script(
                 Some((mut i, _)) => *i = Interaction::Pressed,
                 None => eprintln!("script: no advisor button {arg}"),
             },
+            "dom" => {
+                match reach.domestic_buttons.iter_mut().find(|(_, c)| c.script_name() == arg) {
+                    Some((mut i, _)) => *i = Interaction::Pressed,
+                    None => eprintln!("script: no domestic button {arg}"),
+                }
+            }
+            "meet" => {
+                let mut civs = arg.split_whitespace().filter_map(|c| c.parse::<usize>().ok());
+                match (civs.next(), civs.next()) {
+                    (Some(a), Some(b)) if a != b && a.max(b) < crate::civs::CIV_COUNT => {
+                        reach.diplomacy.meet(a, b);
+                    }
+                    _ => eprintln!("script: bad meet {arg}"),
+                }
+            }
+            "propose" => {
+                // The civ offers the first advance it can spare, for peace.
+                use civ3mapgen::diplomacy::Clause;
+                use crate::diplomacy::{Deal, Proposal};
+                let from = arg.parse::<usize>().ok().filter(|&c| c != civs.viewer() && c < crate::civs::CIV_COUNT);
+                let spare = from.and_then(|c| reach.research.giftable(c, civs.viewer()).first().copied());
+                match (from, spare) {
+                    (Some(from), Some(tech)) => {
+                        let mut deal = Deal::new(civs.viewer(), from);
+                        deal.from_b.push(Clause::Tech(tech));
+                        deal.from_a.push(Clause::Peace);
+                        reach.diplomacy.meet(civs.viewer(), from);
+                        reach.diplomacy.proposals.push_back(Proposal { from, to: civs.viewer(), deal });
+                    }
+                    _ => eprintln!("script: bad propose {arg}"),
+                }
+            }
+            "wonder" | "build" => {
+                let (civ, name) = arg.split_once(' ').unwrap_or((arg, ""));
+                let row = (0..crate::roster::BLDG_COUNT).find(|&r| crate::roster::bldg(r).name.eq_ignore_ascii_case(name.trim()));
+                let city = civ.parse::<usize>().ok().and_then(|civ| cities.iter_mut().find(|c| c.civ == civ));
+                match (row, city) {
+                    (Some(row), Some(mut city)) if verb == "wonder" => city.buildings.push(Production::from_building_row(row)),
+                    (Some(row), Some(mut city)) => city.production = Production::from_building_row(row),
+                    _ => eprintln!("script: bad {verb} {arg}"),
+                }
+            }
             "tile" => {
                 if let (Some((rx, ry)), Some(e)) = (pair(arg), view.0) {
                     if !cities::click_cluster(&map, &mut cities, e, rx, ry) {

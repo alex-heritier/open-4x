@@ -8,7 +8,7 @@ A playable solo sandbox: open straight into a new game as Japan, move units, exp
 
 ## Non-goals for MVP
 
-Settled: rule-based AI civs only (`src/ai.rs`: one skill level), no multiplayer, no trade of cities or world maps (technology and diplomacy were added after the MVP: `src/research.rs`, `src/diplomacy.rs`, `src/advisors.rs`), no worker improvements (D4), no save or load, no minimap, no combat targets (no huts, no barbarians), no main menu or settings.
+Settled: rule-based AI civs only (`src/ai.rs`: one skill level), no multiplayer, no trade of cities or world maps (technology, diplomacy and the wonder screens were added after the MVP: `src/research.rs`, `src/diplomacy.rs`, `src/advisors.rs`, and for the animated leaderheads, their speech and the wonders window `src/leaders.rs`, `src/speech.rs`, `src/wonders.rs`), no worker improvements (D4), no save or load, no minimap, no combat targets (no huts, no barbarians), no main menu or settings.
 Proposed, not yet accepted: none.
 
 ## Settled decisions
@@ -307,7 +307,8 @@ support and upkeep"), mirrored in `reverse-engineering/rust/src/economy.rs`.
   checks it); a deficit is red. The city screen's food, shield and
   commerce rows read the same per-city yield functions.
 
-Deviations to revisit: Civ3 rolls a die to pay units before upkeep one turn
+Deviations to revisit (the sale price, growth caps, corruption and the
+happiness model have since landed, see the next section): Civ3 rolls a die to pay units before upkeep one turn
 in four and starts its sale at a random city, and the clone is
 deterministic; the sale price is the shield cost, since the binary's divisor
 is not recovered (`[0x9C7268]`); no Aqueduct or Hospital growth caps (no such
@@ -318,3 +319,50 @@ Verified: `cargo test` 162/162, `cargo build` clean; the reference crate's
 in 10 turns" with a 20-cell food box); and a scripted run (one city, eleven
 units by the game's own `report`) whose info box read `0 Gold (-7 per turn)`
 in red, then, after the turn disbanded a Warrior, `(-6 per turn)`.
+
+### Governments, happiness, research, upgrades and unit actions (landed)
+
+The rest of the Civ3 loop, each rule from the executable where
+`reverse-engineering/` read it, with the pure part in the `civ3mapgen` crate
+and the Bevy part a thin system over it. Tests: `cargo test --bin civ3-clone`
+(324) and the crate's `cargo test --lib` (592).
+
+- **City numbers** (`src/citycalc.rs`): one source for a city's food, shields,
+  commerce, science, upkeep, mood and disorder, from the tile yields under the
+  civ's government (Despotism/Anarchy penalty, Republic/Democracy trade bonus),
+  the city-centre rule (`yields.md` 4, with the Industrious/Commercial bonus),
+  corruption by distance from the Palace, the buildings in effect (wonders'
+  gifts, obsolescence), martial law, luxuries, and the Aqueduct/Hospital size
+  limits. `src/realm.rs` mirrors each civ's government, rates, known advances
+  and holdings for plain functions.
+- **Government** (`src/govern.rs`, `src/domestic.rs`): revolution with the
+  executable's anarchy length (halved for a Religious civ), the Domestic Advisor
+  (F1) with the tax/luxury/science rates and a government list, the computer's
+  score-based choice (favorite and shunned governments) and rate setting.
+- **Research** (`src/research.rs`): the 83 advances with the executable's cost,
+  contact discount and the computer's valuation; the whole roster gated by
+  advance, resource, race and obsolescence.
+- **Unit upgrades** (`src/upgrades.rs`, `civ3mapgen::upgrade`): `U` and `Shift+U`,
+  the furthest buildable successor, the price with Leonardo's halving, the
+  facility by domain, the AI's habit. Golden vectors U1-U9 are tests.
+- **Promotions**: the executable's die (`combat.md` 6.2), halved for a
+  Militaristic civ; a failed roll marks the unit for the turn.
+- **Unit actions** (`src/actions.rs`): Join City, Pillage, Automate (the AI's
+  worker brain run for the human's workers).
+- **Computer opponents**: roster-aware choice of defenders and attackers by
+  `PRTO` strategy bits, buildings by need (size limits, contentment, science,
+  trade), Wealth as the sink, gold upgrades.
+- **Traits** (`cities::price_for`): the half-price improvements of Militaristic,
+  Religious, Agricultural, Seafaring and Scientific civs, the Palace's price by
+  empire size, the centre bonuses, Religious anarchy.
+- **City defense**: Walls (towns only) and Civil Defense in the odds
+  (`combat::Hold`).
+
+Still HYPOTHESIS (flagged where they stand): corruption by distance, the
+computer's tax rates and upgrade reserve, the human's next government being
+chosen when a revolution starts, healing rates, the pillage order and rule,
+automation by the computer's own worker brain.
+
+Not landed: railroads, fortresses, pollution and plant-forest jobs (no art
+prepared), ranged and bombard combat, retreat, Great Library and Theory of
+Evolution, war weariness, the scientific leader, save/load.

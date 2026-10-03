@@ -8,18 +8,95 @@
 //!     -- civ3/civ3-gog/app/Conquests/conquests.biq > src/rules_data.rs
 //! ```
 use civ3_biq::Biq;
+use civ3_biq::sections::bldg::other_characteristics as oc;
+use civ3_biq::sections::prto::ability as ab;
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
 /// The civilizations the game plays, as `RACE.civilization_name` values.
 const CIVS: [&str; 4] = ["Japan", "Rome", "Egypt", "China"];
+/// The same list, for the unit-availability mask.
+const RACES_OF_CIVS: [&str; 4] = CIVS;
 
-/// The productions the game has, and the `PRTO`/`BLDG` name each maps to.
-const UNITS: [&str; 7] = ["Warrior", "Archer", "Spearman", "Horseman", "Scout", "Settler", "Worker"];
-const BLDGS: [&str; 3] = ["Barracks", "Granary", "Temple"];
+/// Improvements whose effects the game implements, by `BLDG` name. Every
+/// great wonder is playable besides `BLDG_NOT_PLAYABLE` (they all pay
+/// culture and the game's border and score rules use it).
+const BLDG_PLAYABLE: &[&str] = &[
+    "Barracks",
+    "Granary",
+    "Temple",
+    "Marketplace",
+    "Library",
+    "Courthouse",
+    "Walls",
+    "Aqueduct",
+    "Bank",
+    "Cathedral",
+    "University",
+    "Colosseum",
+    "Factory",
+    "Manufacturing Plant",
+    "Hydro Plant",
+    "Solar Plant",
+    "Hospital",
+    "Research Lab",
+    "Harbor",
+    "Stock Exchange",
+    "Civil Defense",
+    "Wealth",
+];
+/// Great wonders with effects the game cannot honor yet.
+const BLDG_NOT_PLAYABLE: &[&str] = &["The Manhattan Project", "The United Nations"];
+
+fn is_great_wonder(other: u32) -> bool {
+    other & oc::WONDER != 0
+}
 
 fn q(s: &str) -> String {
     format!("{s:?}")
+}
+
+/// `Three-Man Chariot` -> `ThreeManChariot`.
+fn ident(name: &str) -> String {
+    let mut out = String::new();
+    let mut up = true;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            if up {
+                out.extend(c.to_uppercase());
+            } else {
+                out.push(c);
+            }
+            up = false;
+        } else if c != '\'' {
+            up = true;
+        }
+    }
+    out
+}
+
+/// The `Art/Units` folder of a unit, when the install has one (Conquests
+/// folders win over the base game's).
+fn art_dir(name: &str) -> Option<String> {
+    let want = match name {
+        "Warrior" => "warrior",
+        "Chariot" => "chariot",
+        "Three-Man Chariot" => "Three Man Chariot",
+        "Chasqui Scout" => "Chasquis Scout",
+        "Modern Paratrooper" => "Paratrooper",
+        "Mech Infantry" => "Mech Infantry",
+        "Javelin Thrower" => "Javelin Thrower",
+        other => other,
+    };
+    for root in [
+        "civ3/civ3-gog/app/Conquests/Art/Units",
+        "civ3/civ3-gog/app/Art/Units",
+    ] {
+        if std::path::Path::new(root).join(want).is_dir() {
+            return Some(want.to_string());
+        }
+    }
+    None
 }
 
 fn main() -> ExitCode {
@@ -49,8 +126,11 @@ fn main() -> ExitCode {
     p!("//! re-running the generator and diffing.");
     p!("#![allow(clippy::type_complexity)]");
     p!("");
+    p!("use crate::cities::Production;");
+    p!("use crate::roster::{{BldgDef, UnitRow}};");
+    p!("use crate::units::UnitType;");
     p!("use civ3mapgen::research::{{Rules, TechRow}};");
-    p!("use civ3mapgen::research_ai::{{BldgRow, Tables, UnitRow}};");
+    p!("use civ3mapgen::research_ai::{{BldgRow, Tables, UnitRow as AiUnitRow}};");
     p!("");
 
     // --- advances -----------------------------------------------------------
@@ -82,6 +162,8 @@ fn main() -> ExitCode {
     p!("pub const MAX_RESEARCH_TIME: i32 = {};", g.max_research_time);
     p!("/// `RULE` minimum research time.");
     p!("pub const MIN_RESEARCH_TIME: i32 = {};", g.min_research_time);
+    p!("/// `RULE` upgrade cost: gold per shield of price difference (`unit-upgrades.md` 6).");
+    p!("pub const UPGRADE_COST: i32 = {};", g.upgrade_cost);
     p!("");
     p!("/// `ERAS` names.");
     p!("pub const ERA_NAMES: [&str; {}] = [", r.eras.len());
@@ -98,7 +180,7 @@ fn main() -> ExitCode {
 
     // --- valuation tables ---------------------------------------------------
     p!("const TFRM: [i32; {}] = {:?};", r.worker_jobs.len(), r.worker_jobs.iter().map(|j| j.required_tech).collect::<Vec<_>>());
-    p!("const GOOD: [i32; {}] = {:?};", r.goods.len(), r.goods.iter().map(|j| j.prerequisite).collect::<Vec<_>>());
+    p!("/// `GOOD.prerequisite` per `GOOD` row (strategic resources need it to be usable).\npub const GOOD: [i32; {}] = {:?};", r.goods.len(), r.goods.iter().map(|j| j.prerequisite).collect::<Vec<_>>());
     p!("const GOVT: [i32; {}] = {:?};", r.governments.len(), r.governments.iter().map(|j| j.prerequisite_tech).collect::<Vec<_>>());
     p!("const CTZN: [i32; {}] = {:?};", r.citizens.len(), r.citizens.iter().map(|j| j.prerequisite).collect::<Vec<_>>());
     p!("/// `(required_tech, available_to_civs, ai_strategies, needs_resource)`.");
@@ -185,24 +267,149 @@ fn main() -> ExitCode {
     p!("];");
     p!("");
 
-    // --- what unlocks the game's productions -------------------------------
-    p!("/// `(production, required advance)` of the units and buildings the game builds.");
-    p!("pub const UNLOCKS: [(&str, i32); {}] = [", UNITS.len() + BLDGS.len());
-    for n in UNITS {
-        let Some(u) = r.unit_types.iter().find(|u| u.name.text() == n) else {
-            eprintln!("no PRTO called {n}");
-            return ExitCode::from(1);
+    // --- the unit and building rosters -------------------------------------
+    let our_mask: u32 = RACES_OF_CIVS
+        .iter()
+        .map(|n| {
+            let i = r
+                .civilizations
+                .iter()
+                .position(|c| c.civilization_name.text() == *n)
+                .unwrap_or_else(|| panic!("no RACE called {n}"));
+            1u32 << i
+        })
+        .fold(0, |a, b| a | b);
+    let nu = r.unit_types.len();
+    let nb = r.buildings.len();
+    p!("/// Number of `PRTO` rows: `UnitType(i)` is row `i`, `Production(i)` the same unit.");
+    p!("pub const UNIT_COUNT: usize = {nu};");
+    p!("/// Number of `BLDG` rows: `Production(UNIT_COUNT + i)` is row `i`.");
+    p!("pub const BLDG_COUNT: usize = {nb};");
+    p!("");
+    p!("/// Every `PRTO` row.");
+    p!("pub static UNITS: [UnitRow; {nu}] = [");
+    let mut unit_names = vec![];
+    for (i, u) in r.unit_types.iter().enumerate() {
+        let name = u.name.text();
+        let art = art_dir(&name);
+        let abil = u.abilities;
+        let excluded = abil
+            & (ab::ARMY
+                | ab::LEADER
+                | ab::KING
+                | ab::FLAG_UNIT
+                | ab::CRUISE_MISSILE
+                | ab::NUCLEAR_WEAPON
+                | ab::TACTICAL_MISSILE)
+            != 0;
+        let playable = u.alt_strategy_of == -1
+            && u.unit_class == 0
+            && !excluded
+            && ((u.available_to_civs as u32) & our_mask != 0 || &*name == "Scout")
+            && art.is_some();
+        let sight = match (u.unit_class, &*name) {
+            (1, _) => 2,
+            (2, _) => 3,
+            (_, "Scout" | "Explorer" | "Chasqui Scout") => 2,
+            _ => 1,
         };
-        p!("    ({}, {}),", q(n), u.required_tech);
-    }
-    for n in BLDGS {
-        let Some(b) = r.buildings.iter().find(|b| b.name.text() == n) else {
-            eprintln!("no BLDG called {n}");
-            return ExitCode::from(1);
-        };
-        p!("    ({}, {}),", q(n), b.required_advance);
+        p!(
+            "    UnitRow {{ name: {}, art: {}, icon: {}, attack: {}, defense: {}, moves: {}, sight: {sight}, hp_bonus: {}, cost: {}, pop_cost: {}, tech: {}, upgrade_to: {}, resources: [{}, {}, {}], abilities: {:#x}, special: {:#x}, worker: {:#x}, bombard: {}, bomb_range: {}, rof: {}, class: {}, races: {:#x}, ai: {:#x}, zoc: {}, playable: {playable} }}, // {i}",
+            q(&name),
+            q(if playable { art.as_deref().unwrap_or("") } else { "" }),
+            u.icon,
+            u.attack,
+            u.defense,
+            u.movement,
+            u.hit_point_bonus,
+            u.shield_cost,
+            u.population_cost,
+            u.required_tech,
+            u.upgrade_to,
+            u.required_resource_1,
+            u.required_resource_2,
+            u.required_resource_3,
+            abil,
+            u.special_actions,
+            u.worker_actions,
+            u.bombard_strength,
+            u.bombard_range,
+            u.rate_of_fire,
+            u.unit_class,
+            u.available_to_civs as u32,
+            u.ai_strategies,
+            u.zone_of_control != 0,
+        );
+        unit_names.push((i, name, u.alt_strategy_of));
     }
     p!("];");
+    p!("");
+    p!("/// Every `BLDG` row.");
+    p!("pub static BLDGS: [BldgDef; {nb}] = [");
+    let mut bldg_names = vec![];
+    for (i, b) in r.buildings.iter().enumerate() {
+        let name = b.name.text();
+        let playable = BLDG_PLAYABLE.iter().any(|n| *n == &*name) || is_great_wonder(b.other_characteristics as u32) && !BLDG_NOT_PLAYABLE.iter().any(|n| *n == &*name);
+        p!(
+            "    BldgDef {{ name: {}, cost: {}, upkeep: {}, culture: {}, tech: {}, obsolete: {}, requires: {}, govt: {}, resources: [{}, {}], happy: {}, happy_all: {}, unhappy: {}, unhappy_all: {}, defense: {}, production: {}, grant_all: {}, grant_continent: {}, doubles: {}, flags: {:#x}, other: {:#x}, small: {:#x}, wonder: {:#x}, playable: {playable} }}, // {i}",
+            q(&name),
+            b.cost,
+            b.maintenance,
+            b.culture,
+            b.required_advance,
+            b.rendered_obsolete_by,
+            b.required_improvement,
+            b.required_government,
+            b.required_resource_1,
+            b.required_resource_2,
+            b.happy_faces,
+            b.happy_faces_all_cities,
+            b.unhappy_faces,
+            b.unhappy_faces_all_cities,
+            b.defense_bonus,
+            b.production,
+            b.gain_in_every_city,
+            b.gain_in_every_city_on_continent,
+            b.doubles_happiness_of,
+            b.improvement_flags as u32,
+            b.other_characteristics as u32,
+            b.small_wonder_flags as u32,
+            b.wonder_flags as u32,
+        );
+        bldg_names.push((i, name));
+    }
+    p!("];");
+    p!("");
+    p!("#[allow(non_upper_case_globals)]");
+    p!("impl UnitType {{");
+    let mut seen = std::collections::HashSet::new();
+    for (i, name, alt) in &unit_names {
+        let id = ident(name);
+        if *alt != -1 || !seen.insert(id.clone()) {
+            continue;
+        }
+        p!("    pub const {id}: UnitType = UnitType({i});");
+    }
+    p!("}}");
+    p!("");
+    p!("#[allow(non_upper_case_globals)]");
+    p!("impl Production {{");
+    let mut seen_p = std::collections::HashSet::new();
+    for (i, name, alt) in &unit_names {
+        let id = ident(name);
+        if *alt != -1 || !seen_p.insert(id.clone()) {
+            continue;
+        }
+        p!("    pub const {id}: Production = Production({i});");
+    }
+    for (i, name) in &bldg_names {
+        let id = ident(name);
+        if !seen_p.insert(id.clone()) {
+            continue;
+        }
+        p!("    pub const {id}: Production = Production({});", nu + i);
+    }
+    p!("}}");
     p!("");
 
     // --- constructors -------------------------------------------------------
@@ -226,7 +433,7 @@ fn main() -> ExitCode {
     p!("        good_prerequisite: GOOD.to_vec(),");
     p!("        units: PRTO");
     p!("            .iter()");
-    p!("            .map(|&(required_tech, available_to_civs, ai_strategies, needs_resource)| UnitRow {{");
+    p!("            .map(|&(required_tech, available_to_civs, ai_strategies, needs_resource)| AiUnitRow {{");
     p!("                required_tech,");
     p!("                available_to_civs,");
     p!("                ai_strategies,");

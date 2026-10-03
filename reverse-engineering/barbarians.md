@@ -398,15 +398,16 @@ Triggers (all **V** unless noted):
 | Trigger | Where | Condition |
 |---|---|---|
 | A unit arrives on the tile | `Unit::setPosition` `0x5BD220`, `0x5BDD6F..0x5BDDCE` | the destination cell has a camp and the unit's owner (`unit +0x34`) is not `0`; the player record of that owner collects. Then, if that player's difficulty index `Player +0x30` is `<= 4`, the achievement record bit `0x4000000` is set with `0x57CCD0(0xB71288 + 0xB0*owner; 0x4000000)` (`research.md` 7.4; pure bookkeeping), and for the local human's unit with byte `+0x38D` set the unit's activity record (`+0x280`) is reset by `0x403CC0(9)` (UI/automation, **O**). Any kind of unit counts, military or not, and `setPosition` is also the placement routine for newly created units. |
-| The tile's owner changes to a civ | `0x5D3AB0(map; x, y, newOwner)` at `0x5D3DED` | `newOwner > 0` and the tile has a camp: `0x565A00(Player[newOwner]; x, y)`. The same routine destroys a plain colony on the tile (`0x5DAA90`) and pops a goody hut (`0x55C6B0(Player[newOwner]; x, y, 0)`, which calls the hut resolver `0x55B8B0`); the arguments `(x, y, newOwner)` are **I** from the register use. `0x5D3AB0` is called only from `0x5D4830` (three sites: `0x5D4ADD`, `0x5D5194`, `0x5D5743`), which in turn is called from `0x4AE2A0`, `0x4AECC0` (the city destroyer), `0x4B0C60` and `0x5D25F0`; this tile-ownership (border) routine is not yet specified (listed in `STATUS.md`). |
+| The tile's owner changes to a civ | `0x5D3AB0(map; x, y, newOwner)` at `0x5D3DED` | `newOwner > 0` and the tile has a camp: `0x565A00(Player[newOwner]; x, y)`. The same routine destroys a plain colony on the tile (`0x5DAA90`) and pops a goody hut (`0x55C6B0(Player[newOwner]; x, y, 0)`, which calls the hut resolver `0x55B8B0`); the arguments `(x, y, newOwner)` are **I** from the register use. `0x5D3AB0` is called only from `0x5D4830` (three sites: `0x5D4ADD`, `0x5D5194`, `0x5D5743`), which in turn is called from `0x4AE2A0`, `0x4AECC0` (the city destroyer), `0x4B0C60` and `0x5D25F0`; both routines, the order of the side effects and the `newOwner > 0` gate are specified in `borders-culture.md` 5 and 6. |
 | A nuclear blast | `0x5B4070` at `0x5B4482..0x5B4505` | every camp inside the blast: bit cleared, `used[tribe] = 0`, tribe `-1`, **no gold**; the same blast also removes outposts (`0x5D6430`). |
 
 The same arrival code in `0x5BD220` also handles the other colony kinds (**V**, `0x5BDB90..0x5BDD6F`): an enemy
 unit stepping on an **airfield** of another owner triggers `0x5631B0(owner; colonyOwner, 2)`, and the airfield
 is captured (`0x5DB0D0(airfield; newOwner)`) when the entering player knows the technology at
 `[0x9C7324] + 0x45C`, otherwise destroyed (`0x5DAEC0(airfield; 1)`); on a **radar tower** or **outpost** of
-another owner it triggers `0x5631B0(owner; colonyOwner, 2)` and destroys them (`0x5D6360`, `0x5D6430`). These
-belong to the colony specification.
+another owner it triggers `0x5631B0(owner; colonyOwner, 2)` and destroys them (`0x5D6360`, `0x5D6430`). A **plain
+Colony** of another owner is destroyed on entry as well (`0x5BDB41`, with the `COLONY_BARBS` / `COLONY_CIV` popup for the
+local human). All of these are specified in `colonies.md` section 7.
 
 ## 9. Interactions specified elsewhere
 

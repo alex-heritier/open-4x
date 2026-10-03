@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::OnceLock;
 use std::fs;
 
 use crate::combat::Level;
@@ -11,110 +12,35 @@ use crate::improvements::{Work, action_slot};
 use crate::map::*;
 use crate::render::{RevealAll, sprite_z};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum UnitType {
-    Settler,
-    Worker,
-    Warrior,
-    Scout,
-    Archer,
-    Spearman,
-    Horseman,
+/// A unit type: the `PRTO` row of `conquests.biq` (see `roster.rs`). The
+/// named constants (`UnitType::Warrior`, ...) are generated with the rows.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UnitType(pub u8);
+
+impl std::fmt::Debug for UnitType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.row().name)
+    }
 }
 
 impl UnitType {
-    /// Every unit type, for loading art and iterating rules.
-    pub const ALL: [UnitType; 7] = [
-        UnitType::Settler,
-        UnitType::Worker,
-        UnitType::Warrior,
-        UnitType::Scout,
-        UnitType::Archer,
-        UnitType::Spearman,
-        UnitType::Horseman,
-    ];
-}
-
-pub struct UnitDef {
-    pub moves: u8,
-    pub sight: u8,
-    pub dir: &'static str,
-    pub name: &'static str,
-    /// Attack factor, `PRTO` dword +92 of `conquests.biq` (0 = noncombatant).
-    pub attack: i32,
-    /// Defense factor, `PRTO` dword +84 (0 = cannot defend, is captured).
-    pub defense: i32,
-    /// Extra hit points, `PRTO` dword +160 (only War Elephant and Ancient
-    /// Cavalry have one, so no unit here does).
-    pub hp_bonus: i32,
-}
-
-pub fn def(t: UnitType) -> UnitDef {
-    match t {
-        UnitType::Settler => UnitDef {
-            moves: 1,
-            sight: 1,
-            dir: "Settler",
-            name: "Settler",
-            attack: 0,
-            defense: 0,
-            hp_bonus: 0,
-        },
-        UnitType::Worker => UnitDef {
-            moves: 1,
-            sight: 1,
-            dir: "Worker",
-            name: "Worker",
-            attack: 0,
-            defense: 0,
-            hp_bonus: 0,
-        },
-        UnitType::Warrior => UnitDef {
-            moves: 1,
-            sight: 1,
-            dir: "warrior",
-            name: "Warrior",
-            attack: 1,
-            defense: 1,
-            hp_bonus: 0,
-        },
-        UnitType::Scout => UnitDef {
-            moves: 2,
-            sight: 2,
-            dir: "Scout",
-            name: "Scout",
-            attack: 0,
-            defense: 0,
-            hp_bonus: 0,
-        },
-        UnitType::Archer => UnitDef {
-            moves: 1,
-            sight: 1,
-            dir: "Archer",
-            name: "Archer",
-            attack: 2,
-            defense: 1,
-            hp_bonus: 0,
-        },
-        UnitType::Spearman => UnitDef {
-            moves: 1,
-            sight: 1,
-            dir: "Spearman",
-            name: "Spearman",
-            attack: 1,
-            defense: 2,
-            hp_bonus: 0,
-        },
-        UnitType::Horseman => UnitDef {
-            moves: 2,
-            sight: 1,
-            dir: "Horseman",
-            name: "Horseman",
-            attack: 2,
-            defense: 1,
-            hp_bonus: 0,
-        },
+    /// Every unit the game plays with, for loading art and iterating rules.
+    pub fn all() -> impl Iterator<Item = UnitType> {
+        (0..crate::roster::UNIT_COUNT as u8)
+            .map(UnitType)
+            .filter(|t| t.row().playable)
     }
+
+    /// The type's `PRTO` row.
+    pub fn row(self) -> &'static crate::roster::UnitRow {
+        crate::roster::unit(self.0 as usize)
+    }
+}
+
+pub type UnitDef = crate::roster::UnitRow;
+
+pub fn def(t: UnitType) -> &'static UnitDef {
+    t.row()
 }
 
 #[derive(Deserialize)]
@@ -162,51 +88,90 @@ pub struct UnitClipSet {
     pub clips: HashMap<String, Clip>,
 }
 
-#[derive(Resource, Default)]
+/// Unit art, loaded the first time a unit type is drawn: the roster has
+/// dozens of types and the clips are large, so only the types in play are
+/// ever read from disk.
+#[derive(Resource)]
 pub struct UnitArt {
-    pub sets: HashMap<UnitType, UnitClipSet>,
+    server: Option<AssetServer>,
+    sets: Vec<OnceLock<Option<UnitClipSet>>>,
+}
+
+impl Default for UnitArt {
+    fn default() -> Self {
+        Self {
+            server: None,
+            sets: (0..crate::roster::UNIT_COUNT).map(|_| OnceLock::new()).collect(),
+        }
+    }
 }
 
 impl UnitArt {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let mut sets = HashMap::new();
-        for t in UnitType::ALL {
-            let dir = def(t).dir;
-            let text = fs::read_to_string(format!("assets/gen/units/{dir}/manifest.json"))
-                .expect("run from the repo root after tools/prep_assets.py");
-            let raw: HashMap<String, ClipEntry> =
-                serde_json::from_str(&text).expect("unit manifest parses");
-            let mut clips = HashMap::new();
-            for (slot, e) in raw {
-                let strips: Vec<Handle<Image>> = (0..8)
-                    .map(|d| asset_server.load(format!("gen/units/{dir}/{slot}_d{d}.png")))
-                    .collect();
-                clips.insert(
-                    slot,
-                    Clip {
-                        strips: strips.try_into().unwrap(),
-                        frame_w: e.frame[0] as f32,
-                        frame_h: e.frame[1] as f32,
-                        frames: e.frames,
-                        ms: e.ms,
-                        feet: e.feet,
-                        sounds: e
-                            .sounds
-                            .iter()
-                            .map(|(at, wav)| {
-                                (*at, asset_server.load(format!("gen/audio/units/{dir}/{wav}")))
-                            })
-                            .collect(),
-                    },
-                );
-            }
-            sets.insert(t, UnitClipSet { clips });
+        Self { server: Some(asset_server.clone()), ..Self::default() }
+    }
+
+    /// Install a clip set by hand (tests).
+    #[cfg(test)]
+    pub fn insert(&mut self, t: UnitType, set: UnitClipSet) {
+        self.sets[t.0 as usize] = OnceLock::from(Some(set));
+    }
+
+    /// The clips of an installed set (tests).
+    #[cfg(test)]
+    pub fn clips_mut(&mut self, t: UnitType) -> &mut HashMap<String, Clip> {
+        &mut self.sets[t.0 as usize].get_mut().unwrap().as_mut().unwrap().clips
+    }
+
+    fn read(asset_server: &AssetServer, t: UnitType) -> Option<UnitClipSet> {
+        let dir = def(t).art;
+        if dir.is_empty() {
+            return None;
         }
-        Self { sets }
+        let text = match fs::read_to_string(format!("assets/gen/units/{dir}/manifest.json")) {
+            Ok(text) => text,
+            Err(e) => {
+                warn!("{}: no converted art ({e}); run tools/prep_assets.py", def(t).name);
+                return None;
+            }
+        };
+        let raw: HashMap<String, ClipEntry> =
+            serde_json::from_str(&text).expect("unit manifest parses");
+        let mut clips = HashMap::new();
+        for (slot, e) in raw {
+            let strips: Vec<Handle<Image>> = (0..8)
+                .map(|d| asset_server.load(format!("gen/units/{dir}/{slot}_d{d}.png")))
+                .collect();
+            clips.insert(
+                slot,
+                Clip {
+                    strips: strips.try_into().unwrap(),
+                    frame_w: e.frame[0] as f32,
+                    frame_h: e.frame[1] as f32,
+                    frames: e.frames,
+                    ms: e.ms,
+                    feet: e.feet,
+                    sounds: e
+                        .sounds
+                        .iter()
+                        .map(|(at, wav)| {
+                            (*at, asset_server.load(format!("gen/audio/units/{dir}/{wav}")))
+                        })
+                        .collect(),
+                },
+            );
+        }
+        Some(UnitClipSet { clips })
+    }
+
+    fn set(&self, t: UnitType) -> Option<&UnitClipSet> {
+        self.sets[t.0 as usize]
+            .get_or_init(|| self.server.as_ref().and_then(|s| Self::read(s, t)))
+            .as_ref()
     }
 
     pub fn clip(&self, t: UnitType, slot: &str) -> Option<&Clip> {
-        self.sets.get(&t)?.clips.get(slot)
+        self.set(t)?.clips.get(slot)
     }
 
     /// Where a clip's origin sits for facing `dir`: Civ3 frames pad their
@@ -239,6 +204,9 @@ pub struct Unit {
     /// Auto-exploring: each turn the unit routes itself toward unseen tiles
     /// until none are reachable. Any manual order cancels it.
     pub exploring: bool,
+    /// Automated worker: the unit picks its own jobs and routes
+    /// (`actions::auto_workers`). Any manual order cancels it.
+    pub auto: bool,
     /// Experience level: sets the hit points (`EXPR`).
     pub level: Level,
     /// Hit points lost, as the exe keeps them (`unit+0x4C`): the unit dies
@@ -249,6 +217,9 @@ pub struct Unit {
     pub rested: bool,
     /// Attacked this turn (a unit without Blitz may not attack twice).
     pub attacked: bool,
+    /// Failed a promotion roll this turn (status bit 2): the next victory
+    /// promotes without one (`combat.md` 6.2).
+    pub failed_promotion: bool,
 }
 
 impl Unit {
@@ -267,10 +238,12 @@ impl Unit {
             work: None,
             sentry: false,
             exploring: false,
+            auto: false,
             level: Level::Regular,
             damage: 0,
             rested: true,
             attacked: false,
+            failed_promotion: false,
         }
     }
 
@@ -413,6 +386,7 @@ pub fn order_move(map: &GameMap, u: &mut Unit, dest: (i32, i32)) {
     // sentry, and auto-explore.
     u.work = None;
     u.exploring = false;
+    u.auto = false;
     if (u.x, u.y) == dest {
         u.path.clear();
         return;
@@ -529,6 +503,7 @@ pub fn end_turn_units(
             if u.civ == civs.active {
                 u.moves = def(u.utype).moves * MP;
                 u.attacked = false;
+                u.failed_promotion = false;
                 // A unit that sat out its last turn heals; one that moved
                 // or fought did not.
                 if u.rested {
@@ -822,15 +797,8 @@ pub fn refresh_visibility(
 }
 
 fn defender_rank(t: UnitType) -> u8 {
-    match t {
-        UnitType::Spearman => 8,
-        UnitType::Archer => 7,
-        UnitType::Horseman => 6,
-        UnitType::Warrior => 5,
-        UnitType::Scout => 2,
-        UnitType::Settler => 1,
-        UnitType::Worker => 0,
-    }
+    let d = def(t);
+    (d.defense * 4 + d.attack.min(3)).clamp(0, 255) as u8
 }
 
 /// Display units with moves left first, then the selection and best defender.
@@ -882,7 +850,7 @@ pub fn selectable(u: &Unit) -> bool {
 /// A unit "requires attention": it can act and has no standing order
 /// (fortify, sentry, explore, a worker job or a go-to route).
 pub fn needs_orders(u: &Unit) -> bool {
-    selectable(u) && !u.fortified && !u.exploring && u.work.is_none() && u.path.is_empty()
+    selectable(u) && !u.fortified && !u.exploring && !u.auto && u.work.is_none() && u.path.is_empty()
 }
 
 /// Keep the selection while the unit can still act (or is still walking a

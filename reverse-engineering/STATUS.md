@@ -29,6 +29,12 @@ consequences of the text, not captured runs, unless a document says otherwise).
 | [`city-turn.md`](city-turn.md) | the city turn sequencer, production system, building completion | 11 |
 | [`hurry.md`](hurry.md) | hurrying production, citizen removal | 10 |
 | [`city-buildings.md`](city-buildings.md) | adding and removing a building (`0x4ACF40`), culture per building | 10 |
+| [`trade-network.md`](trade-network.md) | the trade network: road/air/water connection matrix, incremental update, resource availability and supply records, resource-deal writers | 10 |
+| [`unit-upgrades.md`](unit-upgrades.md) | unit upgrades: eligibility, replacement type, price, execution, Upgrade All, the AI helper (its callers are open) | 11 |
+| [`borders-culture.md`](borders-culture.md) | culture accumulation and level, ring enumerator, tile-owner recompute, tie-break, owner-write side effects, empire culture total, the culture flip | 11 |
+| [`disease.md`](disease.md) | city disease: terrain tile count, the literal tech-8 cure, infection and cure rolls, citizen loss | 7 |
+| [`worker-jobs.md`](worker-jobs.md) | worker jobs: job rows, order tokens, gates, work rate, completion effects (automation and movement excluded) | 12 |
+| [`colonies.md`](colonies.md) | colonies, airfields, radar towers, outposts: pools, site gate, creators, vision footprints, destroyers, transfer, all triggers, bombard destruction | 11 |
 
 ## 2. Specified earlier, not re-audited to the same standard
 
@@ -48,7 +54,7 @@ Known corrections are applied where a later document found one (for example `eco
 | document | state |
 |---|---|
 | [`ai.md`](ai.md) | census, gates and several routines; the planners, the scoring body and the purchase logic are open (section 4 of this file) |
-| [`workers.md`](workers.md) | leads only (string-negative verdict, goto enumerator, struct head) |
+| [`workers.md`](workers.md) | leads only (string-negative verdict, goto enumerator, struct head); the job rules themselves are in `worker-jobs.md`, worker **automation** is open |
 | [`multiplayer.md`](multiplayer.md) | mode global and gates only; the message protocol is not specified |
 | [`editor.md`](editor.md) | tag census and dispatch map; the binding step is open |
 | [`ui.md`](ui.md), [`graphics-terrain.md`](graphics-terrain.md), [`graphics-units.md`](graphics-units.md), [`graphics-city.md`](graphics-city.md), [`blending.md`](blending.md), [`media.md`](media.md) | art tables and renderer facts, not gameplay rules |
@@ -58,22 +64,22 @@ Known corrections are applied where a later document found one (for example `eco
 
 Listed with the entry points already identified. Each is a piece of rule logic a port must reproduce.
 
-1. **Trade network**: the connection matrix maintainers `0x57E450`, `0x57D980`, `0x57F360`, `0x580540`,
-   `0x57E320`, `0x57DEF0`, `0x57DE90` (`primitives.md` 4.3 has the queries only).
-2. **Unit upgrades**, **espionage** (spy missions, the Intelligence Agency), and **leaders and armies** beyond
-   the pieces in `research.md` 10.2 and `buildable.md`.
-3. **Worker jobs, unit movement, zones of control, line of sight / vision** (`workers.md` has leads).
-4. **Borders and tile ownership**: `0x5D4830`, `0x5D25F0`, `0x5D3AB0`, `0x5B5600`, `0x5B5790`; the culture flip
-   `0x4B28D0`; the culture-accumulate body of `0x4B2680` is described only in `economy.md` (child-reported).
-5. **Colonies**: the destroyers `0x5DAA90`, `0x5DAEC0` and their tails.
-6. **AI decision making**: planners `0x446840`, `0x445EA0`, `0x449B20`, `0x4F4F70`, `0x441F80`; the scoring body
+1. **Espionage** (spy missions, the Intelligence Agency) and **leaders and armies** beyond the pieces in
+   `research.md` 10.2 and `buildable.md`. (Trade network: `trade-network.md`; unit upgrades: `unit-upgrades.md`.)
+2. **Unit movement, zones of control, line of sight / vision, worker automation** (`workers.md` has leads); the path
+   finder `0x580540` modes other than the network fill and the unit step test `0x57F360` are not specified. (Worker
+   job rules: `worker-jobs.md`; the vision footprints of colonies are in `colonies.md` section 5; unit and city vision
+   sources are open.)
+3. ~~Colonies~~ Specified in `colonies.md` (open items there, section 11). Borders and the culture flip:
+   `borders-culture.md`.
+4. **AI decision making**: planners `0x446840`, `0x445EA0`, `0x449B20`, `0x4F4F70`, `0x441F80`; the scoring body
    `0x442480`; the item choosers `0x42C8A0`, `0x42BEE0`; the purchase logic `0x433CD0`, `0x433EE0`; the category
    masks.
-7. **Disease** `0x4B45A0`; the screens `0x5CF640`, `0x5A3910`; the Golden Age start is in `research.md` section 11
-   only.
-8. **Whole-game persistence**: that a loaded save reproduces every field the specifications read (`savegame.md`
+5. **The screens** `0x5CF640`, `0x5A3910`; the Golden Age start is in `research.md` section 11 only. (Disease:
+   `disease.md`.)
+6. **Whole-game persistence**: that a loaded save reproduces every field the specifications read (`savegame.md`
    has the grammar and the open list).
-9. **Everything behind a virtual call that no document resolved**: each document's "O" list names its own.
+7. **Everything behind a virtual call that no document resolved**: each document's "O" list names its own.
 
 ## 5. Open consistency items between documents
 

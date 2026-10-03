@@ -604,7 +604,8 @@ Return 0 at once if `P.slot == 0` (barbarians) or `P` is not in play. Unless `fo
 2. The slot bit is cleared in `[0xA526C0]` (in-play); the human bit in `[0xA526BC]` is cleared too, remembering
    "was human" for the respawn decision; the race bit is cleared in `[0xA526C4]`.
 3. Cities with population are destroyed (`0x4AECC0(city, 1)`); four per-owner object lists (owner byte
-   `+0x2C`; routines `0x5DAA90`, `0x5DAEC0`, `0x5DB990`, `0x5DB4E0`; identity **O**) are emptied.
+   `+0x2C`; routines `0x5DAA90`, `0x5DAEC0`, `0x5DB990`, `0x5DB4E0`; these are the Colony, Airfield, Radar Tower and
+Outpost pools, `colonies.md` 7 row `0x568950`) are emptied.
 4. Units: units with the Flag ability (`0x0D`) are kept; every other unit that still has hit points (or is an
    Army) is killed through `0x5BBBC0(u, killer, 0, 0, 1, 0, 0, 0)`. If anything changed `0x57E450(0xB72888; 0)`
    (trade network recompute) runs.

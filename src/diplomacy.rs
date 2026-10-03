@@ -600,11 +600,11 @@ pub fn people(civ: usize) -> String {
     if adj.ends_with("ese") { adj.to_string() } else { format!("{adj}s") }
 }
 
-/// The attitude word the Foreign Advisor shows (*clone* labels for the
-/// binary's five classes).
+/// The attitude word the Foreign Advisor shows: the five `#ANGER_AT_LEVELS`
+/// of `diplomacy.txt` for the binary's five classes.
 pub fn attitude_label(class: i32) -> &'static str {
     match class {
-        0 => "Worshipful",
+        0 => "Gracious",
         1 => "Polite",
         2 => "Cautious",
         3 => "Annoyed",
@@ -903,6 +903,10 @@ mod tests {
 
     fn city(civ: usize, x: i32, y: i32) -> City {
         City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ,
             name: format!("C{civ}"),
             x,
@@ -1290,7 +1294,7 @@ mod tests {
     #[test]
     fn attitude_words_cover_every_class() {
         let words: Vec<_> = (0..5).map(attitude_label).collect();
-        assert_eq!(words, ["Worshipful", "Polite", "Cautious", "Annoyed", "Furious"]);
+        assert_eq!(words, ["Gracious", "Polite", "Cautious", "Annoyed", "Furious"]);
         assert_eq!(verdict_text(Verdict::Accept), "We have a deal.");
         assert_eq!(clause_text(&Clause::Gold(7)), "7 gold");
         assert_eq!(clause_text(&Clause::Embargo(3)), "Embargo of the Egyptians");

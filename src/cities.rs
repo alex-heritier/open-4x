@@ -15,155 +15,207 @@ use std::fs;
 
 use crate::audio::{self, GameAudio};
 use crate::civs::{CIV_COUNT, CIVS, CivilizationEnded, Civilizations};
-use crate::economy::{self, despotism, food_box, granary_keep};
+use crate::citycalc;
+use crate::economy::{self, food_box, granary_keep};
 use crate::features::{MessageBoard, post};
-use crate::improvements::{ImprovementArt, can_irrigate, tile_overlays};
+use crate::improvements::{ImprovementArt, tile_overlays};
 use crate::map::*;
 use crate::render::{RevealAll, sprite_z};
 use crate::splash::SplashUp;
 use crate::tiles::TileArt;
+use crate::roster::{self, BLDG_COUNT, BldgDef, UNIT_COUNT};
 use crate::units::{self, Selected, Unit, UnitArt, UnitType};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Production {
-    Warrior,
-    Scout,
-    Settler,
-    Worker,
-    Archer,
-    Spearman,
-    Horseman,
-    Barracks,
-    Granary,
-    Temple,
+/// Something a city can build: a unit (`PRTO` row `i`) or an improvement
+/// (`BLDG` row `i - UNIT_COUNT`). The named constants (`Production::Temple`,
+/// `Production::Warrior`, ...) are generated with the rows (`rules_data.rs`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Production(pub u16);
+
+impl std::fmt::Debug for Production {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+/// A civ's `RACE` trait mask (`rules_data::RACES`).
+pub fn traits(civ: usize) -> u32 {
+    crate::rules_data::RACES[civ].traits
+}
+
+/// Shields `p` costs the civ (`0x569FE0`, `economy.md`).
+pub fn price_for(civ: usize, p: Production) -> u16 {
+    let Some(b) = p.bldg() else { return p.cost() };
+    let matched = civ3mapgen::economy::trait_discount(b.other, traits(civ));
+    let palace = (b.flags & roster::imp::CENTER_OF_EMPIRE != 0).then(|| {
+        let cities = crate::realm::read(civ, |r| r.cities).max(1) as i32;
+        civ3mapgen::economy::palace_cost_factor(cities, crate::govern::WORLD_BASE)
+    });
+    civ3mapgen::economy::improvement_cost(b.cost, 10, matched, palace).clamp(1, i32::from(u16::MAX)) as u16
 }
 
 impl Production {
-    pub const ALL: [Production; 10] = [
-        Production::Warrior,
-        Production::Archer,
-        Production::Spearman,
-        Production::Horseman,
-        Production::Scout,
-        Production::Settler,
-        Production::Worker,
-        Production::Barracks,
-        Production::Granary,
-        Production::Temple,
-    ];
+    /// Every unit and improvement the game builds, units first.
+    pub fn all() -> impl Iterator<Item = Production> {
+        (0..(UNIT_COUNT + BLDG_COUNT) as u16)
+            .map(Production)
+            .filter(|p| p.playable())
+    }
 
-    pub fn cost(self) -> u8 {
-        match self {
-            Production::Warrior => 10,
-            Production::Scout => 20,
-            Production::Settler => 30,
-            Production::Worker => 10,
-            Production::Archer => 20,
-            Production::Spearman => 20,
-            Production::Horseman => 30,
-            Production::Barracks => 30,
-            Production::Granary => 40,
-            Production::Temple => 30,
-        }
+    /// Dense index for bit sets and tables.
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub fn from_building_row(row: usize) -> Production {
+        Production((UNIT_COUNT + row) as u16)
+    }
+
+    pub fn from_unit(t: UnitType) -> Production {
+        Production(t.0 as u16)
     }
 
     pub fn unit(self) -> Option<UnitType> {
-        match self {
-            Production::Warrior => Some(UnitType::Warrior),
-            Production::Scout => Some(UnitType::Scout),
-            Production::Settler => Some(UnitType::Settler),
-            Production::Worker => Some(UnitType::Worker),
-            Production::Archer => Some(UnitType::Archer),
-            Production::Spearman => Some(UnitType::Spearman),
-            Production::Horseman => Some(UnitType::Horseman),
-            _ => None,
-        }
+        ((self.0 as usize) < UNIT_COUNT).then_some(UnitType(self.0 as u8))
     }
 
     pub fn is_building(self) -> bool {
-        self.unit().is_none()
+        self.0 as usize >= UNIT_COUNT
+    }
+
+    /// The `BLDG` row of an improvement.
+    pub fn bldg(self) -> Option<&'static BldgDef> {
+        self.building_row().map(roster::bldg)
+    }
+
+    /// Index of the improvement's `BLDG` row.
+    pub fn building_row(self) -> Option<usize> {
+        (self.0 as usize).checked_sub(UNIT_COUNT)
+    }
+
+    /// The game offers it for building (it has art or implemented effects).
+    pub fn playable(self) -> bool {
+        match self.unit() {
+            Some(t) => t.row().playable,
+            None => self.bldg().is_some_and(|b| b.playable),
+        }
+    }
+
+    /// Shields a human pays (`city-turn.md` section 4).
+    pub fn cost(self) -> u16 {
+        match self.unit() {
+            Some(t) => t.row().cost.max(1) as u16,
+            None => self.bldg().map_or(1, |b| b.shields() as u16),
+        }
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            Production::Warrior => "Warrior",
-            Production::Scout => "Scout",
-            Production::Settler => "Settler",
-            Production::Worker => "Worker",
-            Production::Archer => "Archer",
-            Production::Spearman => "Spearman",
-            Production::Horseman => "Horseman",
-            Production::Barracks => "Barracks",
-            Production::Granary => "Granary",
-            Production::Temple => "Temple",
+        match self.unit() {
+            Some(t) => t.row().name,
+            None => self.bldg().map_or("?", |b| b.name),
         }
     }
 
     /// One-line effect blurb for the build list.
-    pub fn blurb(self) -> &'static str {
-        match self {
-            Production::Warrior => "Attack 1, Defense 1",
-            Production::Scout => "Moves 2, sees 2",
-            Production::Settler => "Founds a city (costs 2 pop)",
-            Production::Worker => "Builds improvements",
-            Production::Archer => "Attack 2, Defense 1",
-            Production::Spearman => "Attack 1, Defense 2",
-            Production::Horseman => "Attack 2, Defense 1, Moves 2",
-            Production::Barracks => "Trains veteran land units",
-            Production::Granary => "Keeps half the food box on growth",
-            Production::Temple => "Adds culture; 1 upkeep",
+    pub fn blurb(self) -> String {
+        if let Some(t) = self.unit() {
+            let r = t.row();
+            let mut s = if r.bombard > 0 && r.attack == 0 {
+                format!("Bombard {}x{} range {}, Defense {}", r.bombard, r.rof, r.bomb_range, r.defense)
+            } else if r.attack == 0 && r.defense == 0 {
+                String::new()
+            } else {
+                format!("Attack {}, Defense {}", r.attack, r.defense)
+            };
+            if r.moves > 1 || s.is_empty() {
+                if !s.is_empty() {
+                    s.push_str(", ");
+                }
+                s.push_str(&format!("Moves {}", r.moves));
+            }
+            if r.pop_cost > 0 {
+                s.push_str(&format!(", costs {} pop", r.pop_cost));
+            }
+            return s;
         }
+        let Some(b) = self.bldg() else { return String::new() };
+        let mut parts: Vec<String> = vec![];
+        let f = b.flags;
+        if b.happy > 0 {
+            parts.push(format!("+{} content", b.happy));
+        }
+        if b.happy_all > 0 {
+            parts.push(format!("+{} content everywhere", b.happy_all));
+        }
+        if f & roster::imp::VETERAN_GROUND_UNITS != 0 {
+            parts.push("veteran land units".into());
+        }
+        if f & roster::imp::KEEPS_FOOD != 0 {
+            parts.push("keeps half the food box".into());
+        }
+        if f & roster::imp::RESEARCH_BONUS != 0 {
+            parts.push("+50% science".into());
+        }
+        if f & roster::imp::TAX_BONUS != 0 {
+            parts.push("+50% tax".into());
+        }
+        if f & roster::imp::REDUCES_CORRUPTION != 0 {
+            parts.push("less corruption".into());
+        }
+        if f & roster::imp::ALLOWS_SIZE_LEVEL_2 != 0 {
+            parts.push("size above 8".into());
+        }
+        if f & roster::imp::ALLOWS_SIZE_LEVEL_3 != 0 {
+            parts.push("size above 16".into());
+        }
+        if f & roster::imp::INCREASES_FOOD_IN_WATER != 0 {
+            parts.push("+1 food at sea".into());
+        }
+        if f & roster::imp::CAPITALIZATION != 0 {
+            parts.push("shields become gold".into());
+        }
+        if b.production > 0 {
+            parts.push(format!("+{}% shields", b.production * 25));
+        }
+        if b.defense > 0 {
+            parts.push(format!("+{}% defense", b.defense));
+        }
+        if b.is_great_wonder() {
+            parts.push("wonder".into());
+        }
+        if parts.is_empty() && b.culture > 0 {
+            parts.push(format!("{} culture", b.culture));
+        }
+        parts.join(", ")
     }
 
-    /// Gold upkeep per turn (Civ3: one for each of these).
+    /// Gold upkeep per turn.
     pub fn upkeep(self) -> u8 {
-        match self {
-            Production::Barracks | Production::Granary | Production::Temple => 1,
-            _ => 0,
-        }
+        self.bldg().map_or(0, |b| b.upkeep as u8)
     }
 
-    /// Culture per turn (Civ3's per-building values).
+    /// Culture per turn.
     pub fn culture(self) -> u32 {
-        match self {
-            Production::Temple => 2,
-            _ => 0,
-        }
+        self.bldg().map_or(0, |b| b.culture as u32)
     }
 
-    /// Happy faces the building adds, for the improvements list.
+    /// Content faces the building adds in its own city.
     pub fn happy(self) -> u8 {
-        match self {
-            Production::Temple => 1,
-            _ => 0,
-        }
+        self.bldg().map_or(0, |b| b.happy as u8)
     }
 
-    pub fn icon(self) -> &'static str {
-        match self {
-            Production::Warrior => "gen/ui/uniticon_warrior.png",
-            Production::Scout => "gen/ui/uniticon_scout.png",
-            Production::Settler => "gen/ui/uniticon_settler.png",
-            Production::Worker => "gen/ui/uniticon_worker.png",
-            Production::Archer => "gen/ui/uniticon_archer.png",
-            Production::Spearman => "gen/ui/uniticon_spearman.png",
-            Production::Horseman => "gen/ui/uniticon_horseman.png",
-            _ => "",
-        }
+    /// Cell of the unit icon sheet (`gen/ui/unit_icons.png`, 14 columns of
+    /// 32-px icons on a 33-px grid with a 1-px frame).
+    pub fn unit_icon_rect(self) -> Option<Rect> {
+        let i = self.unit()?.row().icon.max(0) as f32;
+        let (c, r) = (i % 14.0, (i / 14.0).floor());
+        let (x, y) = (1.0 + c * 33.0, 1.0 + r * 33.0);
+        Some(Rect::new(x, y, x + 32.0, y + 32.0))
     }
 
-    /// Row of `buildings-small.png`: 32-px icons on a 33-px grid (1-px green
-    /// lines), with a label column and a header row; row 0 is the Palace.
-    pub fn building_row(self) -> Option<u32> {
-        match self {
-            Production::Barracks => Some(1),
-            Production::Granary => Some(2),
-            Production::Temple => Some(3),
-            _ => None,
-        }
-    }
-
-    /// Sprite rect inside `buildings-small.png`: the ancient-era column.
+    /// Sprite rect inside `buildings-small.png`: 32-px icons on a 33-px grid
+    /// (1-px green lines), with a label column and a header row; row `i` is
+    /// `BLDG` row `i`, the ancient-era column.
     pub fn building_rect(self) -> Option<Rect> {
         let y = 33.0 + self.building_row()? as f32 * 33.0;
         Some(Rect::new(33.0, y, 65.0, y + 32.0))
@@ -180,16 +232,57 @@ pub struct City {
     pub size: u8,
     /// Food stored toward the next citizen, always below `food_box(size)`.
     pub food: u8,
-    pub shields: u8,
+    pub shields: u16,
     pub production: Production,
     /// Items queued after the current build.
     pub queue: Vec<Production>,
     pub buildings: Vec<Production>,
+    /// Improvements this city gets from wonders (Pyramids' Granary, ...):
+    /// they work like real ones but cost no upkeep and cannot be sold.
+    pub gifts: Vec<Production>,
+    /// Borders a water body of any size (Harbor, Offshore Platform).
+    pub coastal: bool,
+    /// On or next to a river (Hydro Plant).
+    pub river: bool,
     pub worked: HashSet<(i32, i32)>,
     /// Culture accumulated: border levels are powers of ten (`economy.md`).
     pub culture: u32,
     /// Turn the city was founded (the clone has no calendar).
     pub founded: u32,
+    /// Turns the city has been in civil disorder (0 when calm).
+    pub unrest: u8,
+}
+
+impl City {
+    /// Shields `p` costs this city's civ (`0x569FE0`): a building is halved
+    /// once for a civ whose trait matches it (Religious Temples, ...), and
+    /// the Palace is dearer the bigger the empire.
+    pub fn price(&self, p: Production) -> u16 {
+        price_for(self.civ, p)
+    }
+
+    /// A size-1 city building a Warrior, with nothing worked yet.
+    pub fn new(civ: usize, name: impl Into<String>, x: i32, y: i32) -> City {
+        City {
+            civ,
+            name: name.into(),
+            x,
+            y,
+            size: 1,
+            food: 0,
+            shields: 0,
+            production: Production::Warrior,
+            queue: vec![],
+            buildings: vec![],
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            worked: HashSet::new(),
+            culture: 0,
+            founded: 1,
+            unrest: 0,
+        }
+    }
 }
 
 /// How many names each civ has taken from its own list.
@@ -325,21 +418,10 @@ pub fn prune_worked(city: &mut City, taken: &HashSet<(i32, i32)>) -> bool {
     city.worked.len() != before
 }
 
-/// What a worked tile gives its city under despotism: food, shields and
-/// commerce, each trimmed by `economy::despotism`.
-pub fn worked_yields(t: &Tile) -> (u8, u8, u8) {
-    let (food, shields) = yields(t);
-    (
-        despotism(food),
-        despotism(shields),
-        despotism(tile_commerce(t)),
-    )
-}
-
 /// The governor's ranking of a tile: food first, then shields, then
-/// commerce, as the city would get them.
-fn tile_rank(map: &GameMap, tile: &(i32, i32)) -> (u8, u8, u8) {
-    worked_yields(&map.tiles[map.idx(tile.0, tile.1)])
+/// commerce, as the city would get them under its civ's government.
+fn tile_rank(map: &GameMap, city: &City, tile: &(i32, i32)) -> (i32, i32, i32) {
+    citycalc::tile_yields(map, city, tile.0, tile.1)
 }
 
 /// Governor: work the best `size` tiles, food first then shields.
@@ -357,7 +439,7 @@ pub fn governor_fill(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>
         let worst = city
             .worked
             .iter()
-            .min_by_key(|t| tile_rank(map, t))
+            .min_by_key(|t| tile_rank(map, city, t))
             .copied();
         if let Some(w) = worst {
             city.worked.remove(&w);
@@ -368,7 +450,7 @@ pub fn governor_fill(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>
         .filter(|t| !city.worked.contains(t) && can_work(map, taken, *t, city.civ))
         .collect();
     free.sort_by_key(|t| {
-        let (f, s, c) = tile_rank(map, t);
+        let (f, s, c) = tile_rank(map, city, t);
         (
             std::cmp::Reverse(f),
             std::cmp::Reverse(s),
@@ -435,7 +517,7 @@ pub fn toggle_worked(
         let worst = city
             .worked
             .iter()
-            .min_by_key(|t| tile_rank(map, t))
+            .min_by_key(|t| tile_rank(map, city, t))
             .copied();
         if let Some(worst) = worst {
             city.worked.remove(&worst);
@@ -445,34 +527,19 @@ pub fn toggle_worked(
     true
 }
 
-/// City center yield: the tile's own yield, irrigated for free when the
-/// land could be irrigated, and at least one shield (Civ3's center rules).
-pub fn center_yields(map: &GameMap, x: i32, y: i32) -> (u8, u8) {
-    let mut t = map.tiles[map.idx(x, y)].clone();
-    if can_irrigate(map, x, y) {
-        t.irrigation = true;
-        t.mine = false;
-    }
-    let (f, s) = yields(&t);
-    (f, s.max(1))
-}
-
-/// Gross (food, shields) from the center plus worked tiles. Worked tiles
-/// pay the despotism penalty; the center does not (`economy::despotism`).
+/// Gross (food, shields) from the center plus worked tiles, under the
+/// owner's government (`citycalc::gross`).
 pub fn city_yields(map: &GameMap, city: &City) -> (u8, u8) {
-    let (mut food, mut shields) = center_yields(map, city.x, city.y);
-    for (x, y) in city.worked.iter() {
-        let (f, s, _) = worked_yields(&map.tiles[map.idx(*x, *y)]);
-        food += f;
-        shields += s;
-    }
-    (food, shields)
+    let (food, shields, _) = citycalc::gross(map, city);
+    (food.clamp(0, 255) as u8, shields.clamp(0, 255) as u8)
 }
 
-/// (net food after feeding 2 per pop, shields per turn).
+/// (food stored or lost each turn, shields added to the box each turn):
+/// the city's real numbers, after waste, the buildings' multiplier and
+/// civil disorder (`citycalc::totals`).
 pub fn city_income(map: &GameMap, city: &City) -> (i16, u8) {
-    let (food, shields) = city_yields(map, city);
-    (food as i16 - 2 * city.size as i16, shields)
+    let t = citycalc::totals(map, city);
+    (t.surplus as i16, t.shields.clamp(0, 255) as u8)
 }
 
 /// Commerce a tile carries: water yields it, a road adds one. Rivers and
@@ -487,28 +554,9 @@ pub fn tile_commerce(t: &Tile) -> u8 {
 }
 
 /// Gross commerce: the center always gives one (Civ3's city tile), plus
-/// every worked tile, trimmed by the despotism penalty.
+/// every worked tile.
 pub fn city_commerce(map: &GameMap, city: &City) -> u8 {
-    let center = tile_commerce(&map.tiles[map.idx(city.x, city.y)]).max(1);
-    city.worked
-        .iter()
-        .map(|(x, y)| worked_yields(&map.tiles[map.idx(*x, *y)]).2)
-        .fold(center, u8::saturating_add)
-}
-
-/// Tax, science and luxury rates in tenths: Civ3's default 50/50/0.
-pub const TAX_RATE: u8 = 5;
-pub const SCI_RATE: u8 = 5;
-pub const LUX_RATE: u8 = 0;
-
-/// (tax, science, luxury) from gross commerce. Each share rounds down, so
-/// the remainder is lost, as Civ3 does (27 -> 13/13/0).
-pub fn commerce_split(commerce: u8) -> (u8, u8, u8) {
-    (
-        commerce * TAX_RATE / 10,
-        commerce * SCI_RATE / 10,
-        commerce * LUX_RATE / 10,
-    )
+    citycalc::gross(map, city).2.clamp(0, 255) as u8
 }
 
 /// Culture per turn: the Palace's belongs to the capital.
@@ -517,9 +565,9 @@ pub fn culture_per_turn(city: &City, capital: bool) -> u32 {
 }
 
 /// Gold a city pays its civ's treasury each turn: the tax share of its
-/// commerce.
+/// commerce, with its buildings' multipliers and any Wealth.
 pub fn city_tax(map: &GameMap, city: &City) -> u32 {
-    commerce_split(city_commerce(map, city)).0 as u32
+    citycalc::totals(map, city).tax.max(0) as u32
 }
 
 /// Culture and tax a city adds when its civ's turn ends. Everything comes
@@ -652,6 +700,13 @@ pub enum CityEvent {
     Built(Production),
     /// A finished Settler waits for the city to reach `SETTLER_MIN_SIZE`.
     TooSmall,
+    /// The city is in civil disorder this turn.
+    Disorder,
+    /// The disorder is over.
+    Calm,
+    /// The food box is full but the city cannot grow without an Aqueduct
+    /// (or a Hospital); announced once.
+    Blocked,
 }
 
 impl City {
@@ -662,11 +717,40 @@ impl City {
     /// Items offered in the build list: what the civ has the advance for,
     /// except buildings the city already owns.
     pub fn buildable(&self) -> Vec<Production> {
-        Production::ALL
-            .iter()
-            .copied()
-            .filter(|p| !(p.is_building() && self.has(*p)) && crate::research::can_build(self.civ, *p))
+        Production::all()
+            .filter(|&p| self.can_build_here(p))
             .collect()
+    }
+
+    /// Can this city build `p` now: the civ may (advance, race, resources,
+    /// no wonder built elsewhere) and the city's own conditions hold
+    /// (`buildable.md` 2 and 3.1).
+    pub fn can_build_here(&self, p: Production) -> bool {
+        if !crate::research::can_build(self.civ, p) {
+            return false;
+        }
+        let Some(b) = p.bldg() else {
+            return true;
+        };
+        if self.has(p) || self.granted(p) {
+            return false;
+        }
+        if b.requires >= 0 && !self.has(Production::from_building_row(b.requires as usize)) {
+            return false;
+        }
+        if b.flags & roster::imp::MUST_BE_NEAR_WATER != 0 && !self.coastal {
+            return false;
+        }
+        if b.flags & roster::imp::MUST_BE_NEAR_RIVER != 0 && !self.river {
+            return false;
+        }
+        true
+    }
+
+    /// An improvement the city has without building it: the gifts of
+    /// wonders. Set by the turn code each turn (`granted`).
+    pub fn granted(&self, p: Production) -> bool {
+        self.gifts.contains(&p)
     }
 
     /// Change the current build. Switching between unit and building
@@ -716,12 +800,27 @@ pub fn process_city_turn(
     taken: &HashSet<(i32, i32)>,
 ) -> Vec<CityEvent> {
     let mut events = vec![];
-    let (net_food, shields) = city_income(map, city);
-    let food = city.food as i16 + net_food;
-    if food >= food_box(city.size) as i16 {
+    let totals = citycalc::totals(map, city);
+    if totals.disorder {
+        city.unrest = city.unrest.saturating_add(1);
+        events.push(CityEvent::Disorder);
+    } else if city.unrest > 0 {
+        city.unrest = 0;
+        events.push(CityEvent::Calm);
+    }
+    let food = city.food as i16 + totals.surplus as i16;
+    let full = food_box(city.size) as i16;
+    if food >= full && citycalc::growth_blocked(city) {
+        // A town or city at its limit keeps a full box until the improvement
+        // that lifts the limit arrives (`0x4B1DC0`).
+        if (city.food as i16) < full {
+            events.push(CityEvent::Blocked);
+        }
+        city.food = full as u8;
+    } else if food >= full {
         // The box that filled is the old size's, and a Granary keeps half
         // of that one; without it the box empties and the overflow is lost.
-        city.food = if city.has(Production::Granary) {
+        city.food = if citycalc::has_flag(city, roster::imp::KEEPS_FOOD) {
             granary_keep(city.size)
         } else {
             0
@@ -739,19 +838,25 @@ pub fn process_city_turn(
     } else {
         city.food = food as u8;
     }
+    // Wealth turns the shields into gold (paid with the taxes), and the
+    // box never fills.
+    if city.production.bldg().is_some_and(|b| b.flags & roster::imp::CAPITALIZATION != 0) {
+        return events;
+    }
+    let shields = totals.shields.max(0);
     let before = city.shields;
-    city.shields = city.shields.saturating_add(shields);
-    if city.shields >= city.production.cost() {
+    city.shields = city.shields.saturating_add(shields as u16);
+    if city.shields >= city.price(city.production) {
         let done = city.production;
         if done == Production::Settler && city.size < SETTLER_MIN_SIZE {
             // Held at full cost; say so once, when the box first fills.
-            city.shields = done.cost();
-            if before < done.cost() {
+            city.shields = city.price(done);
+            if before < city.price(done) {
                 events.push(CityEvent::TooSmall);
             }
             return events;
         }
-        city.shields -= done.cost();
+        city.shields -= city.price(done);
         if let Some(unit) = done.unit() {
             if done == Production::Settler {
                 city.size -= 2;
@@ -928,8 +1033,8 @@ const TEXT_PAD: f32 = 7.0;
 /// over the tile's lower half, as in Civ3.
 const LABEL_DROP: f32 = 28.0;
 
-fn ceil_div(a: u8, b: u8) -> u8 {
-    (a + b - 1) / b
+fn ceil_div(a: impl Into<u16>, b: impl Into<u16>) -> u16 {
+    a.into().div_ceil(b.into().max(1))
 }
 
 /// Map label, Civ3's two lines: the city name with turns to grow, and the
@@ -945,7 +1050,7 @@ fn banner_text(map: &GameMap, city: &City) -> String {
     let prod = if shields == 0 {
         format!("{} : --", city.production.name())
     } else {
-        let left = city.production.cost().saturating_sub(city.shields);
+        let left = city.price(city.production).saturating_sub(city.shields);
         format!("{} : {}", city.production.name(), ceil_div(left, shields))
     };
     format!("{name}\n{prod}")
@@ -1164,19 +1269,16 @@ pub fn found_city(
         // Civ3 cities carry a road on their tile.
         map.tiles[i].road = true;
         let mut city = City {
-            civ,
-            name: next_name(&mut f.names, civ),
-            x,
-            y,
-            size: 1,
-            food: 0,
-            shields: 0,
-            production: Production::Warrior,
-            queue: vec![],
-            buildings: vec![],
-            worked: HashSet::new(),
-            culture: 0,
+            coastal: map
+                .neighbors(x, y)
+                .iter()
+                .any(|&(nx, ny)| map.get(nx, ny).is_some_and(|t| crate::improvements::is_water_base(t.base))),
+            river: map
+                .neighbors(x, y)
+                .iter()
+                .any(|&(nx, ny)| map.get(nx, ny).is_some_and(|t| t.relief == Relief::Mountain)),
             founded: f.turn.0,
+            ..City::new(civ, next_name(&mut f.names, civ), x, y)
         };
         // The new city draws a border too, so tiles another civ already owns
         // are out of its reach from the first turn.
@@ -1223,6 +1325,7 @@ pub fn end_turn_cities(
     mut prompts: ResMut<crate::production_prompt::ProductionPrompts>,
     mut view: ResMut<CityView>,
     mut menu: ResMut<BuildMenu>,
+    mut rng: ResMut<crate::combat::CombatRng>,
 ) {
     // One civ's cities grow, build and pay taxes when that civ hands the
     // hotseat over; the other civs' cities wait for their own turn.
@@ -1235,6 +1338,17 @@ pub fn end_turn_cities(
         // The computer's books are none of the human's business: whatever
         // it would announce is dropped.
         let quiet = crate::civs::is_ai(civ).then(|| (board.text.clone(), board.ttl));
+        // A revolution runs down a turn at a time; its last turn hands the
+        // civ the government it chose.
+        if crate::realm::write(civ, |r| r.tick()) {
+            post(
+                &mut board,
+                format!(
+                    "The revolution is over. Our people now live under {}.",
+                    crate::realm::GOVT_NAMES[crate::realm::read(civ, |r| r.govt)]
+                ),
+            );
+        }
         // The outgoing civ's city screen closes with its turn.
         if view
             .0
@@ -1281,7 +1395,7 @@ pub fn end_turn_cities(
                 && let Ok((_, mut city)) = cities.get_mut(e)
             {
                 let sold = city.buildings.remove(i);
-                gold = gold.saturating_add(economy::sale_price(sold));
+                gold = gold.saturating_add(economy::sale_price(civ, sold));
                 post(
                     &mut board,
                     format!(
@@ -1315,6 +1429,11 @@ pub fn end_turn_cities(
             let Ok((_, mut city)) = cities.get_mut(e) else {
                 continue;
             };
+            // The computer's governor keeps order by putting citizens on
+            // entertainment; the human sees the disorder and decides.
+            if crate::civs::is_ai(civ) {
+                citycalc::keep_order(&map, &mut city);
+            }
             let completed = city.production;
             for event in process_city_turn(&map, &mut city, &taken) {
                 match event {
@@ -1326,9 +1445,7 @@ pub fn end_turn_cities(
                         }
                         // Barracks turn out Veterans (`Civilopedia`
                         // #BLDG_Barracks), but only soldiers have a rank.
-                        let level = if units::def(unit).attack > 0
-                            && city.buildings.contains(&Production::Barracks)
-                        {
+                        let level = if citycalc::trains_veterans(&city, unit) {
                             crate::combat::Level::Veteran
                         } else {
                             crate::combat::Level::Regular
@@ -1359,6 +1476,25 @@ pub fn end_turn_cities(
                         }
                         post(&mut board, format!("{} completes {}.", city.name, p.name()));
                     }
+                    CityEvent::Disorder => {
+                        post(&mut board, format!("Civil disorder in {}! Lower the taxes, add entertainers or build temples.", city.name));
+                        let capital_here = capital.0[civ] == Some(e);
+                        if city.unrest > 1
+                            && let Some(lost) = citycalc::riot(&mut rng.0, &city, capital_here)
+                        {
+                            let sold = city.buildings.remove(lost);
+                            post(&mut board, format!("Rioters destroy the {} in {}!", sold.name(), city.name));
+                        }
+                    }
+                    CityEvent::Calm => post(&mut board, format!("Order is restored in {}.", city.name)),
+                    CityEvent::Blocked => post(
+                        &mut board,
+                        format!(
+                            "{} needs an {} to grow any larger.",
+                            city.name,
+                            if city.size as i32 >= civ3mapgen::economy::CITY_MAX { "Hospital" } else { "Aqueduct" }
+                        ),
+                    ),
                     CityEvent::TooSmall => post(
                         &mut board,
                         format!(
@@ -1568,14 +1704,21 @@ pub(crate) enum ScreenButton {
     Queue(Production),
     Unqueue(usize),
     CloseMenu,
+    /// Turn the build list's page by this many.
+    MenuPage(i32),
     /// Step to the previous or next city, as the top bar's arrows do.
     PrevCity,
     NextCity,
 }
 
-/// Whether the build-list modal is open over the city screen.
+/// Whether the build-list modal is open over the city screen, and which
+/// page of it.
 #[derive(Resource, Default)]
-pub struct BuildMenu(pub bool);
+pub struct BuildMenu(pub bool, pub usize);
+
+/// Rows on one page of the build list: the roster has dozens of items, and
+/// ten fit the 768-px screen.
+const MENU_ROWS: usize = 10;
 
 fn txt(
     parent: &mut ChildSpawnerCommands<'_>,
@@ -1611,11 +1754,18 @@ fn build_icon(assets: &AssetServer, p: Production) -> ImageNode {
             n.rect = Some(rect);
             n
         }
-        None => ImageNode::new(assets.load(p.icon())),
+        None => unit_icon_node(assets, p),
     }
 }
 
-fn turns_for(cost: u8, have: u8, rate: u8) -> String {
+/// The 32-px icon of a unit production, cropped from the Conquests sheet.
+fn unit_icon_node(assets: &AssetServer, p: Production) -> ImageNode {
+    let mut n = ImageNode::new(assets.load("gen/ui/unit_icons.png"));
+    n.rect = p.unit_icon_rect();
+    n
+}
+
+fn turns_for(cost: u16, have: u16, rate: u8) -> String {
     if rate == 0 {
         "never".into()
     } else {
@@ -1629,8 +1779,12 @@ fn build_menu(
     font: &Handle<Font>,
     city: &City,
     rate: u8,
+    page: usize,
 ) {
-    let items = city.buildable();
+    let all = city.buildable();
+    let pages = all.len().div_ceil(MENU_ROWS).max(1);
+    let page = page.min(pages - 1);
+    let items: Vec<Production> = all.iter().skip(page * MENU_ROWS).take(MENU_ROWS).copied().collect();
     let ink = Color::srgb(0.95, 0.9, 0.7);
     content
         .spawn((
@@ -1654,6 +1808,30 @@ fn build_menu(
                 10.0,
                 ink,
             );
+            if pages > 1 {
+                txt(m, font, &format!("{}/{}", page + 1, pages), 16.0, 428.0, 12.0, ink);
+                for (label, left, delta) in [("<", 370.0, -1), (">", 470.0, 1)] {
+                    m.spawn((
+                        Button,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(left),
+                            top: Val::Px(8.0),
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.35, 0.22, 0.1)),
+                        ScreenButton::MenuPage(delta),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new(label),
+                            TextFont { font: font.clone(), font_size: 16.0, ..default() },
+                            TextColor(ink),
+                        ));
+                    });
+                }
+            }
             m.spawn((
                 Button,
                 Node {
@@ -1707,8 +1885,8 @@ fn build_menu(
                         "{}{}   cost {}  ({})",
                         p.name(),
                         mark,
-                        p.cost(),
-                        turns_for(p.cost(), have, rate)
+                        city.price(*p),
+                        turns_for(city.price(*p), have, rate)
                     ),
                     17.0,
                     64.0,
@@ -1718,7 +1896,7 @@ fn build_menu(
                 txt(
                     m,
                     font,
-                    p.blurb(),
+                    &p.blurb(),
                     13.0,
                     64.0,
                     top + 24.0,
@@ -2008,11 +2186,11 @@ fn yield_node(cluster: &mut ChildSpawnerCommands<'_>, ctx: &ClusterCtx, rx: i32,
         return;
     }
     let (f, s, c) = if center {
-        let (f, s) = center_yields(map, nx, ny);
-        (f, s, tile_commerce(&map.tiles[map.idx(nx, ny)]).max(1))
+        citycalc::center(map, city)
     } else {
-        worked_yields(&map.tiles[map.idx(nx, ny)])
+        citycalc::tile_yields(map, city, nx, ny)
     };
+    let (f, s, c) = (f.max(0) as u8, s.max(0) as u8, c.max(0) as u8);
     let icons: Vec<u32> = std::iter::repeat_n(ICON_FOOD, f as usize)
         .chain(std::iter::repeat_n(ICON_SHIELD, s as usize))
         .chain(std::iter::repeat_n(ICON_COMMERCE, c as usize))
@@ -2040,7 +2218,7 @@ fn yield_node(cluster: &mut ChildSpawnerCommands<'_>, ctx: &ClusterCtx, rx: i32,
     }
 }
 
-fn build_city_screen(commands: &mut Commands, ctx: &ClusterCtx, p: &PanelCtx, menu: bool) {
+fn build_city_screen(commands: &mut Commands, ctx: &ClusterCtx, p: &PanelCtx, menu: bool, page: usize) {
     let ClusterCtx {
         assets, map, city, ..
     } = *ctx;
@@ -2148,7 +2326,7 @@ fn build_city_screen(commands: &mut Commands, ctx: &ClusterCtx, p: &PanelCtx, me
                 }
                 // modal build list
                 if menu {
-                    build_menu(content, assets, &font, city, shields_pt);
+                    build_menu(content, assets, &font, city, shields_pt, page);
                 }
             });
         });
@@ -2197,10 +2375,6 @@ const INK: Color = PARCHMENT_TEXT;
 const INK_SOFT: Color = Color::srgb(0.42, 0.30, 0.16);
 const LABEL_TEXT: f32 = 14.0;
 const SMALL_TEXT: f32 = 13.0;
-/// The clone has no government choice: every civ reads despotism on the
-/// city screen's top bar.
-const GOVERNMENT: &str = "DESPOTISM";
-
 /// `CityIcons.png` cell indices, as used across the city screen.
 const ICON_COMMERCE: u32 = 2;
 const ICON_SHIELD: u32 = 4;
@@ -2320,20 +2494,6 @@ fn icons_left(
     }
 }
 
-/// The 32-px build and garrison icon of a unit type.
-fn unit_icon(t: UnitType) -> String {
-    let stem = match t {
-        UnitType::Warrior => "warrior",
-        UnitType::Scout => "scout",
-        UnitType::Settler => "settler",
-        UnitType::Worker => "worker",
-        UnitType::Archer => "archer",
-        UnitType::Spearman => "spearman",
-        UnitType::Horseman => "horseman",
-    };
-    format!("gen/ui/uniticon_{stem}.png")
-}
-
 #[derive(Component)]
 pub(crate) struct PanelButton {
     stem: &'static str,
@@ -2402,8 +2562,10 @@ fn city_panel(
     let (net_food, shields_pt) = city_income(map, city);
     let (food, _) = city_yields(map, city);
     let box_size = food_box(city.size);
-    let commerce = city_commerce(map, city);
-    let (tax, sci, lux) = commerce_split(commerce);
+    let totals = citycalc::totals(map, city);
+    let (tax, sci, lux) = (totals.tax, totals.sci, totals.lux);
+    let commerce = tax + sci + lux;
+    let rates = crate::realm::rates(city.civ);
     let culture_pt = culture_per_turn(city, p.capital);
     let (culture_cur, culture_next) = culture_thresholds(city.culture);
 
@@ -2463,7 +2625,8 @@ fn city_panel(
     let gold = format!("{} GOLD", p.treasury);
     let pop = format!("POP {}", city.size);
     let date = format!("Turn {}", p.turn);
-    for (i, s) in [gold.as_str(), GOVERNMENT, pop.as_str(), date.as_str()]
+    let government = crate::realm::GOVT_NAMES[crate::realm::read(city.civ, |r| r.govt)].to_uppercase();
+    for (i, s) in [gold.as_str(), government.as_str(), pop.as_str(), date.as_str()]
         .iter()
         .enumerate()
     {
@@ -2622,16 +2785,18 @@ fn city_panel(
                 TileCluster,
             ));
         });
-    // Citizens: the ones on worked tiles first, then idle entertainers.
-    let busy = city.worked.len().min(city.size as usize);
-    for i in 0..(city.size as usize).min(16) {
-        let head = if i < busy {
-            "gen/ui/citizen.png"
-        } else {
-            "gen/ui/entertainer.png"
-        };
+    // Citizens by mood (happy, content, unhappy), then the entertainers.
+    let m = totals.mood;
+    let kinds = std::iter::repeat_n(Color::srgb(0.75, 1.0, 0.55), m.happy as usize)
+        .chain(std::iter::repeat_n(Color::WHITE, m.content as usize))
+        .chain(std::iter::repeat_n(Color::srgb(1.0, 0.55, 0.5), m.unhappy as usize))
+        .map(|tint| ("gen/ui/citizen.png", tint))
+        .chain(std::iter::repeat_n(("gen/ui/entertainer.png", Color::WHITE), m.entertainers as usize));
+    for (i, (head, tint)) in kinds.take(16).enumerate() {
+        let mut head = ImageNode::new(assets.load(head));
+        head.color = tint;
         content.spawn((
-            ImageNode::new(assets.load(head)),
+            head,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(176.0 + i as f32 * 52.0),
@@ -2641,6 +2806,9 @@ fn city_panel(
                 ..default()
             },
         ));
+    }
+    if totals.disorder {
+        txt(content, font, "CIVIL DISORDER", 20.0, 176.0, 494.0, Color::srgb(0.75, 0.1, 0.05));
     }
     content.spawn((
         ImageNode::new(assets.load("gen/ui/TopFadeBar.png")),
@@ -2791,7 +2959,7 @@ fn city_panel(
     txt(content, font, "GARRISON", LABEL_TEXT, 300.0, 716.0, INK);
     for (i, u) in p.garrison.iter().take(3).enumerate() {
         content.spawn((
-            ImageNode::new(assets.load(unit_icon(*u))),
+            unit_icon_node(assets, Production::from_unit(*u)),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(300.0 + i as f32 * 40.0),
@@ -2913,9 +3081,9 @@ fn city_panel(
     // Each row leads with its own badge and counts its points in coins,
     // flasks or faces.
     for (row, (amount, rate, icon_cell, point)) in [
-        (tax, TAX_RATE, ICON_TREASURY, ICON_COMMERCE),
-        (sci, SCI_RATE, ICON_FLASK, ICON_FLASK),
-        (lux, LUX_RATE, ICON_HAPPY, ICON_HAPPY),
+        (tax, rates.tax, ICON_TREASURY, ICON_COMMERCE),
+        (sci, rates.sci, ICON_FLASK, ICON_FLASK),
+        (lux, rates.lux, ICON_HAPPY, ICON_HAPPY),
     ]
     .iter()
     .enumerate()
@@ -2925,7 +3093,7 @@ fn city_panel(
             content,
             assets,
             *point,
-            *amount as u32,
+            (*amount).max(0) as u32,
             19.3,
             720.0,
             y + 4.0,
@@ -2978,7 +3146,7 @@ fn city_panel(
             INK,
         );
     }
-    for i in 0..city.production.cost() as usize {
+    for i in 0..city.price(city.production) as usize {
         let tint = if i < city.shields as usize {
             Color::srgb(1.0, 0.82, 0.36)
         } else {
@@ -3041,7 +3209,7 @@ fn city_panel(
                 TextLayout::new_with_justify(Justify::Center),
             ));
         });
-    let left = city.production.cost().saturating_sub(city.shields);
+    let left = city.price(city.production).saturating_sub(city.shields);
     let prod_in = if shields_pt == 0 {
         "never".to_string()
     } else {
@@ -3152,7 +3320,7 @@ pub fn maintain_city_screen(
             h ^= (treasury.0[c.civ] as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             h ^= (garrison.len() as u64) << 32;
             for u in &garrison {
-                h = h.rotate_left(7) ^ (*u as u64);
+                h = h.rotate_left(7) ^ u64::from(u.0);
             }
             h ^= ((strategic.len() as u64) << 16) ^ luxuries.len() as u64;
             h
@@ -3186,7 +3354,7 @@ pub fn maintain_city_screen(
         strategic: &strategic,
         luxuries: &luxuries,
     };
-    build_city_screen(&mut commands, &ctx, &panel, menu.0);
+    build_city_screen(&mut commands, &ctx, &panel, menu.0, menu.1);
 }
 
 pub fn city_screen_input(
@@ -3288,8 +3456,15 @@ pub fn city_screen_buttons(
                 views.0 = None;
                 menu.0 = false;
             }
-            ScreenButton::Change => menu.0 = true,
+            ScreenButton::Change => *menu = BuildMenu(true, 0),
             ScreenButton::CloseMenu => menu.0 = false,
+            ScreenButton::MenuPage(d) => {
+                let pages = views
+                    .0
+                    .and_then(|e| cities.get(e).ok())
+                    .map_or(1, |(_, c)| c.buildable().len().div_ceil(MENU_ROWS).max(1));
+                menu.1 = (menu.1 as i32 + d).clamp(0, pages as i32 - 1) as usize;
+            }
             // The arrows walk the active civ's own cities, never another
             // hotseat player's.
             ScreenButton::PrevCity | ScreenButton::NextCity => {
@@ -3318,7 +3493,12 @@ pub fn city_screen_buttons(
                     continue;
                 };
                 match button {
-                    ScreenButton::Governor => governor_assign(&map, &mut city, &taken),
+                    ScreenButton::Governor => {
+                        governor_assign(&map, &mut city, &taken);
+                        // The governor also puts the unhappy to entertain
+                        // when the city would riot.
+                        citycalc::keep_order(&map, &mut city);
+                    }
                     ScreenButton::Pick(p) => {
                         city.change_build(*p);
                         menu.0 = false;
@@ -3360,6 +3540,10 @@ mod tests {
     fn test_city_of(map: &GameMap, civ: usize) -> City {
         let (x, y) = map.start;
         let mut city = City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ,
             name: CIVS[civ].city_names[0].to_string(),
             x,
@@ -3411,6 +3595,10 @@ mod tests {
             seed: 1,
         };
         let mut city = City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ: 0,
             name: "Kyoto".to_string(),
             x: 1,
@@ -3443,15 +3631,15 @@ mod tests {
         // What the city gets from a tile is the despotism-trimmed yield,
         // and the governor takes food first, then shields.
         let got_by = |tile: &(i32, i32)| {
-            let (f, s, _) = worked_yields(&map.tiles[map.idx(tile.0, tile.1)]);
+            let (f, s, _) = citycalc::tile_yields(&map, &city, tile.0, tile.1);
             (f, s)
         };
-        let mut best: Vec<(u8, u8)> = radius_tiles(&map, city.x, city.y)
+        let mut best: Vec<(i32, i32)> = radius_tiles(&map, city.x, city.y)
             .iter()
             .map(got_by)
             .collect();
         best.sort_by_key(|&(f, s)| (std::cmp::Reverse(f), std::cmp::Reverse(s)));
-        let mut got: Vec<(u8, u8)> = city.worked.iter().map(got_by).collect();
+        let mut got: Vec<(i32, i32)> = city.worked.iter().map(got_by).collect();
         got.sort_by_key(|&(f, s)| (std::cmp::Reverse(f), std::cmp::Reverse(s)));
         assert_eq!(got, best[..3]);
     }
@@ -3498,6 +3686,47 @@ mod tests {
     }
 
     #[test]
+    fn a_full_town_without_an_aqueduct_waits_and_says_so_once() {
+        crate::realm::reset();
+        let map = flat_land();
+        let mut city = test_city(&map);
+        city.size = 6;
+        governor_fill(&map, &mut city, &none());
+        city.food = food_box(6) - 1;
+        let events = process_city_turn(&map, &mut city, &none());
+        assert!(events.iter().any(|e| matches!(e, CityEvent::Blocked)));
+        assert_eq!((city.size, city.food), (6, food_box(6)));
+        // Announced once: the box stays full and the city stays small.
+        let events = process_city_turn(&map, &mut city, &none());
+        assert!(!events.iter().any(|e| matches!(e, CityEvent::Blocked | CityEvent::Grew)));
+        assert_eq!(city.size, 6);
+        // The Aqueduct lets it grow on the next turn.
+        city.buildings.push(Production::Aqueduct);
+        let events = process_city_turn(&map, &mut city, &none());
+        assert!(events.iter().any(|e| matches!(e, CityEvent::Grew)));
+        assert_eq!(city.size, 7);
+    }
+
+    #[test]
+    fn a_city_of_unhappy_citizens_riots_and_calms_when_they_are_born_content() {
+        crate::realm::reset();
+        let map = flat_land();
+        let mut city = test_city(&map);
+        city.size = 4;
+        governor_fill(&map, &mut city, &none());
+        city.shields = 5;
+        crate::realm::write(0, |r| r.born_content = 0);
+        let events = process_city_turn(&map, &mut city, &none());
+        assert!(events.iter().any(|e| matches!(e, CityEvent::Disorder)));
+        assert_eq!(city.shields, 5, "a city in disorder builds nothing");
+        assert_eq!(city.unrest, 1);
+        crate::realm::write(0, |r| r.born_content = 4);
+        let events = process_city_turn(&map, &mut city, &none());
+        assert!(events.iter().any(|e| matches!(e, CityEvent::Calm)));
+        assert_eq!(city.unrest, 0);
+    }
+
+    #[test]
     fn production_completes_and_settler_costs_pop() {
         let map = test_map();
         let mut city = test_city(&map);
@@ -3515,7 +3744,7 @@ mod tests {
         );
         // surplus shields carry into the next build
         let (_, income) = city_income(&map, &city);
-        assert_eq!(city.shields, income);
+        assert_eq!(city.shields, income as u16);
         // settler costs 2 pop
         city.production = Production::Settler;
         city.size = 4;
@@ -3672,7 +3901,7 @@ mod tests {
         // pick the worst tile by hand, then grow
         let worst = radius_tiles(&map, city.x, city.y)
             .into_iter()
-            .min_by_key(|t| tile_rank(&map, t))
+            .min_by_key(|t| tile_rank(&map, &city, t))
             .unwrap();
         city.worked.clear();
         assert!(toggle_worked(&map, &mut city, worst, &none()));
@@ -3687,25 +3916,42 @@ mod tests {
     }
 
     #[test]
-    fn center_yield_is_irrigated_and_at_least_one_shield() {
+    fn the_city_center_follows_the_exe_whatever_the_terrain() {
+        // `yields.md` 4.1 to 4.3: two food whatever the terrain (no free
+        // irrigation), the size class adds shields and commerce, and the
+        // center never gives less than one shield and one commerce.
         let mut map = test_map();
-        // an irrigable grassland tile: center gets +1 food and 1 shield
-        let spot = (0..map.h)
-            .flat_map(|y| (0..map.w).map(move |x| (x, y)))
-            .find(|&(x, y)| {
-                map.get(x, y).unwrap().base == Base::Grassland
-                    && map.get(x, y).unwrap().resource.is_none()
-                    && can_irrigate(&map, x, y)
-            })
-            .expect("irrigable grassland");
-        assert_eq!(center_yields(&map, spot.0, spot.1), (3, 1));
-        // no free irrigation without water access
-        for (nx, ny) in map.neighbors(spot.0, spot.1) {
-            let i = map.idx(nx, ny);
-            map.tiles[i].base = Base::Grassland;
+        let mut city = test_city(&map);
+        city.worked.clear();
+        let i = map.idx(city.x, city.y);
+        for (base, relief) in [
+            (Base::Grassland, Relief::Flat),
+            (Base::Desert, Relief::Flat),
+            (Base::Plains, Relief::Hill),
+        ] {
+            map.tiles[i].base = base;
+            map.tiles[i].relief = relief;
+            map.tiles[i].cover = Cover::Bare;
+            map.tiles[i].resource = None;
             map.tiles[i].irrigation = false;
+            map.tiles[i].mine = false;
+            map.tiles[i].road = false;
+            let (f, s, c) = citycalc::center(&map, &city);
+            assert_eq!(f, 2, "{base:?} {relief:?}");
+            assert!(s >= 1 && c >= 1, "{base:?} {relief:?}: {s} shields {c} commerce");
         }
-        assert_eq!(center_yields(&map, spot.0, spot.1), (2, 1));
+        // The class adds shields and commerce: a Grassland center has none
+        // of its own, so a town and a city both sit on the minimum of one.
+        map.tiles[i].base = Base::Grassland;
+        map.tiles[i].relief = Relief::Flat;
+        let at = |size: u8| {
+            let mut c = city.clone();
+            c.size = size;
+            citycalc::center(&map, &c)
+        };
+        assert_eq!(at(1), (2, 1, 1));
+        assert_eq!(at(7), (2, 1, 1));
+        assert_eq!(at(13), (2, 2, 2));
     }
 
     #[test]
@@ -3720,21 +3966,8 @@ mod tests {
         assert_eq!(f1, f0);
         assert!(s1 > s0);
         city.worked.clear();
-        assert_eq!(
-            city_yields(&map, &city),
-            center_yields(&map, city.x, city.y)
-        );
-    }
-
-    #[test]
-    fn commerce_splits_like_civ3() {
-        // Each share rounds down and the remainder is lost, as Civ3's own
-        // screen shows: 27 commerce becomes 13 tax and 13 science.
-        assert_eq!(commerce_split(27), (13, 13, 0));
-        assert_eq!(commerce_split(20), (10, 10, 0));
-        // Below ten nothing reaches the treasury yet.
-        assert_eq!(commerce_split(9), (4, 4, 0));
-        assert_eq!(commerce_split(0), (0, 0, 0));
+        let (f, s, _) = citycalc::center(&map, &city);
+        assert_eq!(city_yields(&map, &city), (f as u8, s as u8));
     }
 
     #[test]
@@ -3998,6 +4231,13 @@ mod tests {
     fn sized_city(map: &GameMap, size: u8) -> City {
         let mut city = test_city(map);
         city.size = size;
+        // Towns past six need an Aqueduct, cities past twelve a Hospital.
+        if size >= 6 {
+            city.buildings.push(Production::Aqueduct);
+        }
+        if size >= 12 {
+            city.buildings.push(Production::Hospital);
+        }
         governor_fill(map, &mut city, &none());
         assert_eq!(city_income(map, &city).0, 2, "flat land nets two at {size}");
         city
@@ -4074,7 +4314,7 @@ mod tests {
     }
 
     #[test]
-    fn worked_tiles_pay_despotism_but_the_city_center_does_not() {
+    fn worked_tiles_pay_despotism_and_the_center_is_fixed_at_two() {
         let mut map = flat_land();
         let (x, y) = map.start;
         let near = (map.wrap_x(x + 1), y);
@@ -4084,21 +4324,28 @@ mod tests {
         }
         let tile = map.tiles[map.idx(near.0, near.1)].clone();
         assert_eq!(yields(&tile).0, 3);
-        assert_eq!(center_yields(&map, x, y).0, 3, "the center keeps all three");
-        assert_eq!(worked_yields(&tile).0, 2, "a worked tile loses one");
+        assert_eq!(citycalc::center(&map, &test_city(&map)).0, 2, "the center is fixed at two");
+        let city = test_city(&map);
+        let worked = |t: &Tile| {
+            let mut m = map.clone();
+            let i = m.idx(near.0, near.1);
+            m.tiles[i] = t.clone();
+            citycalc::tile_yields(&m, &city, near.0, near.1)
+        };
+        assert_eq!(worked(&tile).0, 2, "a worked tile loses one");
         // A road makes coast three commerce; worked, it gives two.
         let mut coast = tile.clone();
         coast.base = Base::Coast;
         coast.irrigation = false;
         coast.road = true;
         assert_eq!(tile_commerce(&coast), 3);
-        assert_eq!(worked_yields(&coast).2, 2);
+        assert_eq!(worked(&coast).2, 2);
         // Small yields pass untouched.
-        assert_eq!(worked_yields(&map.tiles[map.idx(x, y + 1)]), (2, 0, 0));
-        // The city sums the trimmed amounts.
+        assert_eq!(citycalc::tile_yields(&map, &city, x, y + 1), (2, 0, 0));
+        // The city sums the center's two and the trimmed worked tile.
         let mut city = test_city(&map);
         city.worked = HashSet::from([near]);
-        assert_eq!(city_yields(&map, &city).0, 3 + 2);
+        assert_eq!(city_yields(&map, &city).0, 2 + 2);
     }
 
     /// Civ 0's city at the start and civ 1's city two tiles east: each
@@ -4260,6 +4507,7 @@ mod tests {
         app.init_resource::<crate::production_prompt::ProductionPrompts>();
         app.init_resource::<CityView>();
         app.init_resource::<BuildMenu>();
+        app.insert_resource(crate::combat::CombatRng(crate::rng::MapRng::new(1)));
         app.add_systems(Update, end_turn_cities);
         let city = app.world_mut().spawn(city).id();
         (app, city)
@@ -4312,7 +4560,7 @@ mod tests {
             .iter(app.world())
             .filter(|u| u.utype == UnitType::Scout)
             .count();
-        assert_eq!(scouts, 1, "a Warrior goes before the dearer Scout");
+        assert_eq!(scouts, 1, "a Warrior goes before the Scout that costs the same");
         let board = app.world().resource::<MessageBoard>();
         assert!(board.text.contains("Warrior"), "got: {}", board.text);
         assert!(board.text.contains("disbanded"), "got: {}", board.text);
@@ -4358,7 +4606,7 @@ mod tests {
         // what the civ has left.
         let (mut app, city) = books(&[Production::Temple, Production::Barracks], 0);
         end_turn(&mut app, 0);
-        let price = economy::sale_price(Production::Barracks);
+        let price = economy::sale_price(0, Production::Barracks);
         assert_eq!(app.world().resource::<Treasury>().0[0], price);
         let kept = &app.world().get::<City>(city).unwrap().buildings;
         assert_eq!(kept, &[Production::Temple], "the newest building goes");
@@ -4382,7 +4630,7 @@ mod tests {
         assert_eq!(kept, &[Production::Temple, Production::Barracks]);
         assert_eq!(
             app.world().resource::<Treasury>().0[0],
-            economy::sale_price(Production::Granary)
+            economy::sale_price(0, Production::Granary)
         );
     }
 
@@ -4407,7 +4655,7 @@ mod tests {
         let (mut app, city) = books(&[Production::Temple, Production::Barracks], 0);
         muster(&mut app, 0, &[UnitType::Warrior; 6]);
         end_turn(&mut app, 0);
-        let price = economy::sale_price(Production::Barracks);
+        let price = economy::sale_price(0, Production::Barracks);
         assert_eq!(app.world().resource::<Treasury>().0[0], price - 2);
         assert_eq!(headcount(&mut app, 0), 6);
         assert_eq!(app.world().get::<City>(city).unwrap().buildings.len(), 1);

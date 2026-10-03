@@ -325,11 +325,12 @@ resource availability the turn code maintains, so "cannot use" means "no connect
 Neither method reads the city's size beyond the half-size thresholds, its buildings other than
 wonders, its distance from the capital, the war state (except rule 1 of the accept test), or the
 gold already plundered. `Player +0x183C`, which rule 7 compares, is a per-player rating that the
-AI attitude evaluation `0x440100` also reads (`other +0x183C < this +0x183C / 2`). Its only
-writer is `Player::reset` (`0x567C80`, which stores 0; nine call sites in the game-start code
-`0x5A01BD..0x5A23F0`, two of them loops over all 32 player records), so the comparison is
-`0 > 0` and never fires. **HYPOTHESIS**: only a save file that carries the whole Player block
-could give it a value.
+AI attitude evaluation `0x440100` also reads (`other +0x183C < this +0x183C / 2`). **Correction
+(`borders-culture.md` section 8):** it is the *total culture* of the civ, field `+0x20` of the
+culture sub-object `Player +0x181C`; `Player::reset` (`0x567C80`) zeroes it, and the per-turn
+`0x4F8E20` adds the empire's culture production to it (`max(0, total + max(0, produced))`), so
+the earlier reading "the only writer stores 0 and the comparison is `0 > 0`" was wrong: the
+writes use the sub-object base, not the absolute offset `+0x183C`.
 
 ## 13. Open
 

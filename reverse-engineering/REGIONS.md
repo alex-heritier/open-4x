@@ -60,5 +60,5 @@ Details stay in the system files.
 Round and world-event anchors (specified in `turn.md`, `world-events.md`, `barbarians.md`): round processor
 `0x4F5EF0`, `Player::turn` `0x5604B0` (slot 0 = the barbarian branch `0x5604D7..0x561200`), per-unit turn
 `0x5C7700`, city turn `0x4BE970`, resource upkeep `0x4F4CB0`, camp founding `0x55F9F0`, uprising `0x55FD00`,
-camp destruction `0x565A00`, tile-owner-change handler `0x5D3AB0` (called only by the unspecified border routine
-`0x5D4830`). The range `0x55–0x56` therefore holds the barbarian and event bodies, not only multiplayer.
+camp destruction `0x565A00`, tile-owner-change handler `0x5D3AB0` (called only by the border routine
+`0x5D4830`; both are specified in `borders-culture.md`). The range `0x55–0x56` therefore holds the barbarian and event bodies, not only multiplayer.

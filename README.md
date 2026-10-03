@@ -66,7 +66,17 @@ the desktop-capture fallback.
   and its key, unavailable ones are darkened.
 - Worker: R road, I irrigate, M mine, C clear forest/jungle. Road to road
   costs 1/3 MP; a mine replaces irrigation and vice versa; workers sharing a
-  tile and job pool their turns.
+  tile and job pool their turns. Z automates a Worker: it picks its own jobs
+  with the computer's worker brain until any manual order (a click, a move,
+  Wake) stops it.
+- U: upgrade the selected unit for gold (it must stand in a city with the
+  facility for its domain, a Barracks for land units, and have movement left);
+  Shift+U upgrades every unit of its type, paying unit by unit. The button
+  shows the successor and the price on hover, and only appears in such a city.
+  J: a Settler or Worker joins the city it stands in (2 and 1 citizens, up to
+  the size the city's Aqueduct and Hospital allow). Shift+P: a soldier pillages
+  the mine, else the irrigation, else the road of its tile (outside cities,
+  on ground nobody owns or a civ at war with you owns).
 - Arrow keys: step. Tab: cycle units that need orders. F: fortify. Space: skip.
   Units with no moves left cannot be selected; when none need orders the
   selection clears and the bottom-right box blinks its next-turn prompt.
@@ -78,35 +88,57 @@ the desktop-capture fallback.
   city works, or another civilization's border covers, are dimmed), Change
   build (Build now / Queue), Governor, X or ESC closes. Idle citizens show
   as entertainers.
-- F6: Science Advisor (choose what to research). F4: Foreign Advisor (who you
-  have met, their attitude, and Talk).
+- F1: Domestic Advisor (the tax, luxury and science rates, each city's mood
+  and surplus, and Revolution to a government you know). F6: Science Advisor (choose what to research). F4: Foreign Advisor (who you
+  have met, their attitude, and Talk). F7: Wonders of the World (every great
+  wonder built, who owns it and where, and the ones under construction; the eye
+  button looks at the city).
+- A leader greets you the first time you meet, and Talk, the trade table and the
+  computer's proposals show their animated leaderhead and speak in their own
+  words (Civ3's `diplomacy.txt`). Completing a wonder brings up its splash.
 - P: save a window screenshot as `shot-<unix>.png`.
 - F9: reveal-all debug toggle.
 
 ## Economy
 
 Each citizen works one tile around its city (the governor picks the best, or
-click tiles on the city screen); the city center works for free. All civs run
-Despotism, which takes one off any worked tile yield above 2. A city grows
-when its food box fills: 20 food while it is a town (size 1 to 6), 40 as a
-city (7 to 12), 60 beyond; a Granary keeps half the box on growth, and a
+click tiles on the city screen); the city center works for free and yields
+what the executable gives it (`reverse-engineering/yields.md`: 2 food, shields
+and commerce by size class, more for an Industrious or Commercial civ). A
+city grows when its food box fills: 20 food while it is a town (size 1 to 6),
+40 as a city (7 to 12), 60 beyond; it cannot grow past 6 without an Aqueduct
+or past 12 without a Hospital; a Granary keeps half the box on growth, and a
 city short of food loses a citizen.
 
-Tax (half of each city's commerce) goes into its civilization's treasury when
-that civilization ends its turn. Improvements cost their upkeep, and units
-cost 1 gold each beyond 4 free per city (counted across all of a civ's
-cities; a civ without cities pays nothing). Upkeep the treasury cannot cover
-sells one improvement for its shield cost in gold; unit support it cannot
-cover disbands the cheapest unit. The bottom-right box shows the active
-civilization's `N Gold (+M per turn)`, in red when it is losing gold.
+Every civ starts in Despotism and changes government (Anarchy for a few turns,
+then Monarchy, Republic, ...) once it knows the advance: the government sets
+the tile penalty, the trade bonus, the corruption of the commerce far from the
+Palace, unit support and upkeep, martial law and war weariness
+(`reverse-engineering/government.md`). The Domestic Advisor (F1) sets the
+tax/luxury/science rates and starts a revolution. Citizens are content or
+unhappy by the executable's rules (`happiness.md`): a city with more unhappy
+than happy citizens riots, produces nothing and may lose a building to the mob;
+Temples, Marketplaces, luxuries and soldiers under martial law calm it.
+
+Tax goes into its civilization's treasury when that civilization ends its turn.
+Improvements cost their upkeep, and units cost gold each beyond the free allowance
+the government and the cities' sizes give. Upkeep the treasury cannot
+cover sells one improvement for its shield cost over four in gold; unit support
+it cannot cover disbands the cheapest unit. A civ's traits matter: a Religious
+civ builds Temples at half cost and endures half the anarchy, a Militaristic
+civ promotes its victors twice as often and halves its Barracks, and so on
+(`rules_data::RACES`). The bottom-right box shows the active civilization's
+`N Gold (+M per turn)`, in red when it is losing gold.
 
 The rules are the executable's where `reverse-engineering/economy.md` could
 read them (the food box, the Granary, the upkeep and unit-support formulas,
 one sale or one disbanding per turn). Where it could not, or where the clone
 simplifies, the notes say so: the sale price and which unit goes are marked
 **HYPOTHESIS**, and the executable rolls a die for which bill comes first
-where the clone always pays upkeep first. `src/economy.rs` holds the rules
-as plain functions with tests.
+where the clone always pays upkeep first. `src/economy.rs` and
+`src/citycalc.rs` hold the rules as plain functions with tests; the
+corruption by distance, the computer's tax rates and the choice of the human's
+next government are marked **HYPOTHESIS** where the executable read stops.
 
 ## Research
 
@@ -126,11 +158,12 @@ against the cost. The computer picks with the executable's valuation
 (`reverse-engineering/research-ai.md`). Goody huts can give an advance to a
 civ still in the ancient era.
 
-Five of the ten productions are gated by an advance: Archer (Warrior Code),
-Spearman (Bronze Working), Horseman (Horseback Riding), Granary (Pottery) and
-Temple (Ceremonial Burial); the rest need none. Not modelled: governments, wonders
-(the Great Library, Theory of Evolution), the scientific-leader roll, and
-any science rate but 50%.
+The whole unit and building roster of `conquests.biq` is available
+(`src/rules_data.rs`, `src/roster.rs`), gated by advance, strategic resource,
+race and wonder, and a unit with a buildable successor is obsolete: the city
+builds the upgrade instead (`reverse-engineering/buildable.md`). Not modelled:
+the scientific-leader roll and the remaining wonder effects (the Great
+Library, Theory of Evolution).
 
 ## Diplomacy
 
@@ -152,6 +185,12 @@ civ's attitude toward you is the executable's score (its personality, what you
 did to it, what you did to others, governments, treaties and so on), and its
 decision to go to war is the executable's roll. The computer proposes advance
 swaps now and then.
+
+The diplomacy screens are Civ3's own art: the leader's animated portrait
+(`Art/Flics`, one clip per era, played back and forth) sits in the frame, and
+what the leader says comes from `diplomacy.txt` by the block for the occasion
+(first contact, a greeting, a proposal, a verdict) and by the leader's strength
+and mood. The clone stands in the tone and which block a deal calls for.
 
 Clone-level choices, because the executable's drivers are not decoded
 (`diplomacy.md` section 12): soldiers standing in a civ's borders build up
@@ -180,8 +219,20 @@ points per level (2, 3, 4, 5, plus the unit's bonus); the dice are the same
 LCG as the map generator. A test pins the round loop to the reverse-engineered
 `duel`.
 
+A victor promotes on the executable's die (`combat.md` 6.2): one in 2, 4 or 8
+for a Conscript, Regular or Veteran, twice as often for a Militaristic civ; a
+unit that failed a roll this turn promotes on its next win. A city's Walls
+(a town) and Civil Defense add their percentage to the defense, the best one
+counting.
+
+Units upgrade for gold (`reverse-engineering/unit-upgrades.md`, `src/upgrades.rs`):
+the price is the rule's 3 gold per shield of difference to the furthest
+successor the civ can build, halved by Leonardo's Workshop; the new unit keeps
+its tile, its fortified order and at most a Veteran's rank, and starts healed
+and out of moves. The computer spends spare gold on upgrades in its cities.
+
 Marked **HYPOTHESIS** in `src/combat.rs`, because the executable read does not
-cover them yet: the promotion odds (50% to Veteran, 33% to Elite), healing (1
+cover them yet: healing (1
 hit point a turn in the field, 2 in a city, full with a Barracks, only after a
 turn of rest), which defender of a stack fights (the likeliest to win), which
 clip plays in a round, when in the clip the blow lands, the details of
@@ -201,8 +252,12 @@ the same units, costs, combat odds, and upkeep as you. It sees where units
 are, but remembers only the ground it has explored. Each turn it:
 
 - builds a garrison first, then Settlers while there is room, Workers (about
-  one per city), soldiers (Warrior, Archer, Spearman, Horseman), and Temples,
-  Granaries and Barracks when its treasury can carry the upkeep;
+  one per city), soldiers (the best defender or attacker of the roster it can
+  build, by its `PRTO` strategy bits), and Temples, Granaries, Barracks,
+  Libraries, Marketplaces, Harbors and what lifts a city's size limit when its
+  treasury can carry the upkeep, with Wealth when nothing is worth adding;
+- picks its government by the executable's score, sets its rates, and spends
+  spare gold upgrading units that stand in a city with a Barracks;
 - settles the best open sites away from other cities and foreign borders;
 - has Workers road, irrigate, and mine around its cities;
 - sends Scouts to unexplored ground;
@@ -214,7 +269,7 @@ are, but remembers only the ground it has explored. Each turn it:
 
 A civ with no cities and no units is eliminated after a short grace period.
 Eliminating every rival is a victory; being eliminated is a defeat.
-Deviations from Civ3: no difficulty levels, no naval play, and the computer
+Deviations from Civ3: one fixed difficulty, no naval play, and the computer
 plays at one fixed skill.
 
 ## Scope
@@ -226,6 +281,6 @@ unit sounds, the Asian peace music loop, plus goody huts (poppable for
 units, maps, or settlers), capturable barbarian camps, and 22 placed
 resources with bonus yields, worker improvements (roads, irrigation, mines,
 clearing), city production of units and buildings with a queue, and cultural
-borders that start as the 3x3 square, grow to the 21-tile city radius at 10 culture and to 37 tiles at 100 (measured from the game's own saves), and merge between cities of one civ. Out of
-scope: smarter AI, governments, trade of cities and maps, ranged and naval combat, retreat,
-save/load, minimap.
+borders that start as the 3x3 square, grow to the 21-tile city radius at 10 culture and to 37 tiles at 100 (measured from the game's own saves), and merge between cities of one civ. Governments, happiness, research, diplomacy, gold upgrades and promotions are
+in. Out of scope: smarter AI, trade of cities and maps, ranged and naval
+combat, retreat, railroads, fortresses, pollution, save/load, minimap.

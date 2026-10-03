@@ -138,6 +138,7 @@ precisely to make those edge reads well-defined.
 | `government.rs` | governments: the GOVT table, anarchy and revolution, war weariness, call to arms, the declaration of war (`../government.md`) |
 | `research.rs` | research: the base cost and the turn clamp, the research step, `acquire` in order (eras, the scientific leader, Philosophy, the Great Library, the Science Age), the queue, the default-pick plumbing, the goody-hut advance (`World::hut_advance`) (`../research.md`) |
 | `research_ai.rs` | the AI's valuation of an advance (`Valuer::value`, `0x448BF0`), the flavor overlap, the category mask, the default and steal picks (`../research-ai.md`) |
+| `upgrade.rs` | unit upgrades: the facility flag by domain, the replacement walk, the gold price with Leonardo and the AI discount, the experience cap (`../unit-upgrades.md`) |
 | `diplomacy.rs` | diplomacy: the per-pair relation state (`Relations`), contact, `declare_war` with the alliance and pact call-in, `make_peace`, the attitude score and class, `wants_war`, the deal clauses and their executor, the packages, the verdict ladder (`weigh`) (`../diplomacy.md`) |
 | `happiness.rs` | citizen moods: the recompute `0x4BCFF0` (base mood, buildings, martial law, luxury, draft, war, foreign nationals, face distribution, reason percentages), disorder and the riot roll, celebration; checked against the real code by differential test (`../happiness.md`) |
 | `buildable.rs` | `canBuildImprovement` / `canBuildUnit` and the free-building set key (`../buildable.md`) |

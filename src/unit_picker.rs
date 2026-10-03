@@ -77,6 +77,7 @@ pub fn update(
                             u.fortified = false;
                             u.sentry = false;
                             u.exploring = false;
+                            u.auto = false;
                             selected.0 = Some(row.0);
                             audio::sfx(&mut commands, &audio, "Select");
                         }

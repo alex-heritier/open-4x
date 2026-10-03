@@ -506,6 +506,10 @@ mod tests {
             .id();
         // Civ 2 holds a city and no units; civ 3 has nothing at all.
         app.world_mut().spawn(City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ: 2,
             name: "Thebes".into(),
             x: 10,

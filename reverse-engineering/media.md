@@ -41,6 +41,72 @@ zero `.text` imm32 hits) — open.
 
 `rust/src/media.rs`: `intro_plays()`, `center_offset()`, tested.
 
+## Diplomacy and wonder screens: art, leaderheads, text (verified: art files)
+
+Everything here is read from the shipped data, not the executable; the
+executable only names the files (`WONDERSPLASH`, `WONDER_WIN` above). The
+clone's builders are `src/advisors.rs`, `src/leaders.rs`, `src/speech.rs`,
+`src/wonders.rs` on the stage of `src/stage.rs`; `tools/prep_assets.py`
+stages `leaders`, `diplomacy`, `wonders` convert the files.
+
+**Frames** (`Art/Diplomacy/*.pcx`, 1024 x 768, magenta outside the panels so
+the map shows through). All three hold the leader's frame, a 221 x 261 piece at
+(401, 50) around a 200 x 240 hole at (411, 59). Measured panels (interior
+parchment, x y w h):
+
+| Frame | Panels |
+| --- | --- |
+| `talk_offer` | one box (298, 327, 436, 239) under the portrait |
+| `consider` | one box (277, 326, 479, 377) |
+| `counter` | side panels (41, 223, 200, 393) and (790, 223, 200, 393), each with an arrow pointing at the bar; top box (298, 327, 436, 97); bar (312, 439, 410, 101); lower box (298, 558, 436, 144); bottom bar (346, 726, 325, 28) |
+
+The clone uses `talk_offer` for the greeting and the computer's proposal and
+`counter` for the trade table (our offer left, theirs right, the leader's words
+in the top box, standing and war in the bar, treaties in the lower box, Propose
+and Leave in the bottom bar). `consider` is converted but unused (CLONE).
+
+**Leaderheads** (`Art/Flics/*.flc`, 200 x 240). Each civ
+has four clips, one per era, named by the leader's two letters: Japan `To_A01`,
+`To_01`, `To_C01`, `To_D01`; Rome `Ce_01`, `Ce_B01`, `Ce_C01`, `Ce_D01`; Egypt
+`Cl_01`, `Cl_B01`, `Cl_C01`, `Cl_D01`; China `Mo_A01`, `Mo_B01`, `Mo_C01`,
+`Mo_01`. A clip has 120 or 121 frames plus one ring frame equal to frame 0
+that FLC appends. It drifts away from frame 0 the whole way (no loop), and the
+`_02` file beside it is the same frames reversed (a few pixels differ in a few
+frames: `Mo_B02`), so the game plays `_01` then `_02`: a ping-pong over one
+forward clip. The FLC header speed is not what plays (71 ms in `Mo_01` and the
+Japan and Rome base clips, 0 or 20 in the rest); the clone plays every clip at
+71 ms a frame (CLONE). The era variant follows the civ's research era (0 ancient
+.. 3 modern).
+
+**Speech** (`Text/diplomacy.txt`, Windows-1252). A block is `#KEY` followed by
+`#civ n`, `#power n`, `#mood n`, `#random n` and the quoted lines. A block holds
+`(32 if civ) * (3 if power) * (3 if mood) * random` lines, in that order of
+nesting: text set, power tone, mood tone, phrasing. Comment lines above a block
+(`; $CIVNAME1 = AI's Civ`) say what each `$NAMEn` in its lines is, the digit
+being the argument number. The text set of a leader is `RACE.diplomacy_text_index`,
+and all four of our `RACE` rows store -1, meaning the row minus one (`0x515557`):
+Japan 8, Rome 0, Egypt 1, China 6. Which power and mood tone a leader speaks
+in is not in the data; the clone derives them (CLONE: power from the score ratio,
+mood from the attitude class, 0/1 friendly, 2 neutral, 3/4 hostile). `#ANGER_AT_LEVELS` lists
+the five attitude words (Gracious, Polite, Cautious, Annoyed, Furious).
+
+**Wonder splash** (`Art/Wonder Splash/wonderBackground.pcx`, 1024 x 768): a 320 x
+320 hole at (351, 109) for the wonder's picture (`Art/Wonder Splash/<name>.pcx`,
+found through the wonder's `civilopedia_entry` and `PediaIcons.txt`), the text
+(`script.txt #WONDERSPLASH`) below it, two buttons ("Zoom to City.", "Sounds
+Good.") and `Wonder.wav`. A rival's great wonder is only a news line
+(`#WONDERPRODUCE`).
+
+**Wonders of the World window** (F7): `Art/Advisors/wonders_background.pcx` (a
+914 x 645 field at x 56..969, y 69..713), `wondersBOX.pcx` the 370 x 200 card,
+whose picture well is 190 x 132 at (162, 47) with the top right 66 x 47 cut out
+for the eye. `wondersBOXoverlay.pcx` is a plate the same size as the card that
+hides the picture of a wonder not built yet. `wondersEye.pcx` is the "zoom to
+city" button, three 66 x 47 states stacked at x = 1 (what each state is
+stays HYPOTHESIS; the clone draws the first),
+with pure green (0, 255, 0) in the rounded corners (a second key beside the
+magenta). Each card says Owned by / Constructed in / Located in.
+
 ## Sound engine anchors (verified: push-imm scan + `r2`)
 
 Audio goes through `WINMM` (single import-table hit at file `0x27E8E2`;

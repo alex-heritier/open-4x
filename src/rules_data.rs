@@ -6,8 +6,11 @@
 //! re-running the generator and diffing.
 #![allow(clippy::type_complexity)]
 
+use crate::cities::Production;
+use crate::roster::{BldgDef, UnitRow};
+use crate::units::UnitType;
 use civ3mapgen::research::{Rules, TechRow};
-use civ3mapgen::research_ai::{BldgRow, Tables, UnitRow};
+use civ3mapgen::research_ai::{BldgRow, Tables, UnitRow as AiUnitRow};
 
 /// Name of every advance, in `TECH` order.
 pub const TECH_NAMES: [&str; 83] = [
@@ -189,6 +192,8 @@ pub const FUTURE_TECH_COST: i32 = 400;
 pub const MAX_RESEARCH_TIME: i32 = 50;
 /// `RULE` minimum research time.
 pub const MIN_RESEARCH_TIME: i32 = 4;
+/// `RULE` upgrade cost: gold per shield of price difference (`unit-upgrades.md` 6).
+pub const UPGRADE_COST: i32 = 3;
 
 /// `ERAS` names.
 pub const ERA_NAMES: [&str; 4] = [
@@ -204,7 +209,8 @@ pub const DIFFICULTY_COST_FACTOR: [i32; 8] = [20, 12, 10, 9, 8, 7, 6, 4];
 pub const WORLD_TECH_RATE: [i32; 5] = [160, 200, 240, 320, 400];
 
 const TFRM: [i32; 13] = [-1, -1, 20, -1, 44, 23, -1, -1, -1, 58, 63, 1, 20];
-const GOOD: [i32; 26] = [4, 7, 30, 44, 53, 57, 64, 65, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+/// `GOOD.prerequisite` per `GOOD` row (strategic resources need it to be usable).
+pub const GOOD: [i32; 26] = [4, 7, 30, 44, 53, 57, 64, 65, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
 const GOVT: [i32; 8] = [-1, -1, 19, 46, 18, 34, 82, 22];
 const CTZN: [i32; 6] = [-1, -1, -1, -1, 43, 57];
 /// `(required_tech, available_to_civs, ai_strategies, needs_resource)`.
@@ -478,19 +484,581 @@ pub const RACES: [RaceFacts; 4] = [
     RaceFacts { race: 7, flavors: 0x0, build_often: 0x580, traits: 0x21, aggression: -1, culture_group: 4, shunned_government: 7, favorite_government: 3, free_techs: [5, 1, -1, -1] }, // China
 ];
 
-/// `(production, required advance)` of the units and buildings the game builds.
-pub const UNLOCKS: [(&str, i32); 10] = [
-    ("Warrior", -1),
-    ("Archer", 5),
-    ("Spearman", 0),
-    ("Horseman", 15),
-    ("Scout", -1),
-    ("Settler", -1),
-    ("Worker", -1),
-    ("Barracks", -1),
-    ("Granary", 3),
-    ("Temple", 6),
+/// Number of `PRTO` rows: `UnitType(i)` is row `i`, `Production(i)` the same unit.
+pub const UNIT_COUNT: usize = 141;
+/// Number of `BLDG` rows: `Production(UNIT_COUNT + i)` is row `i`.
+pub const BLDG_COUNT: usize = 83;
+
+/// Every `PRTO` row.
+pub static UNITS: [UnitRow; 141] = [
+    UnitRow { name: "Settler", art: "Settler", icon: 0, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 2, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x0, special: 0x1, worker: 0x1002, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x2000, zoc: false, playable: true }, // 0
+    UnitRow { name: "Worker", art: "Worker", icon: 1, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 10, pop_cost: 1, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x0, special: 0x5, worker: 0x1fffd, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1000, zoc: false, playable: true }, // 1
+    UnitRow { name: "Scout", art: "Scout", icon: 2, attack: 0, defense: 0, moves: 2, sight: 2, hp_bonus: 0, cost: 10, pop_cost: 0, tech: -1, upgrade_to: 67, resources: [-1, -1, -1], abilities: 0x0, special: 0x109, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x14424140, ai: 0x8, zoc: false, playable: true }, // 2
+    UnitRow { name: "Explorer", art: "Explorer", icon: 3, attack: 0, defense: 0, moves: 2, sight: 2, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 32, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x10, special: 0x9, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffbfffe, ai: 0x8, zoc: false, playable: true }, // 3
+    UnitRow { name: "Marine", art: "Marine", icon: 4, attack: 12, defense: 6, moves: 1, sight: 1, hp_bonus: 0, cost: 120, pop_cost: 0, tech: 59, upgrade_to: -1, resources: [5, -1, -1], abilities: 0x2000042, special: 0x20d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1, zoc: false, playable: true }, // 4
+    UnitRow { name: "Modern Paratrooper", art: "Paratrooper", icon: 5, attack: 6, defense: 11, moves: 1, sight: 1, hp_bonus: 0, cost: 110, pop_cost: 0, tech: 73, upgrade_to: -1, resources: [4, 5, -1], abilities: 0x2000002, special: 0x22d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1, zoc: true, playable: true }, // 5
+    UnitRow { name: "Warrior", art: "warrior", icon: 6, attack: 1, defense: 1, moves: 1, sight: 1, hp_bonus: 0, cost: 10, pop_cost: 0, tech: -1, upgrade_to: 9, resources: [-1, -1, -1], abilities: 0x2, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfdffffff, ai: 0x1, zoc: false, playable: true }, // 6
+    UnitRow { name: "Archer", art: "Archer", icon: 7, attack: 2, defense: 1, moves: 1, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 5, upgrade_to: 68, resources: [-1, -1, -1], abilities: 0x2000002, special: 0x30d, worker: 0x0, bombard: 1, bomb_range: 0, rof: 1, class: 0, races: 0x7fffffee, ai: 0x1, zoc: false, playable: true }, // 7
+    UnitRow { name: "Spearman", art: "Spearman", icon: 8, attack: 1, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 0, upgrade_to: 72, resources: [-1, -1, -1], abilities: 0x202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfd7fbff6, ai: 0x2, zoc: false, playable: true }, // 8
+    UnitRow { name: "Swordsman", art: "Swordsman", icon: 9, attack: 3, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 7, upgrade_to: 70, resources: [1, -1, -1], abilities: 0x2, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xffdfeffc, ai: 0x1, zoc: false, playable: true }, // 9
+    UnitRow { name: "Chariot", art: "chariot", icon: 10, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 4, upgrade_to: 11, resources: [0, -1, -1], abilities: 0x1, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfbfffffa, ai: 0x1, zoc: false, playable: true }, // 10
+    UnitRow { name: "Horseman", art: "Horseman", icon: 11, attack: 2, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 15, upgrade_to: 57, resources: [0, -1, -1], abilities: 0x0, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xffff7fff, ai: 0x1, zoc: false, playable: true }, // 11
+    UnitRow { name: "Pikeman", art: "Pikeman", icon: 12, attack: 1, defense: 3, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 22, upgrade_to: 14, resources: [1, -1, -1], abilities: 0x202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xf77ffff6, ai: 0x2, zoc: false, playable: true }, // 12
+    UnitRow { name: "Longbowman", art: "Longbowman", icon: 13, attack: 4, defense: 1, moves: 1, sight: 1, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 26, upgrade_to: 75, resources: [-1, -1, -1], abilities: 0x2000002, special: 0x30d, worker: 0x0, bombard: 2, bomb_range: 0, rof: 1, class: 0, races: 0xfff7fffe, ai: 0x1, zoc: false, playable: true }, // 13
+    UnitRow { name: "Musketman", art: "Musketman", icon: 14, attack: 2, defense: 4, moves: 1, sight: 1, hp_bonus: 0, cost: 60, pop_cost: 0, tech: 30, upgrade_to: 107, resources: [2, -1, -1], abilities: 0x2000202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffbfe, ai: 0x2, zoc: false, playable: true }, // 14
+    UnitRow { name: "Knight", art: "Knight", icon: 15, attack: 4, defense: 3, moves: 2, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 25, upgrade_to: 66, resources: [0, 1, -1], abilities: 0x0, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xffbdf57e, ai: 0x1, zoc: false, playable: true }, // 15
+    UnitRow { name: "Rifleman", art: "Rifleman", icon: 16, attack: 4, defense: 6, moves: 1, sight: 1, hp_bonus: 0, cost: 80, pop_cost: 0, tech: 43, upgrade_to: 18, resources: [-1, -1, -1], abilities: 0x2000202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1, zoc: false, playable: true }, // 16
+    UnitRow { name: "Cavalry", art: "Cavalry", icon: 17, attack: 6, defense: 3, moves: 3, sight: 1, hp_bonus: 0, cost: 80, pop_cost: 0, tech: 42, upgrade_to: 69, resources: [0, 2, -1], abilities: 0x2000000, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xffefffbe, ai: 0x1, zoc: true, playable: true }, // 17
+    UnitRow { name: "Infantry", art: "Infantry", icon: 18, attack: 6, defense: 10, moves: 1, sight: 1, hp_bonus: 0, cost: 90, pop_cost: 0, tech: 57, upgrade_to: 20, resources: [5, -1, -1], abilities: 0x2000202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1, zoc: false, playable: true }, // 18
+    UnitRow { name: "Tank", art: "Tank", icon: 19, attack: 16, defense: 8, moves: 2, sight: 1, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 62, upgrade_to: 21, resources: [4, 5, -1], abilities: 0x2000004, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xffffffde, ai: 0x1, zoc: true, playable: true }, // 19
+    UnitRow { name: "Mech Infantry", art: "Mech Infantry", icon: 20, attack: 12, defense: 18, moves: 2, sight: 1, hp_bonus: 0, cost: 110, pop_cost: 0, tech: 66, upgrade_to: -1, resources: [4, 5, -1], abilities: 0x2000200, special: 0x20d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1, zoc: true, playable: true }, // 20
+    UnitRow { name: "Modern Armor", art: "Modern Armor", icon: 21, attack: 24, defense: 16, moves: 3, sight: 1, hp_bonus: 0, cost: 120, pop_cost: 0, tech: 73, upgrade_to: -1, resources: [4, 5, 6], abilities: 0x2000004, special: 0x20d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1, zoc: true, playable: true }, // 21
+    UnitRow { name: "Catapult", art: "Catapult", icon: 22, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 10, upgrade_to: 109, resources: [-1, -1, -1], abilities: 0x1, special: 0x111, worker: 0x0, bombard: 4, bomb_range: 1, rof: 1, class: 0, races: 0xfffffffe, ai: 0x4, zoc: false, playable: true }, // 22
+    UnitRow { name: "Cannon", art: "Cannon", icon: 23, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 38, upgrade_to: 73, resources: [1, 2, -1], abilities: 0x1, special: 0x111, worker: 0x0, bombard: 8, bomb_range: 1, rof: 1, class: 0, races: 0xfffffffe, ai: 0x4, zoc: false, playable: true }, // 23
+    UnitRow { name: "Artillery", art: "Artillery", icon: 24, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 80, pop_cost: 0, tech: 57, upgrade_to: 25, resources: [-1, -1, -1], abilities: 0x0, special: 0x111, worker: 0x0, bombard: 12, bomb_range: 2, rof: 2, class: 0, races: 0xfffffffe, ai: 0x4, zoc: false, playable: true }, // 24
+    UnitRow { name: "Radar Artillery", art: "Radar Artillery", icon: 25, attack: 0, defense: 0, moves: 2, sight: 1, hp_bonus: 0, cost: 120, pop_cost: 0, tech: 79, upgrade_to: -1, resources: [6, -1, -1], abilities: 0x4000020, special: 0x11, worker: 0x0, bombard: 16, bomb_range: 2, rof: 3, class: 0, races: 0xfffffffe, ai: 0x4, zoc: true, playable: true }, // 25
+    UnitRow { name: "Cruise Missile", art: "", icon: 26, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 60, pop_cost: 0, tech: 64, upgrade_to: -1, resources: [6, -1, -1], abilities: 0x18000008, special: 0x11, worker: 0x0, bombard: 16, bomb_range: 4, rof: 3, class: 0, races: 0xfffffffe, ai: 0x20, zoc: false, playable: false }, // 26
+    UnitRow { name: "Tactical Nuke", art: "", icon: 27, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 300, pop_cost: 0, tech: 68, upgrade_to: -1, resources: [6, 7, -1], abilities: 0x810000, special: 0x11, worker: 0x0, bombard: 0, bomb_range: 6, rof: 0, class: 0, races: 0xfffffffe, ai: 0x8000, zoc: false, playable: false }, // 27
+    UnitRow { name: "ICBM", art: "", icon: 28, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 500, pop_cost: 0, tech: 74, upgrade_to: -1, resources: [6, 7, -1], abilities: 0x110400, special: 0x10, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x10000, zoc: false, playable: false }, // 28
+    UnitRow { name: "Galley", art: "", icon: 29, attack: 1, defense: 1, moves: 3, sight: 2, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 14, upgrade_to: 115, resources: [-1, -1, -1], abilities: 0x6001800, special: 0x102, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xdffffffe, ai: 0x400, zoc: false, playable: false }, // 29
+    UnitRow { name: "Caravel", art: "", icon: 30, attack: 1, defense: 2, moves: 4, sight: 2, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 32, upgrade_to: 106, resources: [-1, -1, -1], abilities: 0x6001000, special: 0x102, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xeffffffe, ai: 0x400, zoc: false, playable: false }, // 30
+    UnitRow { name: "Frigate", art: "", icon: 31, attack: 2, defense: 2, moves: 5, sight: 2, hp_bonus: 0, cost: 60, pop_cost: 0, tech: 41, upgrade_to: -1, resources: [1, 2, -1], abilities: 0x6000000, special: 0x10, worker: 0x0, bombard: 3, bomb_range: 1, rof: 2, class: 1, races: 0xfffefffe, ai: 0x100, zoc: false, playable: false }, // 31
+    UnitRow { name: "Galleon", art: "", icon: 32, attack: 1, defense: 2, moves: 4, sight: 2, hp_bonus: 0, cost: 50, pop_cost: 0, tech: 41, upgrade_to: 34, resources: [-1, -1, -1], abilities: 0x6000000, special: 0x102, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x400, zoc: false, playable: false }, // 32
+    UnitRow { name: "Ironclad", art: "", icon: 33, attack: 5, defense: 6, moves: 3, sight: 2, hp_bonus: 0, cost: 90, pop_cost: 0, tech: 81, upgrade_to: 37, resources: [1, 3, -1], abilities: 0x2000000, special: 0x110, worker: 0x0, bombard: 6, bomb_range: 1, rof: 2, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 33
+    UnitRow { name: "Transport", art: "", icon: 34, attack: 1, defense: 2, moves: 6, sight: 2, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 56, upgrade_to: -1, resources: [4, -1, -1], abilities: 0x42000000, special: 0x2, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x400, zoc: false, playable: false }, // 34
+    UnitRow { name: "Carrier", art: "", icon: 35, attack: 1, defense: 8, moves: 7, sight: 2, hp_bonus: 0, cost: 180, pop_cost: 0, tech: 60, upgrade_to: -1, resources: [4, -1, -1], abilities: 0x42000120, special: 0x2, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x800, zoc: false, playable: false }, // 35
+    UnitRow { name: "Submarine", art: "", icon: 36, attack: 8, defense: 4, moves: 4, sight: 2, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 60, upgrade_to: -1, resources: [4, -1, -1], abilities: 0x2400080, special: 0x10000, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 36
+    UnitRow { name: "Destroyer", art: "", icon: 37, attack: 12, defense: 8, moves: 8, sight: 2, hp_bonus: 0, cost: 120, pop_cost: 0, tech: 56, upgrade_to: -1, resources: [4, -1, -1], abilities: 0x2400000, special: 0x10, worker: 0x0, bombard: 6, bomb_range: 1, rof: 2, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 37
+    UnitRow { name: "Battleship", art: "", icon: 38, attack: 18, defense: 12, moves: 5, sight: 2, hp_bonus: 0, cost: 200, pop_cost: 0, tech: 60, upgrade_to: -1, resources: [4, -1, -1], abilities: 0x6000000, special: 0x10, worker: 0x0, bombard: 8, bomb_range: 2, rof: 2, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 38
+    UnitRow { name: "AEGIS Cruiser", art: "", icon: 39, attack: 15, defense: 10, moves: 7, sight: 2, hp_bonus: 0, cost: 160, pop_cost: 0, tech: 79, upgrade_to: -1, resources: [6, 7, -1], abilities: 0x2400020, special: 0x10, worker: 0x0, bombard: 6, bomb_range: 2, rof: 2, class: 1, races: 0xfffffffe, ai: 0x100, zoc: true, playable: false }, // 39
+    UnitRow { name: "Nuclear Submarine", art: "", icon: 40, attack: 8, defense: 4, moves: 5, sight: 2, hp_bonus: 0, cost: 140, pop_cost: 0, tech: 65, upgrade_to: -1, resources: [7, -1, -1], abilities: 0x3400080, special: 0x10002, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 40
+    UnitRow { name: "Fighter", art: "", icon: 41, attack: 4, defense: 2, moves: 1, sight: 3, hp_bonus: 0, cost: 80, pop_cost: 0, tech: 58, upgrade_to: 44, resources: [4, -1, -1], abilities: 0x10000400, special: 0x101, worker: 0x0, bombard: 3, bomb_range: 0, rof: 1, class: 2, races: 0xfffffffe, ai: 0x80, zoc: false, playable: false }, // 41
+    UnitRow { name: "Bomber", art: "", icon: 42, attack: 0, defense: 2, moves: 1, sight: 3, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 58, upgrade_to: -1, resources: [4, -1, -1], abilities: 0x18000400, special: 0x1, worker: 0x0, bombard: 12, bomb_range: 0, rof: 3, class: 2, races: 0xfffffffe, ai: 0x40, zoc: false, playable: false }, // 42
+    UnitRow { name: "Helicopter", art: "", icon: 43, attack: 0, defense: 2, moves: 1, sight: 3, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 63, upgrade_to: -1, resources: [4, 5, -1], abilities: 0x4400, special: 0x22, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 2, races: 0xfffffffe, ai: 0x200, zoc: false, playable: false }, // 43
+    UnitRow { name: "Jet Fighter", art: "", icon: 44, attack: 8, defense: 4, moves: 1, sight: 3, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 64, upgrade_to: 64, resources: [4, 6, -1], abilities: 0x10000400, special: 0x101, worker: 0x0, bombard: 3, bomb_range: 0, rof: 1, class: 2, races: 0xfffffefe, ai: 0x80, zoc: false, playable: false }, // 44
+    UnitRow { name: "Stealth Fighter", art: "", icon: 45, attack: 8, defense: 6, moves: 1, sight: 3, hp_bonus: 0, cost: 120, pop_cost: 0, tech: 77, upgrade_to: -1, resources: [4, 6, -1], abilities: 0x18200400, special: 0x10001, worker: 0x0, bombard: 6, bomb_range: 0, rof: 2, class: 2, races: 0xfffffffe, ai: 0x40, zoc: false, playable: false }, // 45
+    UnitRow { name: "Stealth Bomber", art: "", icon: 46, attack: 0, defense: 5, moves: 1, sight: 3, hp_bonus: 0, cost: 240, pop_cost: 0, tech: 77, upgrade_to: -1, resources: [4, 6, -1], abilities: 0x18200400, special: 0x10001, worker: 0x0, bombard: 18, bomb_range: 0, rof: 3, class: 2, races: 0xfffffffe, ai: 0x40, zoc: false, playable: false }, // 46
+    UnitRow { name: "Leader", art: "", icon: 47, attack: 0, defense: 0, moves: 3, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x80000, special: 0x2000c1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x4000, zoc: false, playable: false }, // 47
+    UnitRow { name: "Army", art: "", icon: 48, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 400, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x40024, special: 0x209, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x10, zoc: true, playable: false }, // 48
+    UnitRow { name: "Jaguar Warrior", art: "", icon: 49, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 15, pop_cost: 0, tech: 5, upgrade_to: 9, resources: [-1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x2000, ai: 0x1, zoc: false, playable: false }, // 49
+    UnitRow { name: "Bowman", art: "", icon: 50, attack: 2, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 5, upgrade_to: 13, resources: [-1, -1, -1], abilities: 0x2008002, special: 0x30d, worker: 0x0, bombard: 1, bomb_range: 0, rof: 1, class: 0, races: 0x10, ai: 0x1, zoc: false, playable: false }, // 50
+    UnitRow { name: "Hoplite", art: "", icon: 51, attack: 1, defense: 3, moves: 1, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 0, upgrade_to: 14, resources: [-1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x8, ai: 0x2, zoc: false, playable: false }, // 51
+    UnitRow { name: "Impi", art: "", icon: 52, attack: 1, defense: 2, moves: 2, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 0, upgrade_to: 14, resources: [-1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x4000, ai: 0x1, zoc: false, playable: false }, // 52
+    UnitRow { name: "Legionary", art: "Legionary", icon: 53, attack: 3, defense: 3, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 7, upgrade_to: 54, resources: [1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x2, ai: 0x1, zoc: false, playable: true }, // 53
+    UnitRow { name: "Immortals", art: "", icon: 54, attack: 4, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 7, upgrade_to: 74, resources: [1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x1000, ai: 0x1, zoc: false, playable: false }, // 54
+    UnitRow { name: "War Chariot", art: "War Chariot", icon: 55, attack: 2, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 4, upgrade_to: 15, resources: [0, -1, -1], abilities: 0x2008001, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x4, ai: 0x1, zoc: false, playable: true }, // 55
+    UnitRow { name: "Rider", art: "Rider", icon: 56, attack: 4, defense: 3, moves: 3, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 25, upgrade_to: 59, resources: [0, 1, -1], abilities: 0x8000, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x80, ai: 0x1, zoc: false, playable: true }, // 56
+    UnitRow { name: "Mounted Warrior", art: "", icon: 57, attack: 3, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 15, upgrade_to: 102, resources: [0, -1, -1], abilities: 0x2008000, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x8000, ai: 0x1, zoc: false, playable: false }, // 57
+    UnitRow { name: "Musketeer", art: "", icon: 58, attack: 2, defense: 5, moves: 1, sight: 1, hp_bonus: 0, cost: 60, pop_cost: 0, tech: 30, upgrade_to: 16, resources: [2, -1, -1], abilities: 0x2008002, special: 0x30d, worker: 0x0, bombard: 2, bomb_range: 0, rof: 1, class: 0, races: 0x400, ai: 0x1, zoc: false, playable: false }, // 58
+    UnitRow { name: "Samurai", art: "Samurai", icon: 59, attack: 4, defense: 4, moves: 2, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 25, upgrade_to: 60, resources: [1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x200, ai: 0x1, zoc: false, playable: true }, // 59
+    UnitRow { name: "War Elephant", art: "", icon: 60, attack: 4, defense: 3, moves: 2, sight: 1, hp_bonus: 1, cost: 70, pop_cost: 0, tech: 25, upgrade_to: 17, resources: [-1, -1, -1], abilities: 0x8000, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x800, ai: 0x1, zoc: false, playable: false }, // 60
+    UnitRow { name: "Cossack", art: "", icon: 61, attack: 6, defense: 3, moves: 3, sight: 1, hp_bonus: 0, cost: 90, pop_cost: 0, tech: 42, upgrade_to: -1, resources: [0, 2, -1], abilities: 0x2008004, special: 0x20d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x40, ai: 0x1, zoc: true, playable: false }, // 61
+    UnitRow { name: "Panzer", art: "", icon: 62, attack: 16, defense: 8, moves: 3, sight: 1, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 62, upgrade_to: 21, resources: [4, 5, -1], abilities: 0x2008004, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x20, ai: 0x1, zoc: true, playable: false }, // 62
+    UnitRow { name: "Man-O-War", art: "", icon: 63, attack: 4, defense: 2, moves: 5, sight: 2, hp_bonus: 0, cost: 65, pop_cost: 0, tech: 41, upgrade_to: -1, resources: [1, 2, -1], abilities: 0x6008000, special: 0x40010, worker: 0x0, bombard: 4, bomb_range: 1, rof: 2, class: 1, races: 0x10000, ai: 0x100, zoc: false, playable: false }, // 63
+    UnitRow { name: "F-15", art: "", icon: 64, attack: 8, defense: 4, moves: 1, sight: 3, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 64, upgrade_to: -1, resources: [4, 6, -1], abilities: 0x18008400, special: 0x10001, worker: 0x0, bombard: 6, bomb_range: 0, rof: 2, class: 2, races: 0x100, ai: 0x40, zoc: false, playable: false }, // 64
+    UnitRow { name: "Privateer", art: "", icon: 65, attack: 2, defense: 1, moves: 5, sight: 2, hp_bonus: 0, cost: 50, pop_cost: 0, tech: 41, upgrade_to: -1, resources: [1, 2, -1], abilities: 0x6020000, special: 0x40000, worker: 0x0, bombard: 3, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 65
+    UnitRow { name: "Keshik", art: "", icon: 76, attack: 4, defense: 2, moves: 2, sight: 1, hp_bonus: 0, cost: 60, pop_cost: 0, tech: 25, upgrade_to: 71, resources: [0, -1, -1], abilities: 0x2008000, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x20000, ai: 0x1, zoc: true, playable: false }, // 66
+    UnitRow { name: "Conquistador", art: "", icon: 75, attack: 3, defense: 2, moves: 2, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 32, upgrade_to: 3, resources: [0, -1, -1], abilities: 0x2008010, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x40000, ai: 0x1, zoc: true, playable: false }, // 67
+    UnitRow { name: "Berserk", art: "", icon: 74, attack: 6, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 26, upgrade_to: 13, resources: [-1, -1, -1], abilities: 0x8042, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x80000, ai: 0x1, zoc: false, playable: false }, // 68
+    UnitRow { name: "Sipahi", art: "", icon: 77, attack: 8, defense: 3, moves: 3, sight: 1, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 42, upgrade_to: 61, resources: [0, 2, -1], abilities: 0x2008000, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x100000, ai: 0x1, zoc: true, playable: false }, // 69
+    UnitRow { name: "Gallic Swordsman", art: "", icon: 78, attack: 3, defense: 2, moves: 2, sight: 1, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 7, upgrade_to: 53, resources: [1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x200000, ai: 0x1, zoc: false, playable: false }, // 70
+    UnitRow { name: "Ansar Warrior", art: "", icon: 82, attack: 4, defense: 2, moves: 3, sight: 1, hp_bonus: 0, cost: 60, pop_cost: 0, tech: 25, upgrade_to: 56, resources: [0, 1, -1], abilities: 0x8000, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x400000, ai: 0x1, zoc: false, playable: false }, // 71
+    UnitRow { name: "Numidian Mercenary", art: "", icon: 80, attack: 2, defense: 3, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 0, upgrade_to: 12, resources: [-1, -1, -1], abilities: 0x8202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x800000, ai: 0x1, zoc: false, playable: false }, // 72
+    UnitRow { name: "Hwach'a", art: "", icon: 79, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 38, upgrade_to: 24, resources: [2, -1, -1], abilities: 0x18008001, special: 0x111, worker: 0x0, bombard: 8, bomb_range: 1, rof: 1, class: 0, races: 0x1000000, ai: 0x4, zoc: false, playable: false }, // 73
+    UnitRow { name: "Medieval Infantry", art: "", icon: 84, attack: 4, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 22, upgrade_to: 75, resources: [1, -1, -1], abilities: 0x202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xffffeffe, ai: 0x1, zoc: false, playable: false }, // 74
+    UnitRow { name: "Guerilla", art: "", icon: 85, attack: 6, defense: 6, moves: 1, sight: 1, hp_bonus: 0, cost: 90, pop_cost: 0, tech: 57, upgrade_to: 121, resources: [-1, -1, -1], abilities: 0x202, special: 0x30d, worker: 0x0, bombard: 3, bomb_range: 0, rof: 1, class: 0, races: 0xfffffffe, ai: 0x1, zoc: false, playable: false }, // 75
+    UnitRow { name: "Princess", art: "", icon: 121, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x2400, special: 0x0, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x40000, zoc: false, playable: false }, // 76
+    UnitRow { name: "Lincoln", art: "", icon: 97, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 77
+    UnitRow { name: "Hammurabi", art: "", icon: 100, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 78
+    UnitRow { name: "Mao", art: "", icon: 103, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 79
+    UnitRow { name: "Bismarck", art: "", icon: 107, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 80
+    UnitRow { name: "Alexander", art: "", icon: 108, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 81
+    UnitRow { name: "Caesar", art: "", icon: 116, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 82
+    UnitRow { name: "Xerxes", art: "", icon: 115, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 83
+    UnitRow { name: "Hiawatha", art: "", icon: 110, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 84
+    UnitRow { name: "Shaka", art: "", icon: 120, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 85
+    UnitRow { name: "Montezuma", art: "", icon: 99, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 86
+    UnitRow { name: "Cleopatra", art: "", icon: 104, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 87
+    UnitRow { name: "Elizabeth", art: "", icon: 105, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 88
+    UnitRow { name: "Catherine", art: "", icon: 117, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 89
+    UnitRow { name: "Abu", art: "", icon: 98, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 90
+    UnitRow { name: "Hannibal", art: "", icon: 101, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 91
+    UnitRow { name: "Osman", art: "", icon: 114, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 92
+    UnitRow { name: "Temujin", art: "", icon: 113, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 93
+    UnitRow { name: "Gandhi", art: "", icon: 109, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 94
+    UnitRow { name: "Ragnar", art: "", icon: 119, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 95
+    UnitRow { name: "Brennus", art: "", icon: 102, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 96
+    UnitRow { name: "Tokugawa", art: "", icon: 111, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 97
+    UnitRow { name: "Joan d'Arc", art: "", icon: 106, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 98
+    UnitRow { name: "Wang Kon", art: "", icon: 112, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 99
+    UnitRow { name: "Isabella", art: "", icon: 118, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 100
+    UnitRow { name: "Enkidu Warrior", art: "", icon: 175, attack: 1, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 10, pop_cost: 0, tech: -1, upgrade_to: 12, resources: [-1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x2000000, ai: 0x2, zoc: false, playable: false }, // 101
+    UnitRow { name: "Three-Man Chariot", art: "", icon: 186, attack: 2, defense: 2, moves: 2, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 4, upgrade_to: 15, resources: [0, -1, -1], abilities: 0x2008001, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x4000000, ai: 0x1, zoc: false, playable: false }, // 102
+    UnitRow { name: "Mursilis", art: "", icon: 169, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 103
+    UnitRow { name: "Gilgamesh", art: "", icon: 174, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 104
+    UnitRow { name: "Henry", art: "", icon: 173, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 105
+    UnitRow { name: "Carrack", art: "", icon: 198, attack: 2, defense: 2, moves: 4, sight: 2, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 32, upgrade_to: 32, resources: [-1, -1, -1], abilities: 0x6008000, special: 0x102, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0x10000000, ai: 0x100, zoc: false, playable: false }, // 106
+    UnitRow { name: "Swiss Mercenary", art: "", icon: 181, attack: 1, defense: 4, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 22, upgrade_to: 58, resources: [1, -1, -1], abilities: 0x8202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x8000000, ai: 0x2, zoc: false, playable: false }, // 107
+    UnitRow { name: "William of Orange", art: "", icon: 172, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 108
+    UnitRow { name: "Trebuchet", art: "Trebuchet", icon: 190, attack: 0, defense: 0, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 23, upgrade_to: 23, resources: [-1, -1, -1], abilities: 0x1, special: 0x111, worker: 0x0, bombard: 6, bomb_range: 1, rof: 1, class: 0, races: 0xfffffffe, ai: 0x4, zoc: false, playable: true }, // 109
+    UnitRow { name: "Pachacuti", art: "", icon: 170, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 110
+    UnitRow { name: "Smoke-Jaguar", art: "", icon: 171, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 111
+    UnitRow { name: "Theodora", art: "", icon: 168, attack: 1, defense: 1, moves: 2, sight: 1, hp_bonus: 0, cost: 0, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x20000000, special: 0x1, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x80000, zoc: false, playable: false }, // 112
+    UnitRow { name: "Chasqui Scout", art: "", icon: 176, attack: 1, defense: 1, moves: 2, sight: 2, hp_bonus: 0, cost: 20, pop_cost: 0, tech: -1, upgrade_to: 67, resources: [-1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x40000000, ai: 0x1, zoc: false, playable: false }, // 113
+    UnitRow { name: "Javelin Thrower", art: "", icon: 177, attack: 2, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 5, upgrade_to: 68, resources: [-1, -1, -1], abilities: 0x2008002, special: 0x4030d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x80000000, ai: 0x1, zoc: false, playable: false }, // 114
+    UnitRow { name: "Dromon", art: "", icon: 196, attack: 2, defense: 1, moves: 3, sight: 2, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 14, upgrade_to: 30, resources: [-1, -1, -1], abilities: 0x12009800, special: 0x112, worker: 0x0, bombard: 2, bomb_range: 1, rof: 2, class: 1, races: 0x20000000, ai: 0x100, zoc: false, playable: false }, // 115
+    UnitRow { name: "Cruiser", art: "", icon: 200, attack: 15, defense: 10, moves: 6, sight: 2, hp_bonus: 0, cost: 160, pop_cost: 0, tech: 56, upgrade_to: 39, resources: [4, -1, -1], abilities: 0x2000020, special: 0x110, worker: 0x0, bombard: 7, bomb_range: 1, rof: 2, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 116
+    UnitRow { name: "Crusader", art: "", icon: 180, attack: 5, defense: 3, moves: 1, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x2, special: 0x20d, worker: 0x10, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x1, zoc: false, playable: false }, // 117
+    UnitRow { name: "Ancient Cavalry", art: "", icon: 187, attack: 3, defense: 2, moves: 2, sight: 1, hp_bonus: 1, cost: 40, pop_cost: 0, tech: -1, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x0, special: 0x20d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x0, ai: 0x1, zoc: false, playable: false }, // 118
+    UnitRow { name: "Curragh", art: "", icon: 195, attack: 1, defense: 1, moves: 2, sight: 2, hp_bonus: 0, cost: 15, pop_cost: 0, tech: 2, upgrade_to: 29, resources: [-1, -1, -1], abilities: 0x6001800, special: 0x100, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x100, zoc: false, playable: false }, // 119
+    UnitRow { name: "Paratrooper", art: "Paratrooper", icon: 185, attack: 4, defense: 9, moves: 1, sight: 1, hp_bonus: 0, cost: 90, pop_cost: 0, tech: 63, upgrade_to: 5, resources: [4, 5, -1], abilities: 0x2000002, special: 0x32d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x1, zoc: true, playable: true }, // 120
+    UnitRow { name: "TOW Infantry", art: "TOW Infantry", icon: 203, attack: 12, defense: 14, moves: 1, sight: 1, hp_bonus: 0, cost: 120, pop_cost: 0, tech: 64, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x202, special: 0x20d, worker: 0x0, bombard: 6, bomb_range: 0, rof: 1, class: 0, races: 0xfffffffe, ai: 0x1, zoc: false, playable: true }, // 121
+    UnitRow { name: "Flak", art: "Flak", icon: 205, attack: 1, defense: 6, moves: 1, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 58, upgrade_to: 123, resources: [-1, -1, -1], abilities: 0x0, special: 0x305, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x2, zoc: false, playable: true }, // 122
+    UnitRow { name: "Mobile SAM", art: "Mobile SAM", icon: 206, attack: 1, defense: 6, moves: 2, sight: 1, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 64, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x0, special: 0x205, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x2, zoc: false, playable: true }, // 123
+    UnitRow { name: "Rifleman", art: "", icon: 16, attack: 4, defense: 6, moves: 1, sight: 1, hp_bonus: 0, cost: 80, pop_cost: 0, tech: 43, upgrade_to: 18, resources: [-1, -1, -1], abilities: 0x2000202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x2, zoc: false, playable: false }, // 124
+    UnitRow { name: "Infantry", art: "", icon: 18, attack: 6, defense: 10, moves: 1, sight: 1, hp_bonus: 0, cost: 90, pop_cost: 0, tech: 57, upgrade_to: 20, resources: [5, -1, -1], abilities: 0x2000202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x2, zoc: false, playable: false }, // 125
+    UnitRow { name: "Mech Infantry", art: "", icon: 20, attack: 12, defense: 18, moves: 2, sight: 1, hp_bonus: 0, cost: 110, pop_cost: 0, tech: 66, upgrade_to: -1, resources: [4, 5, -1], abilities: 0x2000200, special: 0x20d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0xfffffffe, ai: 0x2, zoc: true, playable: false }, // 126
+    UnitRow { name: "Nuclear Submarine", art: "", icon: 40, attack: 8, defense: 4, moves: 5, sight: 2, hp_bonus: 0, cost: 140, pop_cost: 0, tech: 65, upgrade_to: -1, resources: [7, -1, -1], abilities: 0x3400080, special: 0x10002, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0xfffffffe, ai: 0x20000, zoc: false, playable: false }, // 127
+    UnitRow { name: "Impi", art: "", icon: 52, attack: 1, defense: 2, moves: 2, sight: 1, hp_bonus: 0, cost: 20, pop_cost: 0, tech: 0, upgrade_to: 14, resources: [-1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x4000, ai: 0x2, zoc: false, playable: false }, // 128
+    UnitRow { name: "Legionary", art: "", icon: 53, attack: 3, defense: 3, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 7, upgrade_to: 54, resources: [1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x2, ai: 0x2, zoc: false, playable: false }, // 129
+    UnitRow { name: "Musketeer", art: "", icon: 58, attack: 2, defense: 5, moves: 1, sight: 1, hp_bonus: 0, cost: 60, pop_cost: 0, tech: 30, upgrade_to: 16, resources: [2, -1, -1], abilities: 0x2008002, special: 0x30d, worker: 0x0, bombard: 2, bomb_range: 0, rof: 1, class: 0, races: 0x400, ai: 0x2, zoc: false, playable: false }, // 130
+    UnitRow { name: "Samurai", art: "", icon: 59, attack: 4, defense: 4, moves: 2, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 25, upgrade_to: 60, resources: [1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x200, ai: 0x2, zoc: false, playable: false }, // 131
+    UnitRow { name: "F-15", art: "", icon: 64, attack: 8, defense: 4, moves: 1, sight: 3, hp_bonus: 0, cost: 100, pop_cost: 0, tech: 64, upgrade_to: -1, resources: [4, 6, -1], abilities: 0x18008400, special: 0x10001, worker: 0x0, bombard: 6, bomb_range: 0, rof: 2, class: 2, races: 0x100, ai: 0x80, zoc: false, playable: false }, // 132
+    UnitRow { name: "Conquistador", art: "", icon: 75, attack: 3, defense: 2, moves: 2, sight: 1, hp_bonus: 0, cost: 70, pop_cost: 0, tech: 32, upgrade_to: 3, resources: [0, -1, -1], abilities: 0x2008010, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x40000, ai: 0x8, zoc: true, playable: false }, // 133
+    UnitRow { name: "Numidian Mercenary", art: "", icon: 80, attack: 2, defense: 3, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 0, upgrade_to: 12, resources: [-1, -1, -1], abilities: 0x8202, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x800000, ai: 0x2, zoc: false, playable: false }, // 134
+    UnitRow { name: "Guerilla", art: "", icon: 85, attack: 6, defense: 6, moves: 1, sight: 1, hp_bonus: 0, cost: 90, pop_cost: 0, tech: 57, upgrade_to: 121, resources: [-1, -1, -1], abilities: 0x202, special: 0x30d, worker: 0x0, bombard: 3, bomb_range: 0, rof: 1, class: 0, races: 0xfffffffe, ai: 0x2, zoc: false, playable: false }, // 135
+    UnitRow { name: "Carrack", art: "", icon: 198, attack: 2, defense: 2, moves: 4, sight: 2, hp_bonus: 0, cost: 40, pop_cost: 0, tech: 32, upgrade_to: 32, resources: [-1, -1, -1], abilities: 0x6008000, special: 0x102, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 1, races: 0x10000000, ai: 0x400, zoc: false, playable: false }, // 136
+    UnitRow { name: "Chasqui Scout", art: "", icon: 176, attack: 1, defense: 1, moves: 2, sight: 2, hp_bonus: 0, cost: 20, pop_cost: 0, tech: -1, upgrade_to: 67, resources: [-1, -1, -1], abilities: 0x8002, special: 0x30d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x40000000, ai: 0x8, zoc: false, playable: false }, // 137
+    UnitRow { name: "Javelin Thrower", art: "", icon: 177, attack: 2, defense: 2, moves: 1, sight: 1, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 5, upgrade_to: 68, resources: [-1, -1, -1], abilities: 0x2008002, special: 0x4030d, worker: 0x0, bombard: 0, bomb_range: 0, rof: 0, class: 0, races: 0x80000000, ai: 0x2, zoc: false, playable: false }, // 138
+    UnitRow { name: "Dromon", art: "", icon: 196, attack: 2, defense: 1, moves: 3, sight: 2, hp_bonus: 0, cost: 30, pop_cost: 0, tech: 14, upgrade_to: 30, resources: [-1, -1, -1], abilities: 0x12009800, special: 0x112, worker: 0x0, bombard: 2, bomb_range: 1, rof: 2, class: 1, races: 0x20000000, ai: 0x400, zoc: false, playable: false }, // 139
+    UnitRow { name: "TOW Infantry", art: "", icon: 203, attack: 12, defense: 14, moves: 1, sight: 1, hp_bonus: 0, cost: 120, pop_cost: 0, tech: 64, upgrade_to: -1, resources: [-1, -1, -1], abilities: 0x202, special: 0x20d, worker: 0x0, bombard: 6, bomb_range: 0, rof: 1, class: 0, races: 0xfffffffe, ai: 0x2, zoc: false, playable: false }, // 140
 ];
+
+/// Every `BLDG` row.
+pub static BLDGS: [BldgDef; 83] = [
+    BldgDef { name: "Palace", cost: 10, upkeep: 0, culture: 1, tech: 1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x1, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 0
+    BldgDef { name: "Barracks", cost: 4, upkeep: 1, culture: 0, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x2, other: 0x2, small: 0x0, wonder: 0x0, playable: true }, // 1
+    BldgDef { name: "Granary", cost: 6, upkeep: 1, culture: 0, tech: 3, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x200, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 2
+    BldgDef { name: "Temple", cost: 6, upkeep: 1, culture: 2, tech: 6, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 1, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x100, small: 0x0, wonder: 0x0, playable: true }, // 3
+    BldgDef { name: "Marketplace", cost: 10, upkeep: 1, culture: 0, tech: 17, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x410, other: 0x40, small: 0x0, wonder: 0x0, playable: true }, // 4
+    BldgDef { name: "Library", cost: 8, upkeep: 1, culture: 3, tech: 13, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x4, other: 0x20, small: 0x0, wonder: 0x0, playable: true }, // 5
+    BldgDef { name: "Courthouse", cost: 8, upkeep: 1, culture: 0, tech: 12, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x180, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 6
+    BldgDef { name: "Walls", cost: 2, upkeep: 0, culture: 0, tech: 1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 50, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x2, small: 0x0, wonder: 0x0, playable: true }, // 7
+    BldgDef { name: "Aqueduct", cost: 10, upkeep: 1, culture: 0, tech: 20, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x800, other: 0x400, small: 0x0, wonder: 0x0, playable: true }, // 8
+    BldgDef { name: "Bank", cost: 16, upkeep: 1, culture: 0, tech: 31, obsolete: -1, requires: 4, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x10, other: 0x40, small: 0x0, wonder: 0x0, playable: true }, // 9
+    BldgDef { name: "Cathedral", cost: 16, upkeep: 2, culture: 3, tech: 21, obsolete: -1, requires: 3, govt: -1, resources: [-1, -1], happy: 3, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x100, small: 0x0, wonder: 0x0, playable: true }, // 10
+    BldgDef { name: "University", cost: 20, upkeep: 2, culture: 4, tech: 29, obsolete: -1, requires: 5, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x4, other: 0x20, small: 0x0, wonder: 0x0, playable: true }, // 11
+    BldgDef { name: "Colosseum", cost: 12, upkeep: 2, culture: 2, tech: 20, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 2, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 12
+    BldgDef { name: "Factory", cost: 24, upkeep: 3, culture: 0, tech: 47, obsolete: -1, requires: -1, govt: -1, resources: [1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 2, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 13
+    BldgDef { name: "Manufacturing Plant", cost: 32, upkeep: 3, culture: 0, tech: 79, obsolete: -1, requires: 13, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 2, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 14
+    BldgDef { name: "Recycling Center", cost: 20, upkeep: 2, culture: 0, tech: 67, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x40, other: 0x400, small: 0x0, wonder: 0x0, playable: false }, // 15
+    BldgDef { name: "Coal Plant", cost: 16, upkeep: 3, culture: 0, tech: 47, obsolete: -1, requires: 13, govt: -1, resources: [3, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 2, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x2000, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 16
+    BldgDef { name: "Hydro Plant", cost: 24, upkeep: 3, culture: 0, tech: 61, obsolete: -1, requires: 13, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 2, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0xa000, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 17
+    BldgDef { name: "Nuclear Plant", cost: 24, upkeep: 3, culture: 0, tech: 69, obsolete: -1, requires: 13, govt: -1, resources: [7, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 4, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x16000, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 18
+    BldgDef { name: "Hospital", cost: 16, upkeep: 2, culture: 0, tech: 50, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x1000, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 19
+    BldgDef { name: "Research Lab", cost: 20, upkeep: 2, culture: 2, tech: 66, obsolete: -1, requires: 11, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x4, other: 0x20, small: 0x0, wonder: 0x0, playable: true }, // 20
+    BldgDef { name: "Mass Transit System", cost: 20, upkeep: 2, culture: 0, tech: 72, obsolete: -1, requires: -1, govt: -1, resources: [5, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x20, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 21
+    BldgDef { name: "SAM Missile Battery", cost: 8, upkeep: 2, culture: 0, tech: 64, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x2, small: 0x0, wonder: 0x0, playable: false }, // 22
+    BldgDef { name: "Coastal Fortress", cost: 4, upkeep: 0, culture: 0, tech: 38, obsolete: -1, requires: -1, govt: -1, resources: [1, 2], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x803, small: 0x0, wonder: 0x0, playable: false }, // 23
+    BldgDef { name: "Solar Plant", cost: 32, upkeep: 3, culture: 0, tech: 72, obsolete: -1, requires: 13, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 2, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x2000, other: 0x400, small: 0x0, wonder: 0x0, playable: true }, // 24
+    BldgDef { name: "Harbor", cost: 6, upkeep: 1, culture: 0, tech: 14, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x1120000, other: 0x843, small: 0x0, wonder: 0x0, playable: true }, // 25
+    BldgDef { name: "Offshore Platform", cost: 24, upkeep: 3, culture: 0, tech: 71, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x800000, other: 0x801, small: 0x0, wonder: 0x0, playable: false }, // 26
+    BldgDef { name: "Airport", cost: 16, upkeep: 2, culture: 0, tech: 58, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x240000, other: 0x42, small: 0x0, wonder: 0x0, playable: false }, // 27
+    BldgDef { name: "Police Station", cost: 16, upkeep: 2, culture: 0, tech: 46, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x400100, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 28
+    BldgDef { name: "Wealth", cost: 0, upkeep: 0, culture: 0, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x80000, other: 0x0, small: 0x0, wonder: 0x0, playable: true }, // 29
+    BldgDef { name: "The Pyramids", cost: 40, upkeep: 0, culture: 4, tech: 1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: 2, doubles: -1, flags: 0x0, other: 0x704, small: 0x0, wonder: 0x20000, playable: true }, // 30
+    BldgDef { name: "The Hanging Gardens", cost: 30, upkeep: 0, culture: 4, tech: 19, obsolete: 44, requires: -1, govt: -1, resources: [-1, -1], happy: 3, happy_all: 1, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x604, small: 0x0, wonder: 0x20000, playable: true }, // 31
+    BldgDef { name: "The Colossus", cost: 20, upkeep: 0, culture: 3, tech: 0, obsolete: 58, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x8c5, small: 0x0, wonder: 0x20020, playable: true }, // 32
+    BldgDef { name: "The Great Lighthouse", cost: 30, upkeep: 0, culture: 2, tech: 14, obsolete: 41, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x8c5, small: 0x0, wonder: 0x20009, playable: true }, // 33
+    BldgDef { name: "The Great Library", cost: 40, upkeep: 0, culture: 6, tech: 13, obsolete: 29, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x24, small: 0x0, wonder: 0x20002, playable: true }, // 34
+    BldgDef { name: "The Oracle", cost: 30, upkeep: 0, culture: 4, tech: 9, obsolete: 24, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: 3, flags: 0x0, other: 0x104, small: 0x0, wonder: 0x20000, playable: true }, // 35
+    BldgDef { name: "The Great Wall", cost: 30, upkeep: 0, culture: 2, tech: 20, obsolete: 38, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: 7, doubles: -1, flags: 0x0, other: 0x206, small: 0x0, wonder: 0x20004, playable: true }, // 36
+    BldgDef { name: "Sun Tzu's Art of War", cost: 60, upkeep: 0, culture: 2, tech: 22, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: 1, doubles: -1, flags: 0x0, other: 0x6, small: 0x0, wonder: 0x0, playable: true }, // 37
+    BldgDef { name: "Sistine Chapel", cost: 60, upkeep: 0, culture: 6, tech: 24, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: 10, flags: 0x0, other: 0x104, small: 0x0, wonder: 0x20000, playable: true }, // 38
+    BldgDef { name: "Magellan's Voyage", cost: 40, upkeep: 0, culture: 3, tech: 36, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x8c5, small: 0x0, wonder: 0x8, playable: true }, // 39
+    BldgDef { name: "Copernicus' Observatory", cost: 40, upkeep: 0, culture: 4, tech: 32, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x84, small: 0x0, wonder: 0x20010, playable: true }, // 40
+    BldgDef { name: "Shakespeare's Theater", cost: 45, upkeep: 0, culture: 8, tech: 39, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 8, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x1000, other: 0x4, small: 0x0, wonder: 0x20000, playable: true }, // 41
+    BldgDef { name: "Leonardo's Workshop", cost: 60, upkeep: 0, culture: 2, tech: 26, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x6, small: 0x0, wonder: 0x20040, playable: true }, // 42
+    BldgDef { name: "JS Bach's Cathedral", cost: 60, upkeep: 0, culture: 6, tech: 28, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 2, happy_all: 2, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x114, small: 0x0, wonder: 0x20000, playable: true }, // 43
+    BldgDef { name: "Newton's University", cost: 40, upkeep: 0, culture: 6, tech: 40, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x24, small: 0x0, wonder: 0x20010, playable: true }, // 44
+    BldgDef { name: "Smith's Trading Company", cost: 60, upkeep: 0, culture: 3, tech: 35, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x844, small: 0x0, wonder: 0x80, playable: true }, // 45
+    BldgDef { name: "Universal Suffrage", cost: 80, upkeep: 0, culture: 4, tech: 47, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x404, small: 0x0, wonder: 0x800, playable: true }, // 46
+    BldgDef { name: "Hoover Dam", cost: 80, upkeep: 0, culture: 2, tech: 61, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: 17, doubles: -1, flags: 0x8000, other: 0x604, small: 0x0, wonder: 0x20000, playable: true }, // 47
+    BldgDef { name: "Theory of Evolution", cost: 60, upkeep: 0, culture: 3, tech: 49, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x24, small: 0x0, wonder: 0x400, playable: true }, // 48
+    BldgDef { name: "The United Nations", cost: 100, upkeep: 0, culture: 4, tech: 65, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x44, small: 0x0, wonder: 0x22000, playable: false }, // 49
+    BldgDef { name: "The Manhattan Project", cost: 80, upkeep: 0, culture: 2, tech: 65, obsolete: -1, requires: -1, govt: -1, resources: [7, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x206, small: 0x0, wonder: 0x100, playable: false }, // 50
+    BldgDef { name: "Cure for Cancer", cost: 100, upkeep: 0, culture: 3, tech: 76, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 1, happy_all: 1, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x424, small: 0x0, wonder: 0x0, playable: true }, // 51
+    BldgDef { name: "Longevity", cost: 100, upkeep: 0, culture: 3, tech: 76, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x24, small: 0x0, wonder: 0x200, playable: true }, // 52
+    BldgDef { name: "SETI program", cost: 100, upkeep: 0, culture: 3, tech: 66, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x84, small: 0x0, wonder: 0x10, playable: true }, // 53
+    BldgDef { name: "Heroic Epic", cost: 20, upkeep: 0, culture: 4, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x908, small: 0x401, wonder: 0x0, playable: false }, // 54
+    BldgDef { name: "Iron Works", cost: 30, upkeep: 0, culture: 2, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [1, 3], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 4, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x80000000, other: 0x8, small: 0x0, wonder: 0x0, playable: false }, // 55
+    BldgDef { name: "Forbidden Palace", cost: 20, upkeep: 0, culture: 2, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x108, small: 0x20, wonder: 0x0, playable: false }, // 56
+    BldgDef { name: "Military Academy", cost: 40, upkeep: 0, culture: 1, tech: 42, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0xa, small: 0x402, wonder: 0x10000, playable: false }, // 57
+    BldgDef { name: "The Pentagon", cost: 40, upkeep: 0, culture: 1, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0xa, small: 0x4, wonder: 0x0, playable: false }, // 58
+    BldgDef { name: "Wall Street", cost: 30, upkeep: 0, culture: 2, tech: -1, obsolete: -1, requires: 76, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x8, small: 0x8, wonder: 0x0, playable: false }, // 59
+    BldgDef { name: "Apollo Program", cost: 50, upkeep: 0, culture: 2, tech: 68, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x28, small: 0x10, wonder: 0x0, playable: false }, // 60
+    BldgDef { name: "Strategic Missile Defense", cost: 50, upkeep: 0, culture: 1, tech: 80, obsolete: -1, requires: 22, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0xa, small: 0x40, wonder: 0x0, playable: false }, // 61
+    BldgDef { name: "Intelligence Agency", cost: 40, upkeep: 0, culture: 1, tech: 51, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x2a, small: 0x80, wonder: 0x0, playable: false }, // 62
+    BldgDef { name: "Battlefield Medicine", cost: 50, upkeep: 0, culture: 1, tech: -1, obsolete: -1, requires: 19, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0xa, small: 0x100, wonder: 0x0, playable: false }, // 63
+    BldgDef { name: "SS Thrusters", cost: 32, upkeep: 0, culture: 0, tech: 74, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 64
+    BldgDef { name: "SS Engine", cost: 64, upkeep: 0, culture: 0, tech: 68, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 65
+    BldgDef { name: "SS Docking Bay", cost: 16, upkeep: 0, culture: 0, tech: 68, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 66
+    BldgDef { name: "SS Cockpit", cost: 32, upkeep: 0, culture: 0, tech: 68, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 67
+    BldgDef { name: "SS Fuel Cells", cost: 16, upkeep: 0, culture: 0, tech: 70, obsolete: -1, requires: -1, govt: -1, resources: [7, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 68
+    BldgDef { name: "SS Life Support System", cost: 32, upkeep: 0, culture: 0, tech: 70, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 69
+    BldgDef { name: "SS Stasis Chamber", cost: 32, upkeep: 0, culture: 0, tech: 79, obsolete: -1, requires: -1, govt: -1, resources: [6, 7], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 70
+    BldgDef { name: "SS Storage/Supply", cost: 16, upkeep: 0, culture: 0, tech: 73, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 71
+    BldgDef { name: "SS Planetary Party Lounge", cost: 16, upkeep: 0, culture: 0, tech: 75, obsolete: -1, requires: -1, govt: -1, resources: [6, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 72
+    BldgDef { name: "SS Exterior Casing", cost: 64, upkeep: 0, culture: 0, tech: 73, obsolete: -1, requires: -1, govt: -1, resources: [6, 5], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x0, small: 0x0, wonder: 0x0, playable: false }, // 73
+    BldgDef { name: "The Internet", cost: 100, upkeep: 0, culture: 4, tech: 71, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: 20, doubles: -1, flags: 0x0, other: 0xfe6, small: 0x0, wonder: 0x0, playable: true }, // 74
+    BldgDef { name: "Civil Defense", cost: 12, upkeep: 1, culture: 0, tech: 61, obsolete: -1, requires: 1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 50, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x2, small: 0x0, wonder: 0x0, playable: true }, // 75
+    BldgDef { name: "Stock Exchange", cost: 20, upkeep: 3, culture: 0, tech: 52, obsolete: -1, requires: 9, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x10, other: 0x40, small: 0x0, wonder: 0x0, playable: true }, // 76
+    BldgDef { name: "Commercial Dock", cost: 16, upkeep: 2, culture: 0, tech: 60, obsolete: -1, requires: 25, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x2000000, other: 0x840, small: 0x0, wonder: 0x0, playable: false }, // 77
+    BldgDef { name: "The Temple of Artemis", cost: 50, upkeep: 0, culture: 4, tech: 16, obsolete: 29, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: 3, doubles: -1, flags: 0x0, other: 0x104, small: 0x0, wonder: 0x20000, playable: true }, // 78
+    BldgDef { name: "The Statue of Zeus", cost: 20, upkeep: 0, culture: 4, tech: 10, obsolete: 38, requires: -1, govt: -1, resources: [13, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x40000000, other: 0x106, small: 0x0, wonder: 0x20000, playable: true }, // 79
+    BldgDef { name: "The Mausoleum of Mausollos", cost: 20, upkeep: 0, culture: 2, tech: 11, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 3, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x824, small: 0x0, wonder: 0x20000, playable: true }, // 80
+    BldgDef { name: "Knights Templar", cost: 30, upkeep: 0, culture: 2, tech: 25, obsolete: 44, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x40000000, other: 0x106, small: 0x0, wonder: 0x0, playable: true }, // 81
+    BldgDef { name: "Secret Police HQ", cost: 20, upkeep: 0, culture: 0, tech: 51, obsolete: -1, requires: -1, govt: 3, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x8, small: 0x20, wonder: 0x0, playable: false }, // 82
+];
+
+#[allow(non_upper_case_globals)]
+impl UnitType {
+    pub const Settler: UnitType = UnitType(0);
+    pub const Worker: UnitType = UnitType(1);
+    pub const Scout: UnitType = UnitType(2);
+    pub const Explorer: UnitType = UnitType(3);
+    pub const Marine: UnitType = UnitType(4);
+    pub const ModernParatrooper: UnitType = UnitType(5);
+    pub const Warrior: UnitType = UnitType(6);
+    pub const Archer: UnitType = UnitType(7);
+    pub const Spearman: UnitType = UnitType(8);
+    pub const Swordsman: UnitType = UnitType(9);
+    pub const Chariot: UnitType = UnitType(10);
+    pub const Horseman: UnitType = UnitType(11);
+    pub const Pikeman: UnitType = UnitType(12);
+    pub const Longbowman: UnitType = UnitType(13);
+    pub const Musketman: UnitType = UnitType(14);
+    pub const Knight: UnitType = UnitType(15);
+    pub const Rifleman: UnitType = UnitType(16);
+    pub const Cavalry: UnitType = UnitType(17);
+    pub const Infantry: UnitType = UnitType(18);
+    pub const Tank: UnitType = UnitType(19);
+    pub const MechInfantry: UnitType = UnitType(20);
+    pub const ModernArmor: UnitType = UnitType(21);
+    pub const Catapult: UnitType = UnitType(22);
+    pub const Cannon: UnitType = UnitType(23);
+    pub const Artillery: UnitType = UnitType(24);
+    pub const RadarArtillery: UnitType = UnitType(25);
+    pub const CruiseMissile: UnitType = UnitType(26);
+    pub const TacticalNuke: UnitType = UnitType(27);
+    pub const ICBM: UnitType = UnitType(28);
+    pub const Galley: UnitType = UnitType(29);
+    pub const Caravel: UnitType = UnitType(30);
+    pub const Frigate: UnitType = UnitType(31);
+    pub const Galleon: UnitType = UnitType(32);
+    pub const Ironclad: UnitType = UnitType(33);
+    pub const Transport: UnitType = UnitType(34);
+    pub const Carrier: UnitType = UnitType(35);
+    pub const Submarine: UnitType = UnitType(36);
+    pub const Destroyer: UnitType = UnitType(37);
+    pub const Battleship: UnitType = UnitType(38);
+    pub const AEGISCruiser: UnitType = UnitType(39);
+    pub const NuclearSubmarine: UnitType = UnitType(40);
+    pub const Fighter: UnitType = UnitType(41);
+    pub const Bomber: UnitType = UnitType(42);
+    pub const Helicopter: UnitType = UnitType(43);
+    pub const JetFighter: UnitType = UnitType(44);
+    pub const StealthFighter: UnitType = UnitType(45);
+    pub const StealthBomber: UnitType = UnitType(46);
+    pub const Leader: UnitType = UnitType(47);
+    pub const Army: UnitType = UnitType(48);
+    pub const JaguarWarrior: UnitType = UnitType(49);
+    pub const Bowman: UnitType = UnitType(50);
+    pub const Hoplite: UnitType = UnitType(51);
+    pub const Impi: UnitType = UnitType(52);
+    pub const Legionary: UnitType = UnitType(53);
+    pub const Immortals: UnitType = UnitType(54);
+    pub const WarChariot: UnitType = UnitType(55);
+    pub const Rider: UnitType = UnitType(56);
+    pub const MountedWarrior: UnitType = UnitType(57);
+    pub const Musketeer: UnitType = UnitType(58);
+    pub const Samurai: UnitType = UnitType(59);
+    pub const WarElephant: UnitType = UnitType(60);
+    pub const Cossack: UnitType = UnitType(61);
+    pub const Panzer: UnitType = UnitType(62);
+    pub const ManOWar: UnitType = UnitType(63);
+    pub const F15: UnitType = UnitType(64);
+    pub const Privateer: UnitType = UnitType(65);
+    pub const Keshik: UnitType = UnitType(66);
+    pub const Conquistador: UnitType = UnitType(67);
+    pub const Berserk: UnitType = UnitType(68);
+    pub const Sipahi: UnitType = UnitType(69);
+    pub const GallicSwordsman: UnitType = UnitType(70);
+    pub const AnsarWarrior: UnitType = UnitType(71);
+    pub const NumidianMercenary: UnitType = UnitType(72);
+    pub const Hwacha: UnitType = UnitType(73);
+    pub const MedievalInfantry: UnitType = UnitType(74);
+    pub const Guerilla: UnitType = UnitType(75);
+    pub const Princess: UnitType = UnitType(76);
+    pub const Lincoln: UnitType = UnitType(77);
+    pub const Hammurabi: UnitType = UnitType(78);
+    pub const Mao: UnitType = UnitType(79);
+    pub const Bismarck: UnitType = UnitType(80);
+    pub const Alexander: UnitType = UnitType(81);
+    pub const Caesar: UnitType = UnitType(82);
+    pub const Xerxes: UnitType = UnitType(83);
+    pub const Hiawatha: UnitType = UnitType(84);
+    pub const Shaka: UnitType = UnitType(85);
+    pub const Montezuma: UnitType = UnitType(86);
+    pub const Cleopatra: UnitType = UnitType(87);
+    pub const Elizabeth: UnitType = UnitType(88);
+    pub const Catherine: UnitType = UnitType(89);
+    pub const Abu: UnitType = UnitType(90);
+    pub const Hannibal: UnitType = UnitType(91);
+    pub const Osman: UnitType = UnitType(92);
+    pub const Temujin: UnitType = UnitType(93);
+    pub const Gandhi: UnitType = UnitType(94);
+    pub const Ragnar: UnitType = UnitType(95);
+    pub const Brennus: UnitType = UnitType(96);
+    pub const Tokugawa: UnitType = UnitType(97);
+    pub const JoanDArc: UnitType = UnitType(98);
+    pub const WangKon: UnitType = UnitType(99);
+    pub const Isabella: UnitType = UnitType(100);
+    pub const EnkiduWarrior: UnitType = UnitType(101);
+    pub const ThreeManChariot: UnitType = UnitType(102);
+    pub const Mursilis: UnitType = UnitType(103);
+    pub const Gilgamesh: UnitType = UnitType(104);
+    pub const Henry: UnitType = UnitType(105);
+    pub const Carrack: UnitType = UnitType(106);
+    pub const SwissMercenary: UnitType = UnitType(107);
+    pub const WilliamOfOrange: UnitType = UnitType(108);
+    pub const Trebuchet: UnitType = UnitType(109);
+    pub const Pachacuti: UnitType = UnitType(110);
+    pub const SmokeJaguar: UnitType = UnitType(111);
+    pub const Theodora: UnitType = UnitType(112);
+    pub const ChasquiScout: UnitType = UnitType(113);
+    pub const JavelinThrower: UnitType = UnitType(114);
+    pub const Dromon: UnitType = UnitType(115);
+    pub const Cruiser: UnitType = UnitType(116);
+    pub const Crusader: UnitType = UnitType(117);
+    pub const AncientCavalry: UnitType = UnitType(118);
+    pub const Curragh: UnitType = UnitType(119);
+    pub const Paratrooper: UnitType = UnitType(120);
+    pub const TOWInfantry: UnitType = UnitType(121);
+    pub const Flak: UnitType = UnitType(122);
+    pub const MobileSAM: UnitType = UnitType(123);
+}
+
+#[allow(non_upper_case_globals)]
+impl Production {
+    pub const Settler: Production = Production(0);
+    pub const Worker: Production = Production(1);
+    pub const Scout: Production = Production(2);
+    pub const Explorer: Production = Production(3);
+    pub const Marine: Production = Production(4);
+    pub const ModernParatrooper: Production = Production(5);
+    pub const Warrior: Production = Production(6);
+    pub const Archer: Production = Production(7);
+    pub const Spearman: Production = Production(8);
+    pub const Swordsman: Production = Production(9);
+    pub const Chariot: Production = Production(10);
+    pub const Horseman: Production = Production(11);
+    pub const Pikeman: Production = Production(12);
+    pub const Longbowman: Production = Production(13);
+    pub const Musketman: Production = Production(14);
+    pub const Knight: Production = Production(15);
+    pub const Rifleman: Production = Production(16);
+    pub const Cavalry: Production = Production(17);
+    pub const Infantry: Production = Production(18);
+    pub const Tank: Production = Production(19);
+    pub const MechInfantry: Production = Production(20);
+    pub const ModernArmor: Production = Production(21);
+    pub const Catapult: Production = Production(22);
+    pub const Cannon: Production = Production(23);
+    pub const Artillery: Production = Production(24);
+    pub const RadarArtillery: Production = Production(25);
+    pub const CruiseMissile: Production = Production(26);
+    pub const TacticalNuke: Production = Production(27);
+    pub const ICBM: Production = Production(28);
+    pub const Galley: Production = Production(29);
+    pub const Caravel: Production = Production(30);
+    pub const Frigate: Production = Production(31);
+    pub const Galleon: Production = Production(32);
+    pub const Ironclad: Production = Production(33);
+    pub const Transport: Production = Production(34);
+    pub const Carrier: Production = Production(35);
+    pub const Submarine: Production = Production(36);
+    pub const Destroyer: Production = Production(37);
+    pub const Battleship: Production = Production(38);
+    pub const AEGISCruiser: Production = Production(39);
+    pub const NuclearSubmarine: Production = Production(40);
+    pub const Fighter: Production = Production(41);
+    pub const Bomber: Production = Production(42);
+    pub const Helicopter: Production = Production(43);
+    pub const JetFighter: Production = Production(44);
+    pub const StealthFighter: Production = Production(45);
+    pub const StealthBomber: Production = Production(46);
+    pub const Leader: Production = Production(47);
+    pub const Army: Production = Production(48);
+    pub const JaguarWarrior: Production = Production(49);
+    pub const Bowman: Production = Production(50);
+    pub const Hoplite: Production = Production(51);
+    pub const Impi: Production = Production(52);
+    pub const Legionary: Production = Production(53);
+    pub const Immortals: Production = Production(54);
+    pub const WarChariot: Production = Production(55);
+    pub const Rider: Production = Production(56);
+    pub const MountedWarrior: Production = Production(57);
+    pub const Musketeer: Production = Production(58);
+    pub const Samurai: Production = Production(59);
+    pub const WarElephant: Production = Production(60);
+    pub const Cossack: Production = Production(61);
+    pub const Panzer: Production = Production(62);
+    pub const ManOWar: Production = Production(63);
+    pub const F15: Production = Production(64);
+    pub const Privateer: Production = Production(65);
+    pub const Keshik: Production = Production(66);
+    pub const Conquistador: Production = Production(67);
+    pub const Berserk: Production = Production(68);
+    pub const Sipahi: Production = Production(69);
+    pub const GallicSwordsman: Production = Production(70);
+    pub const AnsarWarrior: Production = Production(71);
+    pub const NumidianMercenary: Production = Production(72);
+    pub const Hwacha: Production = Production(73);
+    pub const MedievalInfantry: Production = Production(74);
+    pub const Guerilla: Production = Production(75);
+    pub const Princess: Production = Production(76);
+    pub const Lincoln: Production = Production(77);
+    pub const Hammurabi: Production = Production(78);
+    pub const Mao: Production = Production(79);
+    pub const Bismarck: Production = Production(80);
+    pub const Alexander: Production = Production(81);
+    pub const Caesar: Production = Production(82);
+    pub const Xerxes: Production = Production(83);
+    pub const Hiawatha: Production = Production(84);
+    pub const Shaka: Production = Production(85);
+    pub const Montezuma: Production = Production(86);
+    pub const Cleopatra: Production = Production(87);
+    pub const Elizabeth: Production = Production(88);
+    pub const Catherine: Production = Production(89);
+    pub const Abu: Production = Production(90);
+    pub const Hannibal: Production = Production(91);
+    pub const Osman: Production = Production(92);
+    pub const Temujin: Production = Production(93);
+    pub const Gandhi: Production = Production(94);
+    pub const Ragnar: Production = Production(95);
+    pub const Brennus: Production = Production(96);
+    pub const Tokugawa: Production = Production(97);
+    pub const JoanDArc: Production = Production(98);
+    pub const WangKon: Production = Production(99);
+    pub const Isabella: Production = Production(100);
+    pub const EnkiduWarrior: Production = Production(101);
+    pub const ThreeManChariot: Production = Production(102);
+    pub const Mursilis: Production = Production(103);
+    pub const Gilgamesh: Production = Production(104);
+    pub const Henry: Production = Production(105);
+    pub const Carrack: Production = Production(106);
+    pub const SwissMercenary: Production = Production(107);
+    pub const WilliamOfOrange: Production = Production(108);
+    pub const Trebuchet: Production = Production(109);
+    pub const Pachacuti: Production = Production(110);
+    pub const SmokeJaguar: Production = Production(111);
+    pub const Theodora: Production = Production(112);
+    pub const ChasquiScout: Production = Production(113);
+    pub const JavelinThrower: Production = Production(114);
+    pub const Dromon: Production = Production(115);
+    pub const Cruiser: Production = Production(116);
+    pub const Crusader: Production = Production(117);
+    pub const AncientCavalry: Production = Production(118);
+    pub const Curragh: Production = Production(119);
+    pub const Paratrooper: Production = Production(120);
+    pub const TOWInfantry: Production = Production(121);
+    pub const Flak: Production = Production(122);
+    pub const MobileSAM: Production = Production(123);
+    pub const Palace: Production = Production(141);
+    pub const Barracks: Production = Production(142);
+    pub const Granary: Production = Production(143);
+    pub const Temple: Production = Production(144);
+    pub const Marketplace: Production = Production(145);
+    pub const Library: Production = Production(146);
+    pub const Courthouse: Production = Production(147);
+    pub const Walls: Production = Production(148);
+    pub const Aqueduct: Production = Production(149);
+    pub const Bank: Production = Production(150);
+    pub const Cathedral: Production = Production(151);
+    pub const University: Production = Production(152);
+    pub const Colosseum: Production = Production(153);
+    pub const Factory: Production = Production(154);
+    pub const ManufacturingPlant: Production = Production(155);
+    pub const RecyclingCenter: Production = Production(156);
+    pub const CoalPlant: Production = Production(157);
+    pub const HydroPlant: Production = Production(158);
+    pub const NuclearPlant: Production = Production(159);
+    pub const Hospital: Production = Production(160);
+    pub const ResearchLab: Production = Production(161);
+    pub const MassTransitSystem: Production = Production(162);
+    pub const SAMMissileBattery: Production = Production(163);
+    pub const CoastalFortress: Production = Production(164);
+    pub const SolarPlant: Production = Production(165);
+    pub const Harbor: Production = Production(166);
+    pub const OffshorePlatform: Production = Production(167);
+    pub const Airport: Production = Production(168);
+    pub const PoliceStation: Production = Production(169);
+    pub const Wealth: Production = Production(170);
+    pub const ThePyramids: Production = Production(171);
+    pub const TheHangingGardens: Production = Production(172);
+    pub const TheColossus: Production = Production(173);
+    pub const TheGreatLighthouse: Production = Production(174);
+    pub const TheGreatLibrary: Production = Production(175);
+    pub const TheOracle: Production = Production(176);
+    pub const TheGreatWall: Production = Production(177);
+    pub const SunTzusArtOfWar: Production = Production(178);
+    pub const SistineChapel: Production = Production(179);
+    pub const MagellansVoyage: Production = Production(180);
+    pub const CopernicusObservatory: Production = Production(181);
+    pub const ShakespearesTheater: Production = Production(182);
+    pub const LeonardosWorkshop: Production = Production(183);
+    pub const JSBachsCathedral: Production = Production(184);
+    pub const NewtonsUniversity: Production = Production(185);
+    pub const SmithsTradingCompany: Production = Production(186);
+    pub const UniversalSuffrage: Production = Production(187);
+    pub const HooverDam: Production = Production(188);
+    pub const TheoryOfEvolution: Production = Production(189);
+    pub const TheUnitedNations: Production = Production(190);
+    pub const TheManhattanProject: Production = Production(191);
+    pub const CureForCancer: Production = Production(192);
+    pub const Longevity: Production = Production(193);
+    pub const SETIProgram: Production = Production(194);
+    pub const HeroicEpic: Production = Production(195);
+    pub const IronWorks: Production = Production(196);
+    pub const ForbiddenPalace: Production = Production(197);
+    pub const MilitaryAcademy: Production = Production(198);
+    pub const ThePentagon: Production = Production(199);
+    pub const WallStreet: Production = Production(200);
+    pub const ApolloProgram: Production = Production(201);
+    pub const StrategicMissileDefense: Production = Production(202);
+    pub const IntelligenceAgency: Production = Production(203);
+    pub const BattlefieldMedicine: Production = Production(204);
+    pub const SSThrusters: Production = Production(205);
+    pub const SSEngine: Production = Production(206);
+    pub const SSDockingBay: Production = Production(207);
+    pub const SSCockpit: Production = Production(208);
+    pub const SSFuelCells: Production = Production(209);
+    pub const SSLifeSupportSystem: Production = Production(210);
+    pub const SSStasisChamber: Production = Production(211);
+    pub const SSStorageSupply: Production = Production(212);
+    pub const SSPlanetaryPartyLounge: Production = Production(213);
+    pub const SSExteriorCasing: Production = Production(214);
+    pub const TheInternet: Production = Production(215);
+    pub const CivilDefense: Production = Production(216);
+    pub const StockExchange: Production = Production(217);
+    pub const CommercialDock: Production = Production(218);
+    pub const TheTempleOfArtemis: Production = Production(219);
+    pub const TheStatueOfZeus: Production = Production(220);
+    pub const TheMausoleumOfMausollos: Production = Production(221);
+    pub const KnightsTemplar: Production = Production(222);
+    pub const SecretPoliceHQ: Production = Production(223);
+}
 
 /// The advance rules for `civ3mapgen::research`.
 pub fn rules() -> Rules {
@@ -512,7 +1080,7 @@ pub fn tables() -> Tables {
         good_prerequisite: GOOD.to_vec(),
         units: PRTO
             .iter()
-            .map(|&(required_tech, available_to_civs, ai_strategies, needs_resource)| UnitRow {
+            .map(|&(required_tech, available_to_civs, ai_strategies, needs_resource)| AiUnitRow {
                 required_tech,
                 available_to_civs,
                 ai_strategies,

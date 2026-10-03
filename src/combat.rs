@@ -63,19 +63,6 @@ impl Level {
         }
     }
 
-    /// Chance in percent that a victory promotes a unit of this level.
-    ///
-    /// HYPOTHESIS: the exe's promotion routine (`0x5C6968`) is unread and
-    /// `EXPR` holds only hit points and retreat. A coin flip up to Veteran
-    /// and one in three for Elite is community lore.
-    pub fn promotion_pct(self) -> i32 {
-        match self {
-            Level::Conscript | Level::Regular => 50,
-            Level::Veteran => 33,
-            Level::Elite => 0,
-        }
-    }
-
     /// The game's promotion text (`UNITPROMOTIONREG/VET/ELITE`) for a unit
     /// that just reached this level.
     fn promotion_text(self, unit: &str) -> String {
@@ -149,20 +136,56 @@ fn terrain_row(t: &Tile) -> usize {
     }
 }
 
+/// What a defending city adds to the odds: its size class and the best
+/// defensive improvement in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hold {
+    pub size: u8,
+    /// Percent from Walls, Civil Defense, the Great Wall's gift
+    /// (`exe::city_building_bonus`, the best one, not the sum).
+    pub building_pct: i32,
+}
+
+impl Hold {
+    /// A city with no defensive improvements.
+    #[cfg(test)]
+    pub fn bare(size: u8) -> Hold {
+        Hold { size, building_pct: 0 }
+    }
+
+    pub fn of(city: &City) -> Hold {
+        // Walls count only up to a town (`BLDG +0x98` is 8 for them); the
+        // others at every size. Obsolete ones and the gifts of wonders are
+        // sorted out by `citycalc::active`.
+        let list: Vec<exe::BuildingDefense> = crate::citycalc::active(city)
+            .filter(|(_, b)| b.defense > 0)
+            .map(|(p, b)| exe::BuildingDefense {
+                pct: b.defense,
+                town_limited: if p == Production::Walls { 8 } else { 0 },
+                obsolete: false,
+            })
+            .collect();
+        Hold {
+            size: city.size,
+            building_pct: exe::city_building_bonus(i32::from(city.size), false, &list, &exe::Rules::CONQUESTS),
+        }
+    }
+}
+
 /// The defender-side percentage `D` of the odds formula: the terrain, a
-/// city's size bonus, and the fortify bonus. A fortified unit counts only
+/// city's size bonus and improvements, and the fortify bonus. A fortified unit counts only
 /// with movement left (`0x4A0F79`); a defender's moves refill when its own
 /// civ's turn begins, so for the hotseat it counts as having them.
-pub fn defense_pct(map: &GameMap, d: &Unit, city_size: Option<u8>) -> i32 {
+pub fn defense_pct(map: &GameMap, d: &Unit, hold: Option<Hold>) -> i32 {
     let rules = exe::Rules::CONQUESTS;
     let Some(tile) = map.get(d.x, d.y) else {
         return 0;
     };
-    let structure = match city_size {
-        Some(size) => exe::Structure::City {
-            size: size as i32,
+    let structure = match hold {
+        Some(h) => exe::Structure::City {
+            size: i32::from(h.size),
             resisters: 0,
-            building_pct: 0, // the clone has no Walls or Civil Defense
+            building_pct: h.building_pct,
         },
         None => exe::Structure::None,
     };
@@ -172,14 +195,14 @@ pub fn defense_pct(map: &GameMap, d: &Unit, city_size: Option<u8>) -> i32 {
 }
 
 /// `1024 * P(defender wins a round)` for `att` against `dfn`, `0x4A0ED0`.
-pub fn round_odds(map: &GameMap, att: &Unit, dfn: &Unit, city_size: Option<u8>) -> i32 {
+pub fn round_odds(map: &GameMap, att: &Unit, dfn: &Unit, hold: Option<Hold>) -> i32 {
     exe::defender_round_odds(&exe::OddsInput {
         att_strength: exe::attack_strength(&[], def(att.utype).attack),
         att_army_bonus: 0,
         att_pct: 0,
         def_strength: exe::defense_strength(&[], def(dfn.utype).defense, false),
         def_army_bonus: 0,
-        def_pct: defense_pct(map, dfn, city_size),
+        def_pct: defense_pct(map, dfn, hold),
     })
     .expect("an attacker has attack above 0")
 }
@@ -235,7 +258,7 @@ pub fn defender_win_chance(odds: i32, att_hp: i32, def_hp: i32) -> f64 {
 pub fn pick_defender(
     map: &GameMap,
     att: &Unit,
-    city_size: Option<u8>,
+    hold: Option<Hold>,
     candidates: &[(Entity, Unit)],
 ) -> Option<Entity> {
     candidates
@@ -243,7 +266,7 @@ pub fn pick_defender(
         .filter(|(_, u)| def(u.utype).defense > 0)
         .max_by(|(ea, a), (eb, b)| {
             let rank = |u: &Unit| {
-                let odds = round_odds(map, att, u, city_size);
+                let odds = round_odds(map, att, u, hold);
                 (defender_win_chance(odds, att.hp(), u.hp()), u.hp())
             };
             let (ra, rb) = (rank(a), rank(b));
@@ -642,7 +665,7 @@ pub fn start_attacks(
         .cities
         .iter()
         .find(|(_, c)| (c.x, c.y) == at && c.civ != att.civ)
-        .map(|(e, c)| (e, c.size));
+        .map(|(e, c)| (e, Hold::of(c)));
     let stack: Vec<(Entity, Unit)> = units
         .iter()
         .filter(|(_, u)| (u.x, u.y) == at && u.civ != att.civ)
@@ -692,15 +715,15 @@ pub fn start_attacks(
         return;
     }
 
-    let city_size = city.map(|(_, size)| size);
-    let kind = match pick_defender(&map, &att, city_size, &stack) {
+    let hold = city.map(|(_, h)| h);
+    let kind = match pick_defender(&map, &att, hold, &stack) {
         Some(d) => {
             let dfn = &stack
                 .iter()
                 .find(|(e, _)| *e == d)
                 .expect("picked from the stack")
                 .1;
-            let odds = round_odds(&map, &att, dfn, city_size);
+            let odds = round_odds(&map, &att, dfn, hold);
             Kind::Fight {
                 defender: d,
                 rounds: roll_rounds(&mut rng.0, odds, att.hp(), dfn.hp()),
@@ -758,15 +781,26 @@ pub fn start_attacks(
     active.0 = Some(seq);
 }
 
-/// Roll the promotion die for a victor.
-fn promote(rng: &mut MapRng, u: &mut Unit) -> bool {
+/// A victor's promotion roll (`0x5BEF00`, `combat.md` 6.2): the die is
+/// `[2, 4, 8]` by level, halved for a Militaristic civ; it promotes on a
+/// zero. A unit that already failed this turn is promoted without a roll,
+/// and a failed roll marks it. Elite never rolls.
+pub fn promote(rng: &mut MapRng, u: &mut Unit, loser_is_barbarian: bool) -> bool {
     let Some(next) = u.level.next() else {
         return false;
     };
-    if rng.below(100) < u.level.promotion_pct() {
+    let militaristic = civ3mapgen::economy::has_trait(
+        crate::cities::traits(u.civ),
+        civ3mapgen::economy::trait_bit::MILITARISTIC,
+    );
+    let Some(die) = exe::promotion_die(u.level as i32, loser_is_barbarian, militaristic) else {
+        return false;
+    };
+    if u.failed_promotion || rng.below(die) == 0 {
         u.level = next;
         return true;
     }
+    u.failed_promotion = true;
     false
 }
 
@@ -901,7 +935,7 @@ fn resolve(
             if let Ok((_, mut u)) = units.get_mut(winner) {
                 u.anim = UnitAnim::Idle { t: 0.0 };
                 let name = def(u.utype).name;
-                if promote(rng, &mut u) && u.civ == realm.civs.viewer() {
+                if promote(rng, &mut u, false) && u.civ == realm.civs.viewer() {
                     post(&mut realm.board, u.level.promotion_text(name));
                 }
                 // Alone on its tile, the beaten defender leaves it to the
@@ -1053,7 +1087,7 @@ mod tests {
             .find(|s| s.tag_str() == "PRTO")
             .expect("PRTO section");
         let dword = |r: &[u8], at: usize| i32::from_le_bytes(r[at..at + 4].try_into().unwrap());
-        for t in UnitType::ALL {
+        for t in UnitType::all() {
             let row = (0..prto.count)
                 .map(|i| prto.row(&body, i).unwrap())
                 .find(|r| {
@@ -1094,9 +1128,9 @@ mod tests {
         assert_eq!(defense_pct(&forest, &warrior(1, 2, 1), None), 25);
         // A city adds its size class: town 0, city 50, metropolis 100.
         let d = warrior(1, 2, 1);
-        assert_eq!(defense_pct(&map, &d, Some(6)), 10);
-        assert_eq!(defense_pct(&map, &d, Some(7)), 60);
-        assert_eq!(defense_pct(&map, &d, Some(13)), 110);
+        assert_eq!(defense_pct(&map, &d, Some(Hold::bare(6))), 10);
+        assert_eq!(defense_pct(&map, &d, Some(Hold::bare(7))), 60);
+        assert_eq!(defense_pct(&map, &d, Some(Hold::bare(13))), 110);
     }
 
     #[test]
@@ -1188,6 +1222,10 @@ mod tests {
 
     fn city_at(civ: usize, x: i32, y: i32, size: u8) -> City {
         City {
+            gifts: vec![],
+            coastal: false,
+            river: false,
+            unrest: 0,
             civ,
             name: "Thebes".to_string(),
             x,
@@ -1218,17 +1256,78 @@ mod tests {
     }
 
     #[test]
+    fn walls_add_half_again_to_a_town_but_not_to_a_city() {
+        let mut town = city_at(1, 2, 1, 4);
+        assert_eq!(Hold::of(&town).building_pct, 0);
+        town.buildings.push(Production::Walls);
+        assert_eq!(Hold::of(&town), Hold { size: 4, building_pct: 50 });
+        // Above a town they stop counting (`BLDG +0x98`), Civil Defense does not.
+        let mut city = city_at(1, 2, 1, 9);
+        city.buildings.push(Production::Walls);
+        assert_eq!(Hold::of(&city).building_pct, 0);
+        city.buildings.push(Production::CivilDefense);
+        assert_eq!(Hold::of(&city).building_pct, 50);
+        // The best bonus counts, not the sum.
+        let mut both = city_at(1, 2, 1, 4);
+        both.buildings.extend([Production::Walls, Production::CivilDefense]);
+        assert_eq!(Hold::of(&both).building_pct, 50);
+        // And the odds follow: walls make the defender likelier to win a round.
+        let map = GameMap::generate();
+        let att = warrior(0, 1, 1);
+        let d = warrior(1, 2, 1);
+        assert!(
+            round_odds(&map, &att, &d, Some(Hold::of(&town))) > round_odds(&map, &att, &d, Some(Hold::bare(4)))
+        );
+    }
+
+    #[test]
     fn promotion_climbs_one_level_and_stops_at_elite() {
-        let mut u = warrior(0, 0, 0);
+        let mut u = warrior(2, 0, 0); // Egypt
         let mut rng = MapRng::new(5);
         let mut climbed = 0;
         for _ in 0..200 {
-            if promote(&mut rng, &mut u) {
+            u.failed_promotion = false;
+            if promote(&mut rng, &mut u, false) {
                 climbed += 1;
             }
         }
         assert_eq!((u.level, climbed), (Level::Elite, 2)); // Regular to Elite
-        assert!(!promote(&mut rng, &mut u));
+        assert!(!promote(&mut rng, &mut u, false));
+    }
+
+    #[test]
+    fn a_failed_roll_makes_the_next_victory_a_promotion() {
+        let mut u = warrior(0, 0, 0);
+        let mut rng = MapRng::new(11);
+        // Win until a roll fails, then the very next win promotes.
+        let mut fails = 0;
+        while u.level == Level::Regular && fails < 100 {
+            if !promote(&mut rng, &mut u, false) {
+                assert!(u.failed_promotion);
+                fails += 1;
+                assert!(promote(&mut rng, &mut u, false), "the second win this turn");
+            }
+            u.failed_promotion = false;
+        }
+        assert_eq!(u.level, Level::Veteran);
+    }
+
+    #[test]
+    fn a_militaristic_civ_promotes_twice_as_often() {
+        let rate = |civ: usize| {
+            let mut rng = MapRng::new(3);
+            let mut won = 0;
+            for _ in 0..4000 {
+                let mut u = warrior(civ, 0, 0); // a Regular: die 4, or 2
+                if promote(&mut rng, &mut u, false) {
+                    won += 1;
+                }
+            }
+            won
+        };
+        let (egypt, japan) = (rate(2), rate(0));
+        assert!((900..1100).contains(&egypt), "{egypt}"); // one in four
+        assert!((1900..2100).contains(&japan), "{japan}"); // one in two
     }
 
     #[test]
@@ -1266,7 +1365,7 @@ mod tests {
             UnitType::Warrior,
             UnitType::Scout,
         ] {
-            art.sets.insert(
+            art.insert(
                 t,
                 UnitClipSet {
                     clips: HashMap::from([("DEFAULT".to_string(), clip())]),
@@ -1357,10 +1456,7 @@ mod tests {
             let mut app = arena(seed);
             {
                 let mut art = app.world_mut().resource_mut::<UnitArt>();
-                art.sets
-                    .get_mut(&UnitType::Warrior)
-                    .unwrap()
-                    .clips
+                art.clips_mut(UnitType::Warrior)
                     .insert("ATTACK1".to_string(), test_clip(8));
             }
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();

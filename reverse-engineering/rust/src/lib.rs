@@ -131,6 +131,7 @@ pub mod rng;
 pub mod spiral;
 pub mod stack;
 pub mod ui;
+pub mod upgrade;
 pub mod yields;
 
 pub use bugs::OriginalBugs;

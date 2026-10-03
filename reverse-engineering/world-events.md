@@ -125,8 +125,10 @@ plain colonies, `+0x11C8` for airfields). Players: base `0xA52E98`, stride `0x20
 outpost / radar twins are `0x5D6430` / `0x5D6360`, called as `(map; x, y)`): clears the tile's colony id
 (cell slot `+0xF8(-1)`), decrements the owner's and the world's counter, releases the object to the free list
 of its pool, and then removes the tile improvements that only the colony justified: for a plain colony,
-overlay mask `1` (road) when the owner does not know the technology at `[0x9C7324] +0x1A4` and the further
-mask chosen by the technology at `+0x218` (the remaining ~60 instructions, **O**).
+overlay mask `1` (road; the rail bit goes with it) when the owner does not know the technology at
+`[0x9C7324] +0x1A4`, mask `2` (railroad) when it does not know the technology at `+0x218`, and finally un-sees the
+tiles no other structure observes. The complete bodies of all four destroyers, the wrappers, the pool protocol and
+the vision footprints are specified in `colonies.md` sections 1.2, 5 and 6.
 
 ## 2. Resource upkeep `0x4F4CB0` (every 5th turn)
 
@@ -477,8 +479,9 @@ In order, on the tile `c`:
 3. If the tile has an airfield (bit 29): destroy it, `0x5DAEC0(airfield; 1)` (the object is in pool
    `[0xA52E3C]`, indexed by the cell's colony id; section 1.4).
 4. If the tile has an outpost (bit 31): `0x5D6430(map; x, y)`; if it has a radar tower (bit 30):
-   `0x5D6360(map; x, y)` (the outpost and radar destroyers; bodies **O**, same pattern as 1.4). A plain
-   Colony on the tile is not destroyed by this routine (**O** whether anything removes it later).
+   `0x5D6360(map; x, y)` (the outpost and radar destroyers, `colonies.md` 6.3 to 6.5). A plain
+   Colony on the tile is not destroyed by this routine (a plain Colony is removed by tile-owner changes, entry of a
+   foreign unit, city founding, resource disappearance and a nuclear blast; `colonies.md` section 7).
 5. Clear mask `0xF000001F` (road, railroad, mine, irrigation, fortress and bits 28 to 31).
 6. **If the tile is water: stop** (the rest does not apply).
 7. Set overlay mask `0x40` (the same bit as pollution).
@@ -651,8 +654,8 @@ Open (ranked by how much a faithful port needs them):
    coast re-evaluation.
 3. `0x4B45A0` (the step between pollution and meltdown). (`0x4ACCC0` is resolved: the obsolescence test,
    `city-buildings.md` section 2.)
-4. The tail of the colony destroyers `0x5DAA90` / `0x5DAEC0` (which improvements they strip and why), the
-   bodies of `0x5D6430` / `0x5D6360`, and which overlay bit (if any) marks a plain Colony.
+4. (Resolved: `colonies.md`. The destroyers, the wrappers `0x5D6430` / `0x5D6360`, and the plain-Colony marker, which
+   is "colony id valid and overlay bits 29-31 clear" with no bit of its own.)
 5. The meaning of `[cell+0x34]` as a general cell counter (the volcano stage is its only reader found) and
    of cell slot `+0x5C`.
 6. The UI tail of `0x4B3700` and `0x4B3C30` (plague dialog, network events).
