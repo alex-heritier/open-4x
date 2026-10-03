@@ -109,7 +109,8 @@ pub fn update_hover_label(
     hovered: Res<Hovered>,
     selected: Res<Selected>,
     preview: Res<MovePreview>,
-    units: Query<&Unit>,
+    units: Query<(Entity, &Unit)>,
+    cities: Query<&crate::cities::City>,
     mut q: Query<&mut Text, With<HoverLabel>>,
 ) {
     let Ok(mut text) = q.single_mut() else {
@@ -129,14 +130,16 @@ pub fn update_hover_label(
             // The route readout belongs to the move preview: Civ3 shows it
             // while a Go-to or a held press is being aimed, not on a hover.
             if preview.0 == Some((x, y)) {
-                if let Some(u) = selected.0.and_then(|s| units.get(s).ok()) {
-                    match map.find_path((u.x, u.y), (x, y)) {
+                if let Some(u) = selected.0.and_then(|s| units.get(s).ok().map(|(_, u)| u)) {
+                    let ports: Vec<_> = cities.iter().filter(|c| c.civ == u.civ && c.coastal).map(|c| (c.x, c.y)).collect();
+                    let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
+                    match crate::naval::route(&map, u, (x, y), &ports, &snapshot) {
                         Some(p) => {
                             let extra = units::path_turns(
                                 &map,
                                 (u.x, u.y),
                                 u.moves,
-                                units::def(u.utype).moves * crate::map::MP,
+                                crate::naval::moves(u.utype, u.civ),
                                 &p,
                             );
                             parts.push(format!(

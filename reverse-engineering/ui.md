@@ -107,3 +107,33 @@ The last unswept region group (`REGIONS.md` #10), now mapped:
   funclets between them (`call 0x649A80` frees), plus the MSVC
   `Runtime Error!` strings. No game logic; the turn-step SEH handlers
   are vanilla CRT scaffolding.
+
+## Map city labels `0x4E5580` (verified: static, this session)
+
+Called once per map redraw from view slot `0x11C` (`0x4C30E0`), right
+after the map draw `0x5F4550`, with `ecx = 0x9F8700`. It loops over the
+city pool (`[0xA52E6C]`, count `[0xA52E78]`) and for each city:
+
+* skips it unless the local player has discovered the tile (`0x4EDED0`
+  on that player's vision object, bypassed when `0x427310(8)` holds) and
+  it is on screen (`0x4E69F0`);
+* writes the name (`City +0x1E0`), plus ` (<civ>)` when option bit
+  `[0xA52678] & 0x200000` is set;
+* appends `:  <turns to grow>` and the build line **only when the owner
+  (`City +0x28`) is the local player** (`0x4E5839`: `cmp cl, [ebx+0x4DBC]`)
+  or option bit `[0xA52680] & 8` is set (cleared in multiplayer by
+  `0x47B530`). A foreign city's label is its bare name over an empty
+  build band. A stalled count prints `--` (`0x729538`).
+* sizes the box to the wider of the two lines (`0x5FE560`, +12 px, made
+  even) and never wraps it.
+* the text colour is fixed white (`0x8000FFFF`, `0x80007FFF` in 15-bit
+  mode); the growth line turns red (`0x8000F800`) when the city starves
+  and yellow (`0x8000FFE0`) at zero growth. No fog test appears in the
+  routine.
+
+Fog brightness: a remembered city's label in a game screenshot measures
+about half the brightness of a lit one (text peak ~105 vs ~220, badge
+dimmed alike). The label routine has no fog term, so the dimming comes
+from the fog pass; where that pass runs relative to `0x4C30E0` is
+**open**. `civ3-clone` dims a remembered city's art and label to the
+60 % a remembered tile keeps (`cities::FOGGED`).

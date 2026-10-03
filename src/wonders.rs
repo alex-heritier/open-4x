@@ -329,7 +329,7 @@ pub fn window(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c
         let when = match card.turn {
             _ if card.lost => "Destroyed".to_string(),
             Some(0) => "Before the game".to_string(),
-            Some(t) => format!("Turn {t}"),
+            Some(t) => crate::calendar::label(t),
             None => "Under construction".to_string(),
         };
         let owner = if card.lost { "-" } else { CIVS[card.civ].name };
@@ -385,6 +385,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             civ,
             name: name.into(),
             x: 3,

@@ -316,8 +316,8 @@ Bit 1 (celebration): the same scan with `2` and `0xFD` finds `0x44A630` (AI, unr
 accumulator `esi` gains a quarter of a table product; the quantity is unread), `0x4B28D0` (halving),
 `0x4BE440` (the writer), `0x527FC0` (a score: `-5` per unit on the city tile, `-40` for the capital,
 `-20` for a city with an improvement of flag `0x80`, `-10` celebrating, `+10` in disorder, plus a
-GOVT table value; **HYPOTHESIS:** a success percentage of the mission that also writes
-`[city+0x1C0]`) and `0x57CDA0` (a bounded counter, unread). The scan also names `0x49A920`, which is
+GOVT table value; **resolved:** it is the per-citizen success percentage of the Initiate
+Propaganda executor, which also writes `[city+0x1C0]`: `espionage.md` 9.7) and `0x57CDA0` (a bounded counter, unread). The scan also names `0x49A920`, which is
 a false hit: the matched load is a store to an unrelated object.
 
 ### The produces-units tick `0x4BE730` (side result)
@@ -388,8 +388,8 @@ method requires) and is described here so it can be rebuilt:
 * `[city+0xA4]` (when non-zero it is cleared on disorder and on celebration, with a queue entry at
   `+0x3BC` dropped through `0x406200`), `0x4C0AC0(city, a, b, 5)` (called with `(1, 1)` on disorder
   and `(2, 1)` on celebration), `0x4DD240`, `0x5B1830`.
-* The magnitude written to `[city+0x1C0]` by `0x527FC0` (propaganda), and what `0x527FC0`'s score
-  is a score of.
+* ~~The magnitude written to `[city+0x1C0]` by `0x527FC0` (propaganda), and what `0x527FC0`'s score
+  is a score of.~~ Resolved in `espionage.md` 9.7 (`0x527FC0` is the Initiate Propaganda executor).
 * `0x4BDF10`; `0x5BE6E0` and `0x5BE820`, the two predicates `0x5A6060` mode 4 uses to decide which
   units count for martial law (`government.md` section 10); `0x44A630`, the AI evaluator that reads
   the celebration flag; `0x57CDA0`.

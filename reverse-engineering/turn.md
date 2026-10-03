@@ -79,8 +79,7 @@ For `slot` from 31 down to 0, with `P` = the player record, skipping everything 
    `0x5C7700(unit)` is called. That per-unit turn (sea hazard, jungle disease, healing, auto-wake, movement
    reset) is specified in `unit-turn.md`; it contains no AI.
 7. UI refresh `0x4DFB10(0x9F8700; slot)` (and `0x4DFAB0` when it returns true), then `0x449B20(P; 0)`, the
-   UI refresh again, then `0x449B20(P; 1)`. `0x449B20` is a 178-line routine taking a 0/1 phase argument
-   (**O**).
+   UI refresh again, then `0x449B20(P; 1)`. `0x449B20` is the unit command pump (`unit-ai.md` 2): phase 1 runs the standing orders 2..14 of every unit that still has movement, phase 0 gives every other unit up to 15 turns at the unit AI.
 8. `0x4F4EA0(slot)` (section 2.3), then the message pump `0x6268C0`.
 
 ### 2.2 Loop B: slots 0 up to 31 (`Player::turn`) **V**
@@ -92,8 +91,9 @@ human-turn driver, `0x4F5550`, instead).
 
 ### 2.3 The two AI unit helpers **V**
 
-* `0x4F4F70(slot)`: wakes the AI player's fortified units (the exact predicate was not re-read here;
-  it is the first call of the slot in Loop A and runs before the planners). **O** for the predicate.
+* `0x4F4F70(slot)` (**V**, read in full this time): not a gameplay routine. For every unit of `slot` (other than the local player's) whose animation-state field `U.+0x2A0` is `7`, it either calls `U+0x280 .0x403CC0(1)` (when the byte `U.+0x24D` is set) or
+  resets the state (`U.+0x2A0 = 1`, `U.+0x38C = 0`, `U.+0x378 = 1`, `U+0x280 .0x403CC0(0)`), and redraws (`0x4EEB20(0xA268B8)`) when any unit was touched. All the fields are in the animation block
+  (`+0x278..+0x38D`, the same block `setPosition` calls into, `movement.md` 5 step 4), so **H** it only resets the unit sprite pose. It changes no order, movement or position.
 * `0x4F4EA0(slot)` (auto-fortify idle AI units): for every unit owned by `slot` that is not the local
   player's, whose order byte `+0x64 == 1`, for which `0x405890(unit + 0x360; 7)` is true and whose word
   `+0x2A0 != 7`: set `+0x29C = 3`, `+0x2A0 = 7`, `+0x378 = 0x4058B0(...) - 1`, then `0x403CC0(unit + 0x280;

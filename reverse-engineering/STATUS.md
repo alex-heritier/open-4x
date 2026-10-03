@@ -35,6 +35,10 @@ consequences of the text, not captured runs, unless a document says otherwise).
 | [`disease.md`](disease.md) | city disease: terrain tile count, the literal tech-8 cure, infection and cure rolls, citizen loss | 7 |
 | [`worker-jobs.md`](worker-jobs.md) | worker jobs: job rows, order tokens, gates, work rate, completion effects (automation and movement excluded) | 12 |
 | [`colonies.md`](colonies.md) | colonies, airfields, radar towers, outposts: pools, site gate, creators, vision footprints, destroyers, transfer, all triggers, bombard destruction | 11 |
+| [`espionage.md`](espionage.md) | espionage: the nine ESPN rows, mission agents, start dispatcher, cost / quote / setup / dispatcher, the nine executors, the incident tail, the computer player's driver and pickers (what happens to the Diplomat/Spy unit afterwards, the human menus and the wire format are open) | 12 |
+| [`vision.md`](vision.md) | vision: sight masks and primitives, line-of-sight mask (emulator-verified), unit sight predicate, unit sight refresh and its call sites, air reveal, territory sight (consumers of the masks in rendering / combat / AI are open) | 9 |
+| [`movement.md`](movement.md) | movement points and allowances, `setPosition` (full), teleport, mover stages and return codes, evaluator entry guards (evaluator body, path finder `0x580540`, ZOC, order executors are open) | 9 |
+| [`unit-ai.md`](unit-ai.md) | unit command pump, strategy dispatcher and handler table, three small handlers (handler bodies, notably Terraform / worker automation, are open) | 9 |
 
 ## 2. Specified earlier, not re-audited to the same standard
 
@@ -64,18 +68,20 @@ Known corrections are applied where a later document found one (for example `eco
 
 Listed with the entry points already identified. Each is a piece of rule logic a port must reproduce.
 
-1. **Espionage** (spy missions, the Intelligence Agency) and **leaders and armies** beyond the pieces in
-   `research.md` 10.2 and `buildable.md`. (Trade network: `trade-network.md`; unit upgrades: `unit-upgrades.md`.)
-2. **Unit movement, zones of control, line of sight / vision, worker automation** (`workers.md` has leads); the path
-   finder `0x580540` modes other than the network fill and the unit step test `0x57F360` are not specified. (Worker
-   job rules: `worker-jobs.md`; the vision footprints of colonies are in `colonies.md` section 5; unit and city vision
-   sources are open.)
+1. **Leaders and armies** beyond the pieces in `research.md` 10.2 and `buildable.md`. (Trade network:
+   `trade-network.md`; unit upgrades: `unit-upgrades.md`; espionage: `espionage.md`, whose open items include the
+   Intelligence Agency link and the fate of the Diplomat/Spy unit.)
+2. **Unit movement (partial), zones of control, worker automation.** Specified: vision / line of sight (`vision.md`), movement
+   points and `setPosition` (`movement.md`), worker job rules (`worker-jobs.md`). Open: the step evaluator `0x57F360` beyond its
+   entry guards, the path finder `0x580540` (modes other than the network fill), zones of control, the mover's interior
+   (`movement.md` 9), the go-to order executors, and the worker **automation** handler, which is now located (the Terraform strategy handler `0x45C750`, `unit-ai.md` 5) but not decoded.
 3. ~~Colonies~~ Specified in `colonies.md` (open items there, section 11). Borders and the culture flip:
    `borders-culture.md`.
-4. **AI decision making**: planners `0x446840`, `0x445EA0`, `0x449B20`, `0x4F4F70`, `0x441F80`; the scoring body
-   `0x442480`; the item choosers `0x42C8A0`, `0x42BEE0`; the purchase logic `0x433CD0`, `0x433EE0`; the category
-   masks.
-5. **The screens** `0x5CF640`, `0x5A3910`; the Golden Age start is in `research.md` section 11 only. (Disease:
+4. **AI decision making**: planners `0x446840`, `0x445EA0`, `0x441F80`; the scoring body `0x442480`; the item chooser
+   `0x42C8A0`; the purchase logic `0x433CD0`, `0x433EE0`; the category masks; every unit-AI handler body of `unit-ai.md` 3.
+   (Settled: `0x449B20` and the strategy dispatcher `0x4611F0` are `unit-ai.md`; `0x4F4F70` is a sprite-pose reset, `turn.md` 2.3; `0x42BEE0`
+   is `city-turn.md` 10.)
+5. **The screens** `0x5CF640`, `0x5A3910`: assets and control flow only (`city-buildings.md` 11); layout and widget contents are open. The Golden Age start is in `research.md` section 11 only. (Disease:
    `disease.md`.)
 6. **Whole-game persistence**: that a loaded save reproduces every field the specifications read (`savegame.md`
    has the grammar and the open list).

@@ -219,6 +219,9 @@ pub struct Player {
     pub interactive: bool,
     /// Holds a Great Library-type wonder (`0x55A8D0(P; 2, 0) > 0`).
     pub great_library: bool,
+    /// Obsoleting advance of that wonder, checked after research completes
+    /// and before its grant pass. `NONE` means it never expires.
+    pub great_library_obsolete: i32,
     /// `RACE.freeTech(0..4)` (vtable `+0x1C`).
     pub free_techs: [i32; 4],
     /// The civilization has the Scientific trait (`hasTrait(3)`).
@@ -249,6 +252,7 @@ impl Player {
             queue: VecDeque::new(),
             interactive: false,
             great_library: false,
+            great_library_obsolete: NONE,
             free_techs: [NONE; 4],
             scientific: false,
             notice: None,
@@ -774,6 +778,10 @@ impl World {
         if !self.players[p as usize].great_library {
             return;
         }
+        let obsolete = self.players[p as usize].great_library_obsolete;
+        if obsolete >= 0 && self.knows(p, obsolete) {
+            return;
+        }
         for t in 0..self.t() {
             if self.knows(p, t) {
                 continue;
@@ -1251,6 +1259,28 @@ mod tests {
         assert!(w.knows(1, 0));
         assert!(!w.knows(1, 1));
         assert!(ev.iter().any(|e| matches!(e, Event::GreatLibrary { tech: 0, first: 2, second: 3, .. })));
+    }
+
+    #[test]
+    fn completing_the_obsoleting_advance_stops_the_library_before_its_grant_pass() {
+        let mut w = world(4);
+        w.players[1].great_library = true;
+        w.players[1].great_library_obsolete = 0;
+        w.players[1].current = 0;
+        w.players[1].cities = 1;
+        w.players[1].rate = 100;
+        w.players[1].beakers = 10000;
+        w.players[1].turns = w.rules.min_research_turns - 1;
+        for q in [2u32, 3] {
+            w.players[q as usize].contact |= 1 << 1;
+            w.known[1] |= 1 << q;
+        }
+        let (mut brain, mut dice) = (Lowest, Rng::new(1));
+        let mut ev = vec![];
+        w.step(1, &mut ev, &mut Ctx { brain: &mut brain, dice: &mut dice });
+        assert!(w.knows(1, 0), "the research completes first");
+        assert!(!w.knows(1, 1), "the obsolete wonder grants nothing");
+        assert!(!ev.iter().any(|e| matches!(e, Event::GreatLibrary { .. })));
     }
 
     #[test]

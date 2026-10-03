@@ -36,8 +36,6 @@ use civ3mapgen::diplomacy::Verdict;
 const GOLD_STEP: i32 = 10;
 /// Advances listed on each side of the talk screen.
 const TECHS_SHOWN: usize = 8;
-/// Advances listed in the Science Advisor.
-const OPTIONS_SHOWN: usize = 12;
 /// Rows of treaty buttons in the lower box of the trading screen.
 const TREATY_ROWS: usize = 4;
 
@@ -82,6 +80,8 @@ pub struct Advisors {
     seed: u32,
     /// The page of the Wonders window.
     page: usize,
+    /// The era page of the Science Advisor; the viewer's era until turned.
+    era: Option<usize>,
 }
 
 impl Advisors {
@@ -107,6 +107,18 @@ impl Advisors {
 
     fn close(&mut self) {
         self.open(Screen::Closed);
+    }
+
+    /// Open `screen` from another advisor's tab.
+    pub fn show(&mut self, screen: Screen) {
+        self.open(screen);
+    }
+
+    /// Put away what is up, for another advisor's tab.
+    pub fn dismiss(&mut self) {
+        if self.is_open() {
+            self.close();
+        }
     }
 }
 
@@ -142,6 +154,8 @@ pub enum Action {
     Page(i32),
     /// Look at the city on this tile.
     Zoom(i32, i32),
+    /// Turn the Science Advisor's era page a step back or forward.
+    Era(i32),
 }
 
 impl Action {
@@ -167,6 +181,7 @@ impl Action {
             Action::Wonders => "Wonders".into(),
             Action::Page(d) => format!("Page:{d}"),
             Action::Zoom(..) => "Zoom".into(),
+            Action::Era(d) => format!("Era:{d}"),
         }
     }
 }
@@ -327,42 +342,11 @@ fn says(speech: &Speech, d: &Diplomacy, facts: &crate::diplomacy::Facts, me: usi
     speech.say(key, power, mood, roll, who)
 }
 
-fn turns_text(turns: i32) -> String {
+pub fn turns_text(turns: i32) -> String {
     match turns {
         9999.. => "never".into(),
         1 => "1 turn".into(),
         n => format!("{n} turns"),
-    }
-}
-
-fn science(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
-    let (me, r) = (v.me, v.research);
-    let forced = r.needs_choice(me);
-    text(p, font, "Science Advisor", 30.0);
-    let line = match (r.target(me), r.progress(me)) {
-        (Some(t), Some((have, cost))) => {
-            format!("Researching {}: {have} of {cost} beakers, {}.", tech_name(t), turns_text(r.turns(me, t)))
-        }
-        _ if forced => "Excellency, what shall our scientists study?".into(),
-        _ => "Our scientists have no target.".into(),
-    };
-    text(p, font, line, 20.0);
-    text(p, font, format!("Our science yields {} beakers a turn.", r.rate(me)), 18.0);
-    let options = r.options(me);
-    if options.is_empty() {
-        text(p, font, "There is nothing left we can study.", 18.0);
-    } else if !forced && r.progress(me).is_some_and(|(have, _)| have > 0) {
-        text(p, font, "Changing the target forfeits the beakers stored.", 16.0);
-    }
-    for &t in options.iter().take(OPTIONS_SHOWN) {
-        let now = r.target(me) == Some(t);
-        button(p, font, format!("{} ({})", tech_name(t), turns_text(r.turns(me, t))), Action::Pick(t), now);
-    }
-    if options.len() > OPTIONS_SHOWN {
-        text(p, font, format!("...and {} more.", options.len() - OPTIONS_SHOWN), 16.0);
-    }
-    if !forced || options.is_empty() {
-        button(p, font, "Close".into(), Action::Close, false);
     }
 }
 
@@ -648,9 +632,11 @@ pub fn show(
     };
     let st = Stage(scale);
     let ui = Ui { font: &font, st };
-    let staged = !matches!(advisors.screen, Screen::Science | Screen::Foreign | Screen::WarAsk);
+    let staged = !matches!(advisors.screen, Screen::Foreign | Screen::WarAsk);
     if staged {
-        let stage = stage::spawn(&mut commands, AdvisorRoot(scale), st, 0.55, 100);
+        // Civ3's advisors sit over the map undimmed.
+        let dim = if advisors.screen == Screen::Science { 0.0 } else { 0.55 };
+        let stage = stage::spawn(&mut commands, AdvisorRoot(scale), st, dim, 100);
         commands.entity(stage).with_children(|s| match advisors.screen {
             Screen::Greeting(other) => greeting(s, &ui, &v, &mut art, other),
             Screen::Talk(other) => talk(s, &ui, &v, &mut art, other),
@@ -664,7 +650,12 @@ pub fn show(
                     wonders::splash(s, &ui, &assets, splash);
                 }
             }
-            Screen::Science | Screen::Foreign | Screen::WarAsk | Screen::Closed => {}
+            Screen::Science => {
+                let era = advisors.era.unwrap_or_else(|| crate::tech_tree::era_of(&research, v.me));
+                let closable = !research.needs_choice(v.me) || research.options(v.me).is_empty();
+                crate::tech_tree::page(s, &ui, &assets, &research, v.me, era, closable);
+            }
+            Screen::Foreign | Screen::WarAsk | Screen::Closed => {}
         });
         return;
     }
@@ -697,7 +688,6 @@ pub fn show(
                 BorderColor::all(Color::srgb(0.25, 0.4, 0.28)),
             ))
             .with_children(|panel| match advisors.screen {
-                Screen::Science => science(panel, &font, &v),
                 Screen::Foreign => foreign(panel, &font, &v),
                 Screen::WarAsk => war_ask(panel, &font, &v),
                 _ => {}
@@ -776,6 +766,10 @@ pub fn respond(
         Action::Science => advisors.open(Screen::Science),
         Action::Foreign => advisors.open(Screen::Foreign),
         Action::Wonders => advisors.open(Screen::Wonders),
+        Action::Era(step) => {
+            let now = advisors.era.unwrap_or_else(|| crate::tech_tree::era_of(&research, me));
+            advisors.era = Some((now as i32 + step).clamp(0, 3) as usize);
+        }
         Action::Page(step) => {
             let cs: Vec<&City> = cities.iter().collect();
             let last = wonders::pages(wonders::cards(&wonders, &cs, &diplomacy, me).len()) - 1;

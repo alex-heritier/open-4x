@@ -9,17 +9,19 @@
 //! - `sel <Settler|Worker|Warrior|Scout>`: select the first unit of a type.
 //! - `tp <x>,<y>`: teleport the selected unit (debug placement).
 //! - `spawn <Settler|Worker|Warrior|Scout> <civ> <x>,<y>`: add a unit of
-//!   civ index `<civ>` (0 Japan, 1 Egypt, ...).
+//!   civ index `<civ>` (0 Japan, 1 Egypt, ..., 4 the barbarians).
 //! - `go <x>,<y>`: order the selected unit to walk there (attacking whatever
 //!   enemy holds the last tile).
-//! - `report`: print the units within 3 tiles of the first city.
+//! - `report`: print nearby units; `report all` prints every unit.
+//! - `pick <unit name|All>`: press a unit-picker or disembark row.
 //! - `imp <x>,<y> <road|irr|mine>`: put an improvement on a tile.
 //!
 //! Coordinates written `@dx,dy` are relative to the first city.
 //! - `city`: open the first city's screen.
 //! - `btn <name>`: press a city-screen button: `Change`, `Close`,
 //!   `Governor`, `CloseMenu`, `PageNext`, `PagePrev`, `Prev`, `Next`, `Pick:<item>`,
-//!   `Queue:<item>`, `Unqueue:<i>`.
+//!   `Queue:<item>` (a shift-click on the item), `Unqueue:<i>`, `Hurry`,
+//!   `HurryYes`, `HurryNo`.
 //! - `adv <name>`: press an advisor button: `Science`, `Foreign`, `Close`,
 //!   `Pick:<advance>`, `Talk:<civ>`, `Treaty:<clause>`, `Give:<advance>`,
 //!   `Get:<advance>`, `GiveGold:<delta>`, `GetGold:<delta>`, `Propose`,
@@ -35,6 +37,7 @@
 //! - `hover <x>,<y>` / `unhover`: pin the map hover (no mouse in captures).
 //! - `down` / `up`: press and release the left mouse button.
 //! - `tile <rx>,<ry>`: click a tile of the open city's radius.
+//! - `size <n> [shields]`: set the active civ's first city's size and box.
 //!
 //! Example: `CIV3_SCRIPT='20:key B;40:city;60:btn Change'`.
 
@@ -140,11 +143,13 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
         ScreenButton::Governor => kind == "Governor",
         ScreenButton::CloseMenu => kind == "CloseMenu",
         ScreenButton::MenuPage(d) => kind == if *d > 0 { "PageNext" } else { "PagePrev" },
-        ScreenButton::Pick(p) => kind == "Pick" && p.name() == arg,
-        ScreenButton::Queue(p) => kind == "Queue" && p.name() == arg,
+        ScreenButton::Pick(p) => (kind == "Pick" || kind == "Queue") && p.name() == arg,
         ScreenButton::PrevCity => kind == "Prev",
         ScreenButton::NextCity => kind == "Next",
         ScreenButton::Unqueue(i) => kind == "Unqueue" && arg.parse() == Ok(*i),
+        ScreenButton::Hurry => kind == "Hurry",
+        ScreenButton::HurryYes => kind == "HurryYes",
+        ScreenButton::HurryNo => kind == "HurryNo",
     }
 }
 
@@ -152,6 +157,9 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
 /// (a system takes 16 parameters at most).
 #[derive(SystemParam)]
 pub struct Reach<'w, 's> {
+    picker: Res<'w, crate::unit_picker::UnitPicker>,
+    picker_buttons: Query<'w, 's, (&'static mut Interaction, &'static crate::unit_picker::PickerRow),
+        (Without<ScreenButton>, Without<crate::advisors::Action>, Without<crate::domestic::Click>)>,
     mouse: ResMut<'w, ButtonInput<MouseButton>>,
     pin: ResMut<'w, crate::input::HoverPin>,
     diplomacy: ResMut<'w, crate::diplomacy::Diplomacy>,
@@ -237,6 +245,12 @@ pub fn drive_script(
                     .iter()
                     .find(|(_, u)| u.civ == civs.active && Some(u.utype) == t)
                     .map(|(e, _)| e);
+                if let Some((_, mut u)) = selected.0.and_then(|e| units.get_mut(e).ok()) {
+                    u.fortified = false;
+                    u.sentry = false;
+                    u.exploring = false;
+                    u.auto = false;
+                }
             }
             "tp" => {
                 if let (Some((x, y)), Some(s)) = (coord(arg), selected.0) {
@@ -255,16 +269,18 @@ pub fn drive_script(
                     words.next().and_then(coord),
                 );
                 match spec {
-                    (Some(t), Some(civ), Some((x, y))) if civ < crate::civs::CIV_COUNT => {
+                    (Some(t), Some(civ), Some((x, y))) if civ <= crate::civs::BARBARIANS => {
                         units::spawn_unit(&mut commands, &art, t, x, y, civ);
                     }
                     _ => eprintln!("script: bad spawn {arg}"),
                 }
             }
             "go" => {
+                let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
                 if let (Some(dest), Some(s)) = (coord(arg), selected.0) {
                     if let Ok((_, mut u)) = units.get_mut(s) {
-                        units::order_move(&map, &mut u, dest);
+                        let ports: Vec<_> = cities.iter().filter(|c| c.civ == u.civ && c.coastal).map(|c| (c.x, c.y)).collect();
+                        crate::naval::order_move(&map, &mut u, dest, &ports, &snapshot);
                     }
                 }
             }
@@ -273,10 +289,10 @@ pub fn drive_script(
                 let (ox, oy) = origin.unwrap_or((0, 0));
                 for (_, u) in units
                     .iter()
-                    .filter(|(_, u)| (u.x - ox).abs() <= 3 && (u.y - oy).abs() <= 3)
+                    .filter(|(_, u)| arg == "all" || (u.x - ox).abs() <= 3 && (u.y - oy).abs() <= 3)
                 {
                     println!(
-                        "script: unit {:?} civ {} @({},{}) {:?} hp {}/{} moves {}",
+                        "script: unit {:?} civ {} @({},{}) {:?} hp {}/{} moves {} carrier {:?}",
                         u.utype,
                         u.civ,
                         u.x - ox,
@@ -284,7 +300,8 @@ pub fn drive_script(
                         u.level,
                         u.hp(),
                         u.max_hp(),
-                        u.moves
+                        u.moves,
+                        u.carrier
                     );
                 }
             }
@@ -301,6 +318,14 @@ pub fn drive_script(
                     }
                 }
             }
+            // `size <n> [shields]`: set the first city's size (and box).
+            "size" => {
+                let mut it = arg.split_whitespace().map(|v| v.parse::<u16>().ok());
+                if let Some(c) = cities.iter_mut().find(|c| c.civ == civs.active).as_mut() {
+                    if let Some(Some(n)) = it.next() { c.size = n as u8; }
+                    if let Some(Some(sh)) = it.next() { c.shields = sh; }
+                }
+            }
             "hover" => match coord(arg) {
                 Some(p) => reach.pin.0 = Some(p),
                 None => eprintln!("script: bad hover {arg}"),
@@ -315,8 +340,22 @@ pub fn drive_script(
                     .iter()
                     .find(|e| cities.get(*e).is_ok_and(|c| c.civ == civs.active))
             }
-            "btn" => match buttons.iter_mut().find(|(_, b)| button_matches(b, arg)) {
+            "pick" => match reach.picker_buttons.iter_mut().find(|(_, row)| {
+                if arg == "All" { reach.picker.unload == Some(row.0) }
+                else { units.get(row.0).is_ok_and(|(_, u)| units::def(u.utype).name.eq_ignore_ascii_case(arg)) }
+            }) {
                 Some((mut i, _)) => *i = Interaction::Pressed,
+                None => eprintln!("script: no picker row {arg}"),
+            },
+            "btn" => match buttons.iter_mut().find(|(_, b)| button_matches(b, arg)) {
+                Some((mut i, _)) => {
+                    // `Queue:<item>` is a shift-click on the item's row.
+                    if arg.starts_with("Queue:") {
+                        keys.press(KeyCode::ShiftLeft);
+                        script.held.push(KeyCode::ShiftLeft);
+                    }
+                    *i = Interaction::Pressed;
+                }
                 None => eprintln!("script: no button {arg}"),
             },
             "adv" => match advisor_buttons.iter_mut().find(|(_, a)| a.script_name() == arg) {

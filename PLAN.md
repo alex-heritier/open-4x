@@ -364,5 +364,260 @@ chosen when a revolution starts, healing rates, the pillage order and rule,
 automation by the computer's own worker brain.
 
 Not landed: railroads, fortresses, pollution and plant-forest jobs (no art
-prepared), ranged and bombard combat, retreat, Great Library and Theory of
+prepared), naval/air ranged combat, Theory of
 Evolution, war weariness, the scientific leader, save/load.
+
+### Ancient Age continuation: Great Library (landed)
+
+The Great Library now grants eligible advances known by two contacted
+civilizations at the owner's research step (`research.md` 8). Ownership is
+read from the cities each turn, so capture transfers the effect and removing
+the wonder stops it. The building's government requirement and obsoleting
+advance are respected. Obsolescence is checked after research completion:
+completing Education prevents grants that same turn. Free advances unlock
+production, prompt for a new research target when needed, and announce the
+Library as their source.
+
+Verified: 326 game tests, 593 reference-model tests, and `cargo build`.
+The Bevy regression runs the contact refresh and actual research end-turn
+system; no rendered playthrough was run for this slice.
+
+Full Ancient Age equivalence remains incomplete. Confirmed gaps include
+naval play (Galley is not playable and embarkation/transport is absent),
+terrain strikes and exact retreat movement. A complete Ancient Age playthrough and
+an audit of the remaining wonder effects are still required.
+
+### Ancient Age continuation: mounted-unit retreat (landed, movement provisional)
+
+Fast land units now use the executable's retreat eligibility and experience
+rolls (`combat.md` 7). Neither side retreats when both are fast; defenders
+cannot retreat from cities. The round log includes retreat draws in the
+original order, including a defender's failed escape. A retreat stops damage
+at one HP and plays no death clip; both combatants and the defending stack
+survive, with no promotion. Attackers stay on their starting tile; defenders
+step away, and an attacker occupies the emptied tile only for a lone defender.
+
+HYPOTHESIS remains for `0x5BFB60` movement: the defender attempts the adjacent
+tile directly away from the attacker, rejecting impassable terrain and foreign
+units or cities. Retreat consumes the retreating unit's remaining movement.
+These placement and movement-cost details require executable verification
+before claiming Civ3 equivalence.
+
+Verification includes a round/damage/RNG comparison against the reference
+duel across both retreat outcomes, full Bevy sequences for both sides, blocked
+escapes, city defense, two fast combatants, surviving bystanders, and wrapped
+escape coordinates. A seed-2 scripted rendered battle left Japan's Chariot at
+`@1,0`, 1/3 HP and zero movement, and the enemy Warrior at `@2,0`, 2/3 HP.
+The screenshot `/tmp/open4x-retreat.png` was inspected alongside the runtime
+report `/tmp/open4x-retreat-run.log`.
+
+### Ancient Age continuation: Catapult bombardment (landed)
+
+Catapults now have the original Bombard action button and B key: select a
+visible target in range, click to fire, or Esc to cancel. A shot requires war,
+spends one move, and marks the unit as having attacked without moving it.
+The strongest eligible defender is selected with the reference comparator;
+ordinary artillery cannot hit land or sea units already at one HP or reduce
+them below one HP. The shared combat RNG directly drives the reference
+volley, wall-interception and city-strike routines. Town Walls absorb the
+attack and may be destroyed; gifts such as the Great Wall's Walls only report
+the hit and allow the garrison pass. When no unit qualifies in a city,
+bombardment may kill a citizen (minimum size one) or destroy an ordinary
+building, preserving wonders.
+
+AI artillery can approach known hostile targets and fire through the same
+resolution system. HYPOTHESIS: its production ratio is one artillery per
+four soldiers, after meeting garrison, worker and expansion needs. The exact
+AI production ratio and random non-wonder building selection remain
+unrecovered. Bombarding in peace currently refuses the order instead of
+opening a war-declaration prompt. Destroying terrain improvements still needs
+wiring, so this is not complete bombardment parity.
+
+Verified: 338 game tests and `cargo build`, including reference damage/RNG
+comparisons, city walls, city strikes, peace/range/fog refusals, human keyboard
+and click input, and AI choice/production. Rendered seed-2 and seed-1 runs
+exercised a miss and a hit. The latter left the stationary Catapult at `@1,0`
+with zero movement and the enemy Spearman at `@2,0` with 2/3 HP; screenshot
+`/tmp/open4x-bombard-hit.png` was inspected against its runtime report.
+
+### Ancient Age continuation: defensive bombardment (landed)
+
+Before melee, the strongest eligible supporting unit on the defender's tile
+fires one shot (`combat.md` 8.9). The defender itself is excluded; a shooter
+must match the attacker's domain, have bombard strength, lack ability 3, and
+have its separate defensive-fire flag clear. A land attacker needs defense
+above zero and at least two HP. The reference routine rolls raw odds without
+terrain or fortification and marks the shot used on a hit or miss. Its damage
+feeds the subsequent melee dice, while the sequencer shows the supporting
+attack before applying the damage and starting the first melee round.
+
+Defensive fire does not spend movement or the offensive attack allowance.
+Its flag resets when the shooter's civilization begins its next turn. A hit
+leaving the attacker at one HP records the reference incident. Attacked units
+keep their fortified order, as confirmed at `0x4A56F1`. The AI's fight estimate
+weights both the supporting shot's hit and miss outcomes.
+
+Verified: 342 game tests and `cargo build`. Tests compare the supporting shot
+and subsequent melee damage and RNG sequence with the executable model, cover
+shooter choice, the HP floor, reuse limits, incoming-civ reset, fortification,
+and the AI's valuation. A rendered seed-1 run showed the defensive-hit message
+and attacker at 2/3 HP before the defender took melee damage; capture
+`/tmp/open4x-support-180.png` was inspected alongside the runtime report.
+
+Remaining combat fidelity audits include retreat placement/movement.
+Naval transport, remaining wonder effects, and a full
+Ancient Age playthrough remain outstanding.
+
+### Ancient Age continuation: defending stack survival (landed)
+
+Removed the outside-city whole-stack deletion. The executable's melee
+victory paths kill the losing fighter (`0x4A63EF`, `0x4A6EF2`); the kill
+routine's recursive pass only considers units linked to it by carrier id
+(`0x5BC000..0x5BC009`). Ordinary soldiers, Workers and artillery sharing
+the tile survive. This partial finding is recorded in `combat.md` 6.3;
+the complete cargo and destruction bookkeeping remain open.
+
+Verified: 343 game tests, `cargo build`, reference release tests, and
+reference release clippy (existing warnings). Regressions cover surviving
+military/civilian/artillery units and a later move capturing a surviving
+Worker. A rendered seed-1 run left the victorious Swordsman at `@0,0`
+and the enemy Worker at `@1,0` with 3/3 HP after its defending Warrior
+died. `/tmp/open4x-stack-survival.png` was inspected alongside
+`/tmp/open4x-stack-run.log`.
+
+### Ancient Age continuation: terrain bombardment (landed for existing improvements)
+
+Catapults can now target road, mine and irrigation improvements when no legal
+unit or city target takes precedence, including a defender already at the
+nonlethal one-HP floor. The reference tile strike uses implicit strength 16,
+terrain defense and one die (`combat.md` 8.8, `0x4A2460`). A hit clears roads,
+mines and irrigation together (`colonies.md` 8, `0x5B4DC0`); a miss preserves
+them. Movement, attack allowance and the firing animation use the same path
+as unit bombardment. Own or peaceful territory is refused before spending
+movement or dice; unowned improvements are legal targets. Improvement sprites
+and their neighbor masks already synchronize from the map.
+
+The AI can fire on known enemy improvements in range after checking nearby
+unit/city targets. HYPOTHESIS: this targeting priority is game policy; the
+native AI's exact terrain-target priorities remain unrecovered.
+
+Verified: 347 game tests and `cargo build`, including reference hit/miss and
+RNG comparisons, clearing all improvements together, target precedence, HP
+floor, ownership refusals, and AI war/fog choices. Rendered seed-29 and seed-7
+keyboard/click runs exercised a miss and hit. The miss retained Road and Mine;
+the hit removed both and left the Catapult at `@1,0` with zero movement.
+Captures `/tmp/open4x-terrain-250.png` and
+`/tmp/open4x-terrain-hit-145.png` / `250.png` were inspected.
+
+Fortress/Barricade and Railroad destruction need those map improvements first.
+Naval transport, exact retreat movement, remaining wonder effects and a full
+Ancient Age playthrough still need completion.
+
+### Ancient Age continuation: Galley sailing foundation (landed; cargo incomplete)
+
+The generated roster enables the Galley, with its native stats and converted
+animation/sound assets. Sea-unit production requires a coastal city bordering
+a water body larger than 20 tiles (`buildable.md` 3.1, `0x4C05BB`). The same
+path search now accepts domain-specific entry costs: Galleys sail Coast, Sea
+and Ocean for one movement point per step and enter friendly ports; ordinary
+land units still cannot enter water. Manual clicks, arrow orders, Go-to
+previews, scripted moves and auto-exploration use the unit's movement domain.
+
+Ship allowance includes Seafaring and the native active wonder flags for +1
+and +2 movement (`movement.md` 2). The turn boundary rolls sinking only on
+unsafe water (`unit-turn.md` 3.2), respecting sea/ocean technology immunity,
+Safe Sea Travel wonders and the Seafaring 1/4 instead of 1/2 loss chance.
+The Galley's sound converter exposed two sampler chunks whose declared sizes
+omit a trailing byte. Following the WAV terminator and final sampler word
+fixes that file; all 413 previously readable sound schedules stay unchanged.
+
+Verified: 350 game tests and a build, including port routes, impassable land,
+movement spending and next-turn continuation, coastal production, the 20/21
+water-body boundary, sinking dice/RNG and owner isolation, and wonder
+obsolescence. A rendered seed-1 run moved a Galley from `(12,4)` to `(15,4)`
+with zero movement remaining. `/tmp/open4x-galley-sailing.png` was inspected
+against `/tmp/open4x-galley-sailing.log`.
+
+This is the naval foundation, not transport completion. Cargo capacity,
+boarding, disembarking, cargo movement/death and the AI's naval production
+and transport decisions remain required. Exact retreat movement, remaining
+wonder effects and a full Ancient Age playthrough also remain outstanding.
+
+
+### Ancient Age continuation: Galley cargo (landed; naval AI incomplete)
+
+The generated PRTO roster now retains transport capacity. Land units board
+a friendly ship by moving onto its water tile or using Load (L) in port.
+The Galley's two slots are reserved as each move commits, so simultaneous
+orders cannot overfill it. The carrier link follows native Unit +0x60; cargo
+follows ship movement, clears independent orders, stays hidden from map
+rendering and defensive combat, and does not receive independent AI orders.
+
+Unload (L) opens a passenger choice in port. At sea, right-click the ship's
+tile to select a passenger for a move to shore. A successful landing clears the link and spends all
+remaining movement (`movement.md` 7, native mover stage 4). Destroying a ship
+outside a city kills its cargo; destroying one in port releases the cargo,
+while ordinary bystanders survive (`combat.md` 6.3, `0x5BC041..0x5BC09D`).
+Unsafe-water sinking uses the same cargo cleanup.
+
+Verified: 357 game tests and a build. Regressions cover capacity reservation,
+foreign/full carrier refusals and preview routes, port loading/unloading,
+sea passenger selection and visibility, movement following, landing movement,
+cargo defense exclusion, and ship destruction/sinking. A rendered seed-1
+sequence boarded a Settler and Worker at `(8,6)`, sailed to `(9,7)`, landed
+the Settler at `(8,8)` with zero movement left, and founded Kyoto on the next
+turn. The Worker remained aboard. Captures at frames 150 and 320 in
+`/tmp/open4x-galley-cargo{}.png` were inspected against
+`/tmp/open4x-galley-cargo.log`.
+
+Remaining: AI naval production and transport planning and a choice dialog for
+multiple eligible carriers.
+Carrier selection currently uses a deterministic available ship. Full
+Ancient Age parity, remaining wonder effects, exact retreat movement, and
+a complete era playthrough remain outstanding.
+
+### Ancient Age continuation: native transport commands and shore attacks
+
+Recovered the friendly-carrier/capacity selector (`0x5C5F70`), manual Load
+commit (`0x5C5110`), port-only Unload gate (`0x5C1C45`) and human passenger
+choice (`0x5C5420`). Loading and same-tile unloading preserve movement.
+Unload now opens the existing unit picker and detaches only the chosen
+passenger, including one with no moves left. At sea, ordinary passenger
+selection wakes the unit without detaching it.
+
+The water-origin attack gate (`0x5B5DDC..0x5B5E22`) requires a land unit with
+Amphibious ability, positive attack, and an unused attack unless it has Blitz.
+Port cargo can attack normally. Successful advances detach cargo; amphibious
+landings spend the remaining movement, and eligible attacks apply the native
+amphibious combat modifier. Detailed evidence is in `movement.md` section 9.
+
+Verified: 364 game tests and a build, including sea attack refusal, port capture,
+amphibious city entry, and selecting one exhausted passenger for disembark.
+A rendered seed-1 run boarded both passengers, landed the Settler and founded
+Kyoto, then returned the Galley to Kyoto and opened its Disembark dialog for
+the Worker. Captures at frames 150 and 380 in
+`/tmp/open4x-native-landing{}.png` were inspected against
+`/tmp/open4x-native-landing.log`.
+
+### Ancient Age continuation: ship-to-shore disembark
+
+A Galley ordered toward land now sails to the adjacent water tile and opens
+Disembark without spending movement on the final shore attempt. One
+passenger or Unload all sends cargo through ordinary movement and combat;
+the ship stays offshore. Exhausted passengers remain aboard, cancellation
+preserves the cargo, and the same All choice works for port unloading.
+The AI mover dispatches cargo without opening a human dialog, though naval
+production and voyage planning remain unfinished.
+
+Evidence: native ship mover `0x5B91EC`, individual choice `0x5C5821`,
+all-passenger/AI loop `0x5C5835..0x5C5924`, and the DISEMBARK script template.
+Detailed findings and remaining terrain-helper questions are in `movement.md`
+section 9.2. Multiple-carrier selection still uses a deterministic ship.
+
+Verified: 365 game tests and a successful rendered build. An integrated
+regression covers individual landing, Unload all, exhausted cargo and cancel.
+A rendered seed-1 run chose Unload all, landed both Settler and Worker at
+`(8,8)` with zero moves, left the Galley at `(9,7)` with all movement intact,
+then founded Kyoto. Frames 200, 270 and 340 in
+`/tmp/open4x-shore-dialog{}.png` were inspected against
+`/tmp/open4x-shore-dialog-render.log`.

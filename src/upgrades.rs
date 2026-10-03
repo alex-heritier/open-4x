@@ -67,7 +67,7 @@ pub fn upgradable(t: UnitType) -> bool {
 /// it): the facility of its domain is there and a successor can be
 /// trained. Movement and gold are not asked (`0x5C0620` steps 2, 3, 5).
 pub fn plan(u: &Unit, city: Option<&City>) -> Option<Offer> {
-    if !upgradable(u.utype) {
+    if u.carrier.is_some() || !upgradable(u.utype) {
         return None;
     }
     let city = city?;

@@ -33,7 +33,7 @@ Every table is indexed by the other civ's slot `q` (a dword or byte array of 32 
 | `+0xD30 + q` | byte | **at war** | the only war flag; the table `0xA53BC8` of `combat.md` 14.3 | set by `0x501F20`; cleared by `0x5025B0` |
 | `+0xD50 + q` | byte | embassy | `communications` channel; needed to talk | `0x56B7D0` |
 | `+0xB30 + 4q` | dword | greeting timer | `0x20` on an AI side that has just met a human (2) | `0x501CD0` |
-| `+0xD70 + q` | byte | espionage channel | opens talks regardless of embassy and war (`0x501910`); zeroed by `0x502CC0` | not decoded |
+| `+0xD70 + q` | byte | **a mole of `P` planted in civ `q`** (the "espionage channel") | opens talks regardless of embassy and war (`0x501910`); set by Plant Spy `0x527914`; zeroed by `0x502CC0` (with the Spy flag; `this` = victim `q`, argument = `P`), by Expose Enemy Spy `0x528A05` (clears the target city owner's mole in the actor) and at elimination | `espionage.md` 1.4, 9.5, 9.9 |
 | `+0xDB0 + 4q` | dword | tension | border pressure from `q`'s units; `>= 0x200` is the war track | `0x446C1B`; zeroed by `0x501F20` |
 | `+0xEB0 + 4q` | dword | relation word | bits in section 1.1 | `0x501CD0`, `0x446C18`, `0x501F20` |
 | `+0xF30 + 4q` | dword | treaty word | `1` mutual protection, `2` right of passage, `4` alliance | `0x502D90` |
@@ -209,8 +209,8 @@ say what `q` did to `P` live in `P`'s record about `q`.
 
 ## 6. The AI's decision to go to war `wantsWar(P; q)` `0x440B60`, vtable `+0x8C` (A)
 
-Called only from the provoke tail `0x502CC0` (the espionage missions: stealing a tech, poisoning, sabotage:
-`government.md` 5.1), with `P` the victim. When it returns true the victim declares war with reason 0.
+Called only from the provoke tail `0x502CC0` (the espionage missions Steal Technology, Steal World Map, Plant Spy,
+Steal Plans, Sabotage and Expose Enemy Spy: `government.md` 5.1, `espionage.md` 8), with `P` the victim. When it returns true the victim declares war with reason 0.
 
 ```
 n = number of civs in play

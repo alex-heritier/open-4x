@@ -330,8 +330,8 @@ captured from a run), so they check an implementation against this text, not aga
 
 1. `+0x2B8` bitmap's readers; who writes the per-player stamp array `[Player+0x18E0]` read by `0x4C2420`; the unit
    of the stamp (H: calendar years).
-2. `0x5CF640`, `0x5A3910` (the wonder and spaceship screens), `0x4B0E80`.
-3. The trade-network functions `0x57DE90`, `0x57E450`, `0x57F360`, `0x580540` (`trade-network.md` is pending).
+2. `0x4B0E80`. The interiors of the two screens of section 11 (layout, text keys, per-part widgets).
+3. The trade-network path-finder functions `0x57F360` (entry guards only, `movement.md` 8) and `0x580540` (`trade-network.md` specifies the network fill).
 4. Whether a Palace removal elsewhere resets `P.+0x2C` (only the capture/destroy callers were not re-read).
 
 ## 11. Corrections to earlier documents
@@ -341,3 +341,19 @@ captured from a run), so they check an implementation against this text, not aga
   condition is `Player +0xA4 == 1` (mobilization); the builder-record test (captured buildings give 0)
   and the great-wonder exemption from obsolescence are new here.
 * `city-turn.md` section 11 item 1 now points here.
+
+## 11. The wonder splash screen and the spaceship dialog (presentation only; what is verified)
+
+Neither screen changes game state; a port may substitute its own presentation. What the code establishes (**V** for the strings and the control flow named, **O** for the rest):
+
+**Wonder splash** `0x5CF640` (`ecx` = the window object `0xCA6160`, SEH frame, first argument = the wonder's building id; called by the single-player wonder-completion path of section 4): builds a
+1024x768 window (`0x400` by `0x300`, centred on the 2D desktop `[0x9C7338]`, `[0x9C733C]`) with the background `art\wonder splash\wonderBackground.pcx`; looks up the text entry
+`"WON_SPLASH_" + <the wonder's key string>` (the key string is read through `[0x9C40AC] + 0x64 + 2 * <id-derived offset>`, **H**: the building's civilopedia key) and the entry `WONDERSPLASH` in `text\script.txt`;
+loads the wonder's icon through `text\PediaIcons.txt` (a missing entry shows the error string `PEDIAICONS_MISSING_ENTRY`); decorates with `art\interface\wondersEye.pcx`. It then runs as a modal window. The body is about 1.5 KB of widget construction.
+
+**Spaceship dialog** `0x5A3910(this = 0xC90E80; flag)` (`ret 4`; `flag` byte stored at `this+0xE57`; called with `0` from the completion of a spaceship part, section 4 item 1 and section 8 B6, and with `1` when the local human wins the Space Race, `victory.md` 7.3):
+in a multiplayer game (`0x47B530`) it first calls `0x609BA0(0x9F6530)` and, if that is nonzero, `0x61A880(0x9F6530)` (a dialog-gate helper, **O**); it then builds the window with `0x5A3470` (assets `art\Spaceship\SHIPbackground.pcx`,
+`cap_top.pcx`, `progressbar.pcx`, `launchbutton.pcx`, `art\spaceship\bigbrother.pcx`), clears the per-part counters at `this+0xD08 .. +0xD58` (ten dwords in three parallel arrays at `+0xD08`, `+0xD30`, `+0xD58`), fills them with `0x5A3CE0` and `0x5A3B20`,
+and, when `this+0xE54 != 0` (and, for `flag == 0`, the low ten bits of `this+0xDB0` are not all set), runs a modal message loop (frame tick via `timeGetTime`, `this+0xD04`, virtual `+0x124`) until `this+0xE55` is set, then tears the widgets down (`0x5A3A80`).
+**H**: the counters shown are the player's part counts `P.+0x15FC[k]` against the required numbers `(*[0x9C724C])[k]` for `k < [0x9C72A8]` (`victory.md` 7.3); the widget contents were not read.
+

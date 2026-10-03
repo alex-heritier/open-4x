@@ -18,7 +18,7 @@ slots), `rivers.md`.
 The object `0xB72888` is **two things in one**: the connection matrix (this document) and the
 general A\* path finder of the whole game (`0x580540` + the step test `0x57F360`; movement, goto, AI
 reach, sea routes). Only the parts the network uses are specified here; the rest belongs to
-`movement.md` (pending).
+`movement.md` (sections 7 and 8 give the interface and the entry guards of `0x57F360`; the body and `0x580540` stay open).
 
 ## 1. Data
 
@@ -424,7 +424,7 @@ and `byte1 != 0`: both `byte0` cleared and `0x503A10(Player A; 2, 5, g, 1)` ends
 3. Which register is which in the `0x4AF1AD` call of `0x57E3D0` (city id and owner), and the argument
    roles of `0x55EAE0`, `0x55ED60`.
 4. The sea-route query `0x580540(..., flags 9 | 0x1000, ...)`, the path-finder modes, and the unit
-   step test `0x57F360` (`movement.md`, pending): they decide when two harbour cities are connected
+   step test `0x57F360` (`movement.md` 8, body open): they decide when two harbour cities are connected
    and how the *Trade over Sea / Ocean* techs (`0x561480` with `0x2000`/`0x4000`) gate water tiles.
 5. The callers' individual reasons for calling `0x57D980` / `0x57E450` (section 6 table) beyond the
    evidence in the cited function names.

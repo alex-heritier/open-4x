@@ -7,6 +7,21 @@ use crate::map::{GameMap, move_cost};
 
 pub const CIV_COUNT: usize = 4;
 
+/// The owner of barbarian units (the executable's player slot 0). Not a
+/// civilization: it has no cities, no turn of its own in the hotseat
+/// rotation and no diplomacy, and is at war with everyone
+/// (`barbarians.md`).
+pub const BARBARIANS: usize = CIV_COUNT;
+
+pub fn is_barbarian(civ: usize) -> bool {
+    civ == BARBARIANS
+}
+
+/// A unit owner's name, the barbarians included.
+pub fn name(civ: usize) -> &'static str {
+    CIVS.get(civ).map_or("Barbarians", |c| c.name)
+}
+
 pub struct CivDefinition {
     pub name: &'static str,
     pub adjective: &'static str,
@@ -108,7 +123,7 @@ fn set_ai_mask(mask: u8) {
 
 /// The computer plays this civilization.
 pub fn is_ai(civ: usize) -> bool {
-    ai_mask() & (1 << civ) != 0
+    civ == BARBARIANS || ai_mask() & (1 << civ) != 0
 }
 
 /// Choose who plays whom: Japan is the human and everyone else is the
@@ -510,6 +525,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             civ: 2,
             name: "Thebes".into(),
             x: 10,

@@ -211,7 +211,7 @@ which both `0x57F130(0xB72888; C, x, y)` is true (the resource-network cell quer
 
 A worker order carries the order id `job + 2` in `unit +0x64` (section 2). **H**: the UI handlers and the automation write
 it, and the per-turn executors call `workOnTile(job)` each turn while the order stands. Callers found
-(`call 0x461470`): the executor routines at `0x461F90`, `0x4620D0`, `0x4622D0`, `0x462670`; their bodies are **O**.
+(`call 0x461470`): the routines at `0x461F90`, `0x4620D0`, `0x4622D0`, `0x462670`. **V** for `0x461F90` (`ret` plain, `ecx` = unit): it is a **go-to-and-build** executor for the orders `0x11` and `0x12`, not the job chooser. Order `0x11`: if `Player.canImprove(job 3, U.x, U.y, 0)` (`0x55EFA0`) or `U.+0x58 == 3`, call `workOnTile(3)` (`0x461470`) and return. Order `0x12`: the same test for job 3, then for job 4. Otherwise (nothing to build on the unit's own tile): if `0x5B3290(U)` returns 0, ask the path finder `0x580540(0xB72888; U.x, U.y, U.+0xB0, U.+0xB4, U, owner, 0x143, 0)` for a step direction; if it is positive, take it through the unit vtable `+0x4C(dir, 0)`; the order is cancelled (`setOrder(0)`) when there is no step, the step fails, or the unit has no movement left to continue (`0x5BE5B0(U) - U.+0x4C` test). The other three routines were seen to have the same shape (**H**); bodies **O**.
 `canImprove` is also called from `0x42B820`, `0x433CD0`, `0x435F80`, `0x454DA0`, `0x45D814`, `0x45EC1B` (AI planners and UI
 handlers; bodies **O**).
 
@@ -343,8 +343,8 @@ was already set, or the tile was not a forest, nothing happens. In the shipped f
 
 ## 12. Open items
 
-1. **Automation**: the job selection for `0x20000800` workers lives in the executors `0x461F90`, `0x4620D0`, `0x4622D0`,
-   `0x462670` and the planners that call `canImprove` (`0x433CD0`, `0x435F80`, `0x42B820`, `0x454DA0`); not decoded here.
+1. **Automation**: the job selection for `0x20000800` workers is **not** in the go-to executors `0x461F90`, `0x4620D0`, `0x4622D0`, `0x462670`
+   (section 5). It is the **Terraform** strategy handler `0x45C750` (11.7 KB, bit 12 of `PRTO.ai_strategies`; it contains the code regions earlier listed as `0x45D814` and `0x45EC1B`), reached through the strategy dispatcher `0x4611F0` (`unit-ai.md` 3 and 5); its body is not decoded.
 2. `0x449810` and `0x5BC8B0` (the re-validation of step 6.2), `0x55EF88` (Road exemption), `0x5B3040` (cancel orders).
 3. The reader(s) of `TFRM +0x50` and of cell `+0x24`.
 4. The coast/lake recomputation in `0x5D59E0` after a terrain change (`0x5EBDC0`).

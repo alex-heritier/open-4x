@@ -122,6 +122,7 @@ struct Rules {
     govt: &'static Govt,
     harbor: bool,
     colossus: bool,
+    golden: bool,
 }
 
 impl Rules {
@@ -130,20 +131,25 @@ impl Rules {
             govt: realm::govt(city.civ),
             harbor: has_flag(city, imp::INCREASES_FOOD_IN_WATER),
             colossus: active(city).any(|(_, b)| b.wonder & wonder::PLUS_ONE_TRADE != 0),
+            golden: realm::read(city.civ, |r| r.golden),
         }
     }
 
+    /// `yields.md` 4.1 to 4.3: the bonuses come before the Despotism cap,
+    /// and the Golden Age, Colossus and trade bonus only reach a tile that
+    /// already yields.
     fn tile(&self, t: &Tile) -> (i32, i32, i32) {
         let (f, s) = yields(t);
-        let c = tile_commerce(t);
-        let (mut f, s, mut c) = if self.govt.tile_penalty {
-            (trim(f), trim(s), trim(c))
-        } else {
-            (f as i32, s as i32, c as i32)
-        };
+        let (mut f, mut s, mut c) = (i32::from(f), i32::from(s), i32::from(tile_commerce(t)));
         let water = matches!(t.base, Base::Coast | Base::Sea | Base::Ocean);
         if self.harbor && water {
             f += 1;
+        }
+        if self.golden && s > 0 {
+            s += 1;
+        }
+        if self.golden && c > 0 {
+            c += 1;
         }
         if self.colossus && matches!(t.base, Base::Sea | Base::Ocean) && c > 0 {
             c += 1;
@@ -151,7 +157,11 @@ impl Rules {
         if self.govt.trade_bonus && c > 0 {
             c += 1;
         }
-        (f, s, c)
+        if self.govt.tile_penalty {
+            (trim_to(f), trim_to(s), trim_to(c))
+        } else {
+            (f, s, c)
+        }
     }
 
     /// The city tile (`yields.md` 4.1 step 6, 4.2 step 7, 4.3 step 7): food is
@@ -173,7 +183,10 @@ impl Rules {
             2 => 2 + i32::from(has(exe_econ::trait_bit::INDUSTRIOUS)),
             n => n,
         };
-        let s = (i32::from(shields) + s_class).max(1);
+        let mut s = (i32::from(shields) + s_class).max(1);
+        if self.golden {
+            s += 1;
+        }
         // 4.3 step 7: class 2 adds 2 commerce (5 for a Commercial civ),
         // class 1 adds 1 (3).
         let c_class = match (class, has(exe_econ::trait_bit::COMMERCIAL)) {
@@ -182,6 +195,9 @@ impl Rules {
             (n, _) => n,
         };
         let mut c = (i32::from(tile_commerce(t)) + c_class).max(if capital { 4 } else { 1 });
+        if self.golden {
+            c += 1;
+        }
         if self.govt.trade_bonus {
             c += 1;
         }
@@ -340,7 +356,7 @@ pub fn moods(city: &City, luxury: i32) -> Mood {
         luxury_goods: r.luxuries,
         luxury_trade_building: false,
         propaganda: 0,
-        hurry_timer: 0,
+        hurry_timer: i32::from(city.hurry_timer),
         hurry_penalty: HURRY_PENALTY,
         war_counters: vec![],
         weariness_class: r.govt().war_weariness,

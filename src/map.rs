@@ -111,13 +111,17 @@ impl GameMap {
     /// A* path with movement costs, or None when unreachable.
     /// Returns the steps excluding the start tile.
     pub fn find_path(&self, start: (i32, i32), goal: (i32, i32)) -> Option<Vec<(i32, i32)>> {
+        self.find_path_by(start, goal, |from, to| step_cost(self.get(from.0, from.1)?, self.get(to.0, to.1)?))
+    }
+
+    /// The same path search with domain-specific entry costs.
+    pub fn find_path_by(&self, start: (i32, i32), goal: (i32, i32),
+        cost: impl Fn((i32, i32), (i32, i32)) -> Option<u8>) -> Option<Vec<(i32, i32)>>
+    {
         if start == goal {
             return Some(vec![]);
         }
-        let gt = self.get(goal.0, goal.1)?;
-        if move_cost(gt).is_none() {
-            return None;
-        }
+        cost(start, goal)?;
         use std::cmp::Reverse;
         use std::collections::{BinaryHeap, HashMap};
         let w = self.w;
@@ -144,10 +148,8 @@ impl GameMap {
                 return Some(path);
             }
             let g = gscore[&cur];
-            let here = self.get(cur.0, cur.1).unwrap();
             for nb in self.neighbors(cur.0, cur.1) {
-                let t = self.get(nb.0, nb.1).unwrap();
-                let Some(cost) = step_cost(here, t) else {
+                let Some(cost) = cost(cur, nb) else {
                     continue;
                 };
                 let ng = g + cost as u32;
@@ -168,6 +170,27 @@ impl GameMap {
                 Base::Grassland | Base::Plains | Base::Desert | Base::Tundra
             )
         )
+    }
+
+    /// Shipyards need an adjacent water body larger than 20 tiles (0x4C05BB).
+    pub fn coastal_site(&self, x: i32, y: i32) -> bool {
+        use std::collections::{HashSet, VecDeque};
+        let water = |p: (i32, i32)| self.get(p.0, p.1).is_some_and(|t|
+            matches!(t.base, Base::Coast | Base::Sea | Base::Ocean));
+        let mut seen = HashSet::new();
+        for start in self.neighbors(x, y).into_iter().filter(|&p| water(p)) {
+            if !seen.insert(start) { continue; }
+            let mut queue = VecDeque::from([start]);
+            let mut size = 0;
+            while let Some(p) = queue.pop_front() {
+                size += 1;
+                if size > 20 { return true; }
+                for nb in self.neighbors(p.0, p.1).into_iter().filter(|&p| water(p)) {
+                    if seen.insert(nb) { queue.push_back(nb); }
+                }
+            }
+        }
+        false
     }
 
     pub fn generate() -> Self {

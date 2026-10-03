@@ -283,6 +283,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             civ,
             name: format!("C{x}"),
             x,

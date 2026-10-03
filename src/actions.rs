@@ -129,14 +129,15 @@ pub fn strip(t: &mut Tile, l: Loot) {
 /// rest. Cheap: no border lookup (a pillage on foreign land is refused
 /// with a message when it is ordered).
 pub fn check(cmd: UnitCommand, map: &GameMap, u: &Unit, city: Option<&City>) -> Option<bool> {
-    Some(match cmd {
+    let enabled = match cmd {
         UnitCommand::JoinCity => can_join(u, city),
         UnitCommand::Pillage => {
             u.moves > 0 && city.is_none() && map.get(u.x, u.y).and_then(loot).is_some()
         }
         UnitCommand::Automate => u.auto || u.moves > 0,
         _ => return None,
-    })
+    };
+    Some(enabled && u.carrier.is_none())
 }
 
 /// Execute `JoinCity`, `Pillage` and `Automate` for the selected unit.
@@ -157,7 +158,7 @@ pub fn run(
         }
         let Some(e) = selected.0 else { continue };
         let Ok((_, mut u)) = units.get_mut(e) else { continue };
-        if u.civ != civs.active {
+        if u.civ != civs.active || u.carrier.is_some() {
             continue;
         }
         match cmd {
@@ -415,6 +416,7 @@ mod tests {
         app.insert_resource(Turn(1));
         app.insert_resource(crate::splash::SplashUp(false));
         app.insert_resource(Diplomacy::new());
+        app.init_resource::<crate::cities::Treasury>();
         app.insert_resource(MessageBoard::default());
         app.insert_resource(crate::units::Selected(None));
         app.add_message::<UnitCommand>();

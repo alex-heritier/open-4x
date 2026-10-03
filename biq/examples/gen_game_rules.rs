@@ -86,6 +86,9 @@ fn art_dir(name: &str) -> Option<String> {
         "Modern Paratrooper" => "Paratrooper",
         "Mech Infantry" => "Mech Infantry",
         "Javelin Thrower" => "Javelin Thrower",
+        // The Ancient Age art; the later eras' art would follow the era.
+        "Leader" => "Leader Ancient Times",
+        "Army" => "Army Ancient Times",
         other => other,
     };
     for root in [
@@ -152,6 +155,15 @@ fn main() -> ExitCode {
             t.flags,
             t.flavors
         );
+    }
+    p!("];");
+    p!("");
+    p!("/// `(era, icon, x, y)` of every advance: the era page of the Science");
+    p!("/// Advisor it sits on, its icon's index in the tech icon sheets, and its");
+    p!("/// box's top-left on that page (`TECH` +0x44, +0x48, +0x4C, +0x50).");
+    p!("pub const TECH_TREE: [(i32, i32, i32, i32); {}] = [", r.techs.len());
+    for t in &r.techs {
+        p!("    ({}, {}, {}, {}),", t.era, t.icon, t.tree_x, t.tree_y);
     }
     p!("];");
     p!("");
@@ -294,16 +306,14 @@ fn main() -> ExitCode {
         let art = art_dir(&name);
         let abil = u.abilities;
         let excluded = abil
-            & (ab::ARMY
-                | ab::LEADER
-                | ab::KING
+            & (ab::KING
                 | ab::FLAG_UNIT
                 | ab::CRUISE_MISSILE
                 | ab::NUCLEAR_WEAPON
                 | ab::TACTICAL_MISSILE)
             != 0;
         let playable = u.alt_strategy_of == -1
-            && u.unit_class == 0
+            && (u.unit_class == 0 || &*name == "Galley")
             && !excluded
             && ((u.available_to_civs as u32) & our_mask != 0 || &*name == "Scout")
             && art.is_some();
@@ -314,7 +324,7 @@ fn main() -> ExitCode {
             _ => 1,
         };
         p!(
-            "    UnitRow {{ name: {}, art: {}, icon: {}, attack: {}, defense: {}, moves: {}, sight: {sight}, hp_bonus: {}, cost: {}, pop_cost: {}, tech: {}, upgrade_to: {}, resources: [{}, {}, {}], abilities: {:#x}, special: {:#x}, worker: {:#x}, bombard: {}, bomb_range: {}, rof: {}, class: {}, races: {:#x}, ai: {:#x}, zoc: {}, playable: {playable} }}, // {i}",
+            "    UnitRow {{ name: {}, art: {}, icon: {}, attack: {}, defense: {}, moves: {}, sight: {sight}, hp_bonus: {}, cost: {}, pop_cost: {}, tech: {}, upgrade_to: {}, resources: [{}, {}, {}], abilities: {:#x}, special: {:#x}, worker: {:#x}, bombard: {}, bomb_range: {}, rof: {}, capacity: {}, class: {}, races: {:#x}, ai: {:#x}, zoc: {}, playable: {playable} }}, // {i}",
             q(&name),
             q(if playable { art.as_deref().unwrap_or("") } else { "" }),
             u.icon,
@@ -335,6 +345,7 @@ fn main() -> ExitCode {
             u.bombard_strength,
             u.bombard_range,
             u.rate_of_fire,
+            u.transport_capacity,
             u.unit_class,
             u.available_to_civs as u32,
             u.ai_strategies,

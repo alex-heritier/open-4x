@@ -3,7 +3,6 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::sprite::Anchor;
@@ -18,11 +17,9 @@ use crate::civs::{CIV_COUNT, CIVS, CivilizationEnded, Civilizations};
 use crate::citycalc;
 use crate::economy::{self, food_box, granary_keep};
 use crate::features::{MessageBoard, post};
-use crate::improvements::{ImprovementArt, tile_overlays};
 use crate::map::*;
 use crate::render::{RevealAll, sprite_z};
 use crate::splash::SplashUp;
-use crate::tiles::TileArt;
 use crate::roster::{self, BLDG_COUNT, BldgDef, UNIT_COUNT};
 use crate::units::{self, Selected, Unit, UnitArt, UnitType};
 
@@ -40,7 +37,7 @@ impl std::fmt::Debug for Production {
 
 /// A civ's `RACE` trait mask (`rules_data::RACES`).
 pub fn traits(civ: usize) -> u32 {
-    crate::rules_data::RACES[civ].traits
+    crate::rules_data::RACES.get(civ).map_or(0, |r| r.traits)
 }
 
 /// Shields `p` costs the civ (`0x569FE0`, `economy.md`).
@@ -251,6 +248,9 @@ pub struct City {
     pub founded: u32,
     /// Turns the city has been in civil disorder (0 when calm).
     pub unrest: u8,
+    /// Turns of unhappiness left from forced labor (`city +0x1C4`): each
+    /// sacrificed citizen adds twenty, one runs out a turn (`hurry.md` 5.2).
+    pub hurry_timer: u16,
 }
 
 impl City {
@@ -281,6 +281,7 @@ impl City {
             culture: 0,
             founded: 1,
             unrest: 0,
+            hurry_timer: 0,
         }
     }
 }
@@ -365,9 +366,11 @@ pub fn radius_tiles(map: &GameMap, x: i32, y: i32) -> Vec<(i32, i32)> {
 }
 
 /// Tiles a city cannot work: every city center, the tiles other cities
-/// already work, and every tile inside another civilization's cultural
-/// border. `me` is the asking city's center and must be among `cities`;
-/// without it the border rule has no civ to measure against and is skipped.
+/// already work, and every tile of its radius outside its own
+/// civilization's cultural border, foreign or unclaimed alike, as Civ3's
+/// city view shows it. `me` is the asking city's center and must be among
+/// `cities`; without it the border rule has no civ to measure against and
+/// is skipped.
 pub fn taken_tiles<'a>(
     map: &GameMap,
     cities: impl IntoIterator<Item = &'a City>,
@@ -382,18 +385,18 @@ pub fn taken_tiles<'a>(
         }
     }
     if let Some(mine) = all.iter().find(|c| (c.x, c.y) == me) {
+        let land = territory(map, &all);
         out.extend(
-            territory(map, &all)
+            radius_tiles(map, mine.x, mine.y)
                 .into_iter()
-                .filter(|&(_, owner)| all[owner].civ != mine.civ)
-                .map(|(tile, _)| tile),
+                .filter(|t| land.get(t).is_none_or(|&owner| all[owner].civ != mine.civ)),
         );
     }
     out
 }
 
-/// A radius tile the city may work: explored and not taken by another city
-/// or another civ's border.
+/// A radius tile the city may work: explored, inside its civ's border, and
+/// not taken by another city.
 pub fn workable(map: &GameMap, taken: &HashSet<(i32, i32)>, tile: (i32, i32)) -> bool {
     !taken.contains(&tile) && map.get(tile.0, tile.1).is_some_and(|t| t.seen)
 }
@@ -408,7 +411,7 @@ fn can_work(map: &GameMap, taken: &HashSet<(i32, i32)>, tile: (i32, i32), civ: u
     }
 }
 
-/// Drop the worked tiles the city may no longer work: a foreign border
+/// Drop the worked tiles the city may no longer work: its border lost it
 /// grew over one, a city was founded on it, or a neighbor took it. True
 /// when anything was dropped. Fog is not rechecked: a tile once worked was
 /// explored, and `Tile::seen` only describes the civ in play.
@@ -729,6 +732,18 @@ impl City {
         if !crate::research::can_build(self.civ, p) {
             return false;
         }
+        if p.unit().is_some_and(|t| t.row().class == 1) && !self.coastal {
+            return false;
+        }
+        // An Army needs a small wonder that builds armies, the Military
+        // Academy (`buildable.md` 3.1 step 5). HYPOTHESIS-free gap: the
+        // empire's `(armies + 1) * 4 <= cities` rule (3 step 6) is not
+        // checked; no Ancient Age city can hold the Academy.
+        if p.unit().is_some_and(|t| t.row().abilities & roster::ability::ARMY != 0)
+            && !self.buildings.iter().any(|b| b.bldg().is_some_and(|d| d.small & 2 != 0))
+        {
+            return false;
+        }
         let Some(b) = p.bldg() else {
             return true;
         };
@@ -800,6 +815,9 @@ pub fn process_city_turn(
     taken: &HashSet<(i32, i32)>,
 ) -> Vec<CityEvent> {
     let mut events = vec![];
+    // Step 2 of the sequencer (`city-turn.md`, `0x4BE990`): the whip's
+    // memory fades a turn before anything is counted.
+    city.hurry_timer = city.hurry_timer.saturating_sub(1);
     let totals = citycalc::totals(map, city);
     if totals.disorder {
         city.unrest = city.unrest.saturating_add(1);
@@ -929,13 +947,17 @@ pub(crate) struct CityLabelBack(pub Entity);
 /// `sync_city_visuals` once the text has a measured width.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LabelPiece {
-    /// Civ-colored population box on the left.
+    /// Population box on the left: a dark frame around `BadgeFill`.
     Badge,
-    /// Dark translucent box behind the two text lines.
-    Box,
+    /// Civ-colored inside of the badge; a child of `Badge`.
+    BadgeFill,
+    /// Slate band behind the name line.
+    NameBand,
+    /// Brown band behind the build line.
+    BuildBand,
     /// The two text lines.
     Text,
-    /// Civ-colored capital star box on the right; only the capital has it.
+    /// Gold capital star on the right; only the capital shows it.
     Star,
 }
 
@@ -1018,20 +1040,32 @@ impl CapitalStar {
 }
 
 /// Population number on the badge.
-pub const CIV_BADGE_INK: Color = Color::srgb_u8(236, 240, 226);
-/// Dark translucent box behind the name and build lines.
-pub const LABEL_FILL: Color = Color::srgba(0.06, 0.05, 0.04, 0.62);
+pub const CIV_BADGE_INK: Color = Color::srgb_u8(244, 240, 222);
+/// Civ3 draws the label as two bands: a slate one behind the name and a
+/// brown one behind the build.
+const NAME_BAND: Color = Color::srgba(0.15, 0.19, 0.27, 0.86);
+const BUILD_BAND: Color = Color::srgba(0.31, 0.17, 0.08, 0.86);
 const LABEL_INK: Color = Color::srgb_u8(236, 232, 218);
-const LABEL_FONT: f32 = 14.0;
-const BADGE_W: f32 = 26.0;
-/// Height of the whole label: two text lines plus a little air.
-const LABEL_H: f32 = 34.0;
-const STAR_W: f32 = 26.0;
-/// Horizontal padding between the text and the edges of its box.
-const TEXT_PAD: f32 = 7.0;
+const LABEL_FONT: f32 = 11.0;
+/// One text line, and one band: the two lines fill the label exactly.
+const LINE_H: f32 = 13.0;
+const LABEL_H: f32 = 2.0 * LINE_H;
+const BADGE_W: f32 = 22.0;
+/// Width of the pale frame around the badge's civ color.
+const BADGE_FRAME: f32 = 1.0;
+const STAR_W: f32 = 20.0;
+/// Horizontal padding between the text and the edges of its bands.
+const TEXT_PAD: f32 = 6.0;
 /// Label center below the tile center: the label hangs under the town art
 /// over the tile's lower half, as in Civ3.
-const LABEL_DROP: f32 = 28.0;
+const LABEL_DROP: f32 = 34.0;
+
+/// The badge frame: Civ3 rims the civ color in a pale tint of itself.
+fn badge_frame(c: Color) -> Color {
+    let s = c.to_srgba();
+    let pale = |v: f32| v + (1.0 - v) * 0.6;
+    Color::srgb(pale(s.red), pale(s.green), pale(s.blue))
+}
 
 fn ceil_div(a: impl Into<u16>, b: impl Into<u16>) -> u16 {
     a.into().div_ceil(b.into().max(1))
@@ -1039,7 +1073,16 @@ fn ceil_div(a: impl Into<u16>, b: impl Into<u16>) -> u16 {
 
 /// Map label, Civ3's two lines: the city name with turns to grow, and the
 /// current build with turns left. A stalled line shows `--`, as in Civ3.
-fn banner_text(map: &GameMap, city: &City) -> String {
+///
+/// Another civ's city shows its bare name over an empty build band: the
+/// label routine `0x4E5580` appends the growth and build only when the
+/// owner is the local player (`0x4E5839`; `reverse-engineering/ui.md`).
+fn banner_text(map: &GameMap, city: &City, viewer: usize) -> String {
+    if city.civ != viewer {
+        // A no-break space keeps the second line, so the name stays in the
+        // name band.
+        return format!("{}\n\u{a0}", city.name);
+    }
     let (net_food, shields) = city_income(map, city);
     let name = if net_food > 0 {
         let left = food_box(city.size).saturating_sub(city.food);
@@ -1072,6 +1115,7 @@ pub fn spawn_city_visuals(
     entity: Entity,
     city: &City,
     is_capital: bool,
+    viewer: usize,
 ) {
     // Visuals are roots carrying the city entity, like TileSprite and Unit.
     // Cities never move, so nothing needs syncing after spawn.
@@ -1086,13 +1130,13 @@ pub fn spawn_city_visuals(
         CitySprite(entity),
     ));
     let font: Handle<Font> = assets.load("gen/fonts/lsans.ttf");
-    // Civ3 paints the badge and the star box in the owner's civ color.
+    // Civ3 paints the badge in the owner's civ color.
     let civ_color = CIVS[city.civ].color;
     let origin = label_origin(city);
     let z = sprite_z(city.x, city.y, 5.0);
     // Initial layout from a character-count estimate; the sync lays it out
     // exactly from the measured text on the next frame.
-    let est = estimate_text_width(&banner_text(map, city));
+    let est = estimate_text_width(&banner_text(map, city, viewer));
     let layout = label_layout(est, is_capital);
     let part = |piece| LabelPart {
         city: entity,
@@ -1108,7 +1152,7 @@ pub fn spawn_city_visuals(
             label
                 .spawn((
                     Sprite {
-                        color: civ_color,
+                        color: badge_frame(civ_color),
                         custom_size: Some(Vec2::new(BADGE_W, LABEL_H)),
                         ..default()
                     },
@@ -1116,62 +1160,71 @@ pub fn spawn_city_visuals(
                     part(LabelPiece::Badge),
                 ))
                 .with_children(|badge| {
+                    let inner = Vec2::new(BADGE_W, LABEL_H) - 2.0 * BADGE_FRAME;
+                    badge.spawn((
+                        Sprite {
+                            color: civ_color,
+                            custom_size: Some(inner),
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, 0.0, 0.01),
+                        part(LabelPiece::BadgeFill),
+                    ));
                     badge.spawn((
                         Text2d::new(city.size.to_string()),
                         TextFont {
                             font: font.clone(),
-                            font_size: 22.0,
+                            font_size: 16.0,
                             ..default()
                         },
                         TextColor(CIV_BADGE_INK),
-                        Transform::from_xyz(0.0, 0.0, 0.01),
+                        Transform::from_xyz(0.0, 0.0, 0.02),
                         CityBadgeText(entity),
                     ));
                 });
+            for (piece, color, y) in [
+                (LabelPiece::NameBand, NAME_BAND, LINE_H / 2.0),
+                (LabelPiece::BuildBand, BUILD_BAND, -LINE_H / 2.0),
+            ] {
+                label.spawn((
+                    Sprite {
+                        color,
+                        custom_size: Some(Vec2::new(layout.box_w, LINE_H)),
+                        ..default()
+                    },
+                    Transform::from_xyz(layout.text, y, 0.0),
+                    part(piece),
+                ));
+            }
             label.spawn((
-                Sprite {
-                    color: LABEL_FILL,
-                    custom_size: Some(Vec2::new(layout.box_w, LABEL_H)),
-                    ..default()
-                },
-                Transform::from_xyz(layout.text, 0.0, 0.0),
-                part(LabelPiece::Box),
-            ));
-            label.spawn((
-                Text2d::new(banner_text(map, city)),
+                Text2d::new(banner_text(map, city, viewer)),
                 TextFont {
                     font: font.clone(),
                     font_size: LABEL_FONT,
                     ..default()
                 },
+                bevy::text::LineHeight::Px(LINE_H),
                 TextColor(LABEL_INK),
-                TextLayout::new_with_justify(Justify::Center),
+                // Civ3 sizes the bands to the text and never wraps it.
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
                 Transform::from_xyz(layout.text, 0.0, 0.02),
                 CityBanner(entity),
                 part(LabelPiece::Text),
             ));
-            if is_capital {
-                label
-                    .spawn((
-                        Sprite {
-                            color: civ_color,
-                            custom_size: Some(Vec2::new(STAR_W, LABEL_H)),
-                            ..default()
-                        },
-                        Transform::from_xyz(layout.star, 0.0, 0.0),
-                        part(LabelPiece::Star),
-                    ))
-                    .with_children(|badge| {
-                        badge.spawn((
-                            Sprite {
-                                image: star.0.clone(),
-                                custom_size: Some(Vec2::new(20.0, 20.0)),
-                                ..default()
-                            },
-                            Transform::from_xyz(0.0, 0.0, 0.01),
-                        ));
-                    });
-            }
+            label.spawn((
+                Sprite {
+                    image: star.0.clone(),
+                    custom_size: Some(Vec2::splat(17.0)),
+                    ..default()
+                },
+                Transform::from_xyz(layout.star, 0.0, 0.0),
+                if is_capital {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                },
+                part(LabelPiece::Star),
+            ));
         });
 }
 
@@ -1184,7 +1237,7 @@ struct LabelLayout {
     box_w: f32,
 }
 
-/// Badge, text box and (for the capital) star box, abutting, with the whole
+/// Badge, text bands and (for the capital) star, abutting, with the whole
 /// row centered on the city.
 fn label_layout(text_w: f32, is_capital: bool) -> LabelLayout {
     let box_w = text_w + 2.0 * TEXT_PAD;
@@ -1198,10 +1251,10 @@ fn label_layout(text_w: f32, is_capital: bool) -> LabelLayout {
     }
 }
 
-/// Fallback text width before the first layout lands: ~7.5 px per
-/// character of the longest line at 14 px.
+/// Fallback text width before the first layout lands: ~6 px per
+/// character of the longest line at 11 px.
 fn estimate_text_width(s: &str) -> f32 {
-    s.lines().map(|l| l.chars().count()).max().unwrap_or(0) as f32 * 7.5
+    s.lines().map(|l| l.chars().count()).max().unwrap_or(0) as f32 * 6.0
 }
 
 /// The computer's settler asks to found a city where it stands.
@@ -1269,10 +1322,7 @@ pub fn found_city(
         // Civ3 cities carry a road on their tile.
         map.tiles[i].road = true;
         let mut city = City {
-            coastal: map
-                .neighbors(x, y)
-                .iter()
-                .any(|&(nx, ny)| map.get(nx, ny).is_some_and(|t| crate::improvements::is_water_base(t.base))),
+            coastal: map.coastal_site(x, y),
             river: map
                 .neighbors(x, y)
                 .iter()
@@ -1302,6 +1352,7 @@ pub fn found_city(
             entity,
             &city,
             is_capital,
+            civs.viewer(),
         );
         // The computer founds quietly unless the human can see it happen.
         if map.get(x, y).is_some_and(|t| t.visible) || !crate::civs::is_ai(civ) {
@@ -1558,37 +1609,61 @@ pub fn reconcile_tiles(
     }
 }
 
+/// How much light a remembered city keeps: the 60% of a remembered tile
+/// (`render::FOG_SHEET`). City art and labels sit above the fog diamonds,
+/// so they dim themselves; a game screenshot shows a fogged city's label
+/// text at about half the brightness of a lit one.
+const FOGGED: f32 = 0.6;
+
+/// True when the viewer sees the city's tile now, not just remembers it.
+fn city_lit(map: &GameMap, reveal: &RevealAll, city: &City) -> bool {
+    reveal.0 || map.get(city.x, city.y).is_some_and(|t| t.visible)
+}
+
+/// `c` with its color scaled by `k`, its alpha kept.
+fn shade(c: Color, k: f32) -> Color {
+    let s = c.to_srgba();
+    Color::srgba(s.red * k, s.green * k, s.blue * k, s.alpha)
+}
+
 pub fn sync_city_visuals(
     map: Res<GameMap>,
     art: Res<CityArt>,
+    civs: Res<Civilizations>,
+    reveal: Res<RevealAll>,
     cities: Query<&City>,
     capital: Res<Capital>,
     mut sprites: Query<(&CitySprite, &mut Sprite), Without<LabelPart>>,
-    mut banners: Query<(&CityBanner, &mut Text2d), Without<CityBadgeText>>,
+    mut banners: Query<(&CityBanner, &mut Text2d, &mut TextColor), Without<CityBadgeText>>,
     layouts: Query<(&CityBanner, &TextLayoutInfo)>,
-    mut badge_texts: Query<(&CityBadgeText, &mut Text2d), Without<CityBanner>>,
+    mut badge_texts: Query<(&CityBadgeText, &mut Text2d, &mut TextColor), Without<CityBanner>>,
     mut parts: Query<
         (&LabelPart, &mut Transform, Option<&mut Sprite>, &mut Visibility),
         Without<CitySprite>,
     >,
 ) {
+    let viewer = civs.viewer();
+    let light = |city: &City| if city_lit(&map, &reveal, city) { 1.0 } else { FOGGED };
     for (link, mut sprite) in sprites.iter_mut() {
         if let Ok(city) = cities.get(link.0) {
             sprite.image = art.graphic(city.size);
+            sprite.color = shade(Color::WHITE, light(city));
         }
     }
-    for (link, mut banner) in banners.iter_mut() {
+    for (link, mut banner, mut ink) in banners.iter_mut() {
         if let Ok(city) = cities.get(link.0) {
-            banner.0 = banner_text(&map, city);
+            banner.0 = banner_text(&map, city, viewer);
+            ink.0 = shade(LABEL_INK, light(city));
         }
     }
-    for (link, mut text) in badge_texts.iter_mut() {
+    for (link, mut text, mut ink) in badge_texts.iter_mut() {
         if let Ok(city) = cities.get(link.0) {
             text.0 = city.size.to_string();
+            ink.0 = shade(CIV_BADGE_INK, light(city));
         }
     }
     // Lay the pieces out around the label center from the measured text.
-    for (part, mut tf, sprite, mut vis) in parts.iter_mut() {
+    for (part, mut tf, mut sprite, mut vis) in parts.iter_mut() {
         let Ok(city) = cities.get(part.city) else {
             continue;
         };
@@ -1597,36 +1672,45 @@ pub fn sync_city_visuals(
             .find(|(b, _)| b.0 == part.city)
             .map(|(_, l)| l.size.x)
             .filter(|w| *w >= 1.0)
-            .unwrap_or_else(|| estimate_text_width(&banner_text(&map, city)));
+            .unwrap_or_else(|| estimate_text_width(&banner_text(&map, city, viewer)));
         let layout = label_layout(w, capital.0[city.civ] == Some(part.city));
         // A captured city wears its new owner's color, and a lost Palace
         // takes its star down.
         let is_capital = capital.0[city.civ] == Some(part.city);
-        match part.piece {
+        let k = light(city);
+        let color = match part.piece {
             LabelPiece::Badge => {
                 tf.translation.x = layout.badge;
-                if let Some(mut sprite) = sprite {
-                    sprite.color = CIVS[city.civ].color;
-                }
+                badge_frame(CIVS[city.civ].color)
             }
+            LabelPiece::BadgeFill => CIVS[city.civ].color,
             LabelPiece::Star => {
                 tf.translation.x = layout.star;
-                if let Some(mut sprite) = sprite {
-                    sprite.color = CIVS[city.civ].color;
-                }
                 *vis = if is_capital {
                     Visibility::Inherited
                 } else {
                     Visibility::Hidden
                 };
+                Color::WHITE
             }
-            LabelPiece::Text => tf.translation.x = layout.text,
-            LabelPiece::Box => {
+            LabelPiece::Text => {
                 tf.translation.x = layout.text;
-                if let Some(mut sprite) = sprite {
-                    sprite.custom_size = Some(Vec2::new(layout.box_w, LABEL_H));
+                continue;
+            }
+            LabelPiece::NameBand | LabelPiece::BuildBand => {
+                tf.translation.x = layout.text;
+                if let Some(sprite) = sprite.as_mut() {
+                    sprite.custom_size = Some(Vec2::new(layout.box_w, LINE_H));
+                }
+                if part.piece == LabelPiece::NameBand {
+                    NAME_BAND
+                } else {
+                    BUILD_BAND
                 }
             }
+        };
+        if let Some(mut sprite) = sprite {
+            sprite.color = shade(color, k);
         }
     }
 }
@@ -1636,7 +1720,7 @@ pub fn city_visibility(
     reveal: Res<RevealAll>,
     cities: Query<&City>,
     mut sprites: Query<
-        (&CitySprite, &mut Visibility, &mut Sprite),
+        (&CitySprite, &mut Visibility),
         (Without<CityBanner>, Without<CityLabelBack>),
     >,
     // Bar roots carry the whole label (badge, text, star) as children, so
@@ -1646,23 +1730,8 @@ pub fn city_visibility(
     for (link, mut vis) in bars.iter_mut() {
         *vis = city_vis(&map, &cities, &reveal, link.0);
     }
-    for (link, mut vis, mut sprite) in sprites.iter_mut() {
+    for (link, mut vis) in sprites.iter_mut() {
         *vis = city_vis(&map, &cities, &reveal, link.0);
-        // City graphics sit above the fog diamonds, so they dim themselves
-        // when the city is remembered but not currently visible.
-        let lit = reveal.0
-            || cities
-                .get(link.0)
-                .ok()
-                .and_then(|c| map.get(c.x, c.y))
-                .is_some_and(|t| t.visible);
-        sprite.color = if lit {
-            Color::WHITE
-        } else {
-            // City art sits above the fog diamonds, so it dims itself
-            // to the same 60% a remembered tile keeps.
-            Color::srgb(0.6, 0.6, 0.6)
-        };
     }
 }
 
@@ -1700,8 +1769,8 @@ pub(crate) enum ScreenButton {
     Close,
     Change,
     Governor,
+    /// Build this; a shift-click queues it instead.
     Pick(Production),
-    Queue(Production),
     Unqueue(usize),
     CloseMenu,
     /// Turn the build list's page by this many.
@@ -1709,7 +1778,16 @@ pub(crate) enum ScreenButton {
     /// Step to the previous or next city, as the top bar's arrows do.
     PrevCity,
     NextCity,
+    /// Civ3's hurry button: quote the price, then ask.
+    Hurry,
+    /// The two answers of the hurry question.
+    HurryYes,
+    HurryNo,
 }
+
+/// A hurry the player is being asked to confirm: the city and its price.
+#[derive(Resource, Default)]
+pub struct HurryAsk(pub Option<(Entity, crate::hurry::Offer)>);
 
 /// Whether the build-list modal is open over the city screen, and which
 /// page of it.
@@ -1717,8 +1795,8 @@ pub(crate) enum ScreenButton {
 pub struct BuildMenu(pub bool, pub usize);
 
 /// Rows on one page of the build list: the roster has dozens of items, and
-/// ten fit the 768-px screen.
-const MENU_ROWS: usize = 10;
+/// twelve fit between the top bar and the production button.
+const MENU_ROWS: usize = 12;
 
 fn txt(
     parent: &mut ChildSpawnerCommands<'_>,
@@ -1744,6 +1822,62 @@ fn txt(
             ..default()
         },
     ));
+}
+
+/// A text bundle for a flex child: font, size and color, no position.
+fn span(font: &Handle<Font>, s: impl Into<String>, size: f32, color: Color) -> impl Bundle {
+    (
+        Text::new(s),
+        TextFont {
+            font: font.clone(),
+            font_size: size,
+            ..default()
+        },
+        TextColor(color),
+    )
+}
+
+/// Single-line text aligned within `w` pixels from `x`. A flex box does
+/// the aligning: `Justify` only moves lines inside the text's own measured
+/// width, which a single line already fills.
+fn txt_aligned(
+    parent: &mut ChildSpawnerCommands<'_>,
+    font: &Handle<Font>,
+    s: &str,
+    size: f32,
+    (x, y, w): (f32, f32, f32),
+    align: JustifyContent,
+    color: Color,
+) {
+    parent
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(x),
+            top: Val::Px(y),
+            width: Val::Px(w),
+            justify_content: align,
+            ..default()
+        })
+        .with_children(|b| {
+            b.spawn((
+                span(font, s, size, color),
+                TextLayout::new(Justify::Left, LineBreak::NoWrap),
+            ));
+        });
+}
+
+/// Centered single-line text across `w` pixels from `x`.
+fn txt_centered(
+    parent: &mut ChildSpawnerCommands<'_>,
+    font: &Handle<Font>,
+    s: &str,
+    size: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    color: Color,
+) {
+    txt_aligned(parent, font, s, size, (x, y, w), JustifyContent::Center, color);
 }
 
 /// Unit icon or cropped `buildings-small.png` cell for a build item.
@@ -1773,6 +1907,48 @@ fn turns_for(cost: u16, have: u16, rate: u8) -> String {
     }
 }
 
+/// The domestic advisor's hurry question: the line, then the two answers,
+/// the second of which cancels (`#HURRY_GOLD`, `#HURRY_PEOPLE`).
+fn hurry_question(content: &mut ChildSpawnerCommands<'_>, font: &Handle<Font>, q: (String, &str, &str)) {
+    content
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(MENU_X),
+                top: Val::Px(MENU_BOTTOM - 120.0),
+                width: Val::Px(MENU_W),
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(4.0),
+                flex_direction: FlexDirection::Column,
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(MENU_FILL),
+            BorderColor::all(MENU_EDGE),
+        ))
+        .with_children(|m| {
+            m.spawn(span(font, q.0, 14.0, INK));
+            for (label, kind) in [(q.1, ScreenButton::HurryYes), (q.2, ScreenButton::HurryNo)] {
+                m.spawn((
+                    Button,
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(MENU_ROW_H),
+                        padding: UiRect::horizontal(Val::Px(8.0)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(menu_row_color(Interaction::None, false)),
+                    MenuRow { current: false },
+                    kind,
+                ))
+                .with_children(|row| {
+                    row.spawn(span(font, label.to_string(), 13.0, INK));
+                });
+            }
+        });
+}
+
 fn build_menu(
     content: &mut ChildSpawnerCommands<'_>,
     assets: &AssetServer,
@@ -1785,157 +1961,159 @@ fn build_menu(
     let pages = all.len().div_ceil(MENU_ROWS).max(1);
     let page = page.min(pages - 1);
     let items: Vec<Production> = all.iter().skip(page * MENU_ROWS).take(MENU_ROWS).copied().collect();
-    let ink = Color::srgb(0.95, 0.9, 0.7);
+    // Civ3's popup list: a cream box of "Name (N turns)" rows, opening
+    // over the view just above the production button.
+    let height = 8.0 + items.len() as f32 * MENU_ROW_H + 30.0;
     content
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(212.0),
-                top: Val::Px(100.0),
-                width: Val::Px(600.0),
-                height: Val::Px(54.0 + items.len() as f32 * 48.0),
+                left: Val::Px(MENU_X),
+                top: Val::Px(MENU_BOTTOM - height),
+                width: Val::Px(MENU_W),
+                height: Val::Px(height),
+                padding: UiRect::vertical(Val::Px(4.0)),
+                flex_direction: FlexDirection::Column,
+                border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.08, 0.05, 0.03, 0.96)),
+            BackgroundColor(MENU_FILL),
+            BorderColor::all(MENU_EDGE),
         ))
         .with_children(|m| {
-            txt(
-                m,
-                font,
-                &format!("What should {} build?", city.name),
-                20.0,
-                16.0,
-                10.0,
-                ink,
-            );
-            if pages > 1 {
-                txt(m, font, &format!("{}/{}", page + 1, pages), 16.0, 428.0, 12.0, ink);
-                for (label, left, delta) in [("<", 370.0, -1), (">", 470.0, 1)] {
-                    m.spawn((
-                        Button,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(left),
-                            top: Val::Px(8.0),
-                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.35, 0.22, 0.1)),
-                        ScreenButton::MenuPage(delta),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((
-                            Text::new(label),
-                            TextFont { font: font.clone(), font_size: 16.0, ..default() },
-                            TextColor(ink),
-                        ));
-                    });
-                }
-            }
-            m.spawn((
-                Button,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(520.0),
-                    top: Val::Px(8.0),
-                    padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.35, 0.22, 0.1)),
-                ScreenButton::CloseMenu,
-            ))
-            .with_children(|b| {
-                b.spawn((
-                    Text::new("Close"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(ink),
-                ));
-            });
-            for (n, p) in items.iter().enumerate() {
-                let top = 44.0 + n as f32 * 48.0;
-                let have = if *p == city.production {
-                    city.shields
+            for p in &items {
+                let have = if *p == city.production { city.shields } else { 0 };
+                let turns = if rate == 0 {
+                    "never".to_string()
                 } else {
-                    0
+                    let n = ceil_div(city.price(*p).saturating_sub(have), rate);
+                    format!("{n} turn{}", if n == 1 { "" } else { "s" })
                 };
+                let current = *p == city.production;
                 m.spawn((
+                    Button,
                     Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(12.0),
-                        top: Val::Px(top + 2.0),
-                        width: Val::Px(42.0),
-                        height: Val::Px(42.0),
+                        width: Val::Percent(100.0),
+                        height: Val::Px(MENU_ROW_H),
+                        padding: UiRect::horizontal(Val::Px(8.0)),
+                        column_gap: Val::Px(10.0),
+                        align_items: AlignItems::Center,
+                        flex_shrink: 0.0,
                         ..default()
                     },
-                    build_icon(assets, *p),
-                ));
-                let mark = if *p == city.production {
-                    "  [building]"
-                } else {
-                    ""
-                };
-                txt(
-                    m,
-                    font,
-                    &format!(
-                        "{}{}   cost {}  ({})",
-                        p.name(),
-                        mark,
-                        city.price(*p),
-                        turns_for(city.price(*p), have, rate)
-                    ),
-                    17.0,
-                    64.0,
-                    top + 2.0,
-                    ink,
-                );
-                txt(
-                    m,
-                    font,
-                    &p.blurb(),
-                    13.0,
-                    64.0,
-                    top + 24.0,
-                    Color::srgb(0.75, 0.7, 0.55),
-                );
-                for (label, left, kind) in [
-                    ("Build now", 400.0, ScreenButton::Pick(*p)),
-                    ("Queue", 500.0, ScreenButton::Queue(*p)),
-                ] {
-                    m.spawn((
-                        Button,
+                    BackgroundColor(menu_row_color(Interaction::None, current)),
+                    MenuRow { current },
+                    ScreenButton::Pick(*p),
+                ))
+                .with_children(|row| {
+                    row.spawn((
+                        build_icon(assets, *p),
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(left),
-                            top: Val::Px(top + 6.0),
-                            width: Val::Px(90.0),
-                            height: Val::Px(30.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
+                            width: Val::Px(26.0),
+                            height: Val::Px(26.0),
+                            flex_shrink: 0.0,
                             ..default()
                         },
-                        BackgroundColor(Color::srgb(0.35, 0.22, 0.1)),
+                    ));
+                    row.spawn((
+                        span(font, format!("{} ({turns})", p.name()), 14.0, INK),
+                        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                        Node {
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                    ));
+                    row.spawn((
+                        span(font, p.blurb(), 11.0, INK_SOFT),
+                        TextLayout::new(Justify::Right, LineBreak::NoWrap),
+                        Node {
+                            flex_grow: 1.0,
+                            justify_content: JustifyContent::FlexEnd,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                    ));
+                });
+            }
+            // Footer: the queue hint, the pages, and a way out.
+            m.spawn(Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(26.0),
+                margin: UiRect::top(Val::Px(4.0)),
+                padding: UiRect::horizontal(Val::Px(8.0)),
+                column_gap: Val::Px(6.0),
+                align_items: AlignItems::Center,
+                border: UiRect::top(Val::Px(1.0)),
+                ..default()
+            })
+            .insert(BorderColor::all(MENU_RULE))
+            .with_children(|f| {
+                f.spawn((
+                    span(font, "Shift-click to queue", 11.0, INK_SOFT),
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                ));
+                let link = |f: &mut ChildSpawnerCommands<'_>, label: String, kind: ScreenButton| {
+                    f.spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
                         kind,
                     ))
                     .with_children(|b| {
-                        b.spawn((
-                            Text::new(label),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 15.0,
-                                ..default()
-                            },
-                            TextColor(ink),
-                        ));
+                        b.spawn(span(font, label, 12.0, INK));
                     });
+                };
+                if pages > 1 {
+                    link(f, "<".into(), ScreenButton::MenuPage(-1));
+                    f.spawn(span(font, format!("{}/{}", page + 1, pages), 11.0, INK_SOFT));
+                    link(f, ">".into(), ScreenButton::MenuPage(1));
                 }
-            }
+                link(f, "Close".into(), ScreenButton::CloseMenu);
+            });
         });
 }
+
+/// A row of the build list, for its hover highlight.
+#[derive(Component)]
+pub(crate) struct MenuRow {
+    current: bool,
+}
+
+/// Civ3 lights the row under the pointer orange; the current build keeps
+/// a faint wash.
+fn menu_row_color(i: Interaction, current: bool) -> Color {
+    match (i, current) {
+        (Interaction::Hovered | Interaction::Pressed, _) => Color::srgb(0.91, 0.73, 0.42),
+        (Interaction::None, true) => Color::srgba(0.91, 0.73, 0.42, 0.30),
+        (Interaction::None, false) => Color::NONE,
+    }
+}
+
+pub fn highlight_menu_rows(
+    mut rows: Query<(&Interaction, &MenuRow, &mut BackgroundColor), Changed<Interaction>>,
+) {
+    for (i, row, mut bg) in rows.iter_mut() {
+        bg.0 = menu_row_color(*i, row.current);
+    }
+}
+
+/// The build list's box: right-aligned over the view, its foot just above
+/// the production button.
+const MENU_X: f32 = 660.0;
+const MENU_W: f32 = 344.0;
+const MENU_BOTTOM: f32 = 500.0;
+const MENU_ROW_H: f32 = 30.0;
+const MENU_RULE: Color = Color::srgb(0.80, 0.74, 0.60);
+
+/// The build list's cream box and its rim.
+const MENU_FILL: Color = Color::srgb(0.99, 0.96, 0.87);
+const MENU_EDGE: Color = Color::srgb(0.62, 0.58, 0.50);
 
 const CONTENT_W: f32 = 1024.0;
 const CONTENT_H: f32 = 768.0;
@@ -1943,30 +2121,173 @@ const CLUSTER_X: f32 = 192.0;
 const CLUSTER_Y: f32 = 140.0;
 const PARCHMENT_TEXT: Color = Color::srgb(0.23, 0.14, 0.06);
 
-/// Which radius cell (rx, ry in -2..=2 fat cross) sits under a cursor
-/// position in window pixels, if any.
-pub fn cluster_pick(win_w: f32, win_h: f32, cursor: Vec2) -> Option<(i32, i32)> {
-    let ox = (win_w - CONTENT_W) / 2.0;
-    let oy = (win_h - CONTENT_H) / 2.0;
-    let px = cursor.x - ox;
-    let py = (win_h - cursor.y) - oy;
-    let lx = px - CLUSTER_X - 320.0;
-    let ly = py - CLUSTER_Y - 160.0;
-    let a = lx / 64.0;
-    let b = ly / 32.0;
+/// The radius cell (rx, ry in the -2..=2 fat cross) under `v`, a world
+/// offset from the city's tile center. Edges belong to the neighbor.
+pub fn radius_cell(v: Vec2) -> Option<(i32, i32)> {
+    let a = v.x / (TILE_W / 2.0);
+    let b = -v.y / (TILE_H / 2.0);
     let rx = ((a + b) / 2.0).round() as i32;
     let ry = ((b - a) / 2.0).round() as i32;
     if rx.abs() > 2 || ry.abs() > 2 || (rx.abs() == 2 && ry.abs() == 2) {
         return None;
     }
-    // verify inside the diamond (edges belong to neighbors)
-    let cx = (rx - ry) as f32 * 64.0;
-    let cy = (rx + ry) as f32 * 32.0;
-    if (lx - cx).abs() / 64.0 + (ly - cy).abs() / 32.0 > 1.0 {
+    let c = tile_to_world(rx, ry);
+    if (v.x - c.x).abs() / (TILE_W / 2.0) + (v.y - c.y).abs() / (TILE_H / 2.0) > 1.0 {
         return None;
     }
     Some((rx, ry))
 }
+
+/// The map camera as it was before the city screen took it over, and the
+/// city the view is parked on.
+#[derive(Resource, Default)]
+pub struct CityFrame {
+    saved: Option<(Vec3, f32)>,
+    city: Option<Entity>,
+}
+
+/// A diamond dimming one tile of the city view the city may not work:
+/// outside the radius or its civ's border, or unexplored.
+#[derive(Component)]
+pub(crate) struct CityDim;
+
+/// Above every map sprite (`sprite_z` stays under 700) and inside the 2D
+/// camera's +-1000 depth range, so units and labels outside the radius dim
+/// with their tile, as in Civ3's city view.
+const DIM_Z: f32 = 900.0;
+
+/// Where the camera looks so the city sits at the cluster's center: the
+/// cluster center is above the content box's middle, and the content box
+/// is centered in the window.
+fn view_center(city: &City) -> Vec2 {
+    let above = CONTENT_H / 2.0 - (CLUSTER_Y + 160.0);
+    tile_to_world(city.x, city.y) - Vec2::new(0.0, above)
+}
+
+/// Civ3's city view is the map: park the camera on the city at full size
+/// while its screen is open, dim what the city may not work, outline what
+/// it may in white, and give the camera back on close.
+pub fn frame_city_view(
+    mut commands: Commands,
+    view: Res<CityView>,
+    cities: Query<&City>,
+    changed: Query<(), Changed<City>>,
+    civs: Res<Civilizations>,
+    map: Res<GameMap>,
+    assets: Res<AssetServer>,
+    mut frame: ResMut<CityFrame>,
+    mut cam: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
+    dims: Query<Entity, With<CityDim>>,
+    mut gizmos: Gizmos,
+) {
+    let Ok((mut tf, mut proj)) = cam.single_mut() else {
+        return;
+    };
+    let Projection::Orthographic(ortho) = &mut *proj else {
+        return;
+    };
+    let open = view
+        .0
+        .filter(|e| cities.get(*e).is_ok_and(|c| c.civ == civs.active));
+    let Some((e, city)) = open.and_then(|e| cities.get(e).ok().map(|c| (e, c))) else {
+        if let Some((pos, scale)) = frame.saved.take() {
+            tf.translation = pos;
+            ortho.scale = scale;
+        }
+        if frame.city.take().is_some() {
+            dims.iter().for_each(|d| commands.entity(d).despawn());
+        }
+        return;
+    };
+    if frame.saved.is_none() {
+        frame.saved = Some((tf.translation, ortho.scale));
+    }
+    tf.translation = view_center(city).extend(tf.translation.z);
+    ortho.scale = 1.0;
+
+    // Civ3 lights the part of the radius the city may work: inside its
+    // civ's border and explored. Tiles another city works stay lit but get
+    // a dark double rim.
+    let all: Vec<&City> = cities.iter().collect();
+    let land = territory(&map, &all);
+    let tile_of = |rx: i32, ry: i32| (map.wrap_x(city.x + rx), city.y + ry);
+    let lit: HashSet<(i32, i32)> = radius_offsets()
+        .filter(|&(rx, ry)| {
+            let t = tile_of(rx, ry);
+            land.get(&t).is_some_and(|&o| all[o].civ == city.civ)
+                && map.get(t.0, t.1).is_some_and(|t| t.seen)
+        })
+        .collect();
+    let elsewhere: HashSet<(i32, i32)> = all
+        .iter()
+        .filter(|c| (c.x, c.y) != (city.x, city.y))
+        .flat_map(|c| c.worked.iter().copied())
+        .collect();
+    let center = tile_to_world(city.x, city.y);
+    let hw = TILE_W / 2.0;
+    let hh = TILE_H / 2.0;
+    let diamond = |c: Vec2, k: f32| {
+        [
+            Vec2::new(c.x, c.y + hh * k),
+            Vec2::new(c.x + hw * k, c.y),
+            Vec2::new(c.x, c.y - hh * k),
+            Vec2::new(c.x - hw * k, c.y),
+        ]
+    };
+    for &(rx, ry) in &lit {
+        let c = center + tile_to_world(rx, ry);
+        let [n, e_, s_, w] = diamond(c, 1.0);
+        for (next, a, b) in [
+            ((rx + 1, ry), e_, s_),
+            ((rx - 1, ry), n, w),
+            ((rx, ry + 1), s_, w),
+            ((rx, ry - 1), n, e_),
+        ] {
+            if !lit.contains(&next) {
+                gizmos.line_2d(a, b, Color::WHITE);
+            }
+        }
+        if elsewhere.contains(&tile_of(rx, ry)) {
+            for k in [0.94, 0.86] {
+                let d = diamond(c, k);
+                for i in 0..4 {
+                    gizmos.line_2d(d[i], d[(i + 1) % 4], WORKED_ELSEWHERE);
+                }
+            }
+        }
+    }
+
+    if frame.city == Some(e) && changed.is_empty() {
+        return;
+    }
+    frame.city = Some(e);
+    dims.iter().for_each(|d| commands.entity(d).despawn());
+    let fog = assets.load(crate::render::FOG_SHEET);
+    // Every tile whose diamond reaches the view band and that the city may
+    // not work.
+    for ry in -7i32..=7 {
+        for rx in -7i32..=7 {
+            let off = tile_to_world(rx, ry);
+            if off.x.abs() > CONTENT_W / 2.0 + hw || off.y.abs() > 220.0 + hh || lit.contains(&(rx, ry)) {
+                continue;
+            }
+            let pos = center + off;
+            commands.spawn((
+                Sprite {
+                    image: fog.clone(),
+                    rect: Some(crate::blend::cell_rect(0, 0)),
+                    color: Color::srgba(0.0, 0.0, 0.0, 0.62),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x, pos.y, DIM_Z),
+                CityDim,
+            ));
+        }
+    }
+}
+
+/// Civ3's dark double rim on a tile another city works.
+const WORKED_ELSEWHERE: Color = Color::srgb(0.26, 0.16, 0.08);
 
 /// Cell of `CityIcons.png`: 30-px icons on a 31-px stride (1-px green
 /// separators). 2 = commerce, 4 = shield, 6 = food.
@@ -1977,16 +2298,11 @@ fn city_icon(assets: &AssetServer, cell: u32) -> ImageNode {
     n
 }
 
-/// What the city screen needs to draw one radius tile.
+/// What the city screen draws from: the city and the map around it.
 struct ClusterCtx<'a> {
     assets: &'a AssetServer,
-    tiles: &'a TileArt,
-    imp: &'a ImprovementArt,
-    city_art: &'a CityArt,
     map: &'a GameMap,
     city: &'a City,
-    taken: &'a HashSet<(i32, i32)>,
-    hubs: &'a [(i32, i32)],
 }
 
 /// Radius offsets of the 21 city tiles.
@@ -1994,183 +2310,6 @@ fn radius_offsets() -> impl Iterator<Item = (i32, i32)> {
     (-2i32..=2)
         .flat_map(|ry| (-2i32..=2).map(move |rx| (rx, ry)))
         .filter(|(rx, ry)| !(rx.abs() == 2 && ry.abs() == 2))
-}
-
-/// Ground under the radius: the blended corner cells, as on the map
-/// (`blend::corner_cell`), then black diamonds over everything the cells
-/// spill onto outside the radius and over unexplored tiles, and a dimming
-/// diamond over tiles another city works. The cells straddle tiles, so a
-/// per-tile tint cannot do this.
-fn ground_nodes(cluster: &mut ChildSpawnerCommands<'_>, ctx: &ClusterCtx) {
-    let ClusterCtx {
-        assets,
-        map,
-        city,
-        taken,
-        ..
-    } = *ctx;
-    let inside: HashSet<(i32, i32)> = radius_offsets().collect();
-    let box_at = |rx: i32, ry: i32, dy: f32| Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px((rx - ry) as f32 * 64.0 + 320.0 - 64.0),
-        top: Val::Px((rx + ry) as f32 * 32.0 + 160.0 - 32.0 + dy),
-        width: Val::Px(128.0),
-        height: Val::Px(64.0),
-        ..default()
-    };
-    // Cells with a radius tile on a vertex: a tile is the N, E, W and S
-    // vertex of cells (x, y), (x-1, y), (x, y-1) and (x-1, y-1). Sorted
-    // north to south, though the cells never overlap.
-    let mut keys: Vec<(i32, i32)> = inside
-        .iter()
-        .flat_map(|&(rx, ry)| [(rx - 1, ry - 1), (rx, ry - 1), (rx - 1, ry), (rx, ry)])
-        .collect();
-    keys.sort_by_key(|&(rx, ry)| (rx + ry, rx));
-    keys.dedup();
-    for (rx, ry) in keys {
-        let (stem, col, row) = crate::blend::corner_cell(map, city.x + rx, city.y + ry);
-        let mut n = ImageNode::new(assets.load(crate::blend::sheet_path(stem)));
-        n.rect = Some(crate::blend::cell_rect(col, row));
-        // Cell (x, y) is centered on the tile's south corner.
-        cluster.spawn((n, box_at(rx, ry, 32.0)));
-    }
-    let fog = assets.load(crate::render::FOG_SHEET);
-    let mut mask = |rx: i32, ry: i32, color: Color| {
-        let mut n = ImageNode::new(fog.clone());
-        n.rect = Some(crate::blend::cell_rect(0, 0));
-        n.color = color;
-        cluster.spawn((n, box_at(rx, ry, 0.0)));
-    };
-    for ry in -3i32..=3 {
-        for rx in -3i32..=3 {
-            let ny = city.y + ry;
-            let nx = map.wrap_x(city.x + rx);
-            let tile = map.get(nx, ny);
-            if !inside.contains(&(rx, ry)) || !tile.is_some_and(|t| t.seen) {
-                mask(rx, ry, Color::BLACK);
-            } else if (rx, ry) != (0, 0) && taken.contains(&(nx, ny)) {
-                mask(rx, ry, Color::srgba(0.0, 0.0, 0.0, 0.55));
-            }
-        }
-    }
-}
-
-fn tile_node(cluster: &mut ChildSpawnerCommands<'_>, cx_: &ClusterCtx, rx: i32, ry: i32) {
-    let ClusterCtx {
-        assets,
-        tiles,
-        imp,
-        city_art,
-        map,
-        city,
-        taken,
-        hubs,
-    } = *cx_;
-    let ny = city.y + ry;
-    if ny < 0 || ny >= map.h {
-        return;
-    }
-    let nx = map.wrap_x(city.x + rx);
-    let Some(t) = map.get(nx, ny) else {
-        return;
-    };
-    // Unexplored tiles stay black, as on the map.
-    if !t.seen {
-        return;
-    }
-    let center = rx == 0 && ry == 0;
-    // Tiles another city holds are drawn dimmed and cannot be picked.
-    let tint = if !center && taken.contains(&(nx, ny)) {
-        Color::srgb(0.45, 0.45, 0.45)
-    } else {
-        Color::WHITE
-    };
-    let cx = (rx - ry) as f32 * 64.0 + 320.0;
-    let cy = (rx + ry) as f32 * 32.0 + 160.0;
-    let base = crate::render::base_name(t);
-    let full = |image: Handle<Image>| {
-        let mut n = ImageNode::new(image);
-        n.color = tint;
-        (
-            n,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                width: Val::Px(128.0),
-                height: Val::Px(64.0),
-                ..default()
-            },
-        )
-    };
-    cluster
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(cx - 64.0),
-            top: Val::Px(cy - 32.0),
-            width: Val::Px(128.0),
-            height: Val::Px(64.0),
-            ..default()
-        })
-        .with_children(|tile| {
-            if t.base == crate::map::Base::Ice {
-                let (mut n, node) = full(tiles.defs[&base].image.clone());
-                n.color = tint;
-                tile.spawn((n, node));
-            }
-            if center {
-                // cell center on the tile center, as on the map
-                tile.spawn((
-                    ImageNode::new(city_art.graphic(city.size)),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(64.0 - 83.0),
-                        top: Val::Px(32.0 - 47.0),
-                        width: Val::Px(167.0),
-                        height: Val::Px(95.0),
-                        ..default()
-                    },
-                ));
-            } else if let Some(c) = crate::blend::cover_sprite(map, nx, ny) {
-                let size = c.rect.size();
-                let mut n = ImageNode::new(assets.load(&c.path));
-                n.rect = Some(c.rect);
-                n.color = tint;
-                tile.spawn((
-                    n,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(64.0 - c.anchor_px.x),
-                        top: Val::Px(32.0 - c.anchor_px.y),
-                        width: Val::Px(size.x),
-                        height: Val::Px(size.y),
-                        ..default()
-                    },
-                ));
-            } else if let Some(ov) = crate::render::overlay_name(t) {
-                let def = &tiles.defs[&ov];
-                let mut n = ImageNode::new(def.image.clone());
-                n.color = tint;
-                tile.spawn((
-                    n,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(64.0 - def.anchor_px.x),
-                        top: Val::Px(32.0 - def.anchor_px.y),
-                        width: Val::Px(def.size.x),
-                        height: Val::Px(def.size.y),
-                        ..default()
-                    },
-                ));
-            }
-            // Roads, irrigation and mines, in the map's layer order. The
-            // city sprite already shows the center's own road.
-            if !center {
-                for image in tile_overlays(map, imp, hubs, nx, ny) {
-                    tile.spawn(full(image));
-                }
-            }
-        });
 }
 
 /// Yield icons of a worked tile. Drawn after every tile so neighboring
@@ -2196,13 +2335,14 @@ fn yield_node(cluster: &mut ChildSpawnerCommands<'_>, ctx: &ClusterCtx, rx: i32,
         .chain(std::iter::repeat_n(ICON_COMMERCE, c as usize))
         .collect();
     // Civ3 packs the icons in a row across the tile, overlapping them when
-    // there are many. The center's row sits below the city sprite.
+    // there are many. The center's row crosses the city's base, above its
+    // map label.
     let size = 22.0;
     let step = (84.0 / icons.len().max(1) as f32).min(size - 2.0);
     let width = step * icons.len().saturating_sub(1) as f32 + size;
     let cx = (rx - ry) as f32 * 64.0 + 320.0;
     let cy = (rx + ry) as f32 * 32.0 + 160.0;
-    let top = cy + if center { 12.0 } else { -size / 2.0 };
+    let top = cy + if center { -4.0 } else { -size / 2.0 };
     for (i, cell) in icons.iter().enumerate() {
         cluster.spawn((
             city_icon(assets, *cell),
@@ -2218,118 +2358,166 @@ fn yield_node(cluster: &mut ChildSpawnerCommands<'_>, ctx: &ClusterCtx, rx: i32,
     }
 }
 
-fn build_city_screen(commands: &mut Commands, ctx: &ClusterCtx, p: &PanelCtx, menu: bool, page: usize) {
+fn build_city_screen(
+    commands: &mut Commands,
+    ctx: &ClusterCtx,
+    p: &PanelCtx,
+    menu: bool,
+    page: usize,
+    ask: Option<crate::hurry::Offer>,
+) {
     let ClusterCtx {
         assets, map, city, ..
     } = *ctx;
     let font = assets.load("gen/fonts/lsans.ttf");
     let shields_pt = city_income(map, city).1;
+    // Black fills the window around the 1024x768 panel; the panel's own
+    // art is open over the city view band, where the map shows.
+    let black = |w: Val, h: Val| {
+        (
+            Node {
+                width: w,
+                height: h,
+                flex_grow: 1.0,
+                ..default()
+            },
+            BackgroundColor(Color::BLACK),
+        )
+    };
     commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
             CityScreenRoot,
             GlobalZIndex(10),
         ))
         .with_children(|root| {
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-            ));
-            root.spawn((
+            root.spawn(black(Val::Percent(100.0), Val::Auto));
+            root.spawn(Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(CONTENT_H),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|row| {
+            row.spawn(black(Val::Auto, Val::Percent(100.0)));
+            row.spawn((
                 ImageNode::new(assets.load("gen/cityscreen/background.png")),
                 Node {
                     width: Val::Px(CONTENT_W),
                     height: Val::Px(CONTENT_H),
+                    flex_shrink: 0.0,
                     ..default()
                 },
             ))
             .with_children(|content| {
                 city_panel(content, ctx, p, &font);
                 // right panel over the black view: production queue
-                content.spawn((
-                    ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(812.0),
-                        top: Val::Px(98.0),
-                        width: Val::Px(203.0),
-                        height: Val::Px(360.0),
-                        ..default()
-                    },
-                ));
-                txt(
-                    content,
-                    &font,
-                    "Production queue",
-                    15.0,
-                    830.0,
-                    106.0,
-                    PARCHMENT_TEXT,
-                );
-                let mut rows: Vec<(String, Option<usize>)> =
-                    vec![(format!("> {}", city.production.name()), None)];
-                for (i, q) in city.queue.iter().enumerate() {
-                    rows.push((format!("{}. {}", i + 1, q.name()), Some(i)));
-                }
-                for (n, (label, qi)) in rows.iter().enumerate() {
-                    let top = 132.0 + n as f32 * 30.0;
-                    match qi {
-                        Some(i) => {
-                            content
-                                .spawn((
-                                    Button,
-                                    Node {
-                                        position_type: PositionType::Absolute,
-                                        left: Val::Px(826.0),
-                                        top: Val::Px(top),
-                                        width: Val::Px(176.0),
-                                        height: Val::Px(26.0),
-                                        align_items: AlignItems::Center,
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.4, 0.25, 0.1, 0.25)),
-                                    ScreenButton::Unqueue(*i),
-                                ))
-                                .with_children(|b| {
-                                    b.spawn((
-                                        Text::new(format!("{label}  [x]")),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 14.0,
-                                            ..default()
-                                        },
-                                        TextColor(PARCHMENT_TEXT),
-                                    ));
-                                });
-                        }
-                        None => txt(
-                            content,
-                            &font,
-                            label,
-                            16.0,
-                            830.0,
-                            top + 2.0,
-                            PARCHMENT_TEXT,
-                        ),
-                    }
+                // Civ3 shows the queue box only while the queue is in use.
+                if !city.queue.is_empty() {
+                    production_queue(content, assets, &font, city, shields_pt);
                 }
                 // modal build list
                 if menu {
                     build_menu(content, assets, &font, city, shields_pt, page);
                 }
+                if let Some(offer) = ask {
+                    hurry_question(content, &font, offer.question(city.production.name()));
+                }
             });
+            row.spawn(black(Val::Auto, Val::Percent(100.0)));
+            });
+            root.spawn(black(Val::Percent(100.0), Val::Auto));
         });
+}
+
+/// The queue box on the right of the city view: the current build, then
+/// what follows it, each with its icon and turns. A queued row is a button
+/// that takes it off the queue.
+fn production_queue(
+    content: &mut ChildSpawnerCommands<'_>,
+    assets: &AssetServer,
+    font: &Handle<Font>,
+    city: &City,
+    shields_pt: u8,
+) {
+    content.spawn((
+        ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(QUEUE_X),
+            top: Val::Px(QUEUE_Y),
+            width: Val::Px(203.0),
+            height: Val::Px(360.0),
+            ..default()
+        },
+    ));
+    txt(
+        content,
+        font,
+        "PRODUCTION QUEUE",
+        HEADING_TEXT,
+        QUEUE_X + 14.0,
+        QUEUE_Y + 10.0,
+        INK,
+    );
+    let first_turns = turns_for(city.price(city.production), city.shields, shields_pt);
+    let rows = std::iter::once((city.production, first_turns, None)).chain(
+        city.queue
+            .iter()
+            .enumerate()
+            .map(|(i, q)| (*q, String::new(), Some(i))),
+    );
+    for (n, (item, turns, qi)) in rows.take(10).enumerate() {
+        let mut row = content.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(QUEUE_X + 10.0),
+                top: Val::Px(QUEUE_Y + 32.0 + n as f32 * 30.0),
+                width: Val::Px(183.0),
+                height: Val::Px(28.0),
+                padding: UiRect::horizontal(Val::Px(4.0)),
+                column_gap: Val::Px(6.0),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(if qi.is_none() {
+                Color::srgba(0.42, 0.27, 0.10, 0.22)
+            } else {
+                Color::NONE
+            }),
+        ));
+        if let Some(i) = qi {
+            row.insert((Button, ScreenButton::Unqueue(i)));
+        }
+        row.with_children(|r| {
+            r.spawn((
+                build_icon(assets, item),
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(24.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
+            r.spawn((
+                span(font, item.name(), 13.0, INK),
+                TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                Node {
+                    flex_grow: 1.0,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+            ));
+            // The build's turns; a queued row offers its removal instead.
+            let tail = if qi.is_some() { "remove".to_string() } else { turns };
+            r.spawn(span(font, tail, 11.0, INK_SOFT));
+        });
+    }
 }
 
 /// Hash of what the city screen draws from the map around a city.
@@ -2366,7 +2554,6 @@ struct PanelCtx<'a> {
 /// Panel geometry, in the 1024x768 content box: the city view band runs
 /// from the top bar down to the bottom panel, whose bar rows sit where
 /// `background.png` bakes them.
-const BAND_TOP: f32 = 92.0;
 const BAR_PROD: f32 = 522.0;
 const BAR_FOOD: f32 = 568.0;
 const BAR_COM: f32 = 618.0;
@@ -2375,6 +2562,13 @@ const INK: Color = PARCHMENT_TEXT;
 const INK_SOFT: Color = Color::srgb(0.42, 0.30, 0.16);
 const LABEL_TEXT: f32 = 14.0;
 const SMALL_TEXT: f32 = 13.0;
+/// The bottom panel's row headings: they fit the 13-px strips the
+/// background leaves above each bar.
+const HEADING_TEXT: f32 = 11.0;
+/// Top-left of the production queue box over the city view, below the
+/// top fade bar.
+const QUEUE_X: f32 = 812.0;
+const QUEUE_Y: f32 = 118.0;
 /// `CityIcons.png` cell indices, as used across the city screen.
 const ICON_COMMERCE: u32 = 2;
 const ICON_SHIELD: u32 = 4;
@@ -2600,155 +2794,113 @@ fn city_panel(
             TextLayout::new_with_justify(Justify::Center),
         ));
     }
-    for (text, size, y) in [
-        (city.name.clone(), 26.0, 4.0),
-        (format!("Founded: Turn {}", city.founded), SMALL_TEXT, 32.0),
-    ] {
-        content.spawn((
-            Text::new(text),
-            TextFont {
-                font: font.clone(),
-                font_size: size,
-                ..default()
-            },
-            TextColor(INK),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(305.0),
-                top: Val::Px(y),
-                width: Val::Px(400.0),
-                ..default()
-            },
-            TextLayout::new_with_justify(Justify::Center),
-        ));
-    }
-    let gold = format!("{} GOLD", p.treasury);
-    let pop = format!("POP {}", city.size);
-    let date = format!("Turn {}", p.turn);
-    let government = crate::realm::GOVT_NAMES[crate::realm::read(city.civ, |r| r.govt)].to_uppercase();
-    for (i, s) in [gold.as_str(), government.as_str(), pop.as_str(), date.as_str()]
-        .iter()
-        .enumerate()
-    {
-        let left_col = i % 2 == 0;
-        content.spawn((
-            Text::new(*s),
-            TextFont {
-                font: font.clone(),
-                font_size: SMALL_TEXT,
-                ..default()
-            },
-            TextColor(INK),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(if left_col { 305.0 } else { 525.0 }),
-                top: Val::Px(46.0 + (i / 2) as f32 * 16.0),
-                width: Val::Px(if left_col { 173.0 } else { 160.0 }),
-                ..default()
-            },
-            TextLayout::new_with_justify(if left_col {
-                Justify::Right
-            } else {
-                Justify::Left
-            }),
-        ));
-    }
-    txt(content, font, "CULTURE", 15.0, 712.0, 4.0, INK);
-    icon(
-        content,
-        assets,
-        ICON_CULTURE,
-        786.0,
-        4.0,
-        16.0,
-        Color::WHITE,
-    );
-    txt(
+    // The city's own column, between the prev/next arrows.
+    txt_centered(content, font, &city.name, 24.0, 412.0, 2.0, 196.0, INK);
+    txt_centered(
         content,
         font,
-        &format!("{culture_pt} per turn"),
-        SMALL_TEXT,
-        806.0,
-        7.0,
-        INK,
+        &format!("Founded: {}", crate::calendar::label(city.founded)),
+        12.0,
+        412.0,
+        31.0,
+        196.0,
+        INK_SOFT,
     );
-    let expand = if culture_pt == 0 {
-        "never".to_string()
-    } else {
-        format!(
-            "{} turns",
-            (culture_next - city.culture).div_ceil(culture_pt)
-        )
-    };
-    content.spawn((
-        Text::new(format!("Expand in {expand}")),
-        TextFont {
-            font: font.clone(),
-            font_size: 12.0,
+    let government = crate::realm::GOVT_NAMES[crate::realm::read(city.civ, |r| r.govt)].to_uppercase();
+    for (row, (left, right)) in [
+        (format!("{} GOLD", p.treasury), government),
+        (format!("POP {}", city.size), crate::calendar::label(p.turn).to_uppercase()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let y = 50.0 + row as f32 * 16.0;
+        for (s, x, align) in [
+            (left, 412.0, JustifyContent::FlexEnd),
+            (right, 516.0, JustifyContent::FlexStart),
+        ] {
+            txt_aligned(content, font, &s, 12.0, (x, y, 92.0), align, INK);
+        }
+    }
+    // Culture: the rate, the progress to the next border expansion inside
+    // the bar `background.png` bakes at (717, 35), and the running total.
+    content
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(716.0),
+            top: Val::Px(8.0),
+            column_gap: Val::Px(8.0),
+            align_items: AlignItems::Baseline,
             ..default()
-        },
-        TextColor(INK),
+        })
+        .with_children(|row| {
+            row.spawn(span(font, "CULTURE", 12.0, INK));
+            row.spawn(span(font, format!("{culture_pt} per turn"), 10.0, INK));
+        });
+    let progress = (city.culture as f32 / culture_next.max(1) as f32).clamp(0.0, 1.0);
+    content.spawn((
         Node {
             position_type: PositionType::Absolute,
-            left: Val::Px(724.0),
-            top: Val::Px(35.0),
-            width: Val::Px(110.0),
+            left: Val::Px(719.0),
+            top: Val::Px(37.0),
+            width: Val::Px(107.0 * progress),
+            height: Val::Px(15.0),
             ..default()
         },
-        TextLayout::new_with_justify(Justify::Center),
+        BackgroundColor(Color::srgba(0.96, 0.84, 0.30, 0.85)),
     ));
-    txt(
+    let expand = if culture_pt == 0 {
+        "No expansion".to_string()
+    } else {
+        let turns = (culture_next - city.culture).div_ceil(culture_pt);
+        format!("Expand in {turns} turn{}", if turns == 1 { "" } else { "s" })
+    };
+    txt_centered(content, font, &expand, 10.0, 717.0, 39.0, 111.0, INK);
+    txt_centered(
         content,
         font,
         &format!("Total: {}/{culture_cur}", city.culture),
-        SMALL_TEXT,
-        720.0,
-        55.0,
+        11.0,
+        717.0,
+        62.0,
+        111.0,
         INK,
     );
+    // Positions from the button sheet's own layout notes.
     panel_button(
         content,
         assets,
         "mgmt_prev",
-        359.0,
-        26.0,
-        49.0,
-        60.0,
+        368.0,
+        21.0,
+        42.0,
+        47.0,
         ScreenButton::PrevCity,
     );
     panel_button(
         content,
         assets,
         "mgmt_next",
-        604.0,
-        26.0,
-        49.0,
-        60.0,
+        609.0,
+        21.0,
+        42.0,
+        47.0,
         ScreenButton::NextCity,
     );
     panel_button(
         content,
         assets,
-        "x",
-        946.0,
-        18.0,
-        44.0,
-        46.0,
+        "mgmt_x",
+        909.0,
+        21.0,
+        39.0,
+        47.0,
         ScreenButton::Close,
     );
 
     // ---- the city's land, with the citizens who work it ----
-    content.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(BAND_TOP),
-            width: Val::Px(CONTENT_W),
-            height: Val::Px(413.0),
-            ..default()
-        },
-        BackgroundColor(Color::BLACK),
-    ));
+    // The band is a window onto the map (`frame_city_view` parks the
+    // camera on the city), as in Civ3: only the yields and heads are UI.
     content
         .spawn(Node {
             position_type: PositionType::Absolute,
@@ -2759,10 +2911,6 @@ fn city_panel(
             ..default()
         })
         .with_children(|cluster| {
-            ground_nodes(cluster, ctx);
-            for (rx, ry) in radius_offsets() {
-                tile_node(cluster, ctx, rx, ry);
-            }
             for ry in -2i32..=2 {
                 for rx in -2i32..=2 {
                     if rx.abs() == 2 && ry.abs() == 2 {
@@ -2792,17 +2940,19 @@ fn city_panel(
         .chain(std::iter::repeat_n(Color::srgb(1.0, 0.55, 0.5), m.unhappy as usize))
         .map(|tint| ("gen/ui/citizen.png", tint))
         .chain(std::iter::repeat_n(("gen/ui/entertainer.png", Color::WHITE), m.entertainers as usize));
-    for (i, (head, tint)) in kinds.take(16).enumerate() {
+    let heads: Vec<_> = kinds.take(16).collect();
+    let heads_left = CLUSTER_X + 320.0 - heads.len() as f32 * 50.0 / 2.0;
+    for (i, (head, tint)) in heads.into_iter().enumerate() {
         let mut head = ImageNode::new(assets.load(head));
         head.color = tint;
         content.spawn((
             head,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(176.0 + i as f32 * 52.0),
-                top: Val::Px(440.0),
-                width: Val::Px(50.0),
-                height: Val::Px(50.0),
+                left: Val::Px(heads_left + i as f32 * 50.0),
+                top: Val::Px(456.0),
+                width: Val::Px(49.0),
+                height: Val::Px(49.0),
                 ..default()
             },
         ));
@@ -2810,29 +2960,8 @@ fn city_panel(
     if totals.disorder {
         txt(content, font, "CIVIL DISORDER", 20.0, 176.0, 494.0, Color::srgb(0.75, 0.1, 0.05));
     }
-    content.spawn((
-        ImageNode::new(assets.load("gen/ui/TopFadeBar.png")),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(BAND_TOP),
-            width: Val::Px(CONTENT_W),
-            ..default()
-        },
-    ));
-    content.spawn((
-        ImageNode::new(assets.load("gen/ui/BottomFadeBar.png")),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(485.0),
-            width: Val::Px(CONTENT_W),
-            ..default()
-        },
-    ));
-
     // ---- improvements: icon, name, then what the building does ----
-    txt(content, font, "IMPROVEMENTS", LABEL_TEXT, 12.0, 511.0, INK);
+    txt(content, font, "IMPROVEMENTS", HEADING_TEXT, 8.0, 511.0, INK);
     let mut rows: Vec<(&str, Rect, u32, u8, u8)> = vec![];
     if p.capital {
         // The Palace is the capital's; the clone does not build one.
@@ -2843,8 +2972,8 @@ fn city_panel(
             rows.push((b.name(), rect, b.culture(), b.upkeep(), b.happy()));
         }
     }
-    for (i, (name, rect, culture, upkeep, happy)) in rows.iter().enumerate() {
-        let y = 522.0 + i as f32 * 32.0;
+    for (i, (name, rect, culture, upkeep, happy)) in rows.iter().take(7).enumerate() {
+        let y = 528.0 + i as f32 * 32.0;
         let mut n = ImageNode::new(assets.load("gen/cityscreen/buildings-small.png"));
         n.rect = Some(*rect);
         content.spawn((
@@ -2858,19 +2987,19 @@ fn city_panel(
                 ..default()
             },
         ));
-        txt(content, font, name, LABEL_TEXT, 38.0, y + 4.0, INK);
-        let mut mx = 104.0;
+        txt(content, font, name, 12.0, 38.0, y, INK);
+        let mut mx = 38.0;
         if *upkeep > 0 {
             icon(
                 content,
                 assets,
                 ICON_UPKEEP,
                 mx,
-                y + 8.0,
-                16.0,
+                y + 16.0,
+                14.0,
                 Color::WHITE,
             );
-            mx += 18.0;
+            mx += 16.0;
         }
         for _ in 0..*culture {
             icon(
@@ -2878,20 +3007,20 @@ fn city_panel(
                 assets,
                 ICON_CULTURE,
                 mx,
-                y + 8.0,
-                16.0,
+                y + 16.0,
+                14.0,
                 Color::WHITE,
             );
-            mx += 14.0;
+            mx += 12.0;
         }
         for _ in 0..*happy {
             icon(
                 content,
                 assets,
                 ICON_HAPPY,
-                mx + 2.0,
-                y + 8.0,
-                16.0,
+                mx,
+                y + 16.0,
+                14.0,
                 Color::WHITE,
             );
             mx += 18.0;
@@ -2927,7 +3056,7 @@ fn city_panel(
     }
 
     // ---- luxuries, and the rest of the left column ----
-    txt(content, font, "LUXURIES", LABEL_TEXT, 154.0, 511.0, INK);
+    txt(content, font, "LUXURIES", HEADING_TEXT, 162.0, 511.0, INK);
     for (i, (id, n)) in p.luxuries.iter().take(6).enumerate() {
         let y = 524.0 + i as f32 * 31.0;
         txt(
@@ -2954,9 +3083,9 @@ fn city_panel(
             );
         }
     }
-    txt(content, font, "POLLUTION", LABEL_TEXT, 154.0, 716.0, INK);
+    txt(content, font, "POLLUTION", HEADING_TEXT, 162.0, 719.0, INK);
     // ---- garrison: the units standing in the city ----
-    txt(content, font, "GARRISON", LABEL_TEXT, 300.0, 716.0, INK);
+    txt(content, font, "GARRISON", HEADING_TEXT, 288.0, 719.0, INK);
     for (i, u) in p.garrison.iter().take(3).enumerate() {
         content.spawn((
             unit_icon_node(assets, Production::from_unit(*u)),
@@ -2972,25 +3101,7 @@ fn city_panel(
     }
 
     // ---- production, food and commerce ----
-    txt(content, font, "PRODUCTION", LABEL_TEXT, 296.0, 504.0, INK);
-    icon(
-        content,
-        assets,
-        ICON_SHIELD,
-        374.0,
-        506.0,
-        16.0,
-        Color::WHITE,
-    );
-    txt(
-        content,
-        font,
-        &format!("{shields_pt} per turn"),
-        SMALL_TEXT,
-        394.0,
-        507.0,
-        INK,
-    );
+    row_heading(content, font, "PRODUCTION", shields_pt.into(), 290.0, 509.0);
     icons_right(
         content,
         assets,
@@ -3001,25 +3112,7 @@ fn city_panel(
         BAR_PROD,
         24.0,
     );
-    txt(content, font, "FOOD", LABEL_TEXT, 296.0, 550.0, INK);
-    icon(
-        content,
-        assets,
-        ICON_FOOD_BOX,
-        332.0,
-        552.0,
-        16.0,
-        Color::WHITE,
-    );
-    txt(
-        content,
-        font,
-        &format!("{food} per turn"),
-        SMALL_TEXT,
-        352.0,
-        553.0,
-        INK,
-    );
+    row_heading(content, font, "FOOD", food.into(), 290.0, 557.0);
     icons_left(
         content,
         assets,
@@ -3050,34 +3143,17 @@ fn city_panel(
             ceil_div(box_size.saturating_sub(city.food), net_food as u8)
         )
     };
-    txt(
+    txt_centered(
         content,
         font,
-        &format!("Growth in {grow_in}"),
-        12.0,
-        790.0,
-        554.0,
+        &format!("Grows in {grow_in}"),
+        HEADING_TEXT,
+        771.0,
+        559.0,
+        128.0,
         INK_SOFT,
     );
-    txt(content, font, "COMMERCE", LABEL_TEXT, 296.0, 600.0, INK);
-    icon(
-        content,
-        assets,
-        ICON_COMMERCE,
-        378.0,
-        602.0,
-        16.0,
-        Color::WHITE,
-    );
-    txt(
-        content,
-        font,
-        &format!("{commerce} per turn"),
-        SMALL_TEXT,
-        396.0,
-        603.0,
-        INK,
-    );
+    row_heading(content, font, "COMMERCE", commerce, 290.0, 608.0);
     // Each row leads with its own badge and counts its points in coins,
     // flasks or faces.
     for (row, (amount, rate, icon_cell, point)) in [
@@ -3095,7 +3171,7 @@ fn city_panel(
             *point,
             (*amount).max(0) as u32,
             19.3,
-            720.0,
+            680.0,
             y + 4.0,
             20.0,
         );
@@ -3146,20 +3222,18 @@ fn city_panel(
             INK,
         );
     }
-    for i in 0..city.price(city.production) as usize {
-        let tint = if i < city.shields as usize {
-            Color::srgb(1.0, 0.82, 0.36)
-        } else {
-            Color::WHITE
-        };
+    // Civ3's grid: blue shields for what is stored, grey ones for the rest.
+    let (icons, per_icon) = shield_grid(city.price(city.production) as usize);
+    let stored = city.shields as usize / per_icon;
+    for i in 0..icons {
         icon(
             content,
             assets,
-            ICON_SHIELD_BOX,
-            918.0 + (i % 7) as f32 * 12.0,
-            624.0 + (i / 7) as f32 * 12.0,
-            12.0,
-            tint,
+            if i < stored { ICON_SHIELD } else { ICON_SHIELD_BOX },
+            908.0 + (i % SHIELD_COLS) as f32 * 15.5,
+            SHIELD_GRID_Y + (i / SHIELD_COLS) as f32 * 26.0,
+            16.0,
+            Color::WHITE,
         );
     }
     // The current build sits in Civ3's production button; clicking it
@@ -3170,9 +3244,9 @@ fn city_panel(
             ImageNode::new(assets.load("gen/ui/prod_0.png")),
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(890.0),
-                top: Val::Px(514.0),
-                width: Val::Px(133.0),
+                left: Val::Px(905.0),
+                top: Val::Px(516.0),
+                width: Val::Px(115.0),
                 height: Val::Px(95.0),
                 ..default()
             },
@@ -3184,94 +3258,114 @@ fn city_panel(
                 build_icon(assets, city.production),
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(28.0),
-                    top: Val::Px(2.0),
-                    width: Val::Px(76.0),
-                    height: Val::Px(76.0),
+                    left: Val::Px(29.0),
+                    top: Val::Px(6.0),
+                    width: Val::Px(56.0),
+                    height: Val::Px(56.0),
                     ..default()
                 },
             ));
             box_.spawn((
-                Text::new(city.production.name()),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(INK),
+                span(font, city.production.name(), 12.0, INK),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(6.0),
-                    top: Val::Px(70.0),
-                    width: Val::Px(121.0),
+                    top: Val::Px(64.0),
+                    width: Val::Px(103.0),
                     ..default()
                 },
                 TextLayout::new_with_justify(Justify::Center),
             ));
         });
+    // Civ3's hurry button beside it (the sheet's note: "draw @ (860, 520)").
+    content.spawn((
+        Button,
+        ImageNode::new(assets.load("gen/ui/hurry_0.png")),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(860.0),
+            top: Val::Px(520.0),
+            width: Val::Px(28.0),
+            height: Val::Px(28.0),
+            ..default()
+        },
+        PanelButton { stem: "hurry" },
+        ScreenButton::Hurry,
+    ));
     let left = city.price(city.production).saturating_sub(city.shields);
     let prod_in = if shields_pt == 0 {
         "never".to_string()
     } else {
         format!("{} turns", ceil_div(left, shields_pt))
     };
-    txt(
+    txt_centered(
         content,
         font,
         &format!("Complete in {prod_in}"),
-        SMALL_TEXT,
-        898.0,
-        612.0,
+        HEADING_TEXT,
+        901.0,
+        614.0,
+        123.0,
         INK,
     );
-    // ---- the city's own buttons ----
-    for (label, y, kind) in [
-        ("Change build", 668.0, ScreenButton::Change),
-        ("Governor", 668.0, ScreenButton::Governor),
-    ] {
-        let x = if matches!(kind, ScreenButton::Governor) {
-            85.0
-        } else {
-            0.0
-        };
-        content
-            .spawn((
-                Button,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(2.0 + x),
-                    top: Val::Px(y),
-                    width: Val::Px(80.0),
-                    height: Val::Px(26.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.72, 0.63, 0.44)),
-                kind,
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new(label),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(INK),
-                ));
-            });
-    }
+    // The governor sits with the citizens it assigns. The build changes
+    // through the production button, as in Civ3.
+    content
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(16.0),
+                top: Val::Px(452.0),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(4.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BorderColor::all(Color::srgb(0.45, 0.33, 0.17)),
+            BackgroundColor(Color::srgb(0.86, 0.78, 0.60)),
+            ScreenButton::Governor,
+        ))
+        .with_children(|btn| {
+            btn.spawn(span(font, "Governor", 13.0, INK));
+        });
 }
 
-/// Asset resources the city screen draws with: bundled so the system stays
-/// inside Bevy's parameter limit.
-#[derive(SystemParam)]
-pub(crate) struct ScreenArt<'w> {
-    assets: Res<'w, AssetServer>,
-    tiles: Res<'w, TileArt>,
-    imp: Res<'w, ImprovementArt>,
-    city_art: Res<'w, CityArt>,
+/// One of the bottom panel's row headings: the label, then the per-turn
+/// amount in smaller type, as Civ3 prints them.
+fn row_heading(
+    content: &mut ChildSpawnerCommands<'_>,
+    font: &Handle<Font>,
+    label: &str,
+    per_turn: i32,
+    x: f32,
+    y: f32,
+) {
+    content
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(x),
+            top: Val::Px(y),
+            column_gap: Val::Px(8.0),
+            align_items: AlignItems::Baseline,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(span(font, label, 12.0, INK));
+            row.spawn(span(font, format!("{per_turn} per turn"), 10.0, INK));
+        });
+}
+
+/// Top of the build's shield grid, under the production button's caption.
+const SHIELD_GRID_Y: f32 = 630.0;
+/// The grid's shape: rows of seven, five rows at most.
+const SHIELD_COLS: usize = 7;
+const SHIELD_ROWS: usize = 5;
+
+/// (icons, shields per icon) of the build's shield grid: one icon a shield
+/// while the price fits the 7x5 grid, else each icon stands for several.
+fn shield_grid(price: usize) -> (usize, usize) {
+    let per_icon = price.div_ceil(SHIELD_COLS * SHIELD_ROWS).max(1);
+    (price.div_ceil(per_icon), per_icon)
 }
 
 pub fn maintain_city_screen(
@@ -3281,7 +3375,7 @@ pub fn maintain_city_screen(
     changed: Query<(), Changed<City>>,
     roots: Query<Entity, With<CityScreenRoot>>,
     mut last: Local<(Option<Entity>, u64)>,
-    art: ScreenArt,
+    assets: Res<AssetServer>,
     map: Res<GameMap>,
     menu: Res<BuildMenu>,
     units: Query<&Unit>,
@@ -3289,6 +3383,7 @@ pub fn maintain_city_screen(
     capital: Res<Capital>,
     turn: Res<units::Turn>,
     civs: Res<Civilizations>,
+    hurry: Res<HurryAsk>,
 ) {
     // Only the active civ's city may be on screen: a view left over from
     // the previous hotseat player never shows their city to the next one.
@@ -3326,7 +3421,7 @@ pub fn maintain_city_screen(
             h
         })
         .unwrap_or(0);
-    if (open, sig) == *last && changed.is_empty() && !menu.is_changed() {
+    if (open, sig) == *last && changed.is_empty() && !menu.is_changed() && !hurry.is_changed() {
         return;
     }
     for r in roots.iter() {
@@ -3334,17 +3429,10 @@ pub fn maintain_city_screen(
     }
     *last = (open, sig);
     let Some((e, city)) = open_city else { return };
-    let taken = taken_tiles(&map, cities.iter(), (city.x, city.y));
-    let hubs: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
     let ctx = ClusterCtx {
-        assets: &art.assets,
-        tiles: &art.tiles,
-        imp: &art.imp,
-        city_art: &art.city_art,
+        assets: &assets,
         map: &map,
         city,
-        taken: &taken,
-        hubs: &hubs,
     };
     let panel = PanelCtx {
         capital: capital.0[city.civ] == Some(e),
@@ -3354,13 +3442,15 @@ pub fn maintain_city_screen(
         strategic: &strategic,
         luxuries: &luxuries,
     };
-    build_city_screen(&mut commands, &ctx, &panel, menu.0, menu.1);
+    let ask = hurry.0.filter(|(c, _)| *c == e).map(|(_, o)| o);
+    build_city_screen(&mut commands, &ctx, &panel, menu.0, menu.1, ask);
 }
 
 pub fn city_screen_input(
     buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    cam: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     clusters: Query<&Interaction, With<TileCluster>>,
     mut views: ResMut<CityView>,
     mut cities: Query<&mut City>,
@@ -3396,14 +3486,22 @@ pub fn city_screen_input(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    let size = window.size();
-    let Some((rx, ry)) = cluster_pick(size.x, size.y, cursor) else {
+    let Ok((camera, gt)) = cam.single() else {
+        return;
+    };
+    let Ok(world) = camera.viewport_to_world_2d(gt, cursor) else {
+        return;
+    };
+    let Ok(city) = cities.get(e) else {
+        return;
+    };
+    let Some((rx, ry)) = radius_cell(world - tile_to_world(city.x, city.y)) else {
         return;
     };
     if !click_cluster(&map, &mut cities, e, rx, ry) {
         post(
             &mut board,
-            "That tile is unexplored, worked by another city, or inside a foreign border.",
+            "That tile is unexplored, outside our borders, or worked by another city.",
         );
     }
 }
@@ -3445,7 +3543,11 @@ pub fn city_screen_buttons(
     map: Res<GameMap>,
     mut board: ResMut<MessageBoard>,
     civs: Res<Civilizations>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut treasury: ResMut<Treasury>,
+    mut ask: ResMut<HurryAsk>,
 ) {
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     for (interaction, button) in buttons.iter() {
         if *interaction != Interaction::Pressed {
             continue;
@@ -3455,7 +3557,9 @@ pub fn city_screen_buttons(
             ScreenButton::Close => {
                 views.0 = None;
                 menu.0 = false;
+                ask.0 = None;
             }
+            ScreenButton::HurryNo => ask.0 = None,
             ScreenButton::Change => *menu = BuildMenu(true, 0),
             ScreenButton::CloseMenu => menu.0 = false,
             ScreenButton::MenuPage(d) => {
@@ -3499,16 +3603,40 @@ pub fn city_screen_buttons(
                         // when the city would riot.
                         citycalc::keep_order(&map, &mut city);
                     }
-                    ScreenButton::Pick(p) => {
-                        city.change_build(*p);
-                        menu.0 = false;
-                    }
-                    ScreenButton::Queue(p) => {
+                    // Shift-click adds to the queue and leaves the list
+                    // open, as in Civ3.
+                    ScreenButton::Pick(p) if shift => {
                         if !city.enqueue(*p) {
                             post(&mut board, "Cannot queue that item.");
                         }
                     }
+                    ScreenButton::Pick(p) => {
+                        city.change_build(*p);
+                        menu.0 = false;
+                    }
                     ScreenButton::Unqueue(i) => city.dequeue(*i),
+                    ScreenButton::Hurry => {
+                        menu.0 = false;
+                        let how = crate::realm::govt(city.civ).hurry;
+                        match crate::hurry::quote(&city, how, treasury.0[city.civ], crate::hurry::Buyer::Human) {
+                            Ok(offer) => ask.0 = views.0.map(|e| (e, offer)),
+                            Err(no) => post(&mut board, no.text(city.production.name())),
+                        }
+                    }
+                    ScreenButton::HurryYes => {
+                        // The price is quoted again, as the executor does:
+                        // the city may have changed since the question.
+                        let how = crate::realm::govt(city.civ).hurry;
+                        ask.0 = None;
+                        match crate::hurry::quote(&city, how, treasury.0[city.civ], crate::hurry::Buyer::Human) {
+                            Ok(offer) => {
+                                let civ = city.civ;
+                                crate::hurry::apply(&map, &mut city, &taken, offer, &mut treasury.0[civ]);
+                                post(&mut board, format!("{} hurried.", city.production.name()));
+                            }
+                            Err(no) => post(&mut board, no.text(city.production.name())),
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -3544,6 +3672,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             civ,
             name: CIVS[civ].city_names[0].to_string(),
             x,
@@ -3558,7 +3687,9 @@ mod tests {
             culture: 0,
             founded: 1,
         };
-        governor_assign(map, &mut city, &none());
+        // Work under the real rule: a new city's border is its 3x3 block.
+        let alone = city.clone();
+        governor_assign(map, &mut city, &taken_tiles(map, [&alone], (x, y)));
         city
     }
 
@@ -3599,6 +3730,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             civ: 0,
             name: "Kyoto".to_string(),
             x: 1,
@@ -3615,10 +3747,12 @@ mod tests {
         };
         // Center (2,1 with the free shield) plus one grassland tile: net
         // food 2 grows the 20-box in 10, 1 shield builds the Warrior in 10.
-        assert_eq!(banner_text(&map, &city), "Kyoto : 10\nWarrior : 10");
+        assert_eq!(banner_text(&map, &city, 0), "Kyoto : 10\nWarrior : 10");
+        // Another civ sees the bare name over an empty build line.
+        assert_eq!(banner_text(&map, &city, 1), "Kyoto\n\u{a0}");
         // No worked tiles: net food 0 stalls growth, shown as `--`.
         city.worked.clear();
-        assert_eq!(banner_text(&map, &city), "Kyoto : --\nWarrior : 10");
+        assert_eq!(banner_text(&map, &city, 0), "Kyoto : --\nWarrior : 10");
     }
 
     #[test]
@@ -3799,18 +3933,14 @@ mod tests {
     }
 
     #[test]
-    fn cluster_pick_center_and_edges() {
-        // window 1280x800, content centered: origin (128, 16)
-        // cluster center in content: (192+320, 140+160) = (512, 300)
-        // window px (top-left origin): (640, 316); cursor is
-        // bottom-left origin: (640, 800-316) = (640, 484)
-        let c = cluster_pick(1280.0, 800.0, Vec2::new(640.0, 484.0));
-        assert_eq!(c, Some((0, 0)));
-        // one tile east: content (576, 332) -> cursor (704, 452)
-        let c = cluster_pick(1280.0, 800.0, Vec2::new(704.0, 452.0));
-        assert_eq!(c, Some((1, 0)));
-        // far corner is outside
-        assert_eq!(cluster_pick(1280.0, 800.0, Vec2::new(10.0, 10.0)), None);
+    fn radius_cell_center_and_edges() {
+        assert_eq!(radius_cell(Vec2::ZERO), Some((0, 0)));
+        // One tile east of the city is (x+1, y): right and down.
+        assert_eq!(radius_cell(Vec2::new(64.0, -32.0)), Some((1, 0)));
+        assert_eq!(radius_cell(tile_to_world(-2, 1)), Some((-2, 1)));
+        // The fat cross has no corners, and nothing past two tiles.
+        assert_eq!(radius_cell(tile_to_world(2, 2)), None);
+        assert_eq!(radius_cell(tile_to_world(3, 0)), None);
     }
 
     #[test]
@@ -3892,6 +4022,29 @@ mod tests {
         map.tiles[i].seen = false;
         b.worked.clear();
         assert!(!toggle_worked(&map, &mut b, (ux, uy), &taken));
+    }
+
+    #[test]
+    fn a_city_works_only_inside_its_own_border() {
+        // Civ3 lights only the radius tiles inside the civ's border: a new
+        // city's border is its 3x3 block, so the radius's outer ring is
+        // unclaimed and cannot be worked until the border grows.
+        let map = test_map();
+        let mut city = test_city(&map);
+        let near = (map.wrap_x(city.x + 1), city.y);
+        let far = (map.wrap_x(city.x + 2), city.y);
+        let taken = taken_tiles(&map, [&city], (city.x, city.y));
+        assert!(!taken.contains(&near));
+        assert!(taken.contains(&far), "unclaimed land is not workable");
+        city.culture = 10;
+        let taken = taken_tiles(&map, [&city], (city.x, city.y));
+        assert!(!taken.contains(&far), "the grown border takes in the ring");
+        // A rival's border closes the tile again.
+        let mut rival = test_city_of(&map, 1);
+        rival.x = map.wrap_x(city.x + 3);
+        rival.culture = 100;
+        let taken = taken_tiles(&map, [&city, &rival], (city.x, city.y));
+        assert!(taken.contains(&far), "a foreign border is not workable");
     }
 
     #[test]
@@ -4014,6 +4167,20 @@ mod tests {
         assert_eq!(culture_thresholds(0), (10, 10));
         assert_eq!(culture_thresholds(1118), (1000, 10000));
         assert_eq!(culture_thresholds(10000), (10000, 100000));
+    }
+
+    #[test]
+    fn shield_grid_never_outgrows_seven_by_five() {
+        // One icon a shield while the price fits; past 35 each icon
+        // stands for several, so a dear build never runs off the panel.
+        assert_eq!(shield_grid(10), (10, 1));
+        assert_eq!(shield_grid(35), (35, 1));
+        assert_eq!(shield_grid(60), (30, 2));
+        for price in [1, 30, 36, 120, 300, 600] {
+            let (icons, per) = shield_grid(price);
+            assert!(icons <= SHIELD_COLS * SHIELD_ROWS, "price {price}");
+            assert!(icons * per >= price);
+        }
     }
 
     #[test]
@@ -4507,6 +4674,7 @@ mod tests {
         app.init_resource::<crate::production_prompt::ProductionPrompts>();
         app.init_resource::<CityView>();
         app.init_resource::<BuildMenu>();
+        app.init_resource::<HurryAsk>();
         app.insert_resource(crate::combat::CombatRng(crate::rng::MapRng::new(1)));
         app.add_systems(Update, end_turn_cities);
         let city = app.world_mut().spawn(city).id();

@@ -510,33 +510,6 @@ pub fn describe(t: &Tile) -> Option<String> {
 
 // --- Gameplay ---
 
-/// Hut pop outcomes (sandbox-adapted: no gold or diplomacy outcomes). The
-/// outcome roll is the clone's; what an advance outcome gives is the
-/// binary's (`research.md` 10.5).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum HutReward {
-    Warrior,
-    Scout,
-    Reveal,
-    Growth,
-    Tech,
-}
-
-/// Roll a reward from a uniform `[0, 1)` draw (gameplay RNG, not mapgen).
-pub fn hut_reward_roll(v: f32) -> HutReward {
-    if v < 0.35 {
-        HutReward::Warrior
-    } else if v < 0.55 {
-        HutReward::Scout
-    } else if v < 0.80 {
-        HutReward::Reveal
-    } else if v < 0.92 {
-        HutReward::Growth
-    } else {
-        HutReward::Tech
-    }
-}
-
 /// Transient HUD message.
 #[derive(bevy::prelude::Resource, Default)]
 pub struct MessageBoard {
@@ -638,7 +611,7 @@ pub fn spawn_features(
     art: bevy::prelude::Res<FeatureArt>,
 ) {
     use crate::map::tile_to_world;
-    use crate::render::sprite_z;
+    use crate::render::feature_z;
     for y in 0..map.h {
         for x in 0..map.w {
             let t = &map.tiles[map.idx(x, y)];
@@ -658,14 +631,17 @@ pub fn spawn_features(
                     ..Default::default()
                 },
                 anchor,
-                bevy::prelude::Transform::from_xyz(pos.x, pos.y, sprite_z(x, y, layer)),
+                bevy::prelude::Transform::from_xyz(pos.x, pos.y, feature_z(x, y, layer)),
                 FeatureSprite { x, y, kind },
             ));
         }
     }
 }
 
-/// Despawn overlays whose tile feature changed; tint the rest by fog.
+/// Despawn overlays whose tile feature changed; show or hide the rest by
+/// fog. The art sits under the fog diamonds (`render::feature_z`), which
+/// dim it with its tile, so a resource on the frontier fades into the
+/// black with the terrain around it instead of showing as a black blot.
 pub fn sync_feature_sprites(
     mut commands: bevy::prelude::Commands,
     map: bevy::prelude::Res<GameMap>,
@@ -673,24 +649,24 @@ pub fn sync_feature_sprites(
     mut q: bevy::prelude::Query<(
         bevy::prelude::Entity,
         &FeatureSprite,
-        &mut bevy::prelude::Sprite,
+        &mut bevy::prelude::Visibility,
     )>,
 ) {
+    use bevy::prelude::Visibility;
     let mut dead = vec![];
-    for (e, fs, mut sprite) in q.iter_mut() {
+    for (e, fs, mut vis) in q.iter_mut() {
         let t = &map.tiles[map.idx(fs.x, fs.y)];
         if tile_kind(t) != Some(fs.kind) {
             dead.push(e);
             continue;
         }
-        sprite.color = if reveal.0 || t.visible {
-            bevy::prelude::Color::WHITE
-        } else if t.seen {
-            // Feature art sits above the fog diamonds, so it dims itself to
-            // the same 60% a remembered tile keeps.
-            bevy::prelude::Color::srgb(0.6, 0.6, 0.6)
+        // Hidden only under a solid black diamond, so art poking past its
+        // tile never shows over unexplored neighbors.
+        let lit = crate::render::fog_cell(&map, reveal.0, fs.x, fs.y) != (0, 0);
+        *vis = if lit {
+            Visibility::Inherited
         } else {
-            bevy::prelude::Color::BLACK
+            Visibility::Hidden
         };
     }
     for e in dead {
@@ -709,9 +685,11 @@ pub fn resolve_features(
     mut cities: bevy::prelude::Query<(bevy::prelude::Entity, &mut crate::cities::City)>,
     mut board: bevy::prelude::ResMut<MessageBoard>,
     audio: bevy::prelude::Res<crate::audio::GameAudio>,
-    mut gamerng: bevy::prelude::ResMut<crate::rng::GameRng>,
     mut research: bevy::prelude::ResMut<crate::research::Research>,
     mut dice: bevy::prelude::ResMut<crate::combat::CombatRng>,
+    mut treasury: bevy::prelude::ResMut<crate::cities::Treasury>,
+    mut barbarians: bevy::prelude::ResMut<crate::barbarians::Barbarians>,
+    turn: bevy::prelude::Res<crate::units::Turn>,
 ) {
     use crate::units::UnitAnim;
     // The computer pops huts too, silently and without lifting the human's
@@ -728,130 +706,75 @@ pub fn resolve_features(
     for (x, y) in arrivals {
         let i = map.idx(x, y);
         if map.tiles[i].hut {
+            // `0x55C6B0`: the hut is used up before anything is decided.
             map.tiles[i].hut = false;
-            let roll: f32 = gamerng.next_f32();
-            let mut reward = hut_reward_roll(roll);
-            if reward == HutReward::Tech {
-                // The elders teach a civ still in the first age; to anyone
-                // else the hut gives what it gives a city.
-                match research.hut_advance(civs.active, &mut dice.0) {
-                    Some((t, _)) => post(
-                        &mut board,
-                        format!("Goody hut: tribal elders teach us {}!", crate::research::tech_name(t)),
-                    ),
-                    None => reward = HutReward::Growth,
+            let all_cities: Vec<&crate::cities::City> = cities.iter().map(|(_, c)| c).collect();
+            let all_units: Vec<&crate::units::Unit> = units.iter().collect();
+            let walker = units.iter().find(|u| u.civ == civs.active && (u.x, u.y) == (x, y));
+            let civ = civs.active;
+            let era = research.era(civ);
+            let used = |t: usize| barbarians.tribe_used(t);
+            let build = |q: usize, t: crate::units::UnitType| crate::research::can_build(q, crate::cities::Production::from_unit(t));
+            let mut advance = |d: &mut crate::rng::MapRng| research.hut_advance(civ, d).map(|(t, _)| t);
+            let snapshot = map.clone();
+            let mut ctx = crate::huts::Context {
+                map: &snapshot,
+                civ,
+                tile: (x, y),
+                unit: walker,
+                cities: &all_cities,
+                units: &all_units,
+                round: turn.0.saturating_sub(1),
+                era,
+                difficulty: crate::research::DIFFICULTY as i32,
+                players: crate::civs::CIV_COUNT as i32,
+                used_tribe: &used,
+                can_build: &build,
+                advance: &mut advance,
+            };
+            let got = crate::huts::pop(&mut ctx, &mut dice.0);
+            treasury.0[civ] = treasury.0[civ].saturating_add(got.gold);
+            for &(tx, ty) in &got.reveal {
+                // The computer's own map is not modelled; only the human's
+                // fog lifts.
+                if quiet.is_none() {
+                    let j = map.idx(tx, ty);
+                    map.tiles[j].seen = true;
                 }
             }
-            match reward {
-                HutReward::Tech => {}
-                HutReward::Warrior => {
-                    crate::units::spawn_unit(
-                        &mut commands,
-                        &art,
-                        crate::units::UnitType::Warrior,
-                        x,
-                        y,
-                        civs.active,
-                    );
-                    post(&mut board, "Goody hut: a Warrior joins your cause!");
-                }
-                HutReward::Scout => {
-                    crate::units::spawn_unit(
-                        &mut commands,
-                        &art,
-                        crate::units::UnitType::Scout,
-                        x,
-                        y,
-                        civs.active,
-                    );
-                    post(&mut board, "Goody hut: a Scout joins your cause!");
-                }
-                HutReward::Reveal => {
-                    for dy in if quiet.is_some() { 0..0 } else { -5..6 } {
-                        for dx in -5..=5 {
-                            let ny = y + dy;
-                            if ny < 0 || ny >= map.h {
-                                continue;
-                            }
-                            let nx = map.wrap_x(x + dx);
-                            let ni = map.idx(nx, ny);
-                            let t = &mut map.tiles[ni];
-                            t.visible = true;
-                            t.seen = true;
-                        }
-                    }
-                    post(&mut board, "Goody hut: tribal maps reveal nearby lands!");
-                }
-                HutReward::Growth => {
-                    let mut best: Option<(bevy::prelude::Entity, i32, String)> = None;
-                    for (e, c) in cities.iter() {
-                        if c.civ != civs.active {
-                            continue;
-                        }
-                        let dx = (x - c.x).abs();
-                        let dx = dx.min(map.w - dx);
-                        let d = dx + (y - c.y).abs();
-                        if best.as_ref().is_none_or(|(_, bd, _)| d < *bd) {
-                            best = Some((e, d, c.name.clone()));
-                        }
-                    }
-                    if let Some((e, _, name)) = best {
-                        let taken = cities.get(e).ok().map(|(_, c)| {
-                            crate::cities::taken_tiles(
-                                &map,
-                                cities.iter().map(|(_, c)| c),
-                                (c.x, c.y),
-                            )
-                        });
-                        if let (Ok((_, mut c)), Some(taken)) = (cities.get_mut(e), taken) {
-                            c.size += 1;
-                            crate::cities::governor_fill(&map, &mut c, &taken);
-                        }
-                        post(
-                            &mut board,
-                            format!("Goody hut: settlers migrate to {name}!"),
-                        );
-                    } else {
-                        crate::units::spawn_unit(
-                            &mut commands,
-                            &art,
-                            crate::units::UnitType::Scout,
-                            x,
-                            y,
-                            civs.active,
-                        );
-                        post(&mut board, "Goody hut: a Scout joins your cause!");
-                    }
-                }
+            for &(t, conscript) in &got.units {
+                let level = if conscript { crate::combat::Level::Conscript } else { crate::combat::Level::Regular };
+                crate::units::spawn_unit_at_level(&mut commands, &art, t, x, y, civ, level);
             }
+            for &(tx, ty) in &got.barbarians {
+                let e = crate::units::spawn_unit_at_level(
+                    &mut commands,
+                    &art,
+                    crate::units::UnitType::Warrior,
+                    tx,
+                    ty,
+                    crate::civs::BARBARIANS,
+                    crate::combat::Level::Conscript,
+                );
+                commands.entity(e).insert(crate::barbarians::Tribe(got.tribe));
+            }
+            post(&mut board, crate::huts::message(&got, civ));
             if quiet.is_none() {
                 crate::audio::sfx(&mut commands, &audio, "Hut");
             }
         } else if map.tiles[i].camp {
+            // `0x565A00` (`barbarians.md` 8): a flat 25 gold, and the
+            // tribe's name is free again.
             map.tiles[i].camp = false;
-            let mut best: Option<(bevy::prelude::Entity, i32, String)> = None;
-            for (e, c) in cities.iter() {
-                if c.civ != civs.active {
-                    continue;
-                }
-                let dx = (x - c.x).abs();
-                let dx = dx.min(map.w - dx);
-                let d = dx + (y - c.y).abs();
-                if best.as_ref().is_none_or(|(_, bd, _)| d < *bd) {
-                    best = Some((e, d, c.name.clone()));
-                }
-            }
-            if let Some((e, _, name)) = best {
-                if let Ok((_, mut c)) = cities.get_mut(e) {
-                    c.shields = c.shields.saturating_add(10);
-                }
-                post(
-                    &mut board,
-                    format!("Barbarian camp dispersed! Loot (+10 shields) sent to {name}."),
-                );
-            } else {
-                post(&mut board, "Barbarian camp dispersed!");
-            }
+            let tribe = barbarians.disperse((x, y));
+            treasury.0[civs.active] = treasury.0[civs.active].saturating_add(25);
+            post(
+                &mut board,
+                format!(
+                    "We dispersed a {} encampment and took 25 gold!",
+                    crate::barbarians::TRIBES[tribe as usize]
+                ),
+            );
             if quiet.is_none() {
                 crate::audio::sfx(&mut commands, &audio, "Barbarian Raid");
             }
@@ -938,20 +861,6 @@ mod tests {
         assert_eq!(terr_score(18), 10); // fish: coast+sea + water bonus
         assert_eq!(terr_score(16), 10); // whales: ocean+sea + water bonus
         assert_eq!(terr_score(5), 12); // iron: all land rows
-    }
-
-    #[test]
-    fn hut_reward_boundaries() {
-        assert_eq!(hut_reward_roll(0.0), HutReward::Warrior);
-        assert_eq!(hut_reward_roll(0.349), HutReward::Warrior);
-        assert_eq!(hut_reward_roll(0.35), HutReward::Scout);
-        assert_eq!(hut_reward_roll(0.549), HutReward::Scout);
-        assert_eq!(hut_reward_roll(0.55), HutReward::Reveal);
-        assert_eq!(hut_reward_roll(0.799), HutReward::Reveal);
-        assert_eq!(hut_reward_roll(0.80), HutReward::Growth);
-        assert_eq!(hut_reward_roll(0.919), HutReward::Growth);
-        assert_eq!(hut_reward_roll(0.92), HutReward::Tech);
-        assert_eq!(hut_reward_roll(0.999), HutReward::Tech);
     }
 
     #[test]
@@ -1068,10 +977,14 @@ mod tests {
             exploring: false,
             ..crate::units::Unit::new(0, crate::units::UnitType::Scout, sx, sy)
         });
+        app.init_resource::<crate::cities::Treasury>();
+        app.init_resource::<crate::barbarians::Barbarians>();
+        app.insert_resource(crate::units::Turn(1));
         app.add_systems(Update, resolve_features);
         app.update();
         let map = app.world().resource::<GameMap>();
         assert!(!map.tiles[map.idx(sx, sy)].camp);
+        assert_eq!(app.world().resource::<crate::cities::Treasury>().0[0], 25);
         let board = app.world().resource::<MessageBoard>();
         assert!(board.text.contains("dispersed"), "got: {}", board.text);
         assert!(board.ttl > 0.0);

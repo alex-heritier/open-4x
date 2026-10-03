@@ -1,16 +1,18 @@
 //! The Domestic Advisor (F1): the government and a revolution, the three
 //! commerce rates, the books and how each city is faring.
 //!
-//! The screen is a modal like the other advisors'. It reads the same
-//! numbers the turn closes on (`citycalc::totals`, `economy::finance`), so
-//! what it shows is what the end of the turn does. Rules and addresses:
-//! `reverse-engineering/government.md`.
+//! The screen is Civ3's own (`advisor_frame`): the books in the green and
+//! orange boxes, the science and luxury sliders, the government button, and
+//! a line a city. It reads the same numbers the turn closes on
+//! (`citycalc::totals`, `economy::finance`), so what it shows is what the
+//! end of the turn does. Rules and addresses: `reverse-engineering/government.md`.
 
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::prelude::*;
 use civ3mapgen::government as exe;
 
-use crate::cities::{City, CityView, Treasury};
+use crate::advisor_frame::{self, Frame, Tab, art, art_button};
+use crate::cities::{City, CityView, Production, Treasury};
 use crate::citycalc;
 use crate::civs::{Civilizations, is_ai};
 use crate::economy;
@@ -19,7 +21,10 @@ use crate::map::GameMap;
 use crate::production_prompt::ProductionPrompts;
 use crate::realm::{self, GOVT_NAMES, Rate, Rates};
 use crate::rng::GameRng;
+use crate::research::{Research, tech_name};
 use crate::rules_data::TECH_NAMES;
+use crate::stage::{self, Stage, Ui};
+use bevy::window::PrimaryWindow;
 use crate::units::Unit;
 
 /// Whether the screen is up, and the revolution the player has asked for
@@ -29,6 +34,10 @@ pub struct Domestic {
     open: bool,
     armed: Option<usize>,
     note: String,
+    /// The government button's list is down.
+    menu: bool,
+    /// The first city line shown.
+    scroll: usize,
 }
 
 impl Domestic {
@@ -38,6 +47,18 @@ impl Domestic {
 
     fn close(&mut self) {
         *self = Domestic::default();
+    }
+
+    /// Open from another advisor's tab.
+    pub fn show_now(&mut self) {
+        self.open = true;
+    }
+
+    /// Put away for another advisor's tab.
+    pub fn hide(&mut self) {
+        if self.open {
+            self.close();
+        }
     }
 }
 
@@ -51,6 +72,10 @@ pub enum Click {
     Less(Rate),
     /// Start a revolution toward the government (the second click confirms).
     Govt(usize),
+    /// The government button: its list down or up.
+    Menu,
+    /// The city list a line up or down.
+    Scroll(i32),
 }
 
 impl Click {
@@ -66,6 +91,8 @@ impl Click {
             Click::More(r) => format!("More:{}", rate(r)),
             Click::Less(r) => format!("Less:{}", rate(r)),
             Click::Govt(g) => format!("Govt:{}", GOVT_NAMES[*g]),
+            Click::Menu => "Menu".into(),
+            Click::Scroll(d) => format!("Scroll:{d}"),
         }
     }
 }
@@ -171,13 +198,20 @@ pub enum Standing {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CityLine {
     name: String,
-    size: u8,
+    surplus: i32,
+    shields: i32,
+    commerce: i32,
+    lux: i32,
+    sci: i32,
+    tax: i32,
     happy: u8,
     content: u8,
     unhappy: u8,
     entertainers: u8,
     disorder: bool,
-    corruption: i32,
+    producing: Production,
+    /// Turns to finish the build, `None` when it never will.
+    turns: Option<u16>,
 }
 
 /// The whole screen as data: it is rebuilt only when this changes.
@@ -188,20 +222,28 @@ pub struct Page {
     anarchy: Option<(u8, String)>,
     rates: Option<Rates>,
     cap: u8,
-    tax: i32,
+    /// Gross commerce of every city, before corruption.
+    from_cities: i32,
     sci: i32,
     lux: i32,
+    corruption: i32,
     upkeep: i32,
     support: i32,
     net: i32,
     gold: u32,
+    /// The advance being researched and its turns, for under the sliders.
+    research: String,
+    era: usize,
     governments: Vec<(usize, String, Standing)>,
     armed: Option<usize>,
     note: String,
+    menu: bool,
+    scroll: usize,
     cities: Vec<CityLine>,
 }
 
-fn page(me: usize, map: &GameMap, cities: &[&City], owned: usize, gold: u32, domestic: &Domestic) -> Page {
+#[allow(clippy::too_many_arguments)]
+fn page(me: usize, map: &GameMap, cities: &[&City], owned: usize, gold: u32, domestic: &Domestic, research: Option<&Research>) -> Page {
     let (govt, anarchy_left, then, can) = realm::read(me, |r| {
         (r.govt, r.anarchy, r.then, (0..exe::SHIPPED.len()).map(|g| r.can_adopt(g)).collect::<Vec<_>>())
     });
@@ -216,25 +258,43 @@ fn page(me: usize, map: &GameMap, cities: &[&City], owned: usize, gold: u32, dom
         gold,
         armed: domestic.armed,
         note: domestic.note.clone(),
+        menu: domestic.menu,
+        scroll: domestic.scroll,
         ..Page::default()
     };
+    if let Some(r) = research {
+        p.era = crate::tech_tree::era_of(r, me);
+        if let Some(t) = r.target(me) {
+            p.research = format!("{} ({})", tech_name(t), crate::advisors::turns_text(r.turns(me, t)));
+        }
+    }
     if govt == exe::row::ANARCHY {
         p.anarchy = Some((anarchy_left, GOVT_NAMES[then].into()));
     }
-    for c in cities {
+    let mut sorted: Vec<&&City> = cities.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    for c in sorted {
         let t = citycalc::totals(map, c);
-        p.tax += t.tax;
+        p.from_cities += t.commerce;
         p.sci += t.sci;
         p.lux += t.lux;
+        p.corruption += t.corruption;
+        let left = c.price(c.production).saturating_sub(c.shields);
         p.cities.push(CityLine {
             name: c.name.clone(),
-            size: c.size,
+            surplus: t.surplus,
+            shields: t.shields,
+            commerce: t.commerce,
+            lux: t.lux,
+            sci: t.sci,
+            tax: t.tax,
             happy: t.mood.happy,
             content: t.mood.content,
             unhappy: t.mood.unhappy,
             entertainers: t.mood.entertainers,
             disorder: t.disorder,
-            corruption: t.corruption,
+            producing: c.production,
+            turns: (t.shields > 0).then(|| left.div_ceil(t.shields as u16)),
         });
     }
     for g in 0..exe::SHIPPED.len() {
@@ -254,138 +314,229 @@ fn page(me: usize, map: &GameMap, cities: &[&City], owned: usize, gold: u32, dom
     p
 }
 
-// ---------------------------------------------------------------------
-// The panel
-// ---------------------------------------------------------------------
-
-const INK: Color = Color::srgb(0.05, 0.3, 0.65);
-const SELECTED: Color = Color::srgba(0.25, 0.55, 0.3, 0.4);
-const IDLE: Color = Color::srgba(0.65, 0.60, 0.40, 0.18);
-const WARN: Color = Color::srgb(0.7, 0.1, 0.05);
-
-fn text(p: &mut ChildSpawnerCommands, font: &Handle<Font>, s: impl Into<String>, size: f32, color: Color) {
-    p.spawn((
-        Text::new(s),
-        TextFont { font: font.clone(), font_size: size, ..default() },
-        TextColor(color),
-    ));
-}
-
-fn button(p: &mut ChildSpawnerCommands, font: &Handle<Font>, label: &str, click: Click, on: bool) {
-    p.spawn((
-        Button,
-        click,
-        Node {
-            min_height: Val::Px(26.0),
-            padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(if on { SELECTED } else { IDLE }),
-    ))
-    .with_children(|b| {
-        text(b, font, label, 16.0, INK);
-    });
-}
-
-fn row(p: &mut ChildSpawnerCommands, f: impl FnOnce(&mut ChildSpawnerCommands)) {
-    p.spawn(Node { column_gap: Val::Px(10.0), align_items: AlignItems::Center, ..default() })
-        .with_children(f);
-}
-
-fn rate_row(p: &mut ChildSpawnerCommands, font: &Handle<Font>, which: Rate, name: &str, tenths: u8, gives: i32) {
-    row(p, |r| {
-        r.spawn(Node { width: Val::Px(120.0), ..default() }).with_children(|n| text(n, font, name, 17.0, Color::BLACK));
-        button(r, font, "-", Click::Less(which), false);
-        r.spawn(Node { width: Val::Px(56.0), justify_content: JustifyContent::Center, ..default() })
-            .with_children(|n| text(n, font, format!("{}%", tenths as u32 * 10), 17.0, INK));
-        button(r, font, "+", Click::More(which), false);
-        text(r, font, format!("{gives} per turn"), 16.0, Color::BLACK);
-    });
-}
-
-fn body(panel: &mut ChildSpawnerCommands, font: &Handle<Font>, pg: &Page) {
-    text(panel, font, "Domestic Advisor", 24.0, INK);
-    match &pg.anarchy {
-        Some((turns, then)) => text(
-            panel,
-            font,
-            format!("Government: ANARCHY - {turns} more turn{}, then {then}", if *turns == 1 { "" } else { "s" }),
-            18.0,
-            WARN,
-        ),
-        None => text(panel, font, format!("Government: {}", pg.govt), 18.0, Color::BLACK),
-    }
-    if let Some(r) = pg.rates {
-        text(panel, font, "Commerce rates", 18.0, INK);
-        rate_row(panel, font, Rate::Tax, "Taxes", r.tax, pg.tax);
-        rate_row(panel, font, Rate::Sci, "Science", r.sci, pg.sci);
-        rate_row(panel, font, Rate::Lux, "Luxuries", r.lux, pg.lux);
-        text(
-            panel,
-            font,
-            format!(
-                "Treasury {}   Income {:+} (upkeep {}, units {})",
-                pg.gold,
-                pg.net,
-                pg.upkeep,
-                pg.support
-            ),
-            16.0,
-            Color::BLACK,
-        );
-    }
-    text(panel, font, "Governments", 18.0, INK);
-    panel
-        .spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(4.0), ..default() })
-        .with_children(|list| {
-            for (g, name, standing) in &pg.governments {
-                match standing {
-                    Standing::Current => button(list, font, &format!("{name} (now)"), Click::Govt(*g), true),
-                    Standing::Open => {
-                        let label = if pg.armed == Some(*g) { format!("Confirm {name}") } else { name.clone() };
-                        button(list, font, &label, Click::Govt(*g), pg.armed == Some(*g));
-                    }
-                    Standing::Locked(tech) => {
-                        list.spawn(Node { padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)), ..default() })
-                            .with_children(|n| text(n, font, format!("{name} (needs {tech})"), 16.0, Color::srgb(0.4, 0.4, 0.4)));
-                    }
-                }
-            }
-        });
+/// What the advisor says: a note first, then whatever is most pressing.
+fn says(pg: &Page) -> String {
     if !pg.note.is_empty() {
-        text(panel, font, pg.note.clone(), 16.0, WARN);
+        return pg.note.clone();
     }
-    text(panel, font, "Cities", 18.0, INK);
-    for c in pg.cities.iter().take(14) {
-        let mood = format!(
-            "{} happy {} content {} unhappy{}",
-            c.happy,
-            c.content,
-            c.unhappy,
-            if c.entertainers > 0 { format!(" {} entertaining", c.entertainers) } else { String::new() }
-        );
-        let line = format!("{}  (size {})  {mood}  lost to corruption {}", c.name, c.size, c.corruption);
-        text(panel, font, if c.disorder { format!("{line}  DISORDER") } else { line }, 15.0, if c.disorder { WARN } else { Color::BLACK });
+    if let Some((turns, then)) = &pg.anarchy {
+        return format!("Anarchy! {turns} more turn{} before {then}.", if *turns == 1 { "" } else { "s" });
+    }
+    if let Some(c) = pg.cities.iter().find(|c| c.disorder) {
+        return format!("Civil disorder in {}! We must make our people content.", c.name);
+    }
+    if pg.net < 0 {
+        return format!("We are losing {} gold a turn. Raise taxes, or our improvements will be sold.", -pg.net);
+    }
+    if pg.cities.len() < 6 {
+        return "Build more cities!".into();
+    }
+    format!("Our treasury grows by {} gold a turn.", pg.net)
+}
+
+// ---------------------------------------------------------------------
+// The panel, in the pixels of `domestic.pcx`
+// ---------------------------------------------------------------------
+
+const WARN: Color = Color::srgb(0.7, 0.1, 0.05);
+const GREEN: Color = Color::srgb(0.30, 0.52, 0.18);
+const ORANGE: Color = Color::srgb(0.85, 0.36, 0.18);
+const KHAKI: Color = Color::srgb(0.52, 0.44, 0.24);
+const PURPLE: Color = Color::srgb(0.55, 0.22, 0.60);
+const BLUE: Color = Color::srgb(0.15, 0.25, 0.65);
+
+/// City lines on the page, on the background's ruled lines 45 px apart.
+const ROWS: usize = 9;
+const ROW_Y: f32 = 325.0;
+const ROW_STEP: f32 = 45.0;
+/// The slider track: 0% at `TRACK_X`, 100% `TRACK_W` further.
+const TRACK_X: f32 = 566.0;
+const TRACK_W: f32 = 196.0;
+/// The column centres: food, shields and commerce under the first
+/// header pill; luxury, science and tax under the second.
+const COLUMNS: [f32; 6] = [260.0, 302.0, 344.0, 436.0, 486.0, 536.0];
+
+fn line(ui: &Ui, s: &mut ChildSpawnerCommands, x: f32, y: f32, w: f32, text: impl Into<String>, size: f32, color: Color, center: bool) {
+    ui.words(s, x, y, w, size + 6.0, text, size, color, center);
+}
+
+/// One commerce slider: the knob at the rate and the -/+ under it.
+fn slider(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, which: Rate, tenths: u8, y: f32, knob: &str, below: bool) {
+    let x = TRACK_X + tenths as f32 / 10.0 * TRACK_W - 10.0;
+    ui.picture(s, art(assets, knob), x, y - 13.0, 21.0, 27.0);
+    line(ui, s, 762.0, y - 8.0, 32.0, format!("{}%", tenths as u32 * 10), 11.0, Color::BLACK, true);
+    let by = if below { y + 12.0 } else { y - 22.0 };
+    art_button(s, ui, assets, "less", (563.0, by + 2.0, 12.0, 8.0), Click::Less(which));
+    art_button(s, ui, assets, "more", (737.0, by, 12.0, 13.0), Click::More(which));
+}
+
+fn header(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer) {
+    line(ui, s, 91.0, 255.0, 80.0, "Cities", 13.0, Color::BLACK, true);
+    let city_icon = |cell: u32| {
+        let mut n = ImageNode::new(assets.load("gen/cityscreen/CityIcons.png"));
+        let x = 1.0 + cell as f32 * 31.0;
+        n.rect = Some(Rect::new(x, 1.0, x + 30.0, 31.0));
+        n
+    };
+    // CityIcons cells: food 6, shield 4, commerce 2.
+    for (k, cell) in [6, 4, 2].into_iter().enumerate() {
+        ui.picture(s, city_icon(cell), COLUMNS[k] - 12.0, 251.0, 24.0, 24.0);
+    }
+    for (k, icon) in ["smiley", "flask", "coins"].into_iter().enumerate() {
+        ui.picture(s, art(assets, icon), COLUMNS[3 + k] - 10.0, 249.0, 21.0, 27.0);
+    }
+    line(ui, s, 660.0, 255.0, 135.0, "Population", 13.0, Color::BLACK, true);
+    line(ui, s, 870.0, 255.0, 100.0, "Producing", 13.0, Color::BLACK, true);
+}
+
+fn city_row(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c: &CityLine, y: f32) {
+    line(ui, s, 110.0, y - 9.0, 130.0, c.name.clone(), 13.0, if c.disorder { WARN } else { Color::BLACK }, false);
+    let cols = [
+        (format!("{:+}", c.surplus), Color::srgb(0.70, 0.22, 0.10)),
+        (c.shields.to_string(), BLUE),
+        (c.commerce.to_string(), Color::srgb(0.70, 0.22, 0.10)),
+        (c.lux.to_string(), Color::srgb(0.15, 0.55, 0.65)),
+        (c.sci.to_string(), PURPLE),
+        (c.tax.to_string(), KHAKI),
+    ];
+    for ((text, color), x) in cols.into_iter().zip(COLUMNS) {
+        line(ui, s, x - 20.0, y - 8.0, 40.0, text, 12.0, color, true);
+    }
+    // The citizens by mood, then a gap and the entertainers.
+    let heads: Vec<&str> = std::iter::repeat_n("head_happy", c.happy as usize)
+        .chain(std::iter::repeat_n("head_content", c.content as usize))
+        .chain(std::iter::repeat_n("head_unhappy", c.unhappy as usize))
+        .collect();
+    let total = heads.len() + c.entertainers as usize;
+    let step = if total == 0 { 30.0 } else { (240.0 / (total as f32 + 1.0)).min(30.0) };
+    let mut x = 607.0;
+    for head in heads {
+        ui.picture(s, art(assets, head), x, y - 19.0, 34.0, 34.0);
+        x += step;
+    }
+    if c.entertainers > 0 {
+        x += step;
+        for _ in 0..c.entertainers {
+            ui.picture(s, ImageNode::new(assets.load("gen/ui/entertainer.png")), x, y - 19.0, 34.0, 34.0);
+            x += step;
+        }
+    }
+    ui.picture(s, crate::tech_tree::item_icon(assets, c.producing), 872.0, y - 14.0, 28.0, 28.0);
+    let turns = match c.turns {
+        Some(1) => "(1 turn)".to_string(),
+        Some(n) => format!("({n} turns)"),
+        None => "(never)".into(),
+    };
+    line(ui, s, 903.0, y - 14.0, 82.0, format!("{}\n{turns}", c.producing.name()), 10.0, BLUE, false);
+}
+
+fn body(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, pg: &Page) {
+    let f = Frame {
+        background: "domestic",
+        title: "Domestic Advisor",
+        portrait: format!("portrait_domestic_{}", pg.era),
+        says: says(pg),
+        tab: Tab::Domestic,
+    };
+    advisor_frame::frame(s, ui, assets, &f, Some(Click::Close));
+    // The books: income in green, expenses in orange, what is left below.
+    for (k, text) in [
+        format!("From cities: {:+}", pg.from_cities),
+        "From taxmen: +0".into(),
+        "From other civs: +0".into(),
+        "From interest: +0".into(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        line(ui, s, 80.0, 97.0 + 16.0 * k as f32, 160.0, text, 11.0, Color::BLACK, true);
+    }
+    line(ui, s, 250.0, 104.0, 120.0, format!("Income: {}", pg.from_cities), 13.0, GREEN, false);
+    let expenses = pg.sci + pg.lux + pg.corruption + pg.upkeep + pg.support;
+    line(ui, s, 250.0, 153.0, 120.0, format!("Expenses: {expenses}"), 13.0, ORANGE, false);
+    for (k, (n, what)) in [
+        (pg.sci, "Science"),
+        (pg.lux, "Entertainment"),
+        (pg.corruption, "Corruption"),
+        (pg.upkeep, "Maintenance"),
+        (pg.support, "Unit costs"),
+        (0, "To other civs"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        line(ui, s, 384.0, 89.0 + 16.0 * k as f32, 160.0, format!("-{n}: {what}"), 11.0, Color::BLACK, false);
+    }
+    line(ui, s, 80.0, 195.0, 160.0, format!("Treasury: {} Gold", pg.gold), 13.0, KHAKI, true);
+    let net_color = if pg.net < 0 { WARN } else { KHAKI };
+    line(ui, s, 245.0, 195.0, 115.0, format!("Net Gain:{:+}", pg.net), 13.0, net_color, true);
+
+    // Science on the upper slider, luxury on the lower; taxes take the rest.
+    if let Some(r) = pg.rates {
+        slider(s, ui, assets, Rate::Sci, r.sci, 99.0, "flask", true);
+        slider(s, ui, assets, Rate::Lux, r.lux, 146.0, "smiley", false);
+    }
+    line(ui, s, 562.0, 166.0, 240.0, pg.research.clone(), 11.0, PURPLE, false);
+    line(ui, s, 557.0, 191.0, 90.0, "Government", 13.0, Color::BLACK, false);
+    let govt = match &pg.anarchy {
+        Some((turns, _)) => format!("Anarchy ({turns})"),
+        None => pg.govt.clone(),
+    };
+    govt_button(s, ui, assets, 187.0, govt, Click::Menu);
+    if pg.menu {
+        let open = pg.governments.iter().filter(|(_, _, st)| *st == Standing::Open);
+        for (k, (g, name, _)) in open.enumerate() {
+            let label = if pg.armed == Some(*g) { format!("Confirm {name}") } else { name.clone() };
+            govt_button(s, ui, assets, 213.0 + 26.0 * k as f32, label, Click::Govt(*g));
+        }
+    }
+
+    header(s, ui, assets);
+    for (k, c) in pg.cities.iter().skip(pg.scroll).take(ROWS).enumerate() {
+        city_row(s, ui, assets, c, ROW_Y + ROW_STEP * k as f32);
     }
     if pg.cities.is_empty() {
-        text(panel, font, "No cities yet.", 16.0, Color::BLACK);
+        line(ui, s, 110.0, ROW_Y - 9.0, 300.0, "We have no cities yet.", 13.0, Color::BLACK, false);
     }
-    row(panel, |r| button(r, font, "Close", Click::Close, false));
+    if pg.cities.len() > ROWS {
+        for (stem, y, d) in [("scroll_up_0", 290.0, -1), ("scroll_down_0", 690.0, 1)] {
+            s.spawn((Button, Click::Scroll(d), ImageNode::new(assets.load(format!("gen/ui/{stem}.png"))), ui.st.rect(958.0, y, 18.0, 16.0)));
+        }
+    }
+}
+
+fn govt_button(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, y: f32, label: String, click: Click) {
+    s.spawn((
+        Button,
+        advisor_frame::ArtButton("govt"),
+        click,
+        art(assets, "govt_0"),
+        Node { justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..ui.st.rect(650.0, y, 146.0, 26.0) },
+    ))
+    .with_children(|b| {
+        b.spawn((
+            Text::new(label),
+            TextFont { font: ui.font.clone(), font_size: ui.st.font(13.0), ..default() },
+            TextColor(Color::BLACK),
+        ));
+    });
 }
 
 /// Draw the screen (and take it down) when the page changes.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     mut commands: Commands,
     domestic: Res<Domestic>,
     civs: Res<Civilizations>,
     map: Res<GameMap>,
     treasury: Res<Treasury>,
+    research: Res<Research>,
     cities: Query<&City>,
     units: Query<&Unit>,
     assets: Res<AssetServer>,
     roots: Query<Entity, With<DomesticRoot>>,
-    mut shown: Local<Option<Page>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut shown: Local<Option<(Page, f32)>>,
 ) {
     if !domestic.open {
         if shown.take().is_some() {
@@ -398,45 +549,20 @@ pub fn show(
     let me = civs.viewer();
     let mine: Vec<&City> = cities.iter().filter(|c| c.civ == me).collect();
     let owned = units.iter().filter(|u| u.civ == me).count();
-    let pg = page(me, &map, &mine, owned, treasury.0[me], &domestic);
-    if shown.as_ref() == Some(&pg) {
+    let pg = page(me, &map, &mine, owned, treasury.0[me], &domestic, Some(&research));
+    let scale = stage::scale_of(&windows);
+    if shown.as_ref().is_some_and(|(p, s)| *p == pg && *s == scale) {
         return;
     }
     for e in &roots {
         commands.entity(e).despawn();
     }
     let font = assets.load("gen/fonts/lsans.ttf");
-    commands
-        .spawn((
-            DomesticRoot,
-            GlobalZIndex(100),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: Val::Px(720.0),
-                    max_width: Val::Percent(96.0),
-                    max_height: Val::Percent(96.0),
-                    padding: UiRect::all(Val::Px(20.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
-                BackgroundColor(Color::srgb(0.94, 0.91, 0.77)),
-                BorderColor::all(Color::srgb(0.25, 0.4, 0.28)),
-            ))
-            .with_children(|panel| body(panel, &font, &pg));
-        });
-    *shown = Some(pg);
+    let st = Stage(scale);
+    let ui = Ui { font: &font, st };
+    let root = stage::spawn(&mut commands, DomesticRoot, st, 0.0, 100);
+    commands.entity(root).with_children(|s| body(s, &ui, &assets, &pg));
+    *shown = Some((pg, scale));
 }
 
 // ---------------------------------------------------------------------
@@ -481,6 +607,12 @@ pub fn respond(
         }
         match click {
             Click::Close => domestic.close(),
+            Click::Menu => {
+                domestic.menu = !domestic.menu;
+                domestic.armed = None;
+                domestic.note.clear();
+            }
+            Click::Scroll(d) => domestic.scroll = (domestic.scroll as i32 + d).max(0) as usize,
             Click::More(r) | Click::Less(r) => {
                 let more = matches!(click, Click::More(_));
                 let now = realm::rates(me);
@@ -554,13 +686,13 @@ mod tests {
     fn a_government_needs_its_advance_to_be_open() {
         realm::reset();
         let map = GameMap::generate();
-        let pg = page(0, &map, &[], 0, 0, &Domestic::default());
+        let pg = page(0, &map, &[], 0, 0, &Domestic::default(), None);
         let monarchy = pg.governments.iter().find(|(g, ..)| *g == exe::row::MONARCHY).unwrap();
         assert!(matches!(monarchy.2, Standing::Locked(_)));
         let despotism = pg.governments.iter().find(|(g, ..)| *g == exe::row::DESPOTISM).unwrap();
         assert_eq!(despotism.2, Standing::Current);
         realm::write(0, |r| r.known |= 1 << exe::SHIPPED[exe::row::MONARCHY].prerequisite_tech);
-        let pg = page(0, &map, &[], 0, 0, &Domestic::default());
+        let pg = page(0, &map, &[], 0, 0, &Domestic::default(), None);
         let monarchy = pg.governments.iter().find(|(g, ..)| *g == exe::row::MONARCHY).unwrap();
         assert_eq!(monarchy.2, Standing::Open);
     }

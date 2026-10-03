@@ -5,43 +5,47 @@
 //! Classic ANSI-C LCG (`s = s * 1103515245 + 12345`) with output taken
 //! from the high 16 bits as a float in `[0, 1)`. Every mapgen stage seeds
 //! a fresh generator from `water_level + K` with its own per-stage K, so
-//! stages are independently reproducible. Gameplay randomness (hut pops,
-//! combat) must NOT use this; the binary keeps a separate game RNG
-//! (`0x64a20e`).
+//! stages are independently reproducible. Combat uses a separate instance
+//! of this same class; hut rewards and some AI decisions use MSVC `rand()`
+//! (`0x64a20e`), exposed below as `GameRng`.
 
-/// Multiplier of the map generator's LCG (`0x41C64E6D`).
-const A: u32 = 1_103_515_245;
-/// Increment of the map generator's LCG (`0x3039`).
-const C: u32 = 12_345;
 /// Output scale: `1.0 / 32768.0` (`.rdata` at `0x6716C8` = `2^-15`).
+#[cfg(test)]
 const SCALE: f64 = 1.0 / 32768.0;
+#[cfg(test)]
+const A: u32 = 1_103_515_245;
+#[cfg(test)]
+const C: u32 = 12_345;
 
 /// The map generator's LCG.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapRng {
-    state: u32,
+    inner: civ3mapgen::rng::Rng,
 }
 
 impl MapRng {
     /// Fresh stage generator: `water_level + K` per the binary.
     #[inline]
     pub fn new(seed: u32) -> Self {
-        MapRng { state: seed }
+        MapRng { inner: civ3mapgen::rng::Rng::new(seed) }
     }
 
     /// `rand01()` — a double in `[0, 1)`.
     #[inline]
     pub fn next_f64(&mut self) -> f64 {
-        self.state = self.state.wrapping_mul(A).wrapping_add(C);
-        let bits = (self.state >> 16) & 0x7FFF;
-        f64::from(bits) * SCALE
+        self.inner.next_f64()
     }
 
     /// `rand_int(n)` — `(int)(n * rand01())`, a value in `0..n`.
     #[inline]
     pub fn below(&mut self, n: u32) -> i32 {
         debug_assert!(n > 0, "rand_int(0) divides by zero in spirit");
-        (f64::from(n) * self.next_f64()) as i32
+        self.inner.below(n)
+    }
+
+    /// Share the same dice state with reverse-engineered gameplay routines.
+    pub fn reference(&mut self) -> &mut civ3mapgen::rng::Rng {
+        &mut self.inner
     }
 
     /// Fisher-Yates shuffle with `rand_int(n - i)`, as the placement

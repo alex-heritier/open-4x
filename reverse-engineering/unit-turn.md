@@ -229,17 +229,13 @@ bombard, `0x01` and `0x02` per-round flags whose setters are not known (**O**), 
 `0x10`, `0x20` (has produced a Great Leader) and `0x80` survive the end of the round. Everything the unit did
 in the round is forgotten here: the new round starts with **full movement** (used = 0) and no attack flag.
 
-### 3.8 Vision helpers (what is known)
+### 3.8 Vision helpers
 
-* `0x5BA1D0(U; a, b, c)` (**I**): walks the spiral `0x5E6E50` over 49 tiles (radius 3) around the unit's tile
-  (and, depending on `b`/`c`, around its previous tile `+0x2C/+0x30`), skips carried units, and for tiles that the
-  unit may see (`0x5BA010(U; x, y)`) marks them for the owner with `0x55AD90(Player; x, y)`. It is the unit's
-  vision refresh. Argument meaning is **O**.
-* `0x5C7570(U)` (**V** structure, **H** meaning): clears status bit 8; for spiral index `n = 0..24` (5 by 5 tiles) it
-  forms the tile `(wrap(U.+0x6C + dx), wrap(U.+0x70 + dy))` with `0x426C00` / `0x426C40` (single-step wrap, the
-  same as `world-events.md` 1.3), and for each tile inside the map that is valid (`0x426BD0`) it looks for a
-  unit of the same owner on that tile with status bit 8 set; if none is found the tile is passed to
-  `0x55B090(Player; x, y)` (reveal). At the end `U.+0x6C = U.+0x70 = -1`.
+Fully specified in `vision.md`: `0x5BA1D0(U; a, b, c)` is the unit sight refresh (`a` = withdraw this unit's sight, `b` = tidy
+around the previous tile, `c` = request a redraw; section 6 there), `0x5BA010` is the sight predicate (section 3), `0x5C74A0` /
+`0x5C7570` are the air reveal begin / end (section 7). Calls made from this document's routines:
+`0x5BEB10`, `0x5C6290`, `0x5C6570` and the epilogue `0x5C7E62` all use `(a, b, c) = (0, 0, 1)` and only for a sea unit whose order was
+1 or 15.
 
 ## 4. The healing rule
 
@@ -408,7 +404,7 @@ status reset exactly **once per round**, in unit-id order within its owner's pas
 
 * **V** read in full: `0x5C7700` (all 537 lines), `0x5BBBC0` (all instructions), `0x5BC8B0`, `0x5BC6D0`, `0x5BE5B0`,
   `0x5BEB10`, `0x5BEB60`, `0x5BECE0`, `0x56BE70`, `0x56D2C0`, `0x55A020`, `0x5EA6C0`, `0x476FB0`, `0x561220`, `0x56D7D0`.
-* **V** structure only: `0x5BA1D0` (head and loop skeleton), `0x5C7570`.
+* **V** read in full: `0x5BA1D0` and `0x5C7570` (`vision.md` 6 and 7).
 * Not read: `0x5BD220` leave-tile path, `0x5C59B0`, `0x5B2F10`, `0x4EF740`, `0x4F00F0`, `0x4F02C0`, `0x5CD300`,
   `0x56AFB0`, `0x58B5D0`, `0x469590`, `0x46BE30`, the factory's increments.
 * No dynamic test was run. Golden vectors in section 4 are hand-computed from the decoded formulas.
@@ -417,7 +413,7 @@ status reset exactly **once per round**, in unit-id order within its owner's pas
 
 1. Setters of status bits `0x01` and `0x02` of `U.+0x48`; whether bit `0x01` means "rested" or "fortified".
 2. (Settled: `0x56D7D0` is the tile occupant resolver, `goody-huts.md` 6.1.) The border/territory owner code `0x5D4830` is now specified in `borders-culture.md` (the loader `0x5D25F0` remains open).
-3. `0x5BA1D0` argument semantics and the exact vision radius per unit type.
+3. (Settled in `vision.md`: argument semantics, radius 2 for all units, 3 for fortified or intercepting ships over their water body.)
 4. The network handler that consumes the pending-event table, and the purpose of the other columns.
 5. Capture-mode details (section 5.1), the byte `[0x9C5B40]`, and the nationality field `U.+0x38`.
 6. Unit movement, orders and ZOC (`0x5B3040`, `0x5C1AD0`, `0x5BD220`), and the AI planners that drive barbarian

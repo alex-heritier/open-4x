@@ -125,6 +125,16 @@ id), `0x4C2740` (UI toggle: the id, or -1 to free), and the -1 clearers
 for a whole city (HYPOTHESIS: the capture transfer). `rust/src/cell.rs`
 does not document this word yet.
 
+**Which tiles a city may work.** `0x4C2740` (the city-screen toggle) only
+writes the worked-by word: it bounds-checks the cell and then stores the city
+id or `-1`, with no ownership or occupancy test, so the legality check sits
+in its caller (not located). OBSERVED in Conquests' city screen: the view
+lights and outlines only the radius tiles whose border owner is the city's
+own civ, so unclaimed land inside the radius is dark and unworkable as well
+as foreign land; a tile another city of the civ works stays lit with a dark
+double rim and cannot be taken. The clone applies that rule
+(`cities::taken_tiles`).
+
 A **water body** is "large" when its size word is above 20 (`cmp [body+0x24],
 0x14` at `0x5D7470`, `0x5D790F`, `0x5D7D79`, `0x5D7EF4`): ocean-like. A smaller
 one is a lake.

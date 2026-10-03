@@ -929,7 +929,8 @@ grant(t):
 * **Trading** (`0x43F3F0`, at the "Tech traded" step) and **diplomatic gifts** (`0x502D90`):
   `acquire(side; t, 0, 1, 1)` for each side that receives an advance (the multiplayer branch sends the
   same arguments with `0x475460`). The trade also bumps the counter of `diplomacy.md` and then calls
-  `0x55B3A0(side; other, 0)` (not decoded). Which advances are offered or accepted is decided by the
+  `0x55B3A0(side; other, 0)`, which makes `other` discover every tile `side` has seen (decoded
+  in `espionage.md` 9.4, where it is the Steal World Map effect). Which advances are offered or accepted is decided by the
   diplomacy code, not by research.
 * The network handlers (`0x479C70`, `0x5A8410`, `0x5A91F0`) call `acquire` with the arguments carried in
   the message; the multiplayer protocol is not specified here.

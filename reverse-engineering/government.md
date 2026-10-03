@@ -286,7 +286,7 @@ table gives both. `k` is the offset from `+0x1B0`.
 | `+0x00` | `-0x14` | declarations of war by `civ` on this player (the record is the victim's, indexed by the declarer) | `0x5020A6` in `0x501F20` |
 | `+0x04` | `-0x10` | **HYPOTHESIS** (name): deals that `civ` cancelled by going to war; the code adds 1 when the list of deals with the victim has items and its end turn (`+0xC`) lies in the future | `0x5008C1` in `0x500830` (called from `0x501F20` with flag 1) |
 | `+0x0C` | `-0x08` | treaty violations by `civ`: a unit of the declarer, visible to the victim, stands on a tile the victim owns while the declarer has right of passage with the victim or the victim's `+0xDB0` about it is 0x200 or more (at most once per declaration) | `0x502077` in `0x501F20` |
-| `+0x10` | `-0x04` | hostile acts this player committed against `civ`; the war weariness kicker of section 5.5 needs it to be 0 | `0x502CC0`, called by the espionage mission code (`0x526DA0`, `0x527470`, `0x527870`, `0x527BB0`, `0x5283E0`, `0x528800`) |
+| `+0x10` | `-0x04` | hostile acts `civ` committed against this player (the record is the victim's, indexed by the thief; **corrected**: an earlier wording of this row had the direction reversed); the war weariness kicker of section 5.5 needs it to be 0 | `0x502CC0`, called with `this` = the victim by the espionage mission code (`0x526DA0`, `0x527470`, `0x527870`, `0x527BB0`, `0x5283E0`, `0x528800`; `espionage.md` 8) |
 | `+0x14` | `+0x00` | attacks by `civ` on this player | `0x5B577D` in `0x5B5600` (`combat.md` 14.3) |
 | `+0x28` | `+0x14` | tech trades | `diplomacy.md` |
 | `+0x34`, `+0x38` | `+0x20`, `+0x24` | the two incident accumulators below | `0x5631B0`, `0x5025B0` |
@@ -302,9 +302,12 @@ directions (`0x502600..0x502645`). A scan of every loop that steps by `0x4C` (`0
 other writer: **nothing decays an accumulator while the war lasts.** The remaining dwords of the
 record are read as the AI's attitude inputs by `0x440100` (section 5.5) and are not decoded.
 
-`0x502CC0(civ, clear)` (`ret 8`) is the common tail of the espionage missions: it adds 1 to `k +0x10`
-of the actor's record about `civ`; with `clear` it zeroes the byte `Player(civ) +0xD70[actor]`; an AI
-actor then asks its method `+0x8C(civ)` and, when that holds, declares war with reason 0.
+`Player[victim].0x502CC0(actor, clear)` (`ret 8`; `this` is the **victim**, **V** from the raw body
+`0x502CC0..0x502D2F`) is the common tail of the espionage missions: it adds 1 to `k +0x10` of the victim's record
+about `actor`; with `clear` (= the agent is a Spy) it zeroes the byte `Player[actor] +0xD70[victim]` (the actor's mole in
+the victim's country); when the victim is **not** a human slot it then asks its own method `+0x8C(actor)`
+(`wantsWar`, `diplomacy.md` 6) and, when that holds, declares war on `actor` with reason 0 (`0x501F20(actor, 0)`).
+This replaces an earlier wording in which the actor was `this`.
 
 ### 5.2 The turn update (`0x500AD0`, called from `0x5604B0` at `0x560D41`)
 

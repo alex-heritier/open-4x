@@ -58,17 +58,25 @@ pub fn sprite_z(x: i32, y: i32, layer: f32) -> f32 {
     tile_z(x, y, layer) + 500.0
 }
 
-/// Z for cultural border ribbons: above every terrain row, so neither the
-/// next row's ground nor a forest or hill canopy paints over the ribbon,
-/// and below the fog diamonds (`fog_z` is 50 higher, more than a row
-/// step), which dim it with the tile.
-pub fn border_z(x: i32, y: i32, layer: f32) -> f32 {
-    tile_z(x, y, layer) + 200.0
+/// Z for resources, huts and camps: above every terrain row, so no canopy
+/// paints over them, and below the fog diamonds (`fog_z` is 100 higher,
+/// far more than a row step), which shade them with the tile. A resource
+/// on the frontier then fades into the black exactly like its terrain.
+pub fn feature_z(x: i32, y: i32, layer: f32) -> f32 {
+    tile_z(x, y, layer) + 150.0
 }
 
-/// Z for fog diamonds: above every terrain row and improvement layer, so
-/// bright tall art never spills past a fog boundary, and below units and
-/// cities, which manage their own visibility.
+/// Z for cultural border ribbons: above every terrain row and above the
+/// fog diamonds (`fog_z` is 100 lower, far more than a row step), since
+/// Civ3 shows a border at full strength on every tile ever seen; the
+/// ribbon hides itself on tiles never seen. Below the sprite phase.
+pub fn border_z(x: i32, y: i32, layer: f32) -> f32 {
+    tile_z(x, y, layer) + 350.0
+}
+
+/// Z for fog diamonds: above every terrain row, improvement layer and
+/// resource, so bright tall art never spills past a fog boundary, and
+/// below borders, units and cities, which manage their own visibility.
 pub fn fog_z(x: i32, y: i32) -> f32 {
     (x + y) as f32 + 250.0
 }
@@ -339,6 +347,18 @@ mod tests {
         // every fog diamond, whatever the rows.
         assert!(fog_z(0, 0) > tile_z(MAP_W - 1, MAP_H - 1, 1.7));
         assert!(sprite_z(0, 0, 0.0) > fog_z(MAP_W - 1, MAP_H - 1));
+    }
+
+    #[test]
+    fn features_sit_under_the_fog_and_borders_over_it() {
+        // Every resource clears the tallest terrain anywhere; each tile's
+        // fog covers its own features, and its border clears its own fog
+        // and its neighbors'. Units and cities still clear every border.
+        let (x, y) = (40, 30);
+        assert!(feature_z(0, 0, 0.0) > tile_z(MAP_W - 1, MAP_H - 1, 1.7));
+        assert!(fog_z(x, y) > feature_z(x + 1, y + 1, 2.0));
+        assert!(border_z(x, y, 0.0) > fog_z(x + 1, y + 1));
+        assert!(sprite_z(0, 0, 0.0) > border_z(MAP_W - 1, MAP_H - 1, 0.4));
     }
 
     fn all_tiles(visible: bool, seen: bool) -> GameMap {

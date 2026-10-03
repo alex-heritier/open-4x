@@ -8,10 +8,9 @@
 //! The computer picks its targets with the AI valuation (`research-ai.md`);
 //! the human is asked, in the Science Advisor (`advisors.rs`).
 //!
-//! Deviations, all because the game has no such system yet: no governments,
-//! wonders, Great Library or scientific-leader rolls; the science rate is
-//! the fixed 50% (`cities::SCI_RATE`); four civilizations on a Regent game
-//! of a standard-size world; only ten productions are gated by an advance.
+//! The Great Library reads its current owner, government and obsolescence
+//! before each research step. Scientific-leader rolls are not wired into
+//! gameplay. The game uses four civilizations on a Regent standard world.
 use bevy::prelude::*;
 
 use civ3mapgen::research::{Ctx, Dice, Event, NONE, World};
@@ -37,6 +36,9 @@ impl Dice for MapRng {
 /// The slot a civ holds in the research and diplomacy worlds (slot 0 is the
 /// barbarians).
 pub fn slot(civ: usize) -> u32 {
+    if civ == crate::civs::BARBARIANS {
+        return 0;
+    }
     civ as u32 + 1
 }
 
@@ -253,6 +255,11 @@ impl Research {
         Some((self.world.players[s as usize].beakers, self.world.effective_cost(s, t, false)))
     }
 
+    /// The era `civ` is in, `0..=3` (`research.md` 7).
+    pub fn era(&self, civ: usize) -> i32 {
+        self.world.players[slot(civ) as usize].era
+    }
+
     /// Beakers a turn.
     pub fn rate(&self, civ: usize) -> i32 {
         self.world.players[slot(civ) as usize].rate
@@ -269,6 +276,8 @@ impl Research {
     fn unit_available(&self, civ: usize, u: usize) -> bool {
         let r = crate::roster::unit(u);
         r.playable
+            // Nobody builds the battle-created unit (`buildable.md` 3 step 5).
+            && r.abilities & crate::roster::ability::LEADER == 0
             && r.races >> RACES[civ].race & 1 != 0
             && self.has_tech(civ, r.tech)
             && r.resources.iter().all(|&g| owns_good(civ, g))
@@ -311,6 +320,30 @@ impl Research {
     /// have with them.
     pub fn goods_changed(&self) {
         self.sync_locks();
+    }
+
+    /// Active Great Library-type wonders (`research.md` 8). Read knowledge
+    /// directly, rather than the previous frame's realm snapshot.
+    fn refresh_wonders<'a>(&mut self, cities: impl Iterator<Item = &'a City>) {
+        let mut library = [false; CIV_COUNT];
+        let mut obsolete = [NONE; CIV_COUNT];
+        for city in cities {
+            let civ = city.civ;
+            let govt = crate::realm::read(civ, |r| r.govt as i32);
+            for b in city.buildings.iter().filter_map(|p| p.bldg()) {
+                if b.wonder & crate::roster::wonder::GAIN_TECHS_OF_TWO_CIVS != 0
+                        && (b.govt < 0 || b.govt == govt)
+                        && (b.obsolete < 0 || !self.knows(civ, b.obsolete))
+                {
+                    library[civ] = true;
+                    obsolete[civ] = b.obsolete;
+                }
+            }
+        }
+        for (civ, active) in library.into_iter().enumerate() {
+            self.world.players[slot(civ) as usize].great_library = active;
+            self.world.players[slot(civ) as usize].great_library_obsolete = obsolete[civ];
+        }
     }
 
     /// Game start: the free advances of each civilization (`Player::init`,
@@ -424,11 +457,18 @@ pub fn announce(events: &[Event], board: &mut MessageBoard) {
                     board,
                     if by_research {
                         format!("Our scientists have discovered {name}!")
+                    } else if events.iter().any(|e| matches!(e,
+                        Event::GreatLibrary { player: p, tech: t, .. } if *p == player && *t == tech
+                    )) {
+                        format!("The Great Library has taught us {name}.")
                     } else {
                         format!("We have learned {name}.")
                     },
                 );
             }
+            // The second civ to reach an era wakes the barbarians
+            // (`research.md` 7.2, `barbarians.md` 5).
+            Event::BarbarianLanding { .. } => crate::barbarians::request_uprising(),
             Event::EnteredEra { player, era } if !is_ai(civ_of(player)) => {
                 post(board, format!("Our civilization enters the {} Age.", ERA_NAMES[era as usize]));
             }
@@ -460,7 +500,7 @@ pub fn refresh(
         count[c.civ] += 1;
     }
     for u in &units {
-        if def(u.utype).defense > 0 && def(u.utype).attack > 0 {
+        if def(u.utype).defense > 0 && def(u.utype).attack > 0 && u.civ < CIV_COUNT {
             defenders[u.civ] += 1;
         }
     }
@@ -484,6 +524,7 @@ pub fn end_turn(
     mut board: ResMut<MessageBoard>,
     civs: Res<Civilizations>,
     turn: Res<Turn>,
+    cities: Query<&City>,
 ) {
     for ev in ended.read() {
         let civ = ev.0;
@@ -491,6 +532,7 @@ pub fn end_turn(
             continue;
         }
         let beakers = research.rate(civ);
+        research.refresh_wonders(cities.iter());
         let events = research.finish_turn(civ, beakers, turn.0 as i32, &mut rng.0);
         // The computer's discoveries are its own business.
         if is_ai(civ) {
@@ -531,6 +573,89 @@ mod tests {
 
     fn tech(name: &str) -> i32 {
         TECH_NAMES.iter().position(|&n| n == name).unwrap() as i32
+    }
+
+    fn library() -> Production {
+        Production::from_building_row(crate::roster::BLDGS.iter()
+            .position(|b| b.wonder & crate::roster::wonder::GAIN_TECHS_OF_TWO_CIVS != 0)
+            .unwrap())
+    }
+
+    #[test]
+    fn the_great_library_teaches_at_turn_end_after_two_contacts_know_an_advance() {
+        crate::realm::reset();
+        let mut r = game();
+        let mut dice = MapRng::new(5);
+        r.begin(&mut dice);
+        let bw = tech("Bronze Working");
+        r.award(1, bw, &mut dice);
+        r.award(2, bw, &mut dice);
+        r.pick(0, bw, &mut dice);
+        r.world.players[slot(0) as usize].beakers = 3;
+        let mut city = City::new(0, "Kyoto", 10, 10);
+        city.buildings.push(library());
+        let mut diplomacy = Diplomacy::new();
+        diplomacy.meet(0, 1);
+        let mut app = App::new();
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
+        app.insert_resource(r);
+        app.insert_resource(GameMap::generate());
+        app.insert_resource(diplomacy);
+        app.insert_resource(CombatRng(dice));
+        app.insert_resource(MessageBoard::default());
+        app.insert_resource(Civilizations::default());
+        app.insert_resource(Turn(1));
+        app.add_message::<CivilizationEnded>();
+        let c = app.world_mut().spawn(city).id();
+        app.add_systems(Update, (refresh, end_turn).chain());
+        app.world_mut().write_message(CivilizationEnded(0));
+        app.update();
+        assert!(!app.world().resource::<Research>().knows(0, bw), "one contact cannot teach it");
+        app.world_mut().resource_mut::<Diplomacy>().meet(0, 2);
+        app.world_mut().write_message(CivilizationEnded(0));
+        app.update();
+        let r = app.world().resource::<Research>();
+        assert!(r.knows(0, bw));
+        assert!(can_build(0, Production::Spearman), "the free advance unlocks production");
+        assert!(r.needs_choice(0), "choose new research after learning the target");
+        assert!(app.world().resource::<MessageBoard>().text.contains("The Great Library"));
+        let next = r.options(0)[0];
+        app.world_mut().resource_scope(|world, mut r: Mut<Research>| {
+            r.pick(0, next, &mut world.resource_mut::<CombatRng>().0);
+            assert_eq!(r.world.players[slot(0) as usize].beakers, 0, "the next target starts without the old beakers");
+        });
+        // Losing the wonder changes the recipient at the next research step.
+        app.world_mut().get_mut::<City>(c).unwrap().civ = 1;
+        app.world_mut().write_message(CivilizationEnded(0));
+        app.update();
+        let r = app.world().resource::<Research>();
+        assert!(!r.world.players[slot(0) as usize].great_library);
+        assert!(r.world.players[slot(1) as usize].great_library);
+    }
+
+    #[test]
+    fn an_obsolete_or_removed_great_library_stops_granting_advances() {
+        crate::realm::reset();
+        let mut r = game();
+        let mut dice = Rng::new(5);
+        r.begin(&mut dice);
+        let mut city = City::new(0, "Kyoto", 10, 10);
+        let p = library();
+        city.buildings.push(p);
+        r.refresh_wonders(std::iter::once(&city));
+        assert!(r.world.players[slot(0) as usize].great_library);
+        r.award(0, p.bldg().unwrap().obsolete, &mut dice);
+        r.refresh_wonders(std::iter::once(&city));
+        assert!(!r.world.players[slot(0) as usize].great_library, "Education obsoletes it immediately");
+        // An owner without Education can still use a captured library.
+        city.civ = 1;
+        r.refresh_wonders(std::iter::once(&city));
+        assert!(r.world.players[slot(1) as usize].great_library);
+        city.buildings.clear();
+        r.refresh_wonders(std::iter::once(&city));
+        assert!(!r.world.players[slot(1) as usize].great_library);
     }
 
     #[test]

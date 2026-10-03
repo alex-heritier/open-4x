@@ -119,7 +119,7 @@ impl Facts {
             on[c.civ].insert(land[map.idx(c.x, c.y)]);
         }
         for u in units {
-            if def(u.utype).attack > 0 {
+            if def(u.utype).attack > 0 && u.civ < CIV_COUNT {
                 soldiers[u.civ] += 1;
             }
         }
@@ -229,11 +229,14 @@ impl Diplomacy {
     }
 
     pub fn at_war(&self, a: usize, b: usize) -> bool {
+        if crate::civs::is_barbarian(a) || crate::civs::is_barbarian(b) {
+            return a != b;
+        }
         a != b && self.rel.at_war(slot(a), slot(b))
     }
 
     pub fn contact(&self, a: usize, b: usize) -> bool {
-        a != b && self.rel.contact(slot(a), slot(b))
+        a != b && a < CIV_COUNT && b < CIV_COUNT && self.rel.contact(slot(a), slot(b))
     }
 
     /// A civ among `others` (a bit mask of civs) that `civ` is not at war
@@ -681,12 +684,12 @@ pub fn meetings(map: &GameMap, units: &[&Unit], cities: &[&City], met: impl Fn(u
     };
     for (i, u) in units.iter().enumerate() {
         for v in &units[i + 1..] {
-            if u.civ != v.civ && map.distance((u.x, u.y), (v.x, v.y)) <= 2 {
+            if u.civ != v.civ && u.civ < CIV_COUNT && v.civ < CIV_COUNT && map.distance((u.x, u.y), (v.x, v.y)) <= 2 {
                 add(u.civ, v.civ);
             }
         }
         for c in cities {
-            if u.civ != c.civ && map.distance((u.x, u.y), (c.x, c.y)) <= 3 {
+            if u.civ != c.civ && u.civ < CIV_COUNT && map.distance((u.x, u.y), (c.x, c.y)) <= 3 {
                 add(u.civ, c.civ);
             }
         }
@@ -704,7 +707,7 @@ pub fn trespassers(owner: &HashMap<(i32, i32), usize>, cities: &[&City], units: 
         }
         if let Some(&i) = owner.get(&(u.x, u.y)) {
             let host = cities[i].civ;
-            if host != u.civ {
+            if host != u.civ && u.civ < CIV_COUNT {
                 *out.entry((host, u.civ)).or_default() += 1;
             }
         }
@@ -907,6 +910,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             civ,
             name: format!("C{civ}"),
             x,

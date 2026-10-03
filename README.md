@@ -80,7 +80,26 @@ the desktop-capture fallback.
 - Arrow keys: step. Tab: cycle units that need orders. F: fortify. Space: skip.
   Units with no moves left cannot be selected; when none need orders the
   selection clears and the bottom-right box blinks its next-turn prompt.
-- B: found city with the settler. Enter, the next-turn disc, or the
+- Map Making unlocks Galleys in cities bordering water bodies larger than
+  20 tiles. They sail water and enter friendly ports. Sea and Ocean tiles
+  can sink an unprotected Galley and its cargo when its turn ends. A Galley
+  carries two land units: move onto a friendly ship to board, or press L
+  while sharing its port tile. L on a ship in port opens a passenger choice
+  and unloads the selected unit without spending movement. Order a Galley
+  toward shore to choose a passenger or Unload all; the ship stays offshore.
+  Alternatively, right-click its tile to select and move one passenger.
+  Landing spends the passenger's remaining movement. Attacking from water
+  requires Amphibious ability; cargo in port can attack normally. Naval AI
+  and the multiple-carrier boarding choice remain unfinished.
+- B: found a city with a Settler, or arm bombardment with a Catapult.
+  Click a visible enemy target in range to fire; Esc cancels. Catapults
+  require war, spend one move, and leave military units at at least 1 HP.
+  City bombardment can destroy Walls, ordinary buildings, or population.
+  When no unit or city qualifies, a terrain hit destroys roads, mines and
+  irrigation together. Improvements in peaceful or own territory are refused.
+  A supporting Catapult or Archer also fires automatically before melee
+  against its stack, once between its civilization's turns.
+  Enter, the next-turn disc, or the
   bottom-right box (when it shows the prompt): end the active civilization's
   turn and pass control to Japan, Rome, Egypt, or China in that order.
 - City screen: click tiles to assign workers (yields show as Civ3's food

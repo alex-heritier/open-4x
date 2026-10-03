@@ -438,11 +438,12 @@ revealing tech the player lacks: `1`. On Ocean (water, `allow_colonies = 0`): `3
 1. **O** The growth routine `0x4C22C0` and the initial-capacity routine `0x56BC60` (array sizing only; observable only as a
    limit on the number of colonies).
 2. **O** Whether any code reads the airfield byte `+0x30`.
-3. **O** The head of `0x5BD220` (the blocks before `0x5BD8C3`, which include the city and goody-hut handling) was not read in
-   full; whether any condition (war, treaty, stack ownership) precedes the plain-Colony block is unconfirmed.
+3. (Settled in `movement.md` 5.) The head of `0x5BD220` was read in full: before the colony block (`0x5BD8C3`) it only does the list update, the
+   worked-tile eviction for an at-war unit and the martial-law recompute; **no war, treaty or stack-ownership test precedes the plain-Colony block**.
 4. **O** The tail of `0x5B4DC0` after the tile refresh (a victim-side message).
-5. **O** The remaining writers and readers of the per-player cell masks that `unseeTile` clears (`cell +0x60`): whether a
-   city or a unit re-establishes vision after a colony disappears is part of the vision specification (open, `STATUS.md`).
+5. (Settled in `vision.md`: the masks `+0x5C` (units), `+0x60` (structures), `+0x64` (territory) and `+0xD0` (air reveal) are
+   independent; `unseeTile` clears only `+0x60`; nothing re-marks it, and a tile is visible while the OR of the four has the civ's
+   bit, `vision.md` 1.3.) Remaining **O**: the readers of `+0xD4`.
 6. **O** The strings shown for the gate codes of section 2.
 7. **O** The meaning of the `rebuild` flag raised by `0x568950` (it is collected for the Colony and Airfield cases only; its
    consumer was not followed).

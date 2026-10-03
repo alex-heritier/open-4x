@@ -133,7 +133,7 @@ stream.
 | address | role | state |
 |---|---|---|
 | `0x5BEF00(winner, loser, flag)` | victory bookkeeping: promotion, Great Leader, golden age, enslave | verified |
-| `0x5BBBC0` | kill a unit | called; internals open |
+| `0x5BBBC0` | kill a unit | cargo recursion verified (6.3); other bookkeeping open |
 | `0x5631B0(otherCiv, amount)` | incident tally against `otherCiv` (14.4) | verified |
 | `0x563410` | barbarian raid / city capture entry (section 14) | barbarian branch verified |
 | `0x5B5790(unit, otherCiv, interactive)` | may this unit attack that civ (14.3) | verified |
@@ -465,7 +465,33 @@ won, 0 when the defender did; callers include the ranged-attack kill path of
 4. **Enslave** (`0x5BFA05..0x5BFA15`): a winner with the Enslave special action (token
    bit 18) whose prototype names a result unit: `next(100) < 33` converts the loser.
 
-`0x5BBBC0` (kill) is called afterwards by the callers; its internals are open.
+`0x5BBBC0` (kill) is called afterwards by the callers; its cargo recursion is
+specified below. Other destruction bookkeeping remains open.
+
+### 6.3 Death does not wipe an ordinary defending stack (verified)
+
+The melee victory paths call `0x5BBBC0` on the defeated fighter only:
+`0x4A63BE..0x4A63EF` loads the defender from `[combat+4]`, while
+`0x4A6EC1..0x4A6EF2` loads the attacker from `[combat+0]`. In network mode
+each instead queues that unit's id through `0x474140`.
+
+Inside the kill routine, `0x5BBFA5..0x5BC0AB` scans the unit pool. It clears
+references at `Unit +0x1C4` that match the dead unit's id
+(`0x5BBFE9..0x5BBFFB`). The recursive destruction/detachment branch is gated
+by **`other.+0x60 == dead.id`** (`0x5BC000..0x5BC009`), not by matching tile
+coordinates. `+0x60` is the carrier id (`unit-turn.md`, unit layout). Thus
+ordinary soldiers, civilians and artillery on the same tile survive.
+
+For linked cargo, the branch tests the dead unit's Army ability 18
+(`0x5BC00F..0x5BC01A`), its domain at `PRTO +0x9C`, a caller flag for air
+carriers (`0x5BC034..0x5BC03F`), and whether a sea carrier is in a city
+(`0x5BC041..0x5BC077`). It either detaches cargo through `0x5C59B0(-1,-1)`
+or recursively kills it at `0x5BC09D`. The complete transport policy and
+remaining kill bookkeeping are not specified here. This finding establishes
+the negative: there is no whole-tile casualty rule for ordinary melee stacks.
+
+Game regressions cover a surviving soldier, Worker and supporting Catapult,
+and a later move capturing the Worker after its defending fighter dies.
 
 ## 7. Retreat
 
@@ -640,7 +666,7 @@ The same shot loop with the 1-HP floor removed, without port halving, and
 `0x4A2BD9` and consumes it. The missile is a land-domain unit with the AI flag
 (`PRTO +0x8C` bit 5), so its target classes are sea, air, land (8.3).
 
-### 8.8 Strike on an empty tile `0x4A2550` (odds verified, effect open)
+### 8.8 Strike on an empty tile `0x4A2550` (verified; effect in `colonies.md` 8)
 
 If `0x5B3AB0(A, x, y)` holds (verified: the unit either has not attacked yet this turn or has
 Blitz, status bit 2 and ability 2; the tile is neither a city (`0x5EA6C0`) nor flagged by
@@ -650,13 +676,15 @@ or 28 set, mask `0x1000001F`, which includes Fortress (4) and Barricade (28)):
 ```text
 v    = ((terrain + tile + 100) << 4) / 100          terrain = 0x56CD80(-1,-1,x,y), tile = 0x56CEB0(x,y,-1)
 odds = clamp(1024 * v / (v + PRTO[A].+0x48), 1, 1023)
-roll = next(1024); if roll >= odds: 0x5B4DC0(A, 0, x, y, A.owner)       # effect unread
+roll = next(1024); if roll >= odds: 0x5B4DC0(A, 0, x, y, A.owner)
 ```
 
 So a tile defends with an implicit strength of **16** scaled by its terrain and
 structure percentages (`0x51EB851F` is the signed divide by 100). The precondition says
-the target is a tile that carries a destroyable improvement, so `0x5B4DC0` is presumably
-the pillage-style destruction of it (**HYPOTHESIS**, the routine is unread).
+the target is a tile that carries a destroyable improvement. The prioritised
+destruction in `0x5B4DC0` is verified in `colonies.md` 8: Barricade degrades to
+Fortress first, Railroad is removed next, otherwise roads, mines and irrigation
+are cleared together before the structure-removal fallback.
 
 ### 8.9 Defensive bombard, `0x4A1AE0` / `0x4A3280` (verified)
 
@@ -854,12 +882,13 @@ This is the test `worked_example_from_combat_md` in `rust/src/combat.rs`.
 
 * `0x4A4B30` and `[army+0x1D0]`: choosing the participant a stack or army puts forward
   (the odds are recomputed when it changes, section 6).
-* `0x5BBBC0` (kill a unit) and `0x5BFB60` (move a retreating defender): internals; and whether
-  losing a defender kills its whole stack (not decided inside the duel).
+* `0x5BBBC0` (kill a unit): remaining bookkeeping and complete cargo policy;
+  ordinary defending-stack survival is verified in 6.3.
+* `0x5BFB60` (move a retreating defender): internals.
 * `0x4A7280`: the AI estimator of a fight (calls `0x4A0ED0` twice); a dynamic program of
   its own, not decoded.
-* `0x5B4DC0` (the effect of an empty-tile strike), `0x5B3AB0` (its precondition) and
-  `0x5B4D40`.
+* `0x5B4D40`; the meaning of the special tile flag checked by `0x5B3AB0`.
+  Improvement destruction in `0x5B4DC0` is specified in `colonies.md` 8.
 * `TERR` mem `+0xA4` and overlay bit 29 (slot `0x78`): an alternate terrain defense value.
 * The Pikeman's bonus against mounted units (manual): no term for it was found in
   `0x4A0ED0` or the strength getters; its mechanism is not located.

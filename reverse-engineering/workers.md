@@ -42,8 +42,8 @@ scans for best-neighbor. Chain (heads verified):
   wrap-flag test). 19 callers.
 * `0x5E6E50` spiral-offset oracle (child-reported, 325 callers):
   ring via odd squares, index 0 → (0,0).
-* `0x5BA1D0` neighbor best-pick stepper (child-reported): sentinel
-  `0x31` (7x7 spiral), spiral loop + wrap + bounds.
+* `0x5BA1D0` is **not** a pick stepper: it is the unit sight refresh (`vision.md` 6); the "sentinel `0x31`" is the 49-tile
+  (7 x 7 diamond) spiral bound.
 * `0x4DC2A0` order-mode dispatcher (child-reported): range pre-check,
   `jmp [ecx*4+0x4DC448]` over mode table.
 * Meter gates funnel to `ALREADYMOVED` (`0x5C651E`/`0x5C66A6`) on
@@ -102,8 +102,8 @@ tables either:
   body `+0x74`/`+0x75`/`+0x77` are `1` for the nine land terrains *excluding*
   Marsh, and `+0x78` is `3` for every row. The movement *cost value* itself
   is still unfound.
-* `0x55AD90` is a third cell-index helper (`(W>>1)*y + (x>>1)` with
-  `[esi+0x1C]`), same family.
+* `0x55AD90` is the unit-sight set primitive (`cell +0x5C |= 1 << slot`, then `discover`), `vision.md` 1.2; it only
+  looks like a cell-index helper because it computes the same index inline.
 
 **Per-terrain movement cost and defense bonus: located (2026-09-29).** The
 TERR row carries both as `u32` fields, and the decoded `conquests.biq`

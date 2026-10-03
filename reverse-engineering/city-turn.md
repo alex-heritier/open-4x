@@ -353,9 +353,10 @@ result = 0
 if c.+0x148 != -1 and c.+0x144 >= 0:                                   # a race change is pending
     S     = RACE[c.+0x140].civSlot()                                   # 0x539D60
     owner = cityById(c.+0x134).owner
-    if Player[S].+0x194 > 0 and Player[owner].+0xD30[S] != 0:          # S still has cities; byte table +0xD30 (H: owner knows / is in contact with S)
-        row  = T[0x4F8C50(0xA2A7E8; Player[owner].+0x183C, Player[S].+0x183C, ebx)]   # table [0x9C40BC], stride 92 bytes
-               # the third argument is whatever EBX held in the caller (the function never loads it: V quirk, not `flag`)
+    if Player[S].+0x194 > 0 and Player[owner].+0xD30[S] != 0:          # S still has cities; byte table +0xD30 = "at war with S" (diplomacy.md 1; resolves the earlier hypothesis)
+        row  = T[0x4F8C50(0xA2A7E8; Player[owner].+0x183C, Player[S].+0x183C)]   # table [0x9C40BC], stride 92 bytes
+               # CORRECTION: 0x4F8C50 is `ret 8` (two stack arguments); an earlier reading of a third argument
+               # (the caller's EBX) was wrong, the function never reads EBX (V, raw body 0x4F8C50..0x4F8CD2)
         term = flag ? row.+0x54 : row.+0x58
         rec  = *(GOVT[Player[owner].+0xA0].+0x19C) + 12 * Player[S].+0xA0         # pointer to a per-government array of 12-byte records
         if rand(100) < rec.+8 + term:  result = 1
@@ -367,7 +368,9 @@ citizen whose job `+0x13C` is not the default job `[0x9C3D64]` call `0x4BAAF0(ci
 (take it off its task), otherwise `0x4BBC80(city; c.+0x21)` (release the worked tile); refresh again;
 mood `c.+0x128 = 3`. When no longer resisting: mood `c.+0x128 = (job == default) ? 1 : 4`; if the owner
 is the local slot and `0x4BB2A0(city; -1) == 0` (no resisters left), log `RESISTANCEENDS` at the city.
-The table `[0x9C40BC]`, the function `0x4F8C50` and the meaning of `Player +0xD30` are **O**.
+The table `[0x9C40BC]` is the `CULT` table and `0x4F8C50` is the culture-ratio row lookup (`espionage.md` 9.7: ratio =
+`(int)(a * 100.0f / b + 0.5f)`, the row with the greatest `culture_ratio_percent <= ratio`, fallback `[0x9C3D6C]` else 0);
+`Player +0xD30[q]` is "at war with `q`" (`diplomacy.md` 1), not "in contact", so the gate above is **at war with `S`**.
 
 ## 9. Golden vectors (derived by hand from the algorithms above; every input is a shipped value)
 
@@ -472,8 +475,19 @@ elif newQueueFlag and (+0x38 & 3) == 0 and (g == 0 or (g == 1 and P.+0x194 <= 2 
 else:                                                                               result = 0x42C8A0(this)
 0x4AFAB0(this; result.kind, result.id, 0)
 ```
-`0x42C8A0` (30 KB) is the advisor/AI item chooser and `0x42BEE0` the first-defender/first-settler
-variant; both are **O**.
+`0x42C8A0` (30 KB) is the advisor/AI item chooser (**O**). `0x42BEE0` is specified here (**V**, read in full):
+
+```
+0x42BEE0(C; out)      // ret 4, ecx = city, out = {id at +0, kind at +4}
+out.kind = 0;  best = 99999
+for pass in (Defense strategy = PRTO.+0x8C bit 1, Offense strategy = bit 0):        // pass 1 then pass 2
+    for t in 0 .. N-1  (N = [0x9C3DB0], the number of unit prototypes; row = [0x9C71E0] + 0x138*t):
+        if C.canBuildUnit(t; obsoleteCheck = 1, unread = 1, allowKing = 0) (0x4C04E0, buildable.md 3.1) and row.+0x8C has the pass's bit:
+            c = Player[C.owner].unitCost(t; 0)  (0x56A210, city-founding.md 5.4)
+            if c < best:  best = c;  out = (id t, kind 2)                              // strict: ties keep the earlier type and the Defense pass wins ties
+```
+
+So it returns the **cheapest buildable (non-obsolete) unit tagged Defense or Offense**, Defense winning an exact tie; `out.kind` stays `0` when none qualifies (and `out.id` is then unset).
 
 ## 11. Open items
 
@@ -481,11 +495,11 @@ variant; both are **O**.
    [`city-buildings.md`](city-buildings.md) (add path, remove path, the common tail, the replace-by-flag
    sale, free advances, the culture cache, all 21 callers). Its still-open callees are listed there in
    section 10.
-2. `0x42C8A0`, `0x42BEE0` (item choosers), `0x433EE0` (AI purchase); the tile-distance test inside
+2. `0x42C8A0` (item chooser), `0x433EE0` (AI purchase); the tile-distance test inside
    `0x436D10` (`0x436E40..0x436F00`).
 3. `0x55A080` / `0x55A0E0`; `0x4DD420`; the meaning of the last-popup flags `+0x3B0`, `+0xA4`.
-4. The table `[0x9C40BC]` behind `0x4F8C50` (resister re-roll, 8.3), the meaning of `Player +0xD30`, and
-   the writers of citizen `+0x144`/`+0x148` (the pending race change).
+4. The writers of citizen `+0x144`/`+0x148` (the pending race change). (The `CULT` table behind `0x4F8C50` and the
+   meaning of `Player +0xD30` are resolved, see 8.3.)
 5. `0x4B45A0` (disease) is specified in `disease.md`; the culture flip `0x4B28D0` and the culture accumulation `0x4B2680` are in `borders-culture.md`.
 6. The AI/human difference in `0x4B9270` 6.2 (the double test of `canBuildImprovement`) is read exactly;
    its design intent is unknown.

@@ -3,11 +3,16 @@ use bevy::window::WindowResolution;
 
 mod actionbar;
 mod actions;
+mod advisor_frame;
 mod advisors;
 mod ai;
+mod army;
+mod barbarians;
 mod audio;
 mod blend;
 mod borders;
+mod bombard;
+mod calendar;
 mod cities;
 mod citycalc;
 mod civs;
@@ -16,7 +21,11 @@ mod diplomacy;
 mod domestic;
 mod economy;
 mod features;
+mod golden;
 mod govern;
+mod hurry;
+mod huts;
+mod naval;
 mod improvements;
 mod input;
 mod leaders;
@@ -33,6 +42,7 @@ mod script;
 mod speech;
 mod splash;
 mod stage;
+mod tech_tree;
 mod tiles;
 mod ui;
 mod unit_picker;
@@ -60,6 +70,8 @@ fn main() {
         .add_message::<units::TurnEnded>()
         .add_message::<civs::CivilizationEnded>()
         .add_message::<combat::AttackOrder>()
+        .add_message::<bombard::Order>()
+        .init_resource::<bombard::TargetMode>()
         .add_message::<cities::FoundCityOrder>()
         .init_resource::<ai::AiState>()
         .init_resource::<combat::ActiveCombat>()
@@ -84,9 +96,12 @@ fn main() {
         .init_resource::<input::MovePreview>()
         .init_resource::<cities::CityNamesUsed>()
         .init_resource::<cities::CityView>()
+        .init_resource::<cities::CityFrame>()
         .init_resource::<cities::Capital>()
         .init_resource::<cities::Treasury>()
         .init_resource::<cities::BuildMenu>()
+        .init_resource::<cities::HurryAsk>()
+        .init_resource::<barbarians::Barbarians>()
         .init_resource::<production_prompt::ProductionPrompts>()
         .init_resource::<splash::SplashUp>()
         .init_resource::<features::MessageBoard>()
@@ -103,6 +118,7 @@ fn main() {
                 render::spawn_terrain,
                 features::spawn_features,
                 units::spawn_party,
+                barbarians::setup_camps,
                 units::spawn_selection_ring,
                 ui::spawn_hud,
                 actionbar::spawn_bar,
@@ -126,6 +142,7 @@ fn main() {
                         diplomacy::detect_contact,
                         research::refresh,
                         realm::sync,
+                        golden::track,
                         advisors::hotkeys,
                         advisors::open_buttons,
                         advisors::interrupt,
@@ -139,22 +156,32 @@ fn main() {
                     (input::hover, unit_picker::update).chain(),
                     input::hold_preview.run_if(unit_picker::inactive),
                     input::orders
+                        .run_if(barbarians::idle)
                         .run_if(production_prompt::inactive)
                         .run_if(unit_picker::inactive)
                         .run_if(combat::idle),
-                    actionbar::run_commands
+                    (actionbar::run_commands, bombard::arm, naval::cargo_commands, army::commands)
+                        .chain()
+                        .run_if(barbarians::idle)
                         .run_if(production_prompt::inactive)
                         .run_if(combat::idle),
                     (actions::run, actions::auto_workers)
                         .chain()
+                        .run_if(barbarians::idle)
                         .run_if(production_prompt::inactive)
                         .run_if(combat::idle),
                     (
-                        govern::ai_turn,
-                        upgrades::ai_turn,
-                        ai::play_turn,
-                        cities::found_city.run_if(production_prompt::inactive),
-                        civs::check_elimination,
+                        barbarians::play,
+                barbarians::uprising,
+                        (
+                            govern::ai_turn,
+                            upgrades::ai_turn,
+                            ai::play_turn,
+                            cities::found_city.run_if(production_prompt::inactive),
+                            civs::check_elimination,
+                        )
+                            .chain()
+                            .run_if(barbarians::idle),
                     )
                         .chain()
                         .run_if(combat::idle),
@@ -180,6 +207,7 @@ fn main() {
                     civs::focus_active_civ,
                     splash::dismiss_splash,
                     ui::end_turn_button
+                        .run_if(barbarians::idle)
                         .run_if(production_prompt::inactive)
                         .run_if(combat::idle),
                     screenshot::drive_shots,
@@ -224,12 +252,16 @@ fn main() {
         // clips advance.
         .add_systems(
             Update,
-            (combat::start_attacks, combat::run_combat)
+            (naval::sea_hazards, bombard::resolve, combat::start_attacks, combat::run_combat)
                 .chain()
                 .after(units::drive_movement)
                 .before(units::advance_anims),
         )
+        .add_systems(Update, naval::sync_cargo.after(combat::run_combat).before(units::advance_anims))
         .add_systems(Update, combat::sync_health_bars.after(units::animate_units))
+        .add_systems(Update, cities::frame_city_view.after(cities::maintain_city_screen))
+        .add_systems(Update, cities::highlight_menu_rows)
+        .add_systems(Update, (advisor_frame::hover_art, advisor_frame::switch_tabs))
         .run();
 }
 

@@ -19,6 +19,9 @@ use crate::units::{self, Selected, Unit, UnitAnim, UnitType};
 
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UnitCommand {
+    Bombard,
+    Load,
+    Unload,
     Fortify,
     Sentry,
     Skip,
@@ -38,6 +41,10 @@ pub enum UnitCommand {
     Pillage,
     /// A Worker chooses its own jobs until told otherwise (`Z`).
     Automate,
+    /// A Great Leader in a city forms an Army (`B`).
+    BuildArmy,
+    /// A Great Leader in a city completes its build (`H`).
+    LeaderHurry,
 }
 
 /// Next left click on the map sends the selected unit there.
@@ -47,6 +54,9 @@ pub struct GotoMode(pub bool);
 impl UnitCommand {
     pub fn label(self) -> &'static str {
         match self {
+            UnitCommand::Bombard => "Bombard (B)",
+            UnitCommand::Load => "Load (L)",
+            UnitCommand::Unload => "Unload (L)",
             UnitCommand::Fortify => "Fortify (F)",
             UnitCommand::Sentry => "Sentry (Q)",
             UnitCommand::Skip => "Skip (Space)",
@@ -64,12 +74,18 @@ impl UnitCommand {
             UnitCommand::JoinCity => "Join City (J)",
             UnitCommand::Pillage => "Pillage (Shift+P)",
             UnitCommand::Automate => "Automate (Z)",
+            UnitCommand::BuildArmy => "Build army (B)",
+            UnitCommand::LeaderHurry => "Hurry city production (H)",
         }
     }
 
     /// Does this command apply to the unit type at all (button shown)?
     pub fn relevant(self, t: UnitType) -> bool {
         match self {
+            UnitCommand::Load => units::def(t).class == 0 && units::def(t).special & 1 != 0,
+            UnitCommand::BuildArmy | UnitCommand::LeaderHurry => t == UnitType::Leader,
+            UnitCommand::Unload => units::def(t).capacity > 0 && units::def(t).special & 2 != 0,
+            UnitCommand::Bombard => crate::bombard::capable(t),
             UnitCommand::FoundCity => t == UnitType::Settler,
             UnitCommand::Work(_) => t == UnitType::Worker,
             UnitCommand::Fortify => t != UnitType::Scout,
@@ -81,7 +97,7 @@ impl UnitCommand {
             UnitCommand::Automate => crate::actions::can_automate(t),
             // Civ3's Explore is a recon order; settlers and workers hold.
             UnitCommand::Explore => {
-                matches!(t, UnitType::Warrior | UnitType::Scout | UnitType::Horseman)
+                matches!(t, UnitType::Warrior | UnitType::Scout | UnitType::Horseman | UnitType::Galley)
             }
             _ => true,
         }
@@ -89,8 +105,14 @@ impl UnitCommand {
 
     /// Is the command currently possible for this unit?
     pub fn enabled(self, map: &GameMap, cities: &[(i32, i32)], u: &Unit) -> bool {
+        if u.carrier.is_some() && !matches!(self, UnitCommand::Goto | UnitCommand::Skip | UnitCommand::Disband) {
+            return false;
+        }
         let idle = u.work.is_none();
         match self {
+            UnitCommand::Load => u.moves > 0 && u.carrier.is_none(),
+            UnitCommand::Unload => u.moves > 0 && map.get(u.x, u.y).is_some_and(|t| !crate::improvements::is_water_base(t.base)),
+            UnitCommand::Bombard => idle && u.moves > 0 && !u.attacked,
             UnitCommand::Wake => u.fortified || u.sentry || u.exploring || u.work.is_some(),
             UnitCommand::Explore => idle && (u.moves > 0 || u.exploring),
             UnitCommand::Fortify | UnitCommand::Sentry => u.moves > 0 && !u.fortified,
@@ -101,6 +123,7 @@ impl UnitCommand {
             // The city and the tile decide: `actions::check`.
             UnitCommand::JoinCity | UnitCommand::Pillage => u.moves > 0,
             UnitCommand::Automate => u.auto || u.moves > 0,
+            UnitCommand::BuildArmy | UnitCommand::LeaderHurry => u.moves > 0,
             UnitCommand::FoundCity => can_found(map, cities, u.x, u.y),
             UnitCommand::Work(a) => {
                 u.moves > 0
@@ -122,16 +145,21 @@ impl UnitCommand {
 /// that. Civ3 stacks two rows: unit-specific actions (found, worker jobs) a
 /// row up, shared orders below. Wake has no button (in Civ3 it is a
 /// right-click entry), so it stays key-only.
-pub const BAR_ROW_MAIN: [UnitCommand; 7] = [
+pub const BAR_ROW_MAIN: [UnitCommand; 10] = [
     UnitCommand::Skip,
     UnitCommand::Fortify,
     UnitCommand::Disband,
     UnitCommand::Goto,
     UnitCommand::Explore,
     UnitCommand::Sentry,
+    UnitCommand::Load,
+    UnitCommand::Unload,
     UnitCommand::Pillage,
+    UnitCommand::Bombard,
 ];
-pub const BAR_ROW_UNIT: [UnitCommand; 8] = [
+pub const BAR_ROW_UNIT: [UnitCommand; 10] = [
+    UnitCommand::BuildArmy,
+    UnitCommand::LeaderHurry,
     UnitCommand::Upgrade,
     UnitCommand::FoundCity,
     UnitCommand::Work(WorkAction::Road),
@@ -145,6 +173,8 @@ pub const BAR_ROW_UNIT: [UnitCommand; 8] = [
 /// Key bindings shared with the bar labels.
 pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
     let table = [
+        (KeyCode::KeyL, UnitCommand::Load),
+        (KeyCode::KeyL, UnitCommand::Unload),
         (KeyCode::KeyF, UnitCommand::Fortify),
         (KeyCode::KeyQ, UnitCommand::Sentry),
         (KeyCode::Space, UnitCommand::Skip),
@@ -154,6 +184,9 @@ pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
         (KeyCode::Delete, UnitCommand::Disband),
         (KeyCode::Backspace, UnitCommand::Disband),
         (KeyCode::KeyB, UnitCommand::FoundCity),
+        (KeyCode::KeyB, UnitCommand::Bombard),
+        (KeyCode::KeyB, UnitCommand::BuildArmy),
+        (KeyCode::KeyH, UnitCommand::LeaderHurry),
         (KeyCode::KeyU, UnitCommand::Upgrade),
         (KeyCode::KeyJ, UnitCommand::JoinCity),
         (KeyCode::KeyP, UnitCommand::Pillage),
@@ -197,7 +230,7 @@ pub fn run_commands(
         if matches!(cmd, UnitCommand::Upgrade | UnitCommand::UpgradeAll) {
             let mine = units
                 .get(s)
-                .is_ok_and(|(_, u)| u.civ == civs.active && cmd.relevant(u.utype));
+                .is_ok_and(|(_, u)| u.civ == civs.active && u.carrier.is_none() && cmd.relevant(u.utype));
             if mine {
                 goto.0 = false;
                 if cmd == UnitCommand::Upgrade {
@@ -246,6 +279,9 @@ pub fn run_commands(
             continue;
         }
         match cmd {
+            UnitCommand::Load | UnitCommand::Unload => {} // `naval::cargo_commands`, `army`
+            UnitCommand::BuildArmy | UnitCommand::LeaderHurry => {} // `army::commands`
+            UnitCommand::Bombard => {} // `bombard::arm`
             UnitCommand::Fortify => {
                 let warrior = u.utype == UnitType::Warrior;
                 u.fortified = true;
@@ -356,6 +392,9 @@ const BTN_ROWS: u32 = 10;
 /// buttons, forest (27) and wetlands (28, the jungle art here).
 fn action_cell(cmd: UnitCommand, cover: Cover) -> u32 {
     match cmd {
+        UnitCommand::Load => 7,
+        UnitCommand::Unload => 8,
+        UnitCommand::Bombard => 11,
         UnitCommand::Skip => 0,
         UnitCommand::Fortify => 2,
         UnitCommand::Disband => 3,
@@ -372,6 +411,9 @@ fn action_cell(cmd: UnitCommand, cover: Cover) -> u32 {
         UnitCommand::Pillage => 10,
         UnitCommand::Automate => 31,
         UnitCommand::JoinCity => 32,
+        // "(B)uild army" and "(H)urry city production", the 14th and 15th.
+        UnitCommand::BuildArmy => 13,
+        UnitCommand::LeaderHurry => 14,
         UnitCommand::FoundCity => 21,
         UnitCommand::Work(WorkAction::Road) => 22,
         UnitCommand::Work(WorkAction::Mine) => 25,
@@ -640,6 +682,7 @@ pub fn update_bar(
     treasury: Res<Treasury>,
     map: Res<GameMap>,
     goto: Res<GotoMode>,
+    bombard: Res<crate::bombard::TargetMode>,
     mut buttons: Query<(&BarButton, Ref<Interaction>, &mut Node, &mut ImageNode)>,
     mut info: Query<(&mut Text, &mut TextColor), With<BarInfo>>,
     mut status: Query<&mut Text, (With<BoxStatus>, Without<BarInfo>)>,
@@ -677,7 +720,8 @@ pub fn update_bar(
             crate::actions::check(b.0, &map, u, here).unwrap_or_else(|| b.0.enabled(&map, &spots, u))
         };
         let active =
-            (b.0 == UnitCommand::Goto && goto.0) || (b.0 == UnitCommand::Explore && u.exploring);
+            (b.0 == UnitCommand::Goto && goto.0) || (b.0 == UnitCommand::Explore && u.exploring)
+            || (b.0 == UnitCommand::Bombard && bombard.0 == selected.0);
         // Civ3's states: gold idle, orange hover, blue held or toggled on.
         let state = match (*interaction, ok) {
             (Interaction::Pressed, true) => 2,
@@ -747,7 +791,7 @@ pub fn update_bar(
                     "{}\nMoves {}/{}  -  {}\n{terrain}",
                     title,
                     units::fmt_moves(u.moves),
-                    d.moves,
+                    units::fmt_moves(crate::naval::moves(u.utype, u.civ)),
                     state
                 )
             }
@@ -759,12 +803,12 @@ pub fn update_bar(
     }
     if let Ok(mut t) = status.single_mut() {
         t.0 = if civs.active == civs.viewer() {
-            format!("{}  -  Turn {}", CIVS[civs.active].adjective, turn.0)
+            format!("{}  -  {}", CIVS[civs.active].adjective, crate::calendar::label(turn.0))
         } else {
             format!(
-                "{}  -  Turn {}  -  {} moving",
+                "{}  -  {}  -  {} moving",
                 CIVS[civs.viewer()].adjective,
-                turn.0,
+                crate::calendar::label(turn.0),
                 CIVS[civs.active].name
             )
         };
@@ -866,6 +910,8 @@ mod tests {
                 matches!(
                     cmd,
                     UnitCommand::Upgrade
+                        | UnitCommand::BuildArmy
+                        | UnitCommand::LeaderHurry
                         | UnitCommand::FoundCity
                         | UnitCommand::Work(_)
                         | UnitCommand::Automate
@@ -931,6 +977,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             civ: 0,
             name: "Kyoto".to_string(),
             x,

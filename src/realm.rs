@@ -114,6 +114,13 @@ pub struct Realm {
     pub cities: usize,
     /// Wonders that ease war weariness everywhere (Universal Suffrage).
     pub suffrage: i32,
+    /// Turn the Golden Age ends (`Player +0x3C`), `None` while the civ has
+    /// never had one: a civilization has one Golden Age.
+    pub golden_end: Option<u32>,
+    /// The current turn falls inside the Golden Age (`turn < +0x3C`).
+    pub golden: bool,
+    /// A unique unit won: start the age at the next check.
+    pub golden_due: bool,
     /// Citizens born content (`DIFF +0x44`, `happiness.md` 1). Under test
     /// everyone is born content, so the tests that do not study happiness
     /// stay out of it.
@@ -139,6 +146,9 @@ impl Realm {
             garrison: HashMap::new(),
             cities: 0,
             suffrage: 0,
+            golden_end: None,
+            golden: false,
+            golden_due: false,
             born_content: if cfg!(test) {
                 99
             } else {
@@ -226,7 +236,9 @@ impl Default for Realm {
 }
 
 fn fresh() -> Vec<Realm> {
-    (0..CIV_COUNT).map(|_| Realm::new()).collect()
+    // One more for the barbarians, whose units ask about their owner's
+    // government and advances like anyone's.
+    (0..=CIV_COUNT).map(|_| Realm::new()).collect()
 }
 
 #[cfg(not(test))]

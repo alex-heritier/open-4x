@@ -3,7 +3,7 @@
 
 The game never reads PCX, FLC, or MP3. Run from the repo root:
     python3 tools/prep_assets.py [stage ...]
-Stages: terrain units cities cityscreen splash audio fonts features
+Stages: terrain units cities cityscreen splash audio fonts features advisors
 improvements unitbuttons fog borders cursor leaders diplomacy wonders
 (default: all)
 
@@ -42,6 +42,11 @@ def roster_units():
 
 
 UNITS = roster_units()
+# Team colors (`Art/Units/Palettes/ntpNN.pcx`, RACE `default_color` in
+# conquests.biq) of the clone's unit owners: Japan 4, Rome 1, Egypt 3,
+# China 5, the barbarians 0. Palette entries 0-63 of every unit FLC are the
+# team-color ramp the game swaps in.
+TEAM_COLORS = [4, 1, 3, 5, 0]
 UNIT_SLOTS = ["DEFAULT", "RUN", "FORTIFY", "FIDGET", "BUILD", "ROAD",
               "MINE", "IRRIGATE", "FORTRESS", "JUNGLE", "FOREST", "PLANT",
               "ATTACK1", "ATTACK2", "ATTACK3", "DEFEND", "DEATH", "VICTORY",
@@ -404,7 +409,11 @@ def parse_amb(path):
             programs[pid] = _cstr(body, 28)[0]
         elif tag == b"kmap":
             name, q = _cstr(body, 12)
-            kmaps[name] = _cstr(body, q + 20)[0]
+            wav, end = _cstr(body, q + 20)
+            kmaps[name] = wav
+            # GalleyAttack.amb rounds two declared payload lengths down,
+            # omitting a byte of the trailing sampler word after the WAV name.
+            n = max(n, end + 4)
         p += 8 + n
     assert data[p:p + 4] == b"MThd", f"{path}: no MIDI after the sampler bank"
     division = struct.unpack_from(">H", data, p + 12)[0]
@@ -466,7 +475,24 @@ def unit_dirs(unit):
             if os.path.isdir(d)]
 
 
+def team_palettes():
+    out = {}
+    for n in set(TEAM_COLORS):
+        pal = Image.open(os.path.join(GOG, "Art", "Units", "Palettes", f"ntp{n:02d}.pcx")).getpalette()
+        out[n] = pal[:64 * 3]
+    return out
+
+
+def recolor(fim, ramp):
+    """The frame with palette entries 0-63 replaced by a team ramp."""
+    im = fim.copy()
+    pal = im.getpalette()
+    im.putpalette(ramp + pal[64 * 3:])
+    return im
+
+
 def stage_units():
+    ramps = team_palettes()
     for unit in UNITS:
         dirs = unit_dirs(unit)
 
@@ -507,11 +533,15 @@ def stage_units():
                 feet = []
                 for direction in range(8):
                     strip = Image.new("RGBA", (w * fpd, h), (0, 0, 0, 0))
+                    teams = {n: Image.new("RGBA", (w * fpd, h), (0, 0, 0, 0)) for n in ramps}
                     for i in range(fpd):
                         fim = Image.open(frames[direction * fpd + i])
                         fim.load()
                         rgba = to_rgba(fim, unit=True)
                         strip.paste(rgba, (i * w, 0))
+                        if fim.mode == "P":
+                            for n, ramp in ramps.items():
+                                teams[n].paste(to_rgba(recolor(fim, ramp), unit=True), (i * w, 0))
                         if i == 0:
                             # Rows of padding under the lowest solid pixel
                             # (the shadow is translucent and does not
@@ -522,6 +552,8 @@ def stage_units():
                             box = solid.getbbox()
                             feet.append(h - box[3] if box else 0)
                     strip.save(os.path.join(outdir, f"{slot}_d{direction}.png"))
+                    for n, team in teams.items():
+                        team.save(os.path.join(outdir, f"{slot}_d{direction}_c{n}.png"))
                 entry = {"frame": [w, h], "frames": fpd, "dirs": 8,
                          "ms": flc_ms(locate(flc)), "feet": feet}
                 if slot in SOUND_SLOTS:
@@ -575,36 +607,45 @@ def crop_cities():
     uid = os.path.join(OUT, "ui")
     for i, (x0, y0, x1, y1) in enumerate(boxes[:3]):
         xv.crop((x0, y0, x1, y1)).save(os.path.join(uid, f"x_{i}.png"))
-    # production button states: thirds of ProdButton
+    # production button states: three 115x95 cells on a 116-px stride
+    # (the sheet's own note: "115 x 95, draw @ (905, 516)"); the rest of
+    # the sheet is that note.
     pb = Image.open(os.path.join(OUT, "cityscreen", "ProdButton.png"))
-    w = pb.width // 3
     for i in range(3):
-        pb.crop((i * w, 0, (i + 1) * w, pb.height)).save(
+        pb.crop((i * 116, 0, i * 116 + 115, pb.height)).save(
             os.path.join(uid, f"prod_{i}.png"))
+    # hurry button states: three 28x28 cells split by 1-px magenta lines at
+    # x = 0, 29, 58, 87 (the sheet's note: "28 x 28, draw @ (860, 520)").
+    hb = Image.open(os.path.join(OUT, "cityscreen", "HurryButton.png"))
+    for i in range(3):
+        hb.crop((1 + i * 29, 0, 29 + i * 29, 28)).save(
+            os.path.join(uid, f"hurry_{i}.png"))
     # unit icons for the production list: the Conquests sheet, indexed by
     # PRTO.icon (14 columns of 32-px cells on a 33-px grid)
     convert_pcx(os.path.join(GOG, "Conquests", "Art", "Units", "units_32.pcx"),
                 os.path.join(uid, "unit_icons.png"))
-    # content Asian citizen head (row 0, col 4 of popHeads)
+    # content Asian citizen head (row 0, col 4 of popHeads). Cells are 50
+    # px with a 1-px (255,87,255) separator on their top and left edges,
+    # which is not the transparent magenta, so crop inside it.
     heads = Image.open(os.path.join(GOG, "Art", "SmallHeads", "popHeads.pcx"))
     heads.load()
-    to_rgba(heads.crop((200, 0, 250, 50))).save(
+    to_rgba(heads.crop((201, 1, 250, 50))).save(
         os.path.join(uid, "citizen.png"))
     # entertainer (jester, row 16 col 1): idle citizens on the city screen
-    to_rgba(heads.crop((50, 800, 100, 850))).save(
+    to_rgba(heads.crop((51, 801, 100, 850))).save(
         os.path.join(uid, "entertainer.png"))
     # City-panel top bar buttons: previous/next city, close, in
     # normal/hover/pressed states. `cityMgmtButtons.pcx` is a 4x3 grid of
-    # 49x60 cells (prev, next, eye, X), with the dev's own layout notes
-    # under it.
+    # cells (prev, next, eye, X) split by 1-px magenta lines at x = 0, 43,
+    # 86, 153, 193 and y = 0, 48, 96, 144, with the dev's own layout notes
+    # under it (prev @ (368, 21), next @ (609, 21), X @ (909, 21)).
     mgmt = Image.open(os.path.join(OUT, "cityscreen", "cityMgmtButtons.png"))
+    # The third column (the small eye) is unused: the panel's city view is
+    # always on screen, so it has no view toggle.
+    cols = {"prev": (1, 43), "next": (44, 86), "x": (154, 193)}
     for row in range(3):
-        # The sheet's third column (the small eye) is unused: the panel's
-        # city view is always on screen, so it has no view toggle.
-        for col, name in enumerate(["prev", "next", "x"]):
-            # 47 wide: the cells' last two columns carry the next button's
-            # edge, which would show as a sliver on the top bar.
-            mgmt.crop((col * 49, row * 60, col * 49 + 47, row * 60 + 60)).save(
+        for name, (x0, x1) in cols.items():
+            mgmt.crop((x0, row * 48 + 1, x1, row * 48 + 48)).save(
                 os.path.join(uid, f"mgmt_{name}_{row}.png"))
     # Scrollbar pieces from `Art/scroll.pcx`: the small arrow set at the top
     # of the sheet (18x16 cells, green then orange for idle/hover) and the
@@ -636,6 +677,10 @@ def stage_cityscreen():
     for f in files:
         stem = os.path.splitext(os.path.basename(f))[0]
         convert_pcx(f, os.path.join(d, stem + ".png"))
+    # The small improvement icons sit in pure green gutters; clear them, or
+    # a scaled icon samples the line next to it.
+    small = os.path.join(d, "buildings-small.png")
+    clear_color(Image.open(small), (0, 255, 0)).save(small)
     print(f"cityscreen: {len(files)} files")
 
 
@@ -1208,6 +1253,164 @@ def stage_wonders():
           + (f" (no art: {', '.join(missing)})" if missing else ""))
 
 
+def find_ci(base, rel):
+    """`rel` (backslashes or slashes) under `base`, matched without case as
+    the game's own file system does; None when it is not there."""
+    cur = base
+    for part in rel.replace("\\", "/").split("/"):
+        if not os.path.isdir(cur):
+            return None
+        hit = [e for e in os.listdir(cur) if e.lower() == part.lower()]
+        if not hit:
+            return None
+        cur = os.path.join(cur, hit[0])
+    return cur if os.path.isfile(cur) else None
+
+
+def art_file(rel):
+    """An art file as Conquests loads it: its own copy first, then the base
+    game's."""
+    return find_ci(os.path.join(GOG, "Conquests"), rel) or find_ci(GOG, rel)
+
+
+def clear_color(im, rgb):
+    """`im` with every pixel of exactly `rgb` made transparent."""
+    im = im.convert("RGBA")
+    r, g, b, a = im.split()
+    hit = ImageChops.multiply(ImageChops.multiply(
+        r.point([255 if v == rgb[0] else 0 for v in range(256)]),
+        g.point([255 if v == rgb[1] else 0 for v in range(256)])),
+        b.point([255 if v == rgb[2] else 0 for v in range(256)]))
+    im.putalpha(Image.composite(Image.new("L", im.size, 0), a, hit))
+    return im
+
+
+def runs(flags, least=20):
+    """Index ranges where `flags` holds, at least `least` long."""
+    out, start = [], None
+    for i, f in enumerate(flags + [False]):
+        if f and start is None:
+            start = i
+        elif not f and start is not None:
+            if i - start >= least:
+                out.append((start, i))
+            start = None
+    return out
+
+
+def stage_advisors():
+    """The Domestic and Science Advisors: Civ3's 1024x768 backgrounds, the
+    tech boxes, the advisor portraits and tabs, and the advance icons."""
+    d = os.path.join(OUT, "advisors")
+    os.makedirs(d, exist_ok=True)
+
+    def load(rel):
+        im = Image.open(art_file(rel))
+        im.load()
+        # The sheets' 1-px cell lines are darker magentas, (218, 0, 218)
+        # or (200, 0, 200).
+        return clear_color(clear_color(to_rgba(im), (218, 0, 218)), (200, 0, 200))
+
+    # Backgrounds. Conquests redrew the arrows of three eras for its tree;
+    # its Industrial page is `science_industrial_new` (Ironclads and
+    # Fascism). Modern keeps the base game's.
+    for era, stem in enumerate(["science_ancient", "science_middle",
+                                "science_industrial_new", "science_modern"]):
+        load(f"Art/Advisors/{stem}.pcx").save(os.path.join(d, f"science_{era}.png"))
+    load("Art/Advisors/domestic.pcx").save(os.path.join(d, "domestic.png"))
+    load("Art/Advisors/dialogbox.pcx").save(os.path.join(d, "dialog.png"))
+    load("Art/Advisors/non_required.pcx").crop((0, 0, 27, 27)).save(
+        os.path.join(d, "non_required.png"))
+
+    # Tech boxes: four eras of four sizes, each in four states (researched,
+    # researching, available, unavailable), on a 189-px column stride and
+    # split by (218, 0, 218) grid lines. Measured, not hard-coded.
+    sheet = Image.open(art_file("Art/Advisors/techboxes.pcx")).convert("RGB")
+    px = sheet.load()
+    off = {(255, 0, 255), (218, 0, 218)}
+    rows = runs([px[45, y] not in off for y in range(sheet.height)])
+    assert len(rows) == 16, f"techbox rows: {len(rows)}"
+    boxes = clear_color(to_rgba(Image.open(art_file("Art/Advisors/techboxes.pcx"))), (218, 0, 218))
+    for i, (y0, y1) in enumerate(rows):
+        era, size = divmod(i, 4)
+        cols = runs([px[x, (y0 + y1) // 2] not in off for x in range(760)])
+        assert len(cols) == 4, f"techbox row {i}: {cols}"
+        for state, (x0, x1) in enumerate(cols):
+            boxes.crop((x0, y0, x1, y1)).save(
+                os.path.join(d, f"techbox_{era}_{size}_{state}.png"))
+
+    # Buttons: the era navigation (129x34 in three states, then the two
+    # arrows), the close X (26x30, three states), the government button
+    # (146x26, three states) and the rate -/+ (24x24, three states).
+    nav = load("Art/Tech Chooser/scienceNAV.pcx")
+    for i in range(3):
+        nav.crop((0, 34 * i, 129, 34 * i + 34)).save(os.path.join(d, f"nav_{i}.png"))
+    nav.crop((0, 102, 45, 112)).save(os.path.join(d, "nav_left.png"))
+    nav.crop((45, 102, 90, 112)).save(os.path.join(d, "nav_right.png"))
+    ex = load("Art/Advisors/advisor_EXIT.pcx")
+    for i in range(3):
+        ex.crop((26 * i, 0, 26 * i + 26, 30)).save(os.path.join(d, f"exit_{i}.png"))
+    gb = load("Art/Advisors/domesticBUTTON.pcx")
+    for i in range(3):
+        gb.crop((0, 26 * i, 146, 26 * i + 26)).save(os.path.join(d, f"govt_{i}.png"))
+    aux = load("Art/Advisors/domestic_icons_aux.pcx")
+    for i in range(3):
+        aux.crop((50, 24 * i, 74, 24 * i + 24)).save(os.path.join(d, f"minus_{i}.png"))
+        aux.crop((74, 24 * i, 98, 24 * i + 24)).save(os.path.join(d, f"plus_{i}.png"))
+    # The sliders' small -/+ (12 wide; minus 8 tall, plus 13), three states.
+    pm = load("Art/Advisors/domestic_plusminus.pcx")
+    for i in range(3):
+        pm.crop((12 * i, 0, 12 * i + 12, 8)).save(os.path.join(d, f"less_{i}.png"))
+        pm.crop((12 * i, 8, 12 * i + 12, 21)).save(os.path.join(d, f"more_{i}.png"))
+    # The slider knobs and column icons: 23x29 cells framed in dark blue.
+    icons = load("Art/Advisors/domestic_icons.pcx")
+    for name, (x, y) in {"flask": (138, 256), "smiley": (250, 250),
+                         "coins": (172, 256)}.items():
+        icons.crop((x + 1, y + 1, x + 22, y + 28)).save(os.path.join(d, f"{name}.png"))
+
+    # Portraits: 150-px cells, a row an era, the happy face in column 0.
+    # Tabs: 56-px cells, a row an advisor (domestic, trade, military,
+    # foreign, culture, science), columns default, rollover, active.
+    for who in ["DOMESTIC", "SCIENCE"]:
+        sheet = load(f"Art/SmallHeads/popup{who}.pcx")
+        for era in range(4):
+            sheet.crop((0, 150 * era, 150, 150 * era + 150)).save(
+                os.path.join(d, f"portrait_{who.lower()}_{era}.png"))
+    tabs = load("Art/SmallHeads/advisor_tab.pcx")
+    for row in range(6):
+        for state in range(3):
+            tabs.crop((56 * state, 56 * row, 56 * state + 56, 56 * row + 56)).save(
+                os.path.join(d, f"tab_{row}_{state}.png"))
+
+    # Citizen heads by mood for the city list: popHeads holds four rows an
+    # era (happy, content, unhappy, ...); column 4 is the clone's citizen.
+    heads = Image.open(art_file("Art/SmallHeads/popHeads.pcx"))
+    heads.load()
+    for mood, row in [("happy", 0), ("content", 1), ("unhappy", 2)]:
+        to_rgba(heads.crop((201, 50 * row + 1, 250, 50 * row + 50))).save(
+            os.path.join(d, f"head_{mood}.png"))
+
+    # Advance icons, by TECH index, as PediaIcons.txt names them.
+    td = os.path.join(OUT, "tech")
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(os.path.dirname(__file__), "..", "src", "rules_data.rs")) as f:
+        block = f.read().split("pub const TECH_NAMES")[1].split("];")[0]
+    names = re.findall(r'^    "([^"]+)",', block, re.M)
+    lines = open(art_file("Text/PediaIcons.txt"), errors="replace").read().splitlines()
+    keys = {}
+    for i, l in enumerate(lines):
+        l = l.strip()
+        if l.startswith("#TECH_") and not l.endswith("_LARGE"):
+            keys[l[1:].upper()] = lines[i + 1].strip()
+    for i, name in enumerate(names):
+        key = ("TECH_" + name.replace(" ", "_").replace("-", "_")).upper()
+        # The BIQ cuts long names ("Amphibious War"): take the one key
+        # that starts with it.
+        rel = keys.get(key) or next(v for k, v in keys.items() if k.startswith(key))
+        load(rel).save(os.path.join(td, f"{i}.png"))
+    print(f"advisors: backgrounds, 64 tech boxes, buttons, portraits, tabs, {len(names)} advance icons")
+
+
 STAGES = {"terrain": stage_terrain, "units": stage_units,
           "cities": stage_cities, "cityscreen": stage_cityscreen,
           "splash": stage_splash, "audio": stage_audio, "fonts": stage_fonts,
@@ -1215,7 +1418,8 @@ STAGES = {"terrain": stage_terrain, "units": stage_units,
           "unitbuttons": stage_unitbuttons, "hud": stage_hud,
           "fog": stage_fog, "borders": stage_borders,
           "cursor": stage_cursor, "leaders": stage_leaders,
-          "diplomacy": stage_diplomacy, "wonders": stage_wonders}
+          "diplomacy": stage_diplomacy, "wonders": stage_wonders,
+          "advisors": stage_advisors}
 
 
 def main():

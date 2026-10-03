@@ -22,7 +22,7 @@ use crate::map::{GameMap, tile_to_world};
 use crate::render::{Fog, RevealAll, border_z, fog_for};
 
 /// Tie-break inside `render::border_z`'s band, which sits above all
-/// terrain and below the fog diamonds and the sprite phase.
+/// terrain and the fog diamonds and below the sprite phase.
 const BORDER_LAYER: f32 = 0.0;
 
 /// One edge of a tile, named by the map neighbor it faces. `tile_to_world`
@@ -145,8 +145,8 @@ pub fn sync_borders(
             continue;
         }
         have.insert((bs.x, bs.y, bs.side));
-        // The fog diamonds above hold the dimming, so the ribbon only has
-        // to hide where the tile was never seen.
+        // Civ3 draws a border at full strength on every tile ever seen, so
+        // the ribbon sits above the fog and only hides where it is black.
         sprite.color = owner_color(&owner, bs.x, bs.y);
         *vis = match fog_for(reveal.0, &map.tiles[map.idx(bs.x, bs.y)]) {
             Fog::Black => Visibility::Hidden,
@@ -195,6 +195,7 @@ mod tests {
             coastal: false,
             river: false,
             unrest: 0,
+            hurry_timer: 0,
             name: name.to_string(),
             x,
             y,

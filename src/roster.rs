@@ -37,6 +37,7 @@ pub struct UnitRow {
     pub bombard: i32,
     pub bomb_range: i32,
     pub rof: i32,
+    pub capacity: i32,
     /// 0 land, 1 sea, 2 air.
     pub class: i32,
     /// One bit per `RACE` row.
@@ -91,6 +92,8 @@ pub mod ability {
     /// A victory with this unit starts a Golden Age.
     pub const STARTS_GOLDEN_AGE: u32 = 1 << 15;
     pub const ARMY: u32 = 1 << 18;
+    /// The Great Leader (`research.md` 11: ability 19).
+    pub const LEADER: u32 = 1 << 19;
 }
 
 /// `PRTO` special-action bits.

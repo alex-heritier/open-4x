@@ -366,26 +366,6 @@ impl ImpLayer {
     }
 }
 
-/// Improvement overlays for one tile, bottom to top, as (image, anchor
-/// in pixels from the 128x64 cell's top-left). Shared by the city screen.
-pub fn tile_overlays(
-    map: &GameMap,
-    art: &ImprovementArt,
-    hubs: &[(i32, i32)],
-    x: i32,
-    y: i32,
-) -> Vec<Handle<Image>> {
-    let Some(t) = map.get(x, y) else {
-        return vec![];
-    };
-    ImpLayer::ALL
-        .iter()
-        .filter(|l| l.on(t))
-        .filter_map(|l| art.defs.get(&sprite_key(t, *l, l.mask(map, hubs, x, y))))
-        .map(|(image, _)| image.clone())
-        .collect()
-}
-
 /// Spawn overlays for new improvements, refresh masks, tint by fog.
 pub fn sync_improvement_sprites(
     mut commands: Commands,

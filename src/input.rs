@@ -45,7 +45,13 @@ pub fn camera_control(
     keys: Res<ButtonInput<KeyCode>>,
     mut cam: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
     time: Res<Time>,
+    view: Res<CityView>,
 ) {
+    // The city screen holds the camera on its city (`frame_city_view`).
+    if view.0.is_some() {
+        wheel.clear();
+        return;
+    }
     let Ok((mut tf, mut proj)) = cam.single_mut() else {
         return;
     };
@@ -83,7 +89,13 @@ pub fn hover(
     pin: Res<HoverPin>,
     selected: Res<Selected>,
     preview: Res<MovePreview>,
+    view: Res<CityView>,
 ) {
+    // The city screen's band shows the map, but the map is not in play.
+    if view.0.is_some() {
+        hovered.0 = None;
+        return;
+    }
     // The pointer is over a UI button: map picking is off.
     let tile = if let Some(p) = pin.0 {
         Some(p)
@@ -133,9 +145,15 @@ pub fn hold_preview(
     selected: Res<Selected>,
     units: Query<&Unit>,
     goto: Res<GotoMode>,
+    bombard: Res<crate::bombard::TargetMode>,
     mut hold: Local<Hold>,
     mut preview: ResMut<MovePreview>,
 ) {
+    if bombard.0.is_some() {
+        preview.0 = None;
+        hold.armed = false;
+        return;
+    }
     let from = selected
         .0
         .and_then(|s| units.get(s).ok())
@@ -159,9 +177,10 @@ pub fn hold_preview(
     };
 }
 
-fn move_order(map: &GameMap, units: &mut Query<(Entity, &mut Unit)>, s: Entity, dest: (i32, i32)) {
+fn move_order(map: &GameMap, units: &mut Query<(Entity, &mut Unit)>, s: Entity, dest: (i32, i32), ports: &[(i32, i32)]) {
+    let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
     if let Ok((_, mut u)) = units.get_mut(s) {
-        units::order_move(map, &mut u, dest);
+        crate::naval::order_move(map, &mut u, dest, ports, &snapshot);
     }
 }
 
@@ -195,6 +214,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(Hovered(Some((12, 12))));
         app.insert_resource(GotoMode(false));
+        app.init_resource::<crate::bombard::TargetMode>();
         app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource(MovePreview::default());
         app.insert_resource(Time::<()>::default());
@@ -295,6 +315,7 @@ fn order_with_sfx(
     units: &mut Query<(Entity, &mut Unit)>,
     s: Entity,
     dest: (i32, i32),
+    ports: &[(i32, i32)],
 ) {
     if let Ok((_, u)) = units.get(s) {
         if u.moves > 0 {
@@ -303,7 +324,14 @@ fn order_with_sfx(
             }
         }
     }
-    move_order(map, units, s, dest);
+    move_order(map, units, s, dest, ports);
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Targeting<'w> {
+    goto: ResMut<'w, GotoMode>,
+    bombard: ResMut<'w, crate::bombard::TargetMode>,
+    shots: MessageWriter<'w, crate::bombard::Order>,
 }
 
 pub fn orders(
@@ -321,15 +349,18 @@ pub fn orders(
     mut view: ResMut<CityView>,
     audio: Res<GameAudio>,
     splash: Res<SplashUp>,
-    mut goto: ResMut<GotoMode>,
+    mut targeting: Targeting,
     mut cmds: MessageWriter<UnitCommand>,
 ) {
+    let ports: Vec<_> = cities.iter().filter(|(_, c)| c.civ == civs.active && c.coastal).map(|(_, c)| (c.x, c.y)).collect();
     if view.0.is_some() || splash.0 {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
-        goto.0 = false;
+        targeting.goto.0 = false;
+        targeting.bombard.0 = None;
     }
+    if targeting.bombard.0 != selected.0 { targeting.bombard.0 = None; }
     for c in key_commands(&keys) {
         cmds.write(c);
     }
@@ -349,10 +380,14 @@ pub fn orders(
     }
     if buttons.just_released(MouseButton::Left) {
         if let Some((x, y)) = hovered.0 {
-            if goto.0 {
-                goto.0 = false;
+            if let Some(attacker) = targeting.bombard.0.take() {
+                targeting.shots.write(crate::bombard::Order { attacker, to: (x, y) });
+                return;
+            }
+            if targeting.goto.0 {
+                targeting.goto.0 = false;
                 if let Some(s) = selected.0 {
-                    order_with_sfx(&mut commands, &audio, &map, &mut units, s, (x, y));
+                    order_with_sfx(&mut commands, &audio, &map, &mut units, s, (x, y), &ports);
                 }
                 return;
             }
@@ -388,7 +423,7 @@ pub fn orders(
                 selected.0 = Some(next);
                 audio::sfx(&mut commands, &audio, "Select");
             } else if let Some(s) = selected.0 {
-                order_with_sfx(&mut commands, &audio, &map, &mut units, s, (x, y));
+                order_with_sfx(&mut commands, &audio, &map, &mut units, s, (x, y), &ports);
             }
         }
     }
@@ -405,9 +440,10 @@ pub fn orders(
             None
         };
         if let Some((dx, dy)) = step {
+            targeting.bombard.0 = None;
             if let Ok((_, u)) = units.get(s) {
                 let dest = (map.wrap_x(u.x + dx), (u.y + dy).clamp(0, map.h - 1));
-                order_with_sfx(&mut commands, &audio, &map, &mut units, s, dest);
+                order_with_sfx(&mut commands, &audio, &map, &mut units, s, dest, &ports);
             }
         }
     }

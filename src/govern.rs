@@ -132,7 +132,7 @@ pub fn ai_turn(
         // Cooldown counts down in `Realm::tick`; the gate is `0x444A10`.
         let cooling = realm::read(civ, |r| r.cooldown) > 0;
         let gate = exe::revolution_denominator(&exe::GateInputs {
-            golden_age: false,
+            golden_age: realm::read(civ, |r| r.golden),
             no_enemies: wars == 0,
             wars,
             religious: exe_econ::has_trait(crate::cities::traits(civ), exe_econ::trait_bit::RELIGIOUS),

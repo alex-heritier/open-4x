@@ -27,7 +27,7 @@ are different bits; barbarian camp sites exclude hut tiles (`barbarians.md`).
 | 2 | `0x5D3AB0(map; x, y, newOwner)` at `0x5D3E0A..0x5D3E2B` | the tile's owner byte changed (the routine returns at once when it did not, `0x5D3ADD`) and the tile has a hut | `0x55C6B0(Player[newOwner]; x, y, 0)` |
 
 * Trigger 1 has no domain, type or activity filter between the function entry and `0x5BDE63` that I traced
-  (**O**: the head of `0x5BD220` was not read in full). The factory `0x5694D0` and the relocation paths reach
+  (**V**: the head of `0x5BD220` was read in full, `movement.md` 5: nothing between the entry and `0x5BDE63` filters on domain, type or activity). The factory `0x5694D0` and the relocation paths reach
   `0x5BD220` as well (**H**), so a unit created or teleported onto a hut tile pops it.
 * Trigger 2 comes from the border code only (`0x5D3AB0` is called from `0x5D4830`; `borders-culture.md` 6 and 5, `barbarians.md` 8). The
   third argument is `0`, so the pop is **unitless** (section 3, `unit == 0`).
@@ -606,7 +606,7 @@ Open:
 1. `0x4AE2A0` is decoded (`city-founding.md`); its undecoded callees (`0x4B0470`, `0x4B10F0`) are listed in
    `city-founding.md` 7 (`0x55CB20`, `0x4ACF40` are in `city-buildings.md`; `0x5D4830` is in `borders-culture.md`).
 2. The scoring body of `0x442480` and its `0x443153` return.
-3. The unconfirmed trigger-1 filters (head of `0x5BD220`).
+3. (Settled: the head of `0x5BD220` has no trigger-1 filter, `movement.md` 5.)
 4. The citizen record layout and the recompute routines called by `0x4B9F60` (6.7).
 5. Whether anything creates huts after map generation, and the shipped length of the barbarian civ's city name
    list (the index-75 sentinel).
