@@ -1847,9 +1847,14 @@ name = "civ3-clone"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "civ3mapgen",
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "civ3mapgen"
+version = "0.1.0"
 
 [[package]]
 name = "clang-sys"

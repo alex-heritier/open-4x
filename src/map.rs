@@ -52,7 +52,16 @@ pub struct Tile {
     pub mine: bool,
 }
 
-#[derive(Resource)]
+impl Tile {
+    /// Open grassland or plains: the ground a capital is best founded on.
+    pub fn good_start(&self) -> bool {
+        matches!(self.base, Base::Grassland | Base::Plains)
+            && self.relief == Relief::Flat
+            && self.cover == Cover::Bare
+    }
+}
+
+#[derive(Resource, Clone)]
 pub struct GameMap {
     pub w: i32,
     pub h: i32,
@@ -68,6 +77,12 @@ impl GameMap {
 
     pub fn wrap_x(&self, x: i32) -> i32 {
         ((x % self.w) + self.w) % self.w
+    }
+
+    /// Tiles between two positions: the king-move count, wrapping in x.
+    pub fn distance(&self, a: (i32, i32), b: (i32, i32)) -> i32 {
+        let dx = (self.wrap_x(a.0) - self.wrap_x(b.0)).abs();
+        dx.min(self.w - dx).max((a.1 - b.1).abs())
     }
 
     pub fn get(&self, x: i32, y: i32) -> Option<&Tile> {
@@ -287,11 +302,7 @@ impl GameMap {
         let mut best_score = f32::MIN;
         for y in 0..self.h {
             for x in 0..self.w {
-                let t = &self.tiles[self.idx(x, y)];
-                if !matches!(t.base, Base::Grassland | Base::Plains)
-                    || t.relief != Relief::Flat
-                    || t.cover != Cover::Bare
-                {
+                if !self.tiles[self.idx(x, y)].good_start() {
                     continue;
                 }
                 let mut land = 0;
@@ -582,6 +593,15 @@ mod tests {
         assert!(nbs.contains(&(1, 10)));
         let top = map.neighbors(10, 0);
         assert!(!top.iter().any(|(_, y)| *y < 0));
+    }
+
+    #[test]
+    fn distance_counts_king_moves_and_wraps_in_x_only() {
+        let map = GameMap::generate();
+        assert_eq!(map.distance((0, 10), (map.w - 3, 12)), 3);
+        assert_eq!(map.distance((0, 0), (0, 9)), 9);
+        // A position past the edge wraps like the tile it stands for.
+        assert_eq!(map.distance((-2, 5), (2, 5)), 4);
     }
 
     #[test]

@@ -510,13 +510,16 @@ pub fn describe(t: &Tile) -> Option<String> {
 
 // --- Gameplay ---
 
-/// Hut pop outcomes (sandbox-adapted: no gold/tech/diplomacy yet).
+/// Hut pop outcomes (sandbox-adapted: no gold or diplomacy outcomes). The
+/// outcome roll is the clone's; what an advance outcome gives is the
+/// binary's (`research.md` 10.5).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum HutReward {
     Warrior,
     Scout,
     Reveal,
     Growth,
+    Tech,
 }
 
 /// Roll a reward from a uniform `[0, 1)` draw (gameplay RNG, not mapgen).
@@ -527,8 +530,10 @@ pub fn hut_reward_roll(v: f32) -> HutReward {
         HutReward::Scout
     } else if v < 0.80 {
         HutReward::Reveal
-    } else {
+    } else if v < 0.92 {
         HutReward::Growth
+    } else {
+        HutReward::Tech
     }
 }
 
@@ -705,8 +710,13 @@ pub fn resolve_features(
     mut board: bevy::prelude::ResMut<MessageBoard>,
     audio: bevy::prelude::Res<crate::audio::GameAudio>,
     mut gamerng: bevy::prelude::ResMut<crate::rng::GameRng>,
+    mut research: bevy::prelude::ResMut<crate::research::Research>,
+    mut dice: bevy::prelude::ResMut<crate::combat::CombatRng>,
 ) {
     use crate::units::UnitAnim;
+    // The computer pops huts too, silently and without lifting the human's
+    // fog: its announcements are dropped and its map reveal changes nothing.
+    let quiet = crate::civs::is_ai(civs.active).then(|| (board.text.clone(), board.ttl));
     // Collect arrivals first; rewards mutate the map.
     let mut arrivals: Vec<(i32, i32)> = vec![];
     for u in units.iter() {
@@ -720,7 +730,20 @@ pub fn resolve_features(
         if map.tiles[i].hut {
             map.tiles[i].hut = false;
             let roll: f32 = gamerng.next_f32();
-            match hut_reward_roll(roll) {
+            let mut reward = hut_reward_roll(roll);
+            if reward == HutReward::Tech {
+                // The elders teach a civ still in the first age; to anyone
+                // else the hut gives what it gives a city.
+                match research.hut_advance(civs.active, &mut dice.0) {
+                    Some((t, _)) => post(
+                        &mut board,
+                        format!("Goody hut: tribal elders teach us {}!", crate::research::tech_name(t)),
+                    ),
+                    None => reward = HutReward::Growth,
+                }
+            }
+            match reward {
+                HutReward::Tech => {}
                 HutReward::Warrior => {
                     crate::units::spawn_unit(
                         &mut commands,
@@ -744,7 +767,7 @@ pub fn resolve_features(
                     post(&mut board, "Goody hut: a Scout joins your cause!");
                 }
                 HutReward::Reveal => {
-                    for dy in -5..=5 {
+                    for dy in if quiet.is_some() { 0..0 } else { -5..6 } {
                         for dx in -5..=5 {
                             let ny = y + dy;
                             if ny < 0 || ny >= map.h {
@@ -774,7 +797,11 @@ pub fn resolve_features(
                     }
                     if let Some((e, _, name)) = best {
                         let taken = cities.get(e).ok().map(|(_, c)| {
-                            crate::cities::taken_tiles(cities.iter().map(|(_, c)| c), (c.x, c.y))
+                            crate::cities::taken_tiles(
+                                &map,
+                                cities.iter().map(|(_, c)| c),
+                                (c.x, c.y),
+                            )
                         });
                         if let (Ok((_, mut c)), Some(taken)) = (cities.get_mut(e), taken) {
                             c.size += 1;
@@ -797,7 +824,9 @@ pub fn resolve_features(
                     }
                 }
             }
-            crate::audio::sfx(&mut commands, &audio, "Hut");
+            if quiet.is_none() {
+                crate::audio::sfx(&mut commands, &audio, "Hut");
+            }
         } else if map.tiles[i].camp {
             map.tiles[i].camp = false;
             let mut best: Option<(bevy::prelude::Entity, i32, String)> = None;
@@ -823,8 +852,14 @@ pub fn resolve_features(
             } else {
                 post(&mut board, "Barbarian camp dispersed!");
             }
-            crate::audio::sfx(&mut commands, &audio, "Barbarian Raid");
+            if quiet.is_none() {
+                crate::audio::sfx(&mut commands, &audio, "Barbarian Raid");
+            }
         }
+    }
+    if let Some((text, ttl)) = quiet {
+        board.text = text;
+        board.ttl = ttl;
     }
 }
 
@@ -914,7 +949,9 @@ mod tests {
         assert_eq!(hut_reward_roll(0.55), HutReward::Reveal);
         assert_eq!(hut_reward_roll(0.799), HutReward::Reveal);
         assert_eq!(hut_reward_roll(0.80), HutReward::Growth);
-        assert_eq!(hut_reward_roll(0.999), HutReward::Growth);
+        assert_eq!(hut_reward_roll(0.919), HutReward::Growth);
+        assert_eq!(hut_reward_roll(0.92), HutReward::Tech);
+        assert_eq!(hut_reward_roll(0.999), HutReward::Tech);
     }
 
     #[test]
@@ -1013,6 +1050,8 @@ mod tests {
         });
         app.insert_resource(MessageBoard::default());
         app.insert_resource(crate::rng::GameRng::new(2));
+        app.insert_resource(crate::research::Research::new());
+        app.insert_resource(crate::combat::CombatRng(crate::rng::MapRng::new(2)));
         app.init_resource::<crate::civs::Civilizations>();
         app.world_mut().spawn(crate::units::Unit {
             civ: 0,
@@ -1027,6 +1066,7 @@ mod tests {
             work: None,
             sentry: false,
             exploring: false,
+            ..crate::units::Unit::new(0, crate::units::UnitType::Scout, sx, sy)
         });
         app.add_systems(Update, resolve_features);
         app.update();

@@ -8,6 +8,11 @@
 //! - `end <n>`: end `n` turns at once.
 //! - `sel <Settler|Worker|Warrior|Scout>`: select the first unit of a type.
 //! - `tp <x>,<y>`: teleport the selected unit (debug placement).
+//! - `spawn <Settler|Worker|Warrior|Scout> <civ> <x>,<y>`: add a unit of
+//!   civ index `<civ>` (0 Japan, 1 Egypt, ...).
+//! - `go <x>,<y>`: order the selected unit to walk there (attacking whatever
+//!   enemy holds the last tile).
+//! - `report`: print the units within 3 tiles of the first city.
 //! - `imp <x>,<y> <road|irr|mine>`: put an improvement on a tile.
 //!
 //! Coordinates written `@dx,dy` are relative to the first city.
@@ -15,6 +20,11 @@
 //! - `btn <name>`: press a city-screen button: `Change`, `Close`,
 //!   `Governor`, `CloseMenu`, `Prev`, `Next`, `Pick:<item>`,
 //!   `Queue:<item>`, `Unqueue:<i>`.
+//! - `adv <name>`: press an advisor button: `Science`, `Foreign`, `Close`,
+//!   `Pick:<advance>`, `Talk:<civ>`, `Treaty:<clause>`, `Give:<advance>`,
+//!   `Get:<advance>`, `GiveGold:<delta>`, `GetGold:<delta>`, `Propose`,
+//!   `DeclareWar`, `Accept`, `Decline`, `WarYes`, `WarNo`. `key F6` and
+//!   `key F4` open the Science and Foreign Advisors.
 //! - `hover <x>,<y>` / `unhover`: pin the map hover (no mouse in captures).
 //! - `down` / `up`: press and release the left mouse button.
 //! - `tile <rx>,<ry>`: click a tile of the open city's radius.
@@ -25,7 +35,7 @@ use bevy::prelude::*;
 
 use crate::cities::{self, City, CityView, ScreenButton};
 use crate::map::GameMap;
-use crate::units::{Selected, TurnEnded, Unit, UnitType};
+use crate::units::{self, Selected, TurnEnded, Unit, UnitArt, UnitType};
 
 #[derive(Resource, Default)]
 pub struct Script {
@@ -60,6 +70,8 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Down" => KeyCode::ArrowDown,
         "Left" => KeyCode::ArrowLeft,
         "Right" => KeyCode::ArrowRight,
+        "F4" => KeyCode::F4,
+        "F6" => KeyCode::F6,
         "F9" => KeyCode::F9,
         _ => {
             let c = name.chars().next()?;
@@ -110,6 +122,9 @@ fn unit_type(name: &str) -> Option<UnitType> {
         "Worker" => UnitType::Worker,
         "Warrior" => UnitType::Warrior,
         "Scout" => UnitType::Scout,
+        "Archer" => UnitType::Archer,
+        "Spearman" => UnitType::Spearman,
+        "Horseman" => UnitType::Horseman,
         _ => return None,
     })
 }
@@ -133,6 +148,8 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
 /// so injected keys read as `just_pressed` and pressed buttons as
 /// `Changed<Interaction>` for the rest of the frame.
 pub fn drive_script(
+    mut commands: Commands,
+    art: Res<UnitArt>,
     script: Option<ResMut<Script>>,
     civs: Res<crate::civs::Civilizations>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
@@ -145,7 +162,8 @@ pub fn drive_script(
     mut cities: Query<&mut City>,
     city_ids: Query<Entity, With<City>>,
     mut view: ResMut<CityView>,
-    mut buttons: Query<(&mut Interaction, &ScreenButton)>,
+    mut buttons: Query<(&mut Interaction, &ScreenButton), Without<crate::advisors::Action>>,
+    mut advisor_buttons: Query<(&mut Interaction, &crate::advisors::Action), Without<ScreenButton>>,
 ) {
     let Some(mut script) = script else {
         return;
@@ -204,6 +222,47 @@ pub fn drive_script(
                     }
                 }
             }
+            "spawn" => {
+                let mut words = arg.split_whitespace();
+                let spec = (
+                    words.next().and_then(unit_type),
+                    words.next().and_then(|c| c.parse::<usize>().ok()),
+                    words.next().and_then(coord),
+                );
+                match spec {
+                    (Some(t), Some(civ), Some((x, y))) if civ < crate::civs::CIV_COUNT => {
+                        units::spawn_unit(&mut commands, &art, t, x, y, civ);
+                    }
+                    _ => eprintln!("script: bad spawn {arg}"),
+                }
+            }
+            "go" => {
+                if let (Some(dest), Some(s)) = (coord(arg), selected.0) {
+                    if let Ok((_, mut u)) = units.get_mut(s) {
+                        units::order_move(&map, &mut u, dest);
+                    }
+                }
+            }
+            "report" => {
+                // Ground truth for captures: every unit near the first city.
+                let (ox, oy) = origin.unwrap_or((0, 0));
+                for (_, u) in units
+                    .iter()
+                    .filter(|(_, u)| (u.x - ox).abs() <= 3 && (u.y - oy).abs() <= 3)
+                {
+                    println!(
+                        "script: unit {:?} civ {} @({},{}) {:?} hp {}/{} moves {}",
+                        u.utype,
+                        u.civ,
+                        u.x - ox,
+                        u.y - oy,
+                        u.level,
+                        u.hp(),
+                        u.max_hp(),
+                        u.moves
+                    );
+                }
+            }
             "imp" => {
                 let (pos, kind) = arg.split_once(' ').unwrap_or((arg, ""));
                 if let Some((x, y)) = coord(pos) {
@@ -234,6 +293,10 @@ pub fn drive_script(
             "btn" => match buttons.iter_mut().find(|(_, b)| button_matches(b, arg)) {
                 Some((mut i, _)) => *i = Interaction::Pressed,
                 None => eprintln!("script: no button {arg}"),
+            },
+            "adv" => match advisor_buttons.iter_mut().find(|(_, a)| a.script_name() == arg) {
+                Some((mut i, _)) => *i = Interaction::Pressed,
+                None => eprintln!("script: no advisor button {arg}"),
             },
             "tile" => {
                 if let (Some((rx, ry)), Some(e)) = (pair(arg), view.0) {

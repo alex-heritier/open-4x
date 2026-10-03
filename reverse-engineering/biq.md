@@ -2,7 +2,13 @@
 
 Companion to `NOTES.md` §15, which mapped the decompressor but left the
 header framing open (§15.4). The framing is now solved and both shipped
-scenario files decode end to end. Reference implementation: `rust/src/dcl.rs`.
+scenario files decode end to end. Reference implementation: `rust/src/dcl.rs`
+(mode-0 decoder and the section walker the game code uses).
+
+The **complete codec** lives in the standalone crate [`../biq/`](../biq):
+`src/dcl.rs` decodes both literal modes, `src/implode.rs` is the compressor
+(see "The compressor" below), and `Biq::to_bytes` writes a file back in the
+form it was read in. The section-level format is in [`biq-format.md`](biq-format.md).
 
 **Read the correction below first.** The framing is solved, but the distance
 mask was read from the wrong header byte until 2026-09-29: every file whose
@@ -127,9 +133,102 @@ bases and distance tables end exactly at `0x3134` (`0x5F7746`).
 3. Framing (§15.4): solved as above — no missing header bytes.
 4. `0x648920`/`0x648AC0` confirmed as the separate implode *compressor*
    (window select `0x400/0x800/0x1000`, table builds); unused by scenario load.
+   It is used when the game *writes* (saved games), and it is **ported and
+   verified** below: it reproduces every shipped compressed file byte for byte.
 5. Distance mask: it is `(1 << dict_bits) - 1` from the *second* header byte's
    dict bits (`0x649487`-`0x649492`), not a value carried by the third byte.
    See the correction section above.
+
+## The compressor (`implode`): ported and verified (2026-10-02)
+
+`0x648920` is PKWARE DCL 1.11 `implode` (the library banner at `0x73A388`).
+Reference port: [`../biq/src/implode.rs`](../biq/src/implode.rs), every routine
+annotated with its address; `compress(input, mode, dict_bits)`.
+
+| exe | what | notes |
+|---|---|---|
+| `0x648920` | `implode`: checks the window (`0x400`/`0x800`/`0x1000`, else error 1) and mode (0/1, else error 2), builds the code tables, calls the main loop | literal codes `0x6489AA` (binary: 9 bits, code `2*byte`) / `0x6489DC` (ASCII: `len+1` bits, `code*2`); length codes `0x648A12` (flag bit 1, class code, extra bits) |
+| `0x648AC0` | main loop: reads 0x1000-byte blocks, indexes them, emits literals and matches, slides the window, writes the end symbol | block shift `0x648CE0`; lazy match rule `0x648C1D`..`0x648D59` |
+| `0x648E40` | `FindRep`, the match finder | see below |
+| `0x649340` | `SortBuffer`: counting sort of positions by hash | hash `b0*4 + b1*5`, 0x900 buckets, each bucket ascending |
+| `0x649180` | `OutputBits` (LSB-first, recursion above 8 bits) | flush `0x6492C0` only chunks the output |
+
+**Why the match finder had to be transcribed, not guessed.** A DCL stream does
+not record how the compressor chose its matches, so format knowledge alone
+yields a *valid* compressor, not the game's. Reproducing the shipped files
+needs these details of `FindRep`, all read from the disassembly:
+
+* candidates come from the position's hash bucket, oldest first; positions
+  older than the window are dropped from the bucket head for good
+  (`0x648E68`..`0x648EA6`);
+* a candidate must start at least two bytes before the current position
+  (`src - 1 > cand`, `0x648ED1`);
+* early reject on the byte at `best - 1`, then on byte 0 (`0x648EDF`); bytes 0
+  and 1 are assumed equal (same hash, same first byte forces the second byte),
+  so the comparison starts at byte 2 (`0x648EEF`);
+* **an equal-length candidate replaces the best** (`0x648F0C`: only a shorter
+  one is skipped), so the nearest of equal matches wins; a `0x204` match returns
+  at once (`0x648F50`; its distance needs a `-1` fix-up because the compare loop
+  stops one byte early);
+* a 2-byte match is only usable below distance `0x100` (`0x648BF8`, and again after the end-of-data clamp at `0x648C09`);
+* once `best > 10` the finder builds the KMP failure table of the best match
+  (`0x648F8A`, `fail[0] = -1`) and skips candidates that cannot be longer
+  (`0x64900B` LOOPB), still replacing on equal length;
+* the caller adds one-byte lazy evaluation (`0x648C1D`..`0x648D59`): a match
+  of 8 or more is taken at once; a shorter one is retried one byte later and
+  the later match wins only if it is longer by 2, or longer by 1 when the first
+  distance is above `0x80`. Otherwise the first match is kept.
+
+**The work area is one flat struct** (36 312 bytes): `work_buff` at `+0x27CC`
+(`0x2204` bytes: window, `0x204` look-ahead, 0x1000 new input) is followed
+immediately by `hash_offs` at `+0x49D0`. A match compare near the end of a block
+can run past `work_buff` and read the position table, so the port models them
+as one buffer. At end of input the finder also reads up to `0x204` bytes past the
+data; the original never clears the area, so those bytes are the zeros of the
+first block or the previous block's tail. Starting zeroed with the same
+`memcpy` shift reproduces every shipped file.
+
+**Verification (the oracle is the game's own output).** Decode every
+compressed file in the install, compress the result with the port, compare:
+
+| set | files | byte-identical |
+|---|--:|--:|
+| `.biq`/`.bic`/`.bix`, DCL, all `00 06 84` | 83 | 83 |
+| saved games, DCL `00 06 86` (largest: `TETURKAN.SAV`, 507 KB on disk, many 4 KiB blocks) | 10 | 10 |
+
+`biq::implode::tests::recompresses_every_shipped_file_exactly`. The oracle is
+sensitive to each quirk above; one deliberate mutation at a time, files out of 93
+that stop matching:
+
+| mutation | files that fail |
+|---|--:|
+| equal-length candidate no longer replaces (`len <= best` skipped) | 93 |
+| same, in the long-match tail (`esi <= best` before the distance store) | 93 |
+| long-match tail removed (stop at the first match above 10) | 93 |
+| lazy rule without the `+1` case | 88 |
+| 2-byte cutoff `0x100` -> `0x80` | 82 |
+| lazy distance threshold `0x80` -> `0x7F` | 5 |
+
+What the shipped data does not cover is stated, not assumed: dictionary bits 4 and 5 and mode 1 are checked by
+round trip (all lengths 0..20 000, all three windows, both modes) but have no
+shipped stream to compare against.
+
+**Provenance.** The editor links no compressor and writes raw files
+(`editor.md`), and the game compresses only saved games. The 83 compressed
+scenarios therefore came from an external tool; they are byte-identical to what
+this routine produces, so it ran the same library at version 1.11 with the same
+parameters (binary literals, 4 KiB window).
+
+**Mode 1 (ASCII literals), now supported.** A literal is flag `0` plus the
+byte's code from `0x73A088` (lengths 4..13, +1 for the flag) / `0x73A188`
+(codes). The exe keeps a second copy of both tables for the decompressor
+(`0x73A520` lengths, `0x73A620` codes, the table `rust/src/dcl.rs` mirrors as
+`TREE_CODES`); **the two copies are byte-identical** and a test pins every
+table constant to the exe image. The code is a complete prefix code
+(`sum 2^-len = 1` exactly, so a wrong byte would break it) and every 13-bit
+window decodes to exactly one byte. Still no shipped stream uses mode 1, so
+there is no file from the game to decode; the encoder side is the exe's own
+init, the decoder is a 13-bit lookup over the same table.
 
 ## Section framing (verified: walk of the corrected decode)
 
@@ -164,16 +263,20 @@ end), all 18 landing on each other with no slack:
 count/row framed, so the walk ends there. `UNIT` has an arm in the dispatcher
 but no section in this file. Pinned by `dcl::tests::conquests_biq_section_walk`.
 
-## `.sav` files: same framing, optional
+## `.sav` files: same wrapper, a different stream
 
 | file | stored | decodes to |
 |---|---|---|
-| `Saves/EGYPT.SAV` (112 586 B) | DCL, header `00 06 86` | 1 748 113 B starting `CIV3\0`, 20 000 `TILE` tags, clean `0x305` end |
-| `Saves/Auto/…4000 BC.SAV` (1 346 958 B) | raw (`CIV3\0` first) | — (already a scenario stream; 20 000 `TILE` tags in place) |
+| `Saves/EGYPT.SAV` (112 586 B) | DCL, header `00 06 86` | 1 748 113 B starting `CIV3\0`, 20 000 `TILE` tags (a 100x100 map has 5 000 cells, four `TILE` chunks each) |
+| `Saves/Auto/…4000 BC.SAV` (1 346 958 B) | raw (`CIV3\0` first) | already the stream |
 
-Saves are scenario streams with `CIV3` magic, stored raw or DCL-wrapped —
-the loader sniffs the magic. The 20 000-tag TILE array corroborates the
-per-tile record work (`NOTES.md` §13): saves carry the live map.
+A save is a DCL-wrapped or raw stream behind the magic `CIV3`; the loader
+sniffs the magic, so both load, and the wrapper is the same codec (the
+compressor reproduces all 10 compressed saves of the corpus byte for byte).
+The body is **not** a scenario stream: it is a dump of the live game objects in
+a fixed order, with the scenario embedded in it as one `BICQ` block. The 20 000
+`TILE` tags are the per-cell chunks of the map section. Format and loaders:
+[`savegame.md`](savegame.md); Rust: `civ3_biq::Save`.
 
 ## Scenario load sequence `0x59AB50` (verified: region sweep)
 
@@ -242,13 +345,12 @@ Editor`/lowercase `editor`. The editor is a separate binary — confirmed.
 
 ## Open
 
-* Mode-1 (tree-literal) streams: implemented per disassembly, unverified.
-  Exhaustive survey of all 68 scenario/save files in the install: 32 are
-  mode-0 DCL (`00 06 84/86`), 36 are raw (`BIC…`/`CIV3…` magic first),
-  **zero** are mode 1. The `0x649980` build is mirrored on the exe's exact
-  flat table layout, including its `0xFF`-marker writes. Verifying mode 1
-  needs a file the game never ships — likely only producible by the
-  `0x648920` compressor path, if at all.
+* Mode-1 (tree-literal) streams: supported in `../biq` (see "The compressor"),
+  tables verified in both exe copies, but **no stream from the game exists to
+  decode**: of all 68 scenario/save files in the install, 32 are mode-0 DCL
+  (`00 06 84/86`), 36 are raw, **zero** are mode 1. `rust/src/dcl.rs` still
+  mirrors the `0x649980` build on the exe's flat table layout and still reports
+  mode 1 as unverified; the `biq` crate's decoder replaces it for scenarios.
 * Mode-0 splits `00 06 84` (every compressed `.biq`/`.bix`) from `00 06 86`
   (`EGYPT.SAV`). Before the mask fix the `84` files *all* decoded wrong,
   which is what produced the earlier "no Conquests file contains `Horses`"
@@ -267,7 +369,11 @@ leader gender, civ gender, aggression, civ index, shunned government,
 favorite government, **default color**, **unique color**. Colors index
 `Art/Units/Palettes/ntpNN.pcx`, each a 16-entry ramp from light (0) to dark
 (15). Examples: Romans 1/1 (red), Americans 5/5 (cyan), Japanese 4/11
-(green `ntp04`, unique red `ntp11`), Vikings 8/31. The rule for choosing
+(green `ntp04`, unique red `ntp11`), Vikings 8/31. Decoded from the shipped
+`civ3mod.bic` (the layout above reproduces the Romans and Japanese values):
+Egyptians 3/3 (yellow `ntp03`), Chinese 5/15 (cyan `ntp05`, unique lilac
+`ntp15`). The Chinese row's 18 city names open with Beijing, Shanghai,
+Canton, Nanking, Tsingtao, Xinjian, Chengdu, Hangchow. The rule for choosing
 unique over default is not traced; `civ3-clone` uses Japan's default color
 at ramp index 4, `(25,148,24)`, for label badges and border beads
 (`cities::CIV_COLOR`).

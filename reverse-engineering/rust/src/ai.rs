@@ -1,10 +1,13 @@
-//! AI play: the game RNG (exact) + turn/difficulty scaffolding.
+//! AI play: MSVC `rand`/`srand` (exact) + turn/difficulty scaffolding.
 //!
-//! See `../ai.md`. The game RNG at `0x64A20E` is verified by disassembly;
-//! everything else here is observed-string inventory with open mechanics.
+//! See `../ai.md`. The `rand()` at `0x64A20E` is verified by disassembly; it is
+//! **not** the combat die (that is [`crate::rng::Rng`] on the global instance
+//! `0xA526B4`, see `../combat.md`). Everything else here is observed-string
+//! inventory with open mechanics.
 
-/// The game RNG (`0x64A20E`): MSVC-compatible `rand()`, paired with
-/// `srand` at `0x64A201` (back to back, classic MSVC layout).
+/// MSVC `rand()` at `0x64A20E` (the `GameRng` name is historical; combat does
+/// not use it), paired with `srand` at `0x64A201` (back to back, classic MSVC
+/// layout).
 ///
 /// ```asm
 /// ; 0x64A201 srand(seed):

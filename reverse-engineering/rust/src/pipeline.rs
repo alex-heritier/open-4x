@@ -103,14 +103,14 @@ pub fn generate(opts: &Options) -> GeneratedMap {
 ///
 /// Deterministic in both arguments.
 pub fn generate_with(opts: &Options, bugs: &OriginalBugs) -> GeneratedMap {
-    let (w, h) = map_size(opts.map_size);
+    let (w, h) = map_size(opts.size);
     let Landmass {
         mut grid,
         field,
         thresholds,
         draws,
         ..
-    } = generate_landmass(w, h, opts, opts.water_level, *bugs);
+    } = generate_landmass(w, h, opts, opts.seed, *bugs);
 
     // --- deconflictStarts(): 0x5eeb00 -----------------------------------
     deconflict_starts(&mut grid, *bugs);
@@ -181,7 +181,7 @@ pub fn deconflict_starts(grid: &mut MapGrid, bugs: OriginalBugs) {
             i
         };
         if let Some(c) = grid.cell_mut(victim.min(grid.num_cells() - 1)) {
-            c.class = 11;
+            c.set_class(11);
         }
     }
 }
@@ -209,15 +209,15 @@ pub fn convert_deserts_at_starts(grid: &mut MapGrid, opts: &Options) -> Fractal 
         grid.h,
         2,
         fflags::WRAP_X,
-        (opts.water_level as u32).wrapping_add(DESERT_CONVERT_SEED),
+        (opts.seed as u32).wrapping_add(DESERT_CONVERT_SEED),
     );
 
     // A Fisher-Yates draw sequence whose results are thrown away; it exists only
     // to advance the LCG so the later rand_int(100) lands elsewhere.
-    let mut rng = Rng::new((opts.water_level as u32).wrapping_add(SHUFFLE_SEED));
+    let mut rng = Rng::new((opts.seed as u32).wrapping_add(SHUFFLE_SEED));
     rng.discard(grid.num_cells());
 
-    let t = opts.temperature.clamp(0, 2) as usize;
+    let t = opts.age.clamp(0, 2) as usize;
     let spec = START_TERRAIN_BANDS[t];
     let p = |pct: i32| fm.percentile(pct);
     let (b0, b1, b2, fixed, b4, b5) =
@@ -225,7 +225,7 @@ pub fn convert_deserts_at_starts(grid: &mut MapGrid, opts: &Options) -> Fractal 
 
     for i in 0..grid.num_cells() {
         let (x, y) = grid.nominal_slot(i);
-        if grid.cell_at(x, y).map(|c| c.class) != Some(2) {
+        if grid.cell_at(x, y).map(|c| c.class()) != Some(2) {
             continue;
         }
         let h = fm.sample(x, y);
@@ -237,14 +237,14 @@ pub fn convert_deserts_at_starts(grid: &mut MapGrid, opts: &Options) -> Fractal 
             // accepted windows, otherwise leave the desert alone.
             if h >= b5 || (h <= b0 && h >= b2) {
                 if let Some(c) = grid.cell_at_mut(x, y) {
-                    c.class = 5;
+                    c.set_class(5);
                 }
             }
         } else {
             // Borderline band: a coin flip between tundra and plains.
             let class = if rng.below(100) < fixed { 6 } else { 10 };
             if let Some(c) = grid.cell_at_mut(x, y) {
-                c.class = class;
+                c.set_class(class);
             }
         }
     }
@@ -334,7 +334,7 @@ pub const CLIMATE_THRESHOLDS: [[i32; 7]; 3] = [
 /// flood in awaits the `paintContinents` (`0x5eddb0`) region ids, which no
 /// module models yet; the flood itself is implemented and tested below.
 pub fn assign_biomes(grid: &mut MapGrid, opts: &Options, bugs: OriginalBugs) {
-    let res = opts.resources.clamp(0, 2) as usize;
+    let res = opts.temperature.clamp(0, 2) as usize;
     let cli = opts.climate.clamp(0, 2) as usize;
     let (a0, b, c, d, e) = (
         RESOURCE_THRESHOLDS[res][0],
@@ -373,9 +373,9 @@ pub fn assign_biomes(grid: &mut MapGrid, opts: &Options, bugs: OriginalBugs) {
         grid.h,
         BIOME_LEVEL,
         ff,
-        (opts.water_level as u32).wrapping_add(BIOME_FRACTAL_SEED),
+        (opts.seed as u32).wrapping_add(BIOME_FRACTAL_SEED),
     );
-    let mut rng = Rng::new((opts.water_level as u32).wrapping_add(BIOME_SEED_BASE));
+    let mut rng = Rng::new((opts.seed as u32).wrapping_add(BIOME_SEED_BASE));
 
     // Fisher-Yates over the cell indices (0x5f168d..0x5f16cf).
     let n = grid.num_cells();
@@ -455,7 +455,7 @@ pub fn assign_biomes(grid: &mut MapGrid, opts: &Options, bugs: OriginalBugs) {
                 other => other,
             };
         }
-        grid.cell_mut(cell).unwrap().class = cls;
+        grid.cell_mut(cell).unwrap().set_class(cls);
     }
 
     contour_pass(grid, opts, bugs);
@@ -500,7 +500,7 @@ pub fn write_biome_class(
     while let Some((x, y)) = stack.pop() {
         let idx = grid.index(x, y);
         bonus[idx] = 1; // 0x5f1d14
-        let center_class = grid.cell(idx).map(|c| c.class).unwrap_or(255);
+        let center_class = grid.cell(idx).map(|c| c.class()).unwrap_or(255);
         if matches!(center_class, 5 | 6 | 10) {
             continue; // 0x5f1d2c / 0x5f1d48 / 0x5f1d64
         }
@@ -528,7 +528,7 @@ pub fn write_biome_class(
                 continue;
             }
             // 0x5f1ebf / 0x5f1ed7 / 0x5f1eef: neighbour terrain guard.
-            if matches!(grid.cell(nidx).map(|c| c.class), Some(5 | 6 | 10)) {
+            if matches!(grid.cell(nidx).map(|c| c.class()), Some(5 | 6 | 10)) {
                 continue;
             }
             // 0x5f1f0b: unvisited only.
@@ -570,16 +570,16 @@ fn contour_pass(grid: &mut MapGrid, opts: &Options, bugs: OriginalBugs) {
         grid.h,
         BIOME_CONTOUR_LEVEL,
         ff,
-        (opts.water_level as u32).wrapping_add(BIOME_CONTOUR_SEED),
+        (opts.seed as u32).wrapping_add(BIOME_CONTOUR_SEED),
     );
     let p70 = fm.percentile(CONTOUR_PERCENTILE);
 
     for i in 0..grid.num_cells() {
-        if grid.cell(i).map(|c| c.sub_class) == Some(0) {
+        if grid.cell(i).map(|c| c.sub_class()) == Some(0) {
             continue;
         }
         // 0x5f19e6: classes 5, 6, 8, 9 and 10 are left alone.
-        if matches!(grid.cell(i).map(|c| c.class), Some(5 | 6 | 8 | 9 | 10)) {
+        if matches!(grid.cell(i).map(|c| c.class()), Some(5 | 6 | 8 | 9 | 10)) {
             continue;
         }
         let (x, y) = grid.coords(i);
@@ -601,7 +601,7 @@ fn contour_pass(grid: &mut MapGrid, opts: &Options, bugs: OriginalBugs) {
 fn peak_pass(grid: &mut MapGrid, opts: &Options) {
     let _ = opts;
     for i in 0..grid.num_cells() {
-        if grid.cell(i).map(|c| c.class) != Some(6) {
+        if grid.cell(i).map(|c| c.class()) != Some(6) {
             continue;
         }
         let (x, y) = grid.coords(i);
@@ -616,7 +616,7 @@ fn peak_pass(grid: &mut MapGrid, opts: &Options) {
             }
             let hit = grid
                 .cell_at(nx, ny)
-                .map(|s| s.sub_class == 3)
+                .map(|s| s.sub_class() == 3)
                 .unwrap_or(false);
             if hit {
                 // 0x5f1b12: the roll is per-step, not once.
@@ -637,8 +637,9 @@ mod tests {
 
     fn opts(map_size: i32, water: i32) -> Options {
         Options {
-            map_size,
-            water_level: water,
+            size: map_size,
+            ocean: map_size,
+            seed: water,
             ..Options::default()
         }
     }
@@ -653,8 +654,8 @@ mod tests {
     fn flood_grid() -> (MapGrid, Vec<u16>, Vec<u8>) {
         let mut grid = MapGrid::new(8, 4, 0, 0);
         for c in grid.cells.iter_mut() {
-            c.class = 2;
-            c.sub_class = 2;
+            c.set_class(2);
+            c.put_sub_class(2);
             c.continent = 1;
         }
         let n = grid.num_cells();
@@ -669,8 +670,8 @@ mod tests {
         // holds one even-parity tile and all even tiles are reachable, so
         // the flood still claims all 16 cells.
         assert!(bonus.iter().all(|&b| b == 1), "unclaimed cells remain");
-        assert!(grid.cells.iter().all(|c| c.class == 0));
-        assert!(grid.cells.iter().all(|c| c.sub_class == 0));
+        assert!(grid.cells.iter().all(|c| c.class() == 0));
+        assert!(grid.cells.iter().all(|c| c.sub_class() == 0));
     }
 
     #[test]
@@ -678,17 +679,17 @@ mod tests {
         let (mut grid, regions, mut bonus) = flood_grid();
         write_biome_class(&mut grid, &regions, &mut bonus, 0, 0, 2);
         assert!(bonus.iter().all(|&b| b == 1), "cls 2 still floods");
-        assert!(grid.cells.iter().all(|c| c.class == 2), "cls 2 writes nothing");
+        assert!(grid.cells.iter().all(|c| c.class() == 2), "cls 2 writes nothing");
     }
 
     #[test]
     fn biome_writer_guarded_center_marks_but_returns() {
         let (mut grid, regions, mut bonus) = flood_grid();
-        grid.cells[0].class = 6;
+        grid.cells[0].set_class(6);
         write_biome_class(&mut grid, &regions, &mut bonus, 0, 0, 0);
         // bonus[idx] = 1 lands before the terrain guard (0x5f1d14).
         assert_eq!(bonus[0], 1);
-        assert_eq!(grid.cells[0].class, 6, "guarded cell keeps its class");
+        assert_eq!(grid.cells[0].class(), 6, "guarded cell keeps its class");
         assert!(bonus[1..].iter().all(|&b| b == 0), "no flood from guard");
     }
 
@@ -699,15 +700,15 @@ mod tests {
         let cases: &[(&str, Box<dyn Fn(&mut MapGrid, &mut Vec<u16>, &mut Vec<u8>)>)] = &[
             ("region", Box::new(|_, r, _| r[1] = 9)),
             ("continent", Box::new(|g, _, _| g.cells[1].continent = 2)),
-            ("terrain", Box::new(|g, _, _| g.cells[1].class = 6)),
+            ("terrain", Box::new(|g, _, _| g.cells[1].set_class(6))),
             ("visited", Box::new(|_, _, b| b[1] = 1)),
         ];
         for (name, gate) in cases {
             let (mut grid, mut regions, mut bonus) = flood_grid();
             gate(&mut grid, &mut regions, &mut bonus);
-            let before = grid.cells[1].class;
+            let before = grid.cells[1].class();
             write_biome_class(&mut grid, &regions, &mut bonus, 0, 0, 0);
-            assert_eq!(grid.cells[1].class, before, "{name}: blocked cell written");
+            assert_eq!(grid.cells[1].class(), before, "{name}: blocked cell written");
             if *name != "visited" {
                 assert_eq!(bonus[1], 0, "{name}: blocked cell marked");
             }
@@ -723,7 +724,7 @@ mod tests {
         for size in 0..5 {
             let m = generate(&opts(size, 50));
             assert!(
-                m.grid.cells.iter().all(|c| c.class <= 13),
+                m.grid.cells.iter().all(|c| c.class() <= 13),
                 "size {size}: a cell has class > 13"
             );
         }
@@ -746,7 +747,7 @@ mod tests {
         let (w, h) = map_size(1);
         let before = generate_landmass(w, h, &opts(1, 50), 50, OriginalBugs::NONE);
         assert!(
-            before.grid.cells.iter().all(|c| c.is_water() || c.class == 2),
+            before.grid.cells.iter().all(|c| c.is_water() || c.class() == 2),
             "the land/sea stage should leave only class 2 on land"
         );
 
@@ -756,7 +757,7 @@ mod tests {
             .cells
             .iter()
             .filter(|c| !c.is_water())
-            .map(|c| c.class)
+            .map(|c| c.class())
             .collect();
         assert!(
             classes.len() >= 3,
@@ -777,24 +778,24 @@ mod tests {
                 .grid
                 .cells
                 .iter()
-                .filter(|c| !c.is_water() && (c.class == 0 || c.class == 1))
+                .filter(|c| !c.is_water() && (c.class() == 0 || c.class() == 1))
                 .count()
         };
         assert_ne!(count(0), count(2), "Climate had no effect at all");
     }
 
     #[test]
-    fn resources_change_the_wet_classes() {
-        let count = |resources: i32| {
+    fn temperature_changes_the_wet_classes() {
+        let count = |temperature: i32| {
             let o = Options {
-                resources,
+                temperature,
                 ..opts(1, 50)
             };
             generate(&o)
                 .grid
                 .cells
                 .iter()
-                .filter(|c| !c.is_water() && (c.class == 8 || c.class == 9))
+                .filter(|c| !c.is_water() && (c.class() == 8 || c.class() == 9))
                 .count()
         };
         // E = 3, 5, 7 scales the probability of class 9 by nearLand.
@@ -829,7 +830,7 @@ mod tests {
     fn deconflict_leaves_the_map_consistent() {
         let o = opts(0, 50);
         let m = generate(&o);
-        assert!(m.grid.cells.iter().all(|c| c.class <= 13));
+        assert!(m.grid.cells.iter().all(|c| c.class() <= 13));
     }
 
     #[test]
@@ -843,7 +844,7 @@ mod tests {
         // contour pass is for. So `==` is the default here and the flag inverts
         // it for anyone who wants to explore the other reading.
         let m = generate(&opts(2, 50));
-        let hills = m.grid.cells.iter().filter(|c| c.class == 7).count();
+        let hills = m.grid.cells.iter().filter(|c| c.class() == 7).count();
         assert!(hills > 0, "no class-7 cells at all");
         assert!(
             hills * 200 >= m.land_cells(),
@@ -863,7 +864,7 @@ mod tests {
                 .grid
                 .cells
                 .iter()
-                .filter(|c| c.class == 7)
+                .filter(|c| c.class() == 7)
                 .count()
         };
         let (eq, le) = (hills(&all), hills(&none));
@@ -886,7 +887,7 @@ mod tests {
                 .grid
                 .cells
                 .iter()
-                .filter(|c| c.class == 11)
+                .filter(|c| c.class() == 11)
                 .count()
         };
         let (buggy, fixed) = (shallow(&all), shallow(&none));
@@ -909,9 +910,9 @@ mod tests {
             for c in &m.grid.cells {
                 if c.is_water() {
                     assert!(
-                        (11..=13).contains(&c.class),
+                        (11..=13).contains(&c.class()),
                         "water cell has class {}",
-                        c.class
+                        c.class()
                     );
                 }
             }
@@ -923,7 +924,7 @@ mod tests {
         // The land/sea stage writes 13 for every cell below the sea level, and
         // the biome pass skips water, so class 13 must still be plentiful.
         let m = generate(&opts(1, 50));
-        let deep = m.grid.cells.iter().filter(|c| c.class == 13).count();
+        let deep = m.grid.cells.iter().filter(|c| c.class() == 13).count();
         assert!(deep > 0, "no abyssal cells survived");
     }
 }

@@ -22,6 +22,11 @@ impl ProductionPrompts {
         self.pending.push_back((city, civ, completed));
     }
 
+    /// A city changed hands: its previous owner no longer decides for it.
+    pub fn forget_city(&mut self, city: Entity) {
+        self.pending.retain(|(c, _, _)| *c != city);
+    }
+
     /// Index of `civ`'s oldest pending prompt.
     fn first_for(&self, civ: usize) -> Option<usize> {
         self.pending.iter().position(|(_, c, _)| *c == civ)
@@ -42,8 +47,13 @@ impl ProductionPrompts {
     }
 }
 
-pub fn inactive(prompts: Res<ProductionPrompts>, civs: Res<Civilizations>) -> bool {
-    !prompts.blocks(civs.active)
+/// Neither a build decision nor an advisor's modal is waiting.
+pub fn inactive(
+    prompts: Res<ProductionPrompts>,
+    civs: Res<Civilizations>,
+    advisors: Res<crate::advisors::Advisors>,
+) -> bool {
+    !prompts.blocks(civs.active) && !advisors.is_open()
 }
 
 pub fn city_input_allowed(
@@ -104,8 +114,13 @@ pub fn show(
     map: Res<GameMap>,
     assets: Res<AssetServer>,
     civs: Res<Civilizations>,
+    advisors: Res<crate::advisors::Advisors>,
     roots: Query<Entity, With<PromptRoot>>,
 ) {
+    // One modal at a time: a build decision waits for the advisor's.
+    if advisors.is_open() {
+        return;
+    }
     // A panel left over from the civ that just ended its turn comes down
     // before the next player sees it; its decision stays pending.
     if prompts.open.is_some_and(|civ| civ != civs.active) {

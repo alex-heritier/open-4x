@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "civ3-biq"
+version = "0.1.0"
+
+[[package]]
 name = "civ3mapgen"
 version = "0.1.0"
+dependencies = [
+ "civ3-biq",
+]

@@ -285,6 +285,9 @@ cd reverse-engineering/rust && cargo test --release
 - `reverse-engineering/REGIONS.md`: code atlas and fan-out units.
 - `reverse-engineering/NOTES.md`: mapgen source of truth, method.
 - `reverse-engineering/dynamic-tracing.md`: Wine/winedbg runbook.
+- `reverse-engineering/tools/emu/`: Unicorn harness that runs the exe's own save
+  loader headless on a decoded `.SAV` and traces every chunk and raw read
+  (`savegame.md` section 7); use it to verify a grammar instead of transcribing it.
 - `reverse-engineering/rust/`: reference implementation + tests.
 - `scripts/scans.py`: stdlib-only `calls`/`pushes`/`tags`/`slots`/`buckets`
   scans over any PE32 exe (`--exe` overrides the default search).

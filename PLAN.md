@@ -8,7 +8,7 @@ A playable solo sandbox: open straight into a new game as Japan, move units, exp
 
 ## Non-goals for MVP
 
-Settled: no AI civs, no technology, no diplomacy or trade, no multiplayer, no worker improvements (D4), no save or load, no minimap, no combat targets (no huts, no barbarians), no main menu or settings.
+Settled: rule-based AI civs only (`src/ai.rs`: one skill level), no multiplayer, no trade of cities or world maps (technology and diplomacy were added after the MVP: `src/research.rs`, `src/diplomacy.rs`, `src/advisors.rs`), no worker improvements (D4), no save or load, no minimap, no combat targets (no huts, no barbarians), no main menu or settings.
 Proposed, not yet accepted: none.
 
 ## Settled decisions
@@ -194,7 +194,8 @@ Model pieces added as the panel's data sources: `cities::tile_commerce` /
 `city_commerce` (water yields commerce, roads add one, the city tile always
 one), `commerce_split`, `Production::{upkeep, culture, happy}`,
 `City::{culture, founded}` with `culture_thresholds` powers of ten, and a
-`Treasury` that accumulates the tax share each turn.
+per-civ `Treasury` (its income, upkeep and bills are under "Economy"
+below).
 Deviations to revisit: no happiness model, so luxury rows show one face per
 pair of sources; population shows the citizen count rather than Civ3's
 scaled figure; the calendar is the turn number; government is fixed to
@@ -206,19 +207,21 @@ bar's arrows walking Kyoto <-> Osaka.
 ### Cultural borders (landed)
 
 Cities now claim plots on the map and the map draws Civ3's dashed border
-ribbon around them. `cities::{culture_level, culture_radius, territory}`
-turn culture into a radius: level 1 (the founding state, culture < 10)
-reaches every tile within two tiles — the same 21 tiles the work radius
-has — and each further power of ten adds a ring, to Civ3's five-tile cap.
+ribbon around them. `cities::{culture_level, culture_reach_sq, territory}`
+turn culture into a shape, read off the border owners in the shipped saves
+(`reverse-engineering/economy.md`): a city claims every tile within squared
+distance `level² + 1`, so the 3x3 square at the start (culture < 10), the
+21-tile city radius from culture 10, 37 tiles from 100, and the same rule
+on up to level 6 (levels 4 to 6 are a **HYPOTHESIS**, no save is that old).
 The nearest city owns a tile; on a tie the city with more culture wins,
 then the older one, so ownership is stable frame to frame. `resources_owned`
 counts goods inside the real borders now instead of standing in the work
-radius, which is the same set until a city's culture passes 10.
+radius.
 
 `src/borders.rs` draws a ribbon on a tile edge only when the tile is owned
-and the tile across that edge belongs to another city or nobody, which
-keeps the ribbon inside its own territory and gives two cities of one civ
-a line down the middle, the way Civ3 shows internal borders. Art is
+and the tile across that edge belongs to another civ or nobody, which
+keeps the ribbon inside its own territory and merges the cities of one civ
+into one outline, as Civ3 does. Art is
 Civ3's own `Art/Terrain/Territory.pcx` (prep stage `borders`): the four
 straight cells of its 2x4 sheet, baked white and tinted with the civ's map
 color, `cities::CIV_BADGE` (Japan's white). Ribbons hide on never-seen
@@ -266,3 +269,52 @@ clean, unattended captures of the plain selection, the held preview, the
 move after release and the armed Go-to preview, plus a live cliclick
 press-and-hold on the running game showing the route appear and the unit
 move on release.
+
+### Economy: tile working, growth and gold (landed)
+
+Cities now run Civ3's food, shield and gold loop. The pure rules are in
+`src/economy.rs` (each with a test); `cities::end_turn_cities` applies them
+when a civ hands the hotseat over. Findings and addresses are in
+`reverse-engineering/economy.md` ("Growth and the food box", "Gold: unit
+support and upkeep"), mirrored in `reverse-engineering/rust/src/economy.rs`.
+
+- Working tiles: each citizen works one tile of the 21-tile radius, picked
+  by the governor (food, then shields, then commerce) or by a click on the
+  city screen. A tile is out of reach when it is any city's center, another
+  city is working it, or it lies inside another civ's border
+  (`cities::taken_tiles`). When a city is founded on a picked tile, a border
+  grows over it or a neighbor takes it, `reconcile_tiles` drops the pick and
+  the governor refills the gap. Under Despotism a worked tile's yield above
+  2 loses 1 (`economy::despotism`); the city center is exempt.
+- Growth: the food box is 20 / 40 / 60 for a town (size 1-6), city (7-12)
+  or metropolis (13+); a city grows when stored food plus the surplus
+  reaches it. A Granary keeps half of the box that filled; without one the
+  store empties and the overflow is lost. A negative total empties the
+  store and costs a citizen (a size 1 city only loses the food).
+- Gold: tax is the tax share of each city's commerce. Improvements cost
+  their upkeep. Units cost 1 gold each past a free allowance of 4 per city,
+  pooled civ-wide (the Despotism row of the game's GOVT table); a civ with
+  no city pays nothing. The books close before the cities build or grow, so
+  a unit completed this turn is charged from the next one.
+- Shortfalls: the tax joins the treasury, upkeep is paid first and units
+  second. Upkeep the gold cannot cover sells one improvement, whose shield
+  cost joins the treasury, and the rest of that bill is forgiven. Unit
+  support the gold cannot cover empties the treasury and disbands the
+  cheapest unit to rebuild (a Warrior before an equally priced Worker).
+  Both post the game's own wording.
+- The bottom-right info box shows the active civ's `N Gold (+M per turn)`,
+  from the same `economy::finance` the turn settles (a `debug_assert`
+  checks it); a deficit is red. The city screen's food, shield and
+  commerce rows read the same per-city yield functions.
+
+Deviations to revisit: Civ3 rolls a die to pay units before upkeep one turn
+in four and starts its sale at a random city, and the clone is
+deterministic; the sale price is the shield cost, since the binary's divisor
+is not recovered (`[0x9C7268]`); no Aqueduct or Hospital growth caps (no such
+buildings, no fresh water); no corruption or waste; the happiness model is
+still absent, so no disorder; no captured-unit exemption (no capture).
+Verified: `cargo test` 162/162, `cargo build` clean; the reference crate's
+222 lib tests pass; screenshots of the city screen (commerce icons, "Growth
+in 10 turns" with a 20-cell food box); and a scripted run (one city, eleven
+units by the game's own `report`) whose info box read `0 Gold (-7 per turn)`
+in red, then, after the turn disbanded a Warrior, `(-6 per turn)`.

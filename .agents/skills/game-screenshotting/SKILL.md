@@ -102,6 +102,9 @@ CIV3_SHOT='/tmp/s-{}.png' CIV3_SHOT_FRAME=90,160 cargo run
 ```
 
 Actions: `key <K>`, `end <n>`, `sel <UnitType>`, `tp <x>,<y>`,
+`spawn <UnitType> <civ> <x>,<y>`, `go <x>,<y>` (a move that ends on an enemy is
+an attack), `report` (prints the units near the first city with their hit
+points: ground truth, since a captured image only shows so much),
 `imp <x>,<y> <road|irr|mine>`, `city`, `btn <Change|Close|Governor|CloseMenu|Pick:<item>|Queue:<item>|Unqueue:<i>>`,
 `tile <rx>,<ry>`. `@dx,dy` coordinates are relative to the first city. Each
 step prints `script: frame N: ...`; a missing button prints `script: no

@@ -1,4 +1,6 @@
-//! The map generator's private pseudo-random number generator.
+//! The `Random` class of `Civ3Conquests.exe`: the pseudo-random generator used
+//! by the map generator **and** by every gameplay die (combat, retreat,
+//! bombard, riot, ...).
 //!
 //! Recovered from `Civ3Conquests.exe`:
 //!
@@ -20,10 +22,24 @@
 //! 0x60baa2  fmul qword [0x6716C8]         ; 2^-15
 //! ```
 //!
-//! This is a *different* generator from the game's own `rand()` at `0x64a20e`
-//! (MSVC's LCG, state stored at `this+0x14`). The map generator never uses the
-//! game RNG, so map generation is completely independent of combat, AI and the
-//! save file.
+//! # Which instance is which
+//!
+//! There are three random sources in the executable:
+//!
+//! * **The gameplay instance**, a global `Random` object at `0xA526B4` (171
+//!   `call 0x60bab0`/`0x60ba80` sites pass `ecx = 0xA526B4`): combat rounds
+//!   (`0x4A5B3C`), retreat, bombard, and so on. Its state is seeded from
+//!   `timeGetTime()` at start-up (`0x56C1EA`) or from the shared multiplayer
+//!   seed `[0x9903B8]`, and re-seeded from the clock on load unless a
+//!   preserve-seed flag is set (`0x591B66`). It is [`Rng`] exactly.
+//! * **The map generator's private instances**, seeded from
+//!   `water_level + <per-stage constant>`. Same class, separate state, so map
+//!   generation does not disturb gameplay dice (see [`crate::pipeline`]).
+//! * **MSVC `rand()`** at `0x64a20e`, a *different* LCG whose state lives in
+//!   the per-thread data at `ptd+0x14` (70 direct call sites). It rolls no
+//!   combat die.
+//!
+//! The combat model that drives the gameplay instance is in [`crate::combat`].
 
 /// Multiplier of the map generator's LCG (`0x41C64E6D`).
 const A: u32 = 1_103_515_245;
@@ -71,6 +87,13 @@ impl Rng {
     #[inline]
     pub fn one_in(&mut self, n: u32) -> bool {
         self.below(n) == 0
+    }
+
+    /// Adds `by` to the state without drawing, as `finalPass` does with its
+    /// `salt` argument before the slot shuffle (`0x5EF672`).
+    #[inline]
+    pub fn skew(&mut self, by: u32) {
+        self.state = self.state.wrapping_add(by);
     }
 
     /// Advances the LCG `n` times, discarding the results.
@@ -151,6 +174,20 @@ mod tests {
                 (c as i64 - mean).abs() < mean / 4,
                 "bin {i} has {c}, mean {mean}"
             );
+        }
+    }
+
+    #[test]
+    fn below_is_the_exact_integer_floor_of_the_scaled_draw() {
+        // With k the 15-bit output, k * 2^-15 and n * (k * 2^-15) are exact in
+        // f64 (at most 31 significant bits), so truncation equals (k * n) >> 15.
+        // The combat tests and combat.md reason in this integer form.
+        let mut r = Rng::new(0x1234_5678);
+        let mut shadow = r;
+        for n in [3u32, 100, 512, 1024, 6000, 0xFFFF].iter().cycle().take(6000) {
+            shadow.next_f64();
+            let k = (shadow.state >> 16) & 0x7FFF;
+            assert_eq!(r.below(*n) as u32, (k * n) >> 15);
         }
     }
 

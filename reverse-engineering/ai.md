@@ -4,9 +4,14 @@ Status: foundations verified, turn logic not yet recovered. This file records
 the confirmed RNG split, the string inventory that bounds the AI surface, and
 the concrete next disassembly targets. Anything beyond that is marked open.
 
-## Two RNGs (verified this session)
+**Update 2026-10-01:** combat resolution (odds, rounds, retreat, bombard) is now
+recovered in [`combat.md`](combat.md) and `rust/src/combat.rs`. It changes the
+RNG picture below: the combat dice are *not* MSVC `rand()`. Sections that said
+otherwise carry a correction note.
 
-Disassembly at `0x64A20E` (game RNG):
+## Two RNGs (verified this session; there are in fact three, see the correction below)
+
+Disassembly at `0x64A20E` (MSVC `rand()`, which is **not** the combat die):
 
 ```asm
 0x64a20e  call 0x64dc93              ; tls/self pointer
@@ -28,15 +33,25 @@ before `rand` (classic MSVC pairing, re-verified with r2 2026-09-29):
 0x64a20d  ret
 ```
 
-Seeded from `timeGetTime()` in the `0x56C1EA` startup path — which draws
-twice: the first draw is saved to `[0xA526B4]`, the second is pushed as
-the `srand` seed — and at game start (`0x6389DD`: `push eax; call
-0x64A201`, then `[esi+0xAF8] = 1` start flag). The same startup path reads
+Seeded from `timeGetTime()` in the `0x56C1EA` startup path, which calls it
+twice: the first value is stored straight into `[0xA526B4]` (the state of the
+global gameplay `Random` instance, see the correction), the second is pushed as
+the `srand` seed. `srand` is also called at game start (`0x6389DD`: `push eax;
+call 0x64A201`, then `[esi+0xAF8] = 1` start flag). The same startup path reads
 prefs through `0x585B00("Video Mode"/"KeepRes"/"QuickStart"/"NoSound")`.
-**Map generation never touches it** — every map stage uses the local LCG
-`0x60BA80` (`*s = *s*1103515245 + 12345`, high 16 bits out). Consequence
-for clones: AI/combat randomness and map randomness are independent
-streams; sharing one RNG is *not* faithful.
+Map generation never touches MSVC `rand`.
+
+**Correction (2026-10-01, [`combat.md`](combat.md) section 1).** MSVC `rand()`
+rolls no combat die. The dice come from the `Random` class (`0x60BA80` float,
+`0x60BAB0` `next(n)`; the LCG `s*1103515245 + 12345`, high 16 bits out) used
+through the **global instance at `0xA526B4`**, which has 171 call sites: combat
+rounds (`0x4A5B3C`), retreat, bombard, riot, enslave and others. The map
+generator uses its own private instances of that same class. So map and
+gameplay randomness are independent *streams* but not different algorithms.
+What the old text left unidentified is that `[0xA526B4]` (stored from the first
+`timeGetTime()` value above) is the **state of that gameplay instance**. Sharing
+the algorithm (`rust/src/rng.rs`) is faithful; sharing one *instance* between
+map generation and gameplay is not.
 
 `rust/src/ai.rs` implements `GameRng` exactly (constants above); first output
 for seed 0 is 38 (`2531011>>16 & 0x7FFF`), asserted in tests.
@@ -66,7 +81,7 @@ CORRECTION: an intermediate recount claimed 65 by dropping four `0x5A`
 sites and one `0x5C` site — re-examined, all five are real. Each dropped
 `0x5A` site is a conditional-branch target (`jne` into the `call`, e.g.
 `0x5A0786 → 0x5A078C`) followed by the full `cdq`/`idiv` modulo idiom, and
-all nine `0x5C` sites are individually characterised below. Game RNG use
+all nine `0x5C` sites are individually characterised below. MSVC `rand()` use
 is pervasive, not centralised:
 
 | region | callers |
@@ -96,10 +111,11 @@ count     = [0x9FD4BC]                   ; owner/global unit count
 for each row r in 0xA52EB4..0xA94B34 step 0x20E4 (32 rows):
     bit  = dword[row]                    ; bit position for this row
     mask = 1 << bit
-    require mask & [0xA526BC] && mask & [0xA526C0]   ; capability words
-    require byte[ebx + idx*4 + 0xA53BC8] != 0        ; overlay-table byte
-        (idx = owner*2105 idiom; 0xA53BC8 is the rivers.md overlay table:
-         the renderer gate and AI selection read the same table)
+    require mask & [0xA526BC] && mask & [0xA526C0]   ; human mask / in-play mask (combat.md 14.3)
+    require byte[ebx + idx*4 + 0xA53BC8] != 0        ; at-war byte (Player +0xD30 + civ)
+        (idx = owner*2105 idiom; 0xA53BC8 is the base of the at-war byte
+         table, combat.md 14.3; the earlier "rivers.md overlay table" label
+         was a misidentification: the renderer reads the same table)
     for each sub-row (same 32-row walk from 0xA52EB4):
         same capability gates, then pass = 0x501B80(ebx, esi, 0)
         if pass && countdown-- == 0: select (ebx, esi), exit via 0x5AFB1E
@@ -202,6 +218,9 @@ Shared idioms with the rest of the game (not combat-specific): the
 `0x270F` meter scale (`sub eax,[esi+0x4C]` then clamp, `0x5B640E`), cell
 index math off map width `[0x9C74D4]` (`sar 1; imul y; add x`, `0x5B641E`),
 unit-record stride arithmetic. Combat odds math itself is not yet isolated.
+*(Superseded 2026-10-01: that `sub eax,[esi+0x4C]` is `maxHP - damage`, the odds
+core is `0x4A0ED0`, and `0x270F` is a redundant compare; see
+[`combat.md`](combat.md) sections 3 and 6.)*
 
 ## Target select `0x5B6820` and resolve `0x4A53A0` (verified this session)
 
@@ -221,6 +240,10 @@ unit-record stride arithmetic. Combat odds math itself is not yet isolated.
   cell-index + `0x5D16A0` + cell vfunc `+0xB8`, then `0x56D040`
   (bombard-chain head) — resolve = move-step construction, then
   effect application down the same chain bombard uses.
+  *(Correction 2026-10-01: that is only the head of the function. Its 2 235-line
+  body also holds the duel: the odds call `0x4A5AF9` into `0x4A0ED0`, the round die
+  `0x4A5B3C`, damage writes `0x4A5BA4`/`0x4A66F9` and the retreat blocks
+  `0x4A647B`/`0x4A6F84`. See [`combat.md`](combat.md) sections 6-7.)*
 * `0x5B2820` head is a bounds-checked indexed fetch, not odds math:
 
 ```text
@@ -244,6 +267,10 @@ as `table_backptr`.
   (`setg` byte at step `+9`), capability test `0x10010000`, then
   `0x4A1910`. Modeled in `rust/src/ai.rs` as `wrap_coord`; the odds core
   moves one level deeper (`0x4A1590` / `0x4A1910`).
+  *(2026-10-01: the `setg` byte at step `+9` and its sibling at `+8` are the
+  attacker and defender retreat-eligibility flags. The odds core is `0x4A0ED0`;
+  `0x4A1590`/`0x4A1910` are tile predicates, not odds. See
+  [`combat.md`](combat.md) section 7.)*
 
 ## Step guards `0x4A1590` / `0x4A1910` (verified this session)
 
@@ -265,10 +292,17 @@ as `table_backptr`.
   `0x4A1590` — a bounded recursive cell walk. The backptr reuse confirms
   the `table_backptr` model a second time.
 * `rust/src/ai.rs` gains `cell_index`; odds math proper remains open.
+  *(Superseded 2026-10-01: see [`combat.md`](combat.md) and `rust/src/combat.rs`.)*
 
 ## Combat-dice exclusion map (verified 2026-09-29)
 
-All randomness flows through `0x64A20E` (`0x64A201` is srand-only, 2
+**Superseded in part (2026-10-01):** the sentence "All randomness flows through
+`0x64A20E`" is wrong. The combat die is not an MSVC `rand()` call at all; it is
+`next(1024)` on the global `Random` at `0xA526B4` (`combat.md` section 1), which
+is why no `rand()` site is the die. The census below remains a valid list of what
+the 70 `rand()` sites are *not*.
+
+MSVC `rand()` flows through `0x64A20E` (`0x64A201` is srand-only, 2
 startup callers; no MSVCRT imports). All 70 raw `E8` sites ranked; the
 die roll is NOT in: `0x5B` (zero callers), `0x56`/`0x61` (zero),
 `0x4A` (`0x4AEC63` = 6-of-8 shuffle only), `0x5C` (`0x5CEAxx` =
@@ -293,6 +327,12 @@ a mutator. Body adds unit fields `+0x5D` (flag byte, cleared via
 HP field and damage write are still open, and with them the odds
 core's data anchor.
 
+**Resolved (2026-10-01, [`combat.md`](combat.md) sections 5-6):** there is no
+stored HP. Remaining HP is `maxHP - [unit+0x4C]` with `maxHP = 0x5BE5B0`
+(`EXPR[level].baseHP + PRTO.+0xA4`, floor 1); `[unit+0x4C]` is the damage taken,
+written by the duel loop `0x4A53A0` (`0x4A5BA4`, `0x4A66F9`), one point per round.
+This function is the kill, not the damage.
+
 ## Stack merge `0x5BCC90` (verified: head read)
 
 Field census of `0x5B` (`mov r32,[r+disp8]` ranking) surfaced hot
@@ -307,6 +347,14 @@ Disband block `0x5BC394`: sets bit `0x10` in `[esi+0x30]`,
 `[esi+0x44]` = shield value via `0x4ACD70` evaluator (max-take),
 `DISBANDSHIELDS` text slot — so `+0x44` = shields, `+0x30` bit
 `0x10` = disband flag. HP still unidentified.
+
+**Corrected (2026-10-01, [`combat.md`](combat.md) sections 5-6):** `+0x4C` is the
+unit's **damage taken** (the merge adds the donor's damage to the receiver's, i.e.
+an army pools its members' damage, and zeroes the donor), `+0x50` is the movement
+already used (max'ed on merge), and `+0x44` is the **experience-level index** that
+`0x5BE5B0` uses to pick the `EXPR` row for base hit points. The "stack-summed
+accumulator" and "`+0x44` = shields" readings above are superseded; the disband
+block's `[esi+0x44]` write was not shown to be on a unit record and is unverified.
 
 ## Shuffled 6-of-8 picker `0x4AEC48–0x4AECAB` (verified: `r2`)
 
@@ -418,7 +466,8 @@ deferred tail through `0x47A430` (`0x4B5C64`) — all converging on the
 → `HURRY_CIVIL_DISORDER`; owner compare `[0x9FD4BC]`; `0x47B530`
 neg/sbb/`&0x4000` prelude. Sibling `0x4B5CA0` holds
 `HURRY_NOT_ENOUGH_PEOPLE` (`0x4B5EF1`) + `0x61C570` + the same commit tail.
-Hurry gold/people cost math: open.
+Hurry gold/people cost math: decoded in [`hurry.md`](hurry.md) (the validator
+does not apply the hurry; `0x4B5CA0` does).
 
 ## Disorder turnover `0x4BDFF0` (verified: region sweep)
 
@@ -432,7 +481,19 @@ ecx=`0x9F8700`, x/y from words `[esi+0x24]`/`[esi+0x26]`):
 (`0x4BE2A6`/`0x4BE410`), `CIVIL_DISORDER_OVER` (`0x4BE323`);
 `WLTKD`/`WELOVEKINGOVER` (`0x4BE658`/`0x4BE70F`) share the idiom.
 
+What the flag does to the city's totals (`yields.md` sections 5.3, 5.4): a city in
+disorder eats all its gross food (`0x4B0540`) and loses all its gross shields (the
+`kind = 1` call of `0x4B1190`). **Correction:** the happiness stage `0x4BCFF0`, which runs last in
+the recompute chain `0x4B10F0`, sets no flag. It only rebuilds the citizen moods; `0x4BDFF0` sets and
+clears bit 0 once per turn from the sequencer `0x4BE970`, on the moods the last recompute left, and
+the flag applies from the next recompute. The riot roll, the building it destroys and the
+`rand() % 3` sound are specified in [`happiness.md`](happiness.md) section 7.
+
 ## Spaceship/production tail `0x4B9270` (verified: region sweep)
+
+> Correction: `0x4B9270` is the **building-completion routine** (wonder built elsewhere, completion,
+> announcements), and the `0x61C5A0` calls named below are message-argument setters, not effects. The
+> full specification is [`city-turn.md`](city-turn.md) section 6.
 
 `0x55A240` → `0x61C5A0` (`0x4B98F2`/`0x4B98FA`/`0x4B990F`, the bombard/riot
 effect chain) → `0x5565B0` with `SUMMARY_THEIR_SPACESHIP_PART`
@@ -464,8 +525,11 @@ Pushes `BARBARIAN_DESTROY_WALLS` (`0x72CC64`) + `0xCADC18` into the
 shared effect applicator) and a `0x47B530` gate, followed by a
 `0xA52EB8`/`0xA52EDC`/`0xA52EE0` table scan with 2105-stride math.
 Siblings: `BARBARIAN_CAPTURE_CITY_{POPULATION,GOLD,PRODUCTION}`
-(`0x563688`/`0x563783`/`0x563898`). Linkage to camp placement
-(`0x5F2090`) and `BARBARIAN_ATTACK` (`0x5B628B`): open.
+(`0x563688`/`0x563783`/`0x563898`). The whole flow is the barbarian branch of
+`Player::capture` `0x563410`: the loss chain, the gold formula and the unit removal are
+decoded in `combat.md` section 14.2 (`rust/src/capture.rs`: `raid_loss`, `raid_loot`), the
+non-barbarian branches in `capture.md`. Linkage to camp placement (`0x5F2090`) and
+`BARBARIAN_ATTACK` (`0x5B628B`): open.
 
 ## Game-log queue `0x4ED220` (verified: region sweep)
 
@@ -588,10 +652,14 @@ what `[unit+0x64]` selects.
 
 ## Next targets (concrete)
 
-1. Combat odds: data flow between `0x5B6820` (target select) and `0x4A53A0`
-   (resolve). RNG triage DONE (see sections above): no `0x5B` draws,
-   `0x48/4A/4B` + `0x4D7EC0` ruled out, `0x5C` mapped. Next: live
-   RNG + HP-write trace during an EGYPT combat.
+1. Combat odds: **DONE (2026-10-01)**, see [`combat.md`](combat.md): odds
+   `0x4A0ED0`, duel loop `0x4A53A0`, retreat, bombard, HP. What remains of it is
+   the data flow between `0x5B6820` (target select) and `0x4A53A0` (resolve), plus
+   the open list in `combat.md` section 12 (stack and army participant reselection
+   `0x4A4B30`, the kill routine `0x5BBBC0`, the AI fight estimator `0x4A7280`). The
+   army fortify bonus, the interception duel `0x4A4520` (`air.md`), where bombard
+   removes HP (`combat.md` section 8.4) and the promotion roll (`0x5BEF00`) are
+   resolved.
 2. Settler site scorer: `TUT_*` is a dead end (all 22 keys, zero
    `.text` refs — tutorial engine is data-driven). Lone `0x5B`
    founding-gate caller `0x5B9F90` is order *execution* (`push
@@ -621,9 +689,15 @@ what `[unit+0x64]` selects.
 (hypothesis: handicap multipliers, values open), turn-slice counter model
 from the upkeep format string, three-stage `action_available` gate,
 `table_backptr`, `cell_index`, `wrap_coord`, `in_bounds`. Combat odds math
-proper and the full turn-loop root: open, no stubs.
+now lives in `rust/src/combat.rs` ([`combat.md`](combat.md)); the full turn-loop
+root is still open, no stubs.
 
 ## Combat RNG map (verified: `r2` + `scans.py`, 2026-09-29)
+
+**Note (2026-10-01):** this section hunts the combat die among MSVC `rand()` call
+sites; the die is actually `next(1024)` on `0xA526B4` ([`combat.md`](combat.md)),
+so the negative results below are about `rand()` only. They stay valid as a
+description of what those `rand()` sites do.
 
 No `0x64A20E` (RNG draw) call site exists anywhere in `0x5Bxxxx` — the
 `0x5B5xxx` combat-log cluster resolves no randomness itself. The four
@@ -647,6 +721,8 @@ Remaining odds-hunt surface: the four `0x48/4A/4B` RNG sites (resolve
 `0x4A53A0` lives in `0x4A` — a draw there would be round resolution) and
 the nine `0x5C` unit-AI sites; then a live HP-write trace once EGYPT is
 loaded (HP field itself still unidentified — see Kill path `0x5BBBC0`).
+*(Superseded 2026-10-01: the die is on `0xA526B4`, not a `rand()` site, and the HP
+field is `[unit+0x4C]` damage; see [`combat.md`](combat.md).)*
 
 ## RNG triage: `0x48/4A/4B` + `0x5C` sites (verified: `r2`, 2026-09-29)
 
@@ -667,9 +743,11 @@ All four `0x48/4A/4B` sites ruled OUT for combat odds:
   `[ebp+0x574]`, two `rand() % 31`, `cmp edi,edx` selection.
 * `0x5CEF16`: `rand() % esi` + indexed pick `[eax+edx*4]`.
 
-Static odds-core hunt exhausted: no A/D-division + draw site found in
-any censused region. Next step is live: EGYPT combat with a breakpoint
-on the RNG + HP-write watch (HP field still open).
+Static odds-core hunt exhausted *among `rand()` sites*: no A/D-division + draw
+site found in any censused region. **Superseded (2026-10-01):** the odds core was
+found statically once the search moved to the `Random` class; no live trace was
+needed. See [`combat.md`](combat.md): odds `0x4A0ED0`, draw `0x4A5B3C`, damage
+`+0x4C`.
 
 ## Upkeep step executor `0x470A60` (verified: static walk)
 
@@ -703,6 +781,7 @@ exactly one caller: `0x6226A0`, inside a `0x622xxx` UI-flow function
 (dialog follow-ups `0x638190`/`0x639550`, `0x622750` on both branches,
 then a `strcpy` into `[esi+0xB20]`). Tail behavior: zero
 `[esi+0xAFC]`/`[esi+0xB1C]`, `srand(GetTickCount())` (`0x637490` is a
-thunk: `jmp [GetTickCount]`), set start flag `[esi+0xAF8]=1`. So the
-game RNG is seeded twice with different clocks: `timeGetTime()` on the
-`0x56C1EA` startup path, `GetTickCount()` when a game actually starts.
+thunk: `jmp [GetTickCount]`), set start flag `[esi+0xAF8]=1`. So MSVC `rand` is
+seeded twice with different clocks: `timeGetTime()` on the `0x56C1EA` startup
+path, `GetTickCount()` when a game actually starts. (The gameplay `Random`
+instance `0xA526B4` is seeded separately; see `combat.md` section 1.)

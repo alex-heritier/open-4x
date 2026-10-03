@@ -1,18 +1,24 @@
 # Civ3 Clone
 
-A three-civilization hotseat sandbox built with Rust Bevy, using art and audio
-converted from a local Civilization 3 GOG install. Japan, Rome, and Egypt are
-all human-controlled. No AI, no tech, no diplomacy:
-found cities, explore, pop goody huts, disperse barbarian camps, work
-resources, grow cities, end turns. Map-feature placement follows the
+A single-player Civ3-style game built with Rust Bevy, using art and audio
+converted from a local Civilization 3 GOG install. You play Japan against
+computer-controlled Rome, Egypt, and China. Nobody is at war until someone
+declares it: found cities, explore, research advances, pop goody huts, disperse
+barbarian camps, meet the rivals and trade or make treaties with them, work
+resources, grow cities, build armies, declare war, fight, end turns. Conquer
+all three rivals to win; lose your last city and unit and the game is lost. Map-feature placement follows the
 reverse-engineered mapgen stages (see `reverse-engineering/NOTES.md`).
 
 Each civilization starts with its own Settler, Worker, Warrior, and Scout on
-separate land tiles. Units, cities, capitals, gold, resources, and explored
-terrain belong to their civilization. City badges and borders use its color.
+separate land tiles. Japan starts at the map's best site; Rome, Egypt, and
+China start within 10 tiles of it, on open grassland or plains it can walk to,
+spread around it (`civs::starting_positions`). Units, cities, capitals, gold,
+resources, and explored terrain belong to their civilization. City badges and
+borders use its color.
 End Turn advances only that civilization's cities and worker jobs, then passes
-control and the camera to the next civilization. The turn number increases
-after all three have played. Only the active civilization's units and cities
+control to the next civilization; the computer civs play their turns on their
+own (see "Computer opponents") and the camera stays on your view. The turn number increases
+after all four have played. Only the active civilization's units and cities
 can receive orders; production decisions wait for their owner's next turn.
 
 ## Setup
@@ -24,6 +30,12 @@ Prereqs: Rust, Python 3 with PIL, ffmpeg.
 2. Convert assets once (writes gitignored `assets/gen/`):
    `python3 tools/prep_assets.py`
 3. Run: `cargo run`
+
+`CIV3_HOTSEAT=1` makes all four civs human again (the old hotseat mode),
+`CIV3_AUTOPLAY=1` hands all four to the computer to watch, `CIV3_AI_FAST=1`
+skips the computer's animations and `CIV3_AI_LOG=1` prints what it decides
+each turn. `CIV3_SCRIPT` `end` is meant for hotseat: use it with
+`CIV3_HOTSEAT=1`.
 
 `MAP_SEED` overrides the fixed default map seed; `MAP_CENTER=x,y` and
 `MAP_ZOOM=<0.35..2.5>` frame the starting camera, `CIV3_REVEAL=1` starts with
@@ -60,21 +72,160 @@ the desktop-capture fallback.
   selection clears and the bottom-right box blinks its next-turn prompt.
 - B: found city with the settler. Enter, the next-turn disc, or the
   bottom-right box (when it shows the prompt): end the active civilization's
-  turn and pass control to Japan, Rome, or Egypt in that order.
+  turn and pass control to Japan, Rome, Egypt, or China in that order.
 - City screen: click tiles to assign workers (yields show as Civ3's food
   and shield icons; roads, irrigation and mines are drawn; tiles another
-  city works are dimmed), Change build (Build now / Queue), Governor, X or
-  ESC closes. Idle citizens show as entertainers.
+  city works, or another civilization's border covers, are dimmed), Change
+  build (Build now / Queue), Governor, X or ESC closes. Idle citizens show
+  as entertainers.
+- F6: Science Advisor (choose what to research). F4: Foreign Advisor (who you
+  have met, their attitude, and Talk).
 - P: save a window screenshot as `shot-<unix>.png`.
 - F9: reveal-all debug toggle.
 
+## Economy
+
+Each citizen works one tile around its city (the governor picks the best, or
+click tiles on the city screen); the city center works for free. All civs run
+Despotism, which takes one off any worked tile yield above 2. A city grows
+when its food box fills: 20 food while it is a town (size 1 to 6), 40 as a
+city (7 to 12), 60 beyond; a Granary keeps half the box on growth, and a
+city short of food loses a citizen.
+
+Tax (half of each city's commerce) goes into its civilization's treasury when
+that civilization ends its turn. Improvements cost their upkeep, and units
+cost 1 gold each beyond 4 free per city (counted across all of a civ's
+cities; a civ without cities pays nothing). Upkeep the treasury cannot cover
+sells one improvement for its shield cost in gold; unit support it cannot
+cover disbands the cheapest unit. The bottom-right box shows the active
+civilization's `N Gold (+M per turn)`, in red when it is losing gold.
+
+The rules are the executable's where `reverse-engineering/economy.md` could
+read them (the food box, the Granary, the upkeep and unit-support formulas,
+one sale or one disbanding per turn). Where it could not, or where the clone
+simplifies, the notes say so: the sale price and which unit goes are marked
+**HYPOTHESIS**, and the executable rolls a die for which bill comes first
+where the clone always pays upkeep first. `src/economy.rs` holds the rules
+as plain functions with tests.
+
+## Research
+
+Every civilization has the 83 advances of the Conquests rules, with their
+prerequisites and costs (`src/rules_data.rs`, generated from `conquests.biq`
+by `biq/examples/gen_game_rules.rs`). A civ's cities add their science (the
+fixed 50% of commerce) to its beakers at the start of its turn; when the
+beakers pay the advance's cost the advance arrives and the civ picks the next
+one. The cost follows the executable (`reverse-engineering/research.md`): the
+advance's rule cost scaled by the world size and the difficulty, cheaper for
+each civ you have met that already knows it, and held between 4 and 50 turns at
+the current rate. Changing the target resets the beakers.
+
+The human is asked what to research when the last advance arrives and in the
+Science Advisor (F6); the bottom-right box shows the target and its beakers
+against the cost. The computer picks with the executable's valuation
+(`reverse-engineering/research-ai.md`). Goody huts can give an advance to a
+civ still in the ancient era.
+
+Five of the ten productions are gated by an advance: Archer (Warrior Code),
+Spearman (Bronze Working), Horseman (Horseback Riding), Granary (Pottery) and
+Temple (Ceremonial Burial); the rest need none. Not modelled: governments, wonders
+(the Great Library, Theory of Evolution), the scientific-leader roll, and
+any science rate but 50%.
+
+## Diplomacy
+
+No two civilizations are at war at the start, and a war begins only when one
+declares it. A civ meets another when its soldiers see a foreign unit or stand
+at its border, and the two swap embassies at once (the Foreign Advisor, F4,
+lists everyone met with their attitude, treaties and the war state, and opens
+Talk). Ordering a soldier to attack a civ you are at peace with asks first
+whether to declare war.
+
+Talk is a trade table: peace, right of passage, mutual protection, military
+alliance and embargo against a third civ, contact with a third civ, gold, gold
+per turn for 20 turns, and advances. The computer answers with the
+executable's four verdicts (accept, almost, not interested, no). It asks five
+times the price of anything after you broke a deal with it (the executable's
+`4T + 1`). Declaring war calls in every ally and every mutual-protection
+partner, as in the executable (`reverse-engineering/diplomacy.md`). A computer
+civ's attitude toward you is the executable's score (its personality, what you
+did to it, what you did to others, governments, treaties and so on), and its
+decision to go to war is the executable's roll. The computer proposes advance
+swaps now and then.
+
+Clone-level choices, because the executable's drivers are not decoded
+(`diplomacy.md` section 12): soldiers standing in a civ's borders build up
+pressure that provokes it, the computer plans a war every few turns from turn
+15, the prices of anything but an advance are stand-ins, and the computer
+never offers peace (nothing in the executable lowers its war memory).
+World maps and cities cannot be traded.
+
+## Combat
+
+Move a soldier into an enemy unit or city (click, Go-to, arrow keys) and it
+attacks on the last step. A fight is played out round by round: both units
+face each other and both keep swinging their attack clips for the whole fight,
+whoever wins the round, the blow lands partway through the round, the vertical bar
+beside each unit (green, yellow at two-thirds or less, red at one-third or
+less) drops, and at the end the loser plays its death clip and the winner its victory
+clip. Input waits until the
+sequence ends. `CIV3_COMBAT_SPEED=<n>` plays it `n` times faster, for
+unattended runs.
+
+From the executable (`reverse-engineering/combat.md`, consumed through
+`civ3mapgen::combat`): the round die and odds `defense * (100 + D)` against
+`attack * (100 + P)` with terrain, city size and walls, and fortify terms,
+clamped to `1..=1023` of 1024; one hit point per lost round; the `EXPR` hit
+points per level (2, 3, 4, 5, plus the unit's bonus); the dice are the same
+LCG as the map generator. A test pins the round loop to the reverse-engineered
+`duel`.
+
+Marked **HYPOTHESIS** in `src/combat.rs`, because the executable read does not
+cover them yet: the promotion odds (50% to Veteran, 33% to Elite), healing (1
+hit point a turn in the field, 2 in a city, full with a Barracks, only after a
+turn of rest), which defender of a stack fights (the likeliest to win), which
+clip plays in a round, when in the clip the blow lands, the details of
+capturing a city (one citizen lost, queue and Palace lost, no plunder, no
+raze), and that a stack dies with its defender outside cities. Units never
+retreat. Only units with attack can attack, one attack per unit per turn;
+workers and settlers are captured (a Settler becomes two Workers).
+
+Barracks cities build Veteran soldiers. The action bar shows a soldier's rank
+and hit points. Scripted captures can set up a fight with
+`spawn Warrior 1 @1,1;sel Warrior;go @1,1` and read the result with `report`.
+
+## Computer opponents
+
+The computer (`src/ai.rs`) plays Rome, Egypt, and China by simple rules, with
+the same units, costs, combat odds, and upkeep as you. It sees where units
+are, but remembers only the ground it has explored. Each turn it:
+
+- builds a garrison first, then Settlers while there is room, Workers (about
+  one per city), soldiers (Warrior, Archer, Spearman, Horseman), and Temples,
+  Granaries and Barracks when its treasury can carry the upkeep;
+- settles the best open sites away from other cities and foreign borders;
+- has Workers road, irrigate, and mine around its cities;
+- sends Scouts to unexplored ground;
+- researches by the executable's valuation and builds only what its advances
+  allow;
+- keeps defenders in cities, attacks civs it is at war with when the odds are
+  fair, and marches a large army on the nearest enemy city, taking it when it
+  is empty. It goes to war by the rules under "Diplomacy".
+
+A civ with no cities and no units is eliminated after a short grace period.
+Eliminating every rival is a victory; being eliminated is a defeat.
+Deviations from Civ3: no difficulty levels, no naval play, and the computer
+plays at one fixed skill.
+
 ## Scope
 
-Three human-controlled civilizations, terrain, movement, private fog, settling, food and
+A single-player game against three computer civilizations, terrain, movement, melee combat with
+Civ3's odds and animations, private fog, settling, food and
 shield boxes, Warrior/Settler/Worker production, Tokugawa splash, UI and
 unit sounds, the Asian peace music loop, plus goody huts (poppable for
 units, maps, or settlers), capturable barbarian camps, and 22 placed
 resources with bonus yields, worker improvements (roads, irrigation, mines,
 clearing), city production of units and buildings with a queue, and cultural
-borders that start as a nine-tile diamond and expand at culture thresholds. Out of
-scope: AI, tech, diplomacy, trade, combat, save/load, minimap.
+borders that start as the 3x3 square, grow to the 21-tile city radius at 10 culture and to 37 tiles at 100 (measured from the game's own saves), and merge between cities of one civ. Out of
+scope: smarter AI, governments, trade of cities and maps, ranged and naval combat, retreat,
+save/load, minimap.

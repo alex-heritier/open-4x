@@ -186,6 +186,7 @@ mod tests {
             work: None,
             sentry: false,
             exploring: false,
+            ..Unit::new(0, UnitType::Scout, x, y)
         }
     }
 
@@ -426,7 +427,7 @@ pub fn orders(
             selected.0 = Some(next);
         }
     }
-    if keys.just_pressed(KeyCode::Enter) {
+    if keys.just_pressed(KeyCode::Enter) && !crate::civs::is_ai(civs.active) {
         turn_end.write(TurnEnded);
         audio::sfx(&mut commands, &audio, "EnterTurn");
     }

@@ -16,6 +16,7 @@ import glob
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -25,9 +26,16 @@ from PIL import Image, ImageChops
 GOG = os.environ.get("CIV3_GOG", "civ3/civ3-gog/app")
 OUT = "assets/gen"
 
-UNITS = ["Settler", "warrior", "Worker", "Scout"]
+UNITS = ["Settler", "warrior", "Worker", "Scout", "Archer", "Spearman",
+         "Horseman"]
 UNIT_SLOTS = ["DEFAULT", "RUN", "FORTIFY", "FIDGET", "BUILD", "ROAD",
-              "MINE", "IRRIGATE", "FORTRESS", "JUNGLE", "FOREST", "PLANT"]
+              "MINE", "IRRIGATE", "FORTRESS", "JUNGLE", "FOREST", "PLANT",
+              "ATTACK1", "ATTACK2", "ATTACK3", "DEFEND", "DEATH", "VICTORY",
+              "CAPTURE"]
+# Slots whose sounds the combat sequencer plays (the rest keep their
+# hard-coded effects in audio.rs).
+SOUND_SLOTS = {"ATTACK1", "ATTACK2", "ATTACK3", "DEFEND", "DEATH", "VICTORY",
+               "CAPTURE"}
 UI_SOUNDS = ["Select.wav", "Button OK.wav", "Button Cancel .wav", "Check.wav",
              "EnterTurn.wav", "Hut.wav", "WhatToBuild.wav", "PopupInfo.wav",
              "City View.wav", "Grid.wav", "PaperTurn.wav", "Barbarian Raid.wav"]
@@ -333,6 +341,108 @@ def ffmpeg_frames(src, pattern):
                    check=True)
 
 
+def flc_ms(path):
+    """Milliseconds per frame from the FLC header (`speed`, dword at 16)."""
+    with open(path, "rb") as f:
+        head = f.read(20)
+    magic, speed = struct.unpack_from("<H", head, 4)[0], struct.unpack_from("<I", head, 16)[0]
+    assert magic == 0xAF12, f"{path}: not an FLC (magic {magic:#x})"
+    return speed
+
+
+def _cstr(data, at):
+    end = data.index(b"\0", at)
+    return data[at:end].decode("latin-1"), end + 1
+
+
+def _vlq(data, p):
+    v = 0
+    while True:
+        b = data[p]
+        p += 1
+        v = (v << 7) | (b & 0x7F)
+        if not b & 0x80:
+            return v, p
+
+
+def parse_amb(path):
+    """Sound schedule of a Civ3 `.amb`: a list of `(seconds, wav name)`.
+
+    An `.amb` is a sampler bank (`prgm` programs, `kmap` key maps pointing at
+    `.wav` files, one `glbl`) followed by a raw Standard MIDI File. Each
+    MIDI track fires one program's note; its first note-on tick, converted
+    with the file's tempo and division, is when that sample starts relative
+    to the animation (`WarriorAttackA.amb`: Grunt at 0 s, Slash at 0.44 s
+    of a 1.245 s clip). Verified against the on-disk bytes; the engine's
+    own reader is not disassembled.
+    """
+    data = open(path, "rb").read()
+    programs = {}   # program id -> sample name
+    kmaps = {}      # sample name -> wav
+    p = 0
+    while data[p:p + 4] in (b"prgm", b"kmap", b"glbl"):
+        tag = data[p:p + 4]
+        n = struct.unpack_from("<I", data, p + 4)[0]
+        body = data[p + 8:p + 8 + n]
+        if tag == b"prgm":
+            pid = struct.unpack_from("<i", body, 0)[0]
+            programs[pid] = _cstr(body, 28)[0]
+        elif tag == b"kmap":
+            name, q = _cstr(body, 12)
+            kmaps[name] = _cstr(body, q + 20)[0]
+        p += 8 + n
+    assert data[p:p + 4] == b"MThd", f"{path}: no MIDI after the sampler bank"
+    division = struct.unpack_from(">H", data, p + 12)[0]
+    p += 8 + struct.unpack_from(">I", data, p + 4)[0]
+    tempo = 500000
+    out = []
+    while data[p:p + 4] == b"MTrk":
+        end = p + 8 + struct.unpack_from(">I", data, p + 4)[0]
+        q, tick, status, program, first = p + 8, 0, 0, None, None
+        while q < end:
+            delta, q = _vlq(data, q)
+            tick += delta
+            if data[q] >= 0x80:
+                status = data[q]
+                q += 1
+            if status == 0xFF:
+                kind = data[q]
+                ln, q = _vlq(data, q + 1)
+                if kind == 0x51:
+                    tempo = int.from_bytes(data[q:q + 3], "big")
+                q += ln
+            elif status in (0xF0, 0xF7):
+                ln, q = _vlq(data, q)
+                q += ln
+            elif status & 0xF0 in (0xC0, 0xD0):
+                if status & 0xF0 == 0xC0:
+                    program = data[q]
+                q += 1
+            else:
+                if status & 0xF0 == 0x90 and data[q + 1] > 0 and first is None:
+                    first = tick
+                q += 2
+        if first is not None and program in programs:
+            wav = kmaps.get(programs[program])
+            if wav:
+                out.append((round(first / division * tempo / 1e6, 3), wav))
+        p = end
+    return sorted(out)
+
+
+def slot_sounds(cfg, udir, slot):
+    """`[Sound Effects] <slot>` as a list of `(seconds, wav)`; `.amb` files
+    expand to their schedule, a bare `.wav` starts with the clip."""
+    if "Sound Effects" not in cfg:
+        return []
+    name = cfg["Sound Effects"].get(slot, "").strip()
+    if not name:
+        return []
+    if name.lower().endswith(".amb"):
+        return parse_amb(os.path.join(udir, name))
+    return [(0.0, name)]
+
+
 def stage_units():
     art = os.path.join(GOG, "Art", "Units")
     for unit in UNITS:
@@ -364,15 +474,30 @@ def stage_units():
                 assert n % 8 == 0, f"{unit}/{slot}: {n} frames not divisible by 8"
                 fpd = n // 8
                 w, h = Image.open(frames[0]).size
+                feet = []
                 for direction in range(8):
                     strip = Image.new("RGBA", (w * fpd, h), (0, 0, 0, 0))
                     for i in range(fpd):
                         fim = Image.open(frames[direction * fpd + i])
                         fim.load()
-                        strip.paste(to_rgba(fim, unit=True), (i * w, 0))
+                        rgba = to_rgba(fim, unit=True)
+                        strip.paste(rgba, (i * w, 0))
+                        if i == 0:
+                            # Rows of padding under the lowest solid pixel
+                            # (the shadow is translucent and does not
+                            # count). The game lifts each clip by the
+                            # difference to DEFAULT so feet stay put.
+                            solid = rgba.getchannel("A").point(
+                                lambda v: 255 if v > 200 else 0)
+                            box = solid.getbbox()
+                            feet.append(h - box[3] if box else 0)
                     strip.save(os.path.join(outdir, f"{slot}_d{direction}.png"))
-                manifest[slot] = {"frame": [w, h], "frames": fpd, "dirs": 8}
-                print(f"  {unit}/{slot}: {w}x{h} x{fpd}f x8d")
+                entry = {"frame": [w, h], "frames": fpd, "dirs": 8,
+                         "ms": flc_ms(os.path.join(udir, flc)), "feet": feet}
+                if slot in SOUND_SLOTS:
+                    entry["sounds"] = [list(s) for s in slot_sounds(cfg, udir, slot)]
+                manifest[slot] = entry
+                print(f"  {unit}/{slot}: {w}x{h} x{fpd}f x8d {entry['ms']}ms")
         with open(os.path.join(outdir, "manifest.json"), "w") as f:
             json.dump(manifest, f, indent=1)
         adir = os.path.join(OUT, "audio", "units", unit)
@@ -428,7 +553,10 @@ def crop_cities():
     # unit icons for the production list
     udir = os.path.join(GOG, "Art", "civilopedia", "icons", "units")
     for src, name in [("00Settlersmall", "settler"), ("01Workersmall", "worker"),
-                      ("02scoutsmall", "scout"), ("06warriorsmall", "warrior")]:
+                      ("02scoutsmall", "scout"), ("06warriorsmall", "warrior"),
+                      ("07Archersmall", "archer"),
+                      ("08Spearmansmall", "spearman"),
+                      ("11Horsemansmall", "horseman")]:
         convert_pcx(os.path.join(udir, src + ".pcx"),
                     os.path.join(uid, f"uniticon_{name}.png"))
     # content Asian citizen head (row 0, col 4 of popHeads)

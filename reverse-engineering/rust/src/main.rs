@@ -36,7 +36,7 @@ fn render(grid: &MapGrid) -> String {
     let mut s = String::with_capacity(((grid.w * 2) * grid.h) as usize);
     for y in 0..grid.h {
         for x in 0..grid.w {
-            s.push(glyph(grid.cell_at(x, y).map_or(b'.', |c| c.class)));
+            s.push(glyph(grid.cell_at(x, y).map_or(b'.', |c| c.class())));
         }
         s.push('\n');
     }
@@ -48,7 +48,7 @@ fn write_pgm(path: &str, grid: &MapGrid) -> std::io::Result<()> {
     let mut out = format!("P2\n{} {}\n255\n", grid.w, grid.h);
     for y in 0..grid.h {
         for x in 0..grid.w {
-            let c = grid.cell_at(x, y).map_or(0, |c| c.class);
+            let c = grid.cell_at(x, y).map_or(0, |c| c.class());
             // Land bright, water dark.
             let v = if is_water(c) { 20 } else { 200 };
             out.push_str(&format!("{v} "));
@@ -89,18 +89,19 @@ fn main() {
     while let Some(a) = args.next() {
         let mut v = || args.next().expect("a value after the flag");
         match a.as_str() {
-            "--size" => opts.map_size = v().parse().expect("a number"),
-            "--water" => opts.water_level = v().parse().expect("a number"),
+            "--size" => opts.size = v().parse().expect("a number"),
+            "--seed" => opts.seed = v().parse().expect("a number"),
+            "--ocean" => opts.ocean = v().parse().expect("a number"),
             "--climate" => opts.climate = v().parse().expect("a number"),
-            "--resources" => opts.resources = v().parse().expect("a number"),
             "--temperature" => opts.temperature = v().parse().expect("a number"),
+            "--age" => opts.age = v().parse().expect("a number"),
             "--landmass" => opts.landmass = v().parse().expect("a number"),
             "--out" => out = Some(v()),
             "--bugs" => bugs = parse_bugs(&v()).unwrap_or_else(|e| panic!("{e}")),
             "-h" | "--help" => {
                 println!(
-                    "usage: civ3mapgen [--size N] [--water N] [--climate N] \\
-                         [--resources N] [--temperature N] [--landmass N] \\
+                    "usage: civ3mapgen [--size N] [--seed N] [--ocean N] [--climate N] \\
+                         [--temperature N] [--age N] [--landmass N] \\
                          [--out FILE.pgm] [--bugs SPEC]\n\n\
                          --bugs takes `all` (the default), `none`, or a comma-separated\n\
                          subset of: {}",

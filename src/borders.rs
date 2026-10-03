@@ -9,10 +9,9 @@
 //! draws the straight column; the corner column is unused here.
 //!
 //! A tile draws a ribbon on an edge only when that edge faces a different
-//! owner (another city, or nobody) and the tile is owned itself, so the
-//! ribbon stays inside its own territory. Plots are per city, so two
-//! cities of one civ draw their own ribbons either side of the shared
-//! edge, the internal borders the game shows between its cities.
+//! civilization (or nobody) and the tile is owned itself, so the ribbon
+//! stays inside its own territory. Cities of one civ share their territory:
+//! their borders merge into one outline, with no ribbon between them.
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -92,8 +91,18 @@ pub struct BorderSprite {
     side: Side,
 }
 
-/// True when `(x, y)` is owned and the tile across `side` is not (a
-/// different city, or nobody). Off-map north and south count as nobody.
+/// Owner civ of every claimed tile: `territory`'s per-city claims, merged
+/// by the civilization the city belongs to.
+pub fn civ_territory(
+    cities: &[&City],
+    claims: &HashMap<(i32, i32), usize>,
+) -> HashMap<(i32, i32), usize> {
+    claims.iter().map(|(&t, &i)| (t, cities[i].civ)).collect()
+}
+
+/// True when `(x, y)` is owned and the tile across `side` is held by
+/// another civ or nobody. `owner` holds civ ids (`civ_territory`). Off-map
+/// north and south count as nobody.
 pub fn has_border(
     map: &GameMap,
     owner: &HashMap<(i32, i32), usize>,
@@ -113,10 +122,9 @@ pub fn has_border(
 }
 
 /// Ribbon tint for an owned tile: the color of the civilization that owns
-/// it. `owner` indexes `cities`, so the tile's city names the civ, and two
-/// civs meeting at a border draw their own colors on either side.
-fn owner_color(cities: &[&City], owner: &HashMap<(i32, i32), usize>, x: i32, y: i32) -> Color {
-    CIVS[cities[owner[&(x, y)]].civ].color
+/// it, so two civs meeting at a border draw their own colors on either side.
+fn owner_color(owner: &HashMap<(i32, i32), usize>, x: i32, y: i32) -> Color {
+    CIVS[owner[&(x, y)]].color
 }
 
 /// Spawn the ribbons a territory has and drop the ones it lost.
@@ -129,7 +137,7 @@ pub fn sync_borders(
     mut q: Query<(Entity, &BorderSprite, &mut Sprite, &mut Visibility)>,
 ) {
     let list: Vec<&City> = cities.iter().collect();
-    let owner = territory(&map, &list);
+    let owner = civ_territory(&list, &territory(&map, &list));
     let mut have: HashSet<(i32, i32, Side)> = HashSet::new();
     for (e, bs, mut sprite, mut vis) in q.iter_mut() {
         if !has_border(&map, &owner, bs.x, bs.y, bs.side) {
@@ -139,7 +147,7 @@ pub fn sync_borders(
         have.insert((bs.x, bs.y, bs.side));
         // The fog diamonds above hold the dimming, so the ribbon only has
         // to hide where the tile was never seen.
-        sprite.color = owner_color(&list, &owner, bs.x, bs.y);
+        sprite.color = owner_color(&owner, bs.x, bs.y);
         *vis = match fog_for(reveal.0, &map.tiles[map.idx(bs.x, bs.y)]) {
             Fog::Black => Visibility::Hidden,
             _ => Visibility::Visible,
@@ -159,7 +167,7 @@ pub fn sync_borders(
                 commands.spawn((
                     Sprite {
                         image: art.defs[&side].clone(),
-                        color: owner_color(&list, &owner, x, y),
+                        color: owner_color(&owner, x, y),
                         ..default()
                     },
                     vis,
@@ -204,7 +212,7 @@ mod tests {
         let map = GameMap::generate();
         let (cx, cy) = (40, 30);
         let c = city("Kyoto", cx, cy, 0, 1);
-        let owner = territory(&map, &[&c]);
+        let owner = civ_territory(&[&c], &territory(&map, &[&c]));
         // The tile one along y is the edge of the claim, and its edge
         // facing y+1 (lower-left on screen) is unclaimed land: it draws.
         assert!(has_border(&map, &owner, cx, cy + 1, Side::Yp));
@@ -224,21 +232,37 @@ mod tests {
     fn map_edges_count_as_unowned() {
         let map = GameMap::generate();
         let c = city("Kyoto", 5, 0, 0, 1);
-        let owner = territory(&map, &[&c]);
+        let owner = civ_territory(&[&c], &territory(&map, &[&c]));
         assert!(has_border(&map, &owner, 5, 0, Side::Ym));
     }
 
     #[test]
-    fn neighbours_claim_their_side_of_a_shared_edge() {
-        // Two cities of one civ, three tiles apart: every tile belongs to
-        // the nearer city, and the edge between them draws from both
-        // sides, which is how Civ3 shows internal borders.
+    fn cities_of_one_civ_share_one_outline() {
+        // Two cities of one civ, three tiles apart, claim touching ground:
+        // no ribbon runs between them, only around the pair.
         let map = GameMap::generate();
         let a = city("Kyoto", 40, 30, 0, 1);
         let b = city("Osaka", 43, 30, 0, 2);
-        let owner = territory(&map, &[&a, &b]);
-        assert_eq!(owner[&(41, 30)], 0);
-        assert_eq!(owner[&(42, 30)], 1);
+        let list: Vec<&City> = vec![&a, &b];
+        let claims = territory(&map, &list);
+        assert_eq!(claims[&(41, 30)], 0);
+        assert_eq!(claims[&(42, 30)], 1);
+        let owner = civ_territory(&list, &claims);
+        assert!(!has_border(&map, &owner, 41, 30, Side::Xp));
+        assert!(!has_border(&map, &owner, 42, 30, Side::Xm));
+        // The outer edges still draw.
+        assert!(has_border(&map, &owner, 39, 30, Side::Xm));
+        assert!(has_border(&map, &owner, 44, 30, Side::Xp));
+    }
+
+    #[test]
+    fn cities_of_two_civs_meet_in_a_frontier() {
+        let map = GameMap::generate();
+        let a = city("Kyoto", 40, 30, 0, 1);
+        let mut b = city("Rome", 43, 30, 0, 2);
+        b.civ = 1;
+        let list: Vec<&City> = vec![&a, &b];
+        let owner = civ_territory(&list, &territory(&map, &list));
         assert!(has_border(&map, &owner, 41, 30, Side::Xp));
         assert!(has_border(&map, &owner, 42, 30, Side::Xm));
         assert!(!has_border(&map, &owner, 41, 30, Side::Xm));
@@ -249,11 +273,11 @@ mod tests {
         let map = GameMap::generate();
         let small = city("Kyoto", 40, 30, 0, 1);
         let grown = city("Kyoto", 40, 30, 10, 1);
-        let before = territory(&map, &[&small]);
-        let after = territory(&map, &[&grown]);
+        let before = civ_territory(&[&small], &territory(&map, &[&small]));
+        let after = civ_territory(&[&grown], &territory(&map, &[&grown]));
         assert!(before.len() < after.len());
-        assert!(has_border(&map, &after, 40, 33, Side::Yp));
-        assert!(!has_border(&map, &before, 40, 33, Side::Yp));
+        assert!(has_border(&map, &after, 40, 32, Side::Yp));
+        assert!(!has_border(&map, &before, 40, 32, Side::Yp));
     }
 
     /// Two civs meeting along a frontier each wear their own color, so a
@@ -261,15 +285,15 @@ mod tests {
     #[test]
     fn borders_take_the_owning_civs_color() {
         let map = GameMap::generate();
-        let mut a = city("Kyoto", 40, 30, 0, 1);
+        let a = city("Kyoto", 40, 30, 0, 1);
         let mut b = city("Tenochtitlan", 43, 30, 0, 2);
         b.civ = 1;
         let list: Vec<&City> = vec![&a, &b];
-        let owner = territory(&map, &list);
-        assert_eq!(owner[&(41, 30)], 0);
-        assert_eq!(owner[&(42, 30)], 1);
-        assert_eq!(owner_color(&list, &owner, 41, 30), CIVS[a.civ].color);
-        assert_eq!(owner_color(&list, &owner, 42, 30), CIVS[b.civ].color);
+        let owner = civ_territory(&list, &territory(&map, &list));
+        assert_eq!(owner[&(41, 30)], a.civ);
+        assert_eq!(owner[&(42, 30)], b.civ);
+        assert_eq!(owner_color(&owner, 41, 30), CIVS[a.civ].color);
+        assert_eq!(owner_color(&owner, 42, 30), CIVS[b.civ].color);
         // Distinct civs must not share a tint, or the frontier vanishes.
         assert_ne!(CIVS[a.civ].color, CIVS[b.civ].color);
     }

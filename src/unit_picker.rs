@@ -290,6 +290,7 @@ mod tests {
                     work: None,
                     sentry: false,
                     exploring: false,
+                    ..Unit::new(0, utype, 10, 10)
                 })
                 .id()
         };

@@ -1,0 +1,12 @@
+[package]
+name = "civ3-biq"
+version = "0.1.0"
+edition = "2024"
+description = "Parser and writer for Civilization III scenario files (.biq/.bic/.bix)"
+publish = false
+
+# Standalone on purpose: not a member of the game's build and not a
+# dependency of it yet (`reverse-engineering/biq.md` owns the format notes).
+[workspace]
+
+[dependencies]

@@ -30,18 +30,18 @@ pub const CELL_SIZE: usize = 0xDC;
 ///
 /// The field at `+0x2C` packs two 4-bit values: bits 12..15 (the "terrain",
 /// read by `vfunc(0xC8)`) and bits 8..11 (the "sub-class", read by
-/// `vfunc(0xC4)`). `vfunc(0x128)(t, -1, -1)` normalises before storing:
+/// `vfunc(0xC4)`). `vfunc(0x128)(t, -1, -1)` stores `t` in bits 12..15 and
+/// derives the sub-class (the base terrain underneath) from it:
 ///
-/// | `t`      | stored class |
+/// | `t`      | stored sub-class |
 /// |-----------|--------------|
 /// | `0..=3`    | `t`          |
-/// | `4`       | `0`          |
+/// | `4` (flood plain) | `0`  |
 /// | `5,6,8,9,10` | `2`       |
-/// | `7`       | `2`, unless a sub-class in `1..=10` is set |
+/// | `7` (forest) | `2`, unless a sub-class in `1..=10` is already set |
 /// | `>= 11`   | `t`          |
 ///
-/// Classes `11`, `12` and `13` are the ones the generator uses to mark
-/// start-location candidates; `vfunc(0x8C)` is simply
+/// Classes `11`, `12` and `13` are the water classes; `vfunc(0x8C)` is
 /// `11 <= class <= 13`.
 pub const CLASS_PLAINS: u8 = 0;
 /// `class == 2`, the group that `4, 5, 6, 8, 9, 10` collapse into.
@@ -89,63 +89,143 @@ pub fn normalise_class(t: u8, sub_class: u8) -> u8 {
     }
 }
 
-/// One cell of the map.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cell {
-    /// Terrain class — bits 12..15 of `+0x2C`. See [`normalise_class`].
-    pub class: u8,
-    /// Sub-class — bits 8..11 of `+0x2C`.
-    pub sub_class: u8,
-    /// Continent id — `word[+0x1E]`. `0xFFFF` means unassigned.
-    pub continent: u16,
-    /// Neighbour bitmask set by `0x5d6500` — `word[+0x1A]`.
-    pub neighbour_mask: u16,
-    /// Feature id — `dword[+0x08]`, `0xFFFF_FFFF` for none (`vfunc(0x9C)`).
-    pub feature: i32,
-    /// Tile flags — the planes at `+0x28`, one `dword` each (`vfunc(0xE0)` /
-    /// `0xCC` take a plane index and a mask within it).
-    pub flags: [u32; NUM_FLAG_PLANES],
-}
-
-/// Number of flag planes, i.e. `(0x40 - 0x28) / 4`.
+/// Number of flag planes the cell carries from `+0x28`, i.e. `(0x40 - 0x28) / 4`.
 pub const NUM_FLAG_PLANES: usize = 6;
+
+/// Plane 0, `Cell+0x28`: the overlay bits (road, mine, goody hut `0x20`, ...).
+pub const PLANE_OVERLAY: usize = 0;
+/// Plane 1, `Cell+0x2C`: the terrain word (class in bits 12..15, sub-class in
+/// bits 8..11).
+pub const PLANE_TERRAIN: usize = 1;
+/// Plane 2, `Cell+0x30`: the feature plane (bonus grassland `0x10000`, start
+/// location `0x80000`, snow-capped `0x100000`, pine forest `0x200000`, ...).
+pub const PLANE_FEATURE: usize = 2;
 
 /// Continent id used for "not assigned yet".
 pub const NO_CONTINENT: u16 = 0xFFFF;
 
+/// The terrain word of a freshly constructed cell: class and sub-class 13.
+pub const TERRAIN_DEFAULT: u32 = 0xDD00;
+
+/// One cell of the map: the part of the game's `Cell` object (`0xDC` bytes)
+/// that `Map::generate` writes, at the offsets it has in the object. The
+/// `.biq` `TILE` row and the `.sav` per-cell chunks carry the same fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cell {
+    /// `+0x04`: eight-direction river adjacency mask.
+    pub river: u8,
+    /// `+0x08`: `GOOD` row of the resource, `-1` for none.
+    pub resource: i32,
+    /// `+0x10`: terrain sprite variant.
+    pub image: u8,
+    /// `+0x11`: terrain sprite file.
+    pub file: u8,
+    /// `+0x1E`: continent id, [`NO_CONTINENT`] when unassigned.
+    pub continent: u16,
+    /// `+0x28..+0x40`: overlay, terrain word, feature plane and three more
+    /// words; see the `PLANE_*` constants.
+    pub planes: [u32; NUM_FLAG_PLANES],
+}
+
 impl Default for Cell {
-    /// The Cell constructor, `0x5e98a0` as called from `0x5e9850`.
-    ///
-    /// The constructor zeroes `+0x2C` and then calls `FUN_005e9940(0xd)`, i.e.
-    /// `setTerrain(13)`, so a freshly built cell is already **deep water**. That
-    /// default is load-bearing: the land/sea stage leaves a cell untouched when
-    /// an isolated peak fails its coast test, and "untouched" therefore means
-    /// "water", which is what removes the speckles.
+    /// The cell `Map::generate` starts from. The constructor (`0x5E98A0` via
+    /// `0x5E9850`) zeroes the terrain word and calls `setTerrain(13)`, so a new
+    /// cell is deep water; the land/sea stage relies on that default when it
+    /// leaves a cell untouched.
     fn default() -> Self {
+        let mut planes = [0; NUM_FLAG_PLANES];
+        planes[PLANE_TERRAIN] = TERRAIN_DEFAULT;
         Cell {
-            class: WATER_ABYSSAL,
-            sub_class: WATER_ABYSSAL,
+            river: 0,
+            resource: -1,
+            image: 0,
+            file: 0,
             continent: NO_CONTINENT,
-            neighbour_mask: 0,
-            feature: -1,
-            flags: [0; NUM_FLAG_PLANES],
+            planes,
         }
     }
 }
 
 impl Cell {
-    /// `vfunc(0x128)(t, -1, -1)` — set the terrain class with normalisation.
-    ///
-    /// Both nibbles of `+0x2C` are written: bits 12..15 get `t` verbatim and
-    /// bits 8..11 get the normalised value, which is what `0x5e9940` does via
-    /// `vfunc(0x0C)` followed by `vfunc(0x04)` or `vfunc(0x08)`.
+    /// Terrain class: bits 12..15 of the terrain word (`vfunc(0xC8)`).
     #[inline]
-    pub fn set_class(&mut self, t: u8) {
-        self.class = t;
-        self.sub_class = normalise_class(t, self.sub_class);
+    pub fn class(&self) -> u8 {
+        ((self.planes[PLANE_TERRAIN] >> 12) & 0xF) as u8
     }
 
-    /// `vfunc(0xE8)(id)` / `vfunc(0xB8)()` — continent id accessors.
+    /// Sub-class: bits 8..11 of the terrain word (`vfunc(0xC4)`).
+    #[inline]
+    pub fn sub_class(&self) -> u8 {
+        ((self.planes[PLANE_TERRAIN] >> 8) & 0xF) as u8
+    }
+
+    /// Replaces the class nibble only.
+    #[inline]
+    pub fn put_class(&mut self, class: u8) {
+        let w = &mut self.planes[PLANE_TERRAIN];
+        *w = (*w & !0xF000) | (u32::from(class & 0xF) << 12);
+    }
+
+    /// Replaces the sub-class nibble only.
+    #[inline]
+    pub fn put_sub_class(&mut self, sub: u8) {
+        let w = &mut self.planes[PLANE_TERRAIN];
+        *w = (*w & !0x0F00) | (u32::from(sub & 0xF) << 8);
+    }
+
+    /// `vfunc(0x128)(t, -1, -1)` - `Cell::setTerrain` at `0x5E9940`.
+    ///
+    /// Writes both nibbles of the terrain word: bits 12..15 (`vfunc(0x0C)`) get
+    /// `t`, bits 8..11 (`vfunc(0x04)`, or `vfunc(0x08)` for water) get the
+    /// base terrain from [`normalise_class`]. Desert (`t == 0`) on a cell that
+    /// already has a river becomes flood plain (class 4, base 0) instead;
+    /// `vfunc(0x60)` is "river mask is non-zero".
+    #[inline]
+    pub fn set_class(&mut self, t: u8) {
+        if t == 0 && self.river != 0 {
+            self.put_class(4);
+            self.put_sub_class(0);
+            return;
+        }
+        let sub = normalise_class(t, self.sub_class());
+        self.put_class(t);
+        self.put_sub_class(sub);
+    }
+
+    /// `vfunc(0xF4)(mask)` - `Cell::addRiver`, `0x5EACC0`: ORs `mask` into the
+    /// river mask, and a desert tile that now has a river becomes flood plain
+    /// (`vfunc(0x0C)(4)`: the class nibble only).
+    #[inline]
+    pub fn add_river(&mut self, mask: u8) {
+        self.river |= mask;
+        if self.class() == 0 {
+            self.put_class(4);
+        }
+    }
+
+    /// `vfunc(0xD0)(mask)` - `Cell::removeRiver`, `0x5EAB70`: clears `mask` from
+    /// the river mask; when nothing is left, [`Cell::clear_river`] runs.
+    #[inline]
+    pub fn remove_river(&mut self, mask: u8) {
+        self.river &= !mask;
+        if self.river == 0 {
+            self.clear_river();
+        }
+    }
+
+    /// `vfunc(0xD4)()`, `0x5EAB90`: no river at all. Zeroes the mask, clears the
+    /// four river-corner bits of the feature plane (`0x0F00_0000`), and a flood
+    /// plain goes back to desert.
+    #[inline]
+    pub fn clear_river(&mut self) {
+        self.river = 0;
+        self.clear_flag(PLANE_FEATURE, 0x0F00_0000);
+        if self.class() == 4 {
+            self.put_class(0);
+        }
+    }
+
+    /// `vfunc(0xE8)(id)` / `vfunc(0xB8)()` - continent id accessors.
     #[inline]
     pub fn set_continent(&mut self, id: u16) {
         self.continent = id;
@@ -160,24 +240,24 @@ impl Cell {
     /// `vfunc(0x8C)()`.
     #[inline]
     pub fn is_water(&self) -> bool {
-        is_water(self.class)
+        is_water(self.class())
     }
 
-    /// `vfunc(0xE0)(plane, mask)` — set bits in one of the flag planes.
+    /// `vfunc(0xE0)(plane, mask)` - set bits in one of the flag planes.
     ///
     /// Planes are `dword`s, not bits within one word, which is why the mask in
     /// the binary is frequently a byte or a nibble-sized constant like `0x200`.
     #[inline]
     pub fn set_flag(&mut self, plane: usize, mask: u32) {
-        if let Some(p) = self.flags.get_mut(plane) {
+        if let Some(p) = self.planes.get_mut(plane) {
             *p |= mask;
         }
     }
 
-    /// `vfunc(0xCC)(plane, mask)` — clear bits in one of the flag planes.
+    /// `vfunc(0xCC)(plane, mask)` - clear bits in one of the flag planes.
     #[inline]
     pub fn clear_flag(&mut self, plane: usize, mask: u32) {
-        if let Some(p) = self.flags.get_mut(plane) {
+        if let Some(p) = self.planes.get_mut(plane) {
             *p &= !mask;
         }
     }
@@ -185,7 +265,7 @@ impl Cell {
     /// Reads one flag plane; out-of-range planes read as 0.
     #[inline]
     pub fn flag(&self, plane: usize) -> u32 {
-        self.flags.get(plane).copied().unwrap_or(0)
+        self.planes.get(plane).copied().unwrap_or(0)
     }
 }
 
@@ -218,6 +298,13 @@ impl MapGrid {
         }
     }
 
+    /// The generator seed, `Map+0x1EC`. (The field is called `water_level` for
+    /// historical reasons; it has always held the seed.)
+    #[inline]
+    pub fn seed(&self) -> i32 {
+        self.water_level
+    }
+
     /// Number of cells, i.e. `word[map + 0x40]`.
     #[inline]
     pub fn num_cells(&self) -> usize {
@@ -227,7 +314,9 @@ impl MapGrid {
     /// Cell index for map coordinates.
     #[inline]
     pub fn index(&self, x: i32, y: i32) -> usize {
-        (((self.w >> 1) * y + (x >> 1)) & 0xFFFF) as usize
+        // `Map::getTile` (0x5DC1C0) halves x with a 16-bit logical shift, so a
+        // negative x does not land in the previous row.
+        (((self.w >> 1) * y + i32::from((x as u16) >> 1)) & 0xFFFF) as usize
     }
 
     /// `map->vfunc(0x30)(x, y)`, bounds-checked; out-of-range yields a scratch
@@ -324,7 +413,7 @@ mod tests {
         let g = MapGrid::new(160, 160, 0, 30);
         // (W/2) columns x H rows.
         assert_eq!(g.num_cells(), 80 * 160);
-        assert_eq!(g.cell_at(0, 0).map(|c| c.class), Some(WATER_ABYSSAL));
+        assert_eq!(g.cell_at(0, 0).map(|c| c.class()), Some(WATER_ABYSSAL));
         assert!(g.cell_at(159, 159).is_some());
         assert!(g.cell_at(160, 159).is_none(), "x == W is out of range");
         assert!(g.cell_at(159, 160).is_none(), "y == H is out of range");
@@ -437,14 +526,16 @@ mod tests {
 
     #[test]
     fn flags_are_plane_addressed() {
+        // (Plane 1 is the terrain word, which starts at TERRAIN_DEFAULT; planes 3..
+        // start empty.)
         let mut c = Cell::default();
         c.set_flag(0, 0x20);
-        c.set_flag(1, 0x200);
+        c.set_flag(3, 0x200);
         assert_eq!(c.flag(0), 0x20);
-        assert_eq!(c.flag(1), 0x200, "the mask is per-plane, not shifted");
+        assert_eq!(c.flag(3), 0x200, "the mask is per-plane, not shifted");
         c.clear_flag(0, 0x20);
         assert_eq!(c.flag(0), 0);
-        assert_eq!(c.flag(1), 0x200, "clearing plane 0 left plane 1 alone");
+        assert_eq!(c.flag(3), 0x200, "clearing plane 0 left plane 3 alone");
         assert_eq!(c.flag(NUM_FLAG_PLANES), 0, "out of range reads as 0");
     }
 }

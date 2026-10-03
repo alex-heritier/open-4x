@@ -16,21 +16,31 @@ cargo test --release
 The renderer is faithful to the binary by default. Pass `--bugs none` for the
 intended behaviour, or a subset like `--bugs sea-level-split,swapped-wrap-flags`.
 
+The library has no dependencies. `tests/ground_truth.rs` uses the sibling `biq`
+crate (a dev-dependency) to run the land/sea stage on shipped scenarios that are
+the generator's own output and compare the result with their tiles; it returns
+early when the git-ignored `civ3/` corpus (or `CIV3_DIR`) is absent.
+
 ## What this reproduces
 
 | stage | address | status |
 |---|---|---|
 | option randomiser | `0x5f1f50` | exact |
-| land/sea generation | `0x5eceb0` | exact |
+| land/sea generation | `0x5eceb0` | exact for the draw it is given; 89-95 % of cells match three shipped maps at the game's draw (ocean 0 and 2), five ocean-1 saves do not match, and the continent-balance test that picks the draw is missing (`../NOTES.md` section 19, `tests/ground_truth.rs`) |
 | start deconfliction | `0x5eeb00` | exact, including the original's index bug |
 | desert conversion at starts | `0x5edb70` | exact |
 | biome / climate assignment | `0x5f1480` | selection exact; `0x5f1ce0` flood mapped (`write_biome_class`), wiring awaits region ids |
 | resource placement math (freq roll, quantity, block odds) | `0x5f22a0` | data-independent math only; needs `.biq` rows for full placement (`resources`) |
 | goody huts, barbarian camps | `0x5f21b0`, `0x5f2090` | fully specified, implemented (`resources`) |
 | start-location and smoothing stages | `0x5eeee0`+ | not implemented |
-| river art path + mask model | `0x4C5FDA`, `0x407D56` | art path verified, storage hypothesis (`rivers`) |
+| river art path + overlay gate | `0x4C5FDA`, `0x407D56` | art path verified; the gate is the owner / at-war overlay, river storage open (`rivers`) |
 | terrain / unit / city sprite selection | `0x4C5F9F`, `0x407C30` | observed inventory (`graphics`) |
-| game RNG | `0x64A20E` | exact (`ai`); strategy/turn logic open |
+| MSVC `rand`/`srand` (rolls no combat die) | `0x64A20E`, `0x64A201` | exact (`ai`); strategy/turn logic open |
+| combat: odds, duel rounds, retreat, defender choice, ranged attacks, city strikes, defensive bombard, victory bookkeeping | `0x4A0ED0`, `0x4A53A0`, `0x4A3A70`, `0x4A2650`, `0x5BEF00` | formulas exact, rule constants from `conquests.biq`; open items in `../combat.md` (`combat`) |
+| air defense: SAM, flak, patrolling interceptors | `0x5C68A0`, `0x4A4520` | exact, every draw in order (`air`, `../air.md`) |
+| city capture and transfer: plunder, population loss, building survival, barbarian raid, the AI's raze and accept decisions | `0x563410`, `0x564800`, `0x563370`, `0x443B60`, `0x443A60` | formulas and decision order exact; the facts the AI reads are caller inputs (`capture`, `../capture.md`) |
+| economy: growth box, upkeep, optimal city number, improvement cost with trait discounts, civ trait mask | `0x4B2030`, `0x5676C0`, `0x569FE0`, `0x53A080` | formulas exact; open constants listed in `../economy.md` (`economy`) |
+| happiness: citizen moods, civil disorder and riots, We Love the King Day | `0x4BCFF0`, `0x4BDFF0`, `0x4BE440`, `0x4BE970` | exact, 30 000 + 30 000 random cases identical to the real code; the riot roll is read, not run; open items in `../happiness.md` (`happiness`) |
 | `.biq`/`.bic` container codec | `0x649400` family | exact mode-0 decode; both shipped files verified (`dcl`, see `../biq.md`) |
 
 Everything not implemented only writes resource and feature ids into cells whose
@@ -118,7 +128,19 @@ precisely to make those edge reads well-defined.
 
 | file | contents |
 |---|---|
-| `rng.rs` | the map LCG, `0x60ba80` / `0x60bab0` |
+| `rng.rs` | the `Random` class, `0x60ba80` / `0x60bab0`: map generator instances and the gameplay instance `0xA526B4` |
+| `combat.rs` | combat resolution: odds and percentage terms, duel rounds, retreat, defender choice, ranged attacks, city strikes, defensive bombard, victory bookkeeping (`../combat.md`) |
+| `air.rs` | air defense: SAM, flak and patrol interceptors, interception order and range test (`../air.md`) |
+| `capture.rs` | city capture and transfer: the three modes, plunder, population loss, building survival, barbarian raid, the AI's raze and accept decisions (`../capture.md`) |
+| `economy.rs` | growth and food box, support and payment, optimal city number, improvement cost and trait discounts, the civ trait bits (`../economy.md`) |
+| `yields.rs` | tile yields: the three `Map` functions `0x5D7180` / `0x5D75F0` / `0x5D7AD0`, the TERR and GOOD tables, centre, water, wonder, Golden Age and Despotism rules (`../yields.md`) |
+| `city.rs` | the city's per-turn totals: food eaten and surplus, the shield multiplier, tourists, Wealth, the commerce split, specialists (`../yields.md`) |
+| `government.rs` | governments: the GOVT table, anarchy and revolution, war weariness, call to arms, the declaration of war (`../government.md`) |
+| `research.rs` | research: the base cost and the turn clamp, the research step, `acquire` in order (eras, the scientific leader, Philosophy, the Great Library, the Science Age), the queue, the default-pick plumbing, the goody-hut advance (`World::hut_advance`) (`../research.md`) |
+| `research_ai.rs` | the AI's valuation of an advance (`Valuer::value`, `0x448BF0`), the flavor overlap, the category mask, the default and steal picks (`../research-ai.md`) |
+| `diplomacy.rs` | diplomacy: the per-pair relation state (`Relations`), contact, `declare_war` with the alliance and pact call-in, `make_peace`, the attitude score and class, `wants_war`, the deal clauses and their executor, the packages, the verdict ladder (`weigh`) (`../diplomacy.md`) |
+| `happiness.rs` | citizen moods: the recompute `0x4BCFF0` (base mood, buildings, martial law, luxury, draft, war, foreign nationals, face distribution, reason percentages), disorder and the riot roll, celebration; checked against the real code by differential test (`../happiness.md`) |
+| `buildable.rs` | `canBuildImprovement` / `canBuildUnit` and the free-building set key (`../buildable.md`) |
 | `fractal.rs` | midpoint displacement, `0x5e1b60`, plus sampling and percentiles |
 | `spiral.rs` | Manhattan-ring neighbour enumeration, `0x5e6e50` |
 | `cell.rs` | the `(W/2) x H` cell grid and the Cell layout |

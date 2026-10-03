@@ -7,8 +7,9 @@
 use bevy::prelude::*;
 
 use crate::audio::{self, GameAudio};
-use crate::cities::{City, can_found};
+use crate::cities::{City, Treasury, can_found};
 use crate::civs::{CIVS, Civilizations};
+use crate::economy;
 use crate::features::{MessageBoard, post};
 use crate::improvements::{
     WorkAction, action_slot, can_clear, can_irrigate, can_mine, can_road, work_turns,
@@ -58,7 +59,9 @@ impl UnitCommand {
             UnitCommand::Work(_) => t == UnitType::Worker,
             UnitCommand::Fortify => t != UnitType::Scout,
             // Civ3's Explore is a recon order; settlers and workers hold.
-            UnitCommand::Explore => matches!(t, UnitType::Warrior | UnitType::Scout),
+            UnitCommand::Explore => {
+                matches!(t, UnitType::Warrior | UnitType::Scout | UnitType::Horseman)
+            }
             _ => true,
         }
     }
@@ -338,6 +341,14 @@ pub struct BarInfo;
 #[derive(Component)]
 pub struct BoxStatus;
 
+/// Treasury and its change per turn, between the readout and the status.
+#[derive(Component)]
+pub struct BoxGold;
+
+/// The research target and its beakers, under the status line.
+#[derive(Component)]
+pub struct BoxScience;
+
 /// Civ3's bottom-right box (`box right`). With no unit selected, clicking
 /// it ends the turn ("Press ENTER or click here for next turn").
 #[derive(Component)]
@@ -422,11 +433,47 @@ pub fn spawn_bar(
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(40.0),
+                    top: Val::Px(80.0),
+                    width: Val::Px(220.0),
+                    ..default()
+                },
+                BoxGold,
+            ));
+            b.spawn((
+                Text::new(""),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(ink),
+                TextLayout::new_with_justify(Justify::Center),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(40.0),
                     top: Val::Px(100.0),
                     width: Val::Px(220.0),
                     ..default()
                 },
                 BoxStatus,
+            ));
+            b.spawn((
+                Text::new(""),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(ink),
+                TextLayout::new_with_justify(Justify::Center),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(40.0),
+                    top: Val::Px(116.0),
+                    width: Val::Px(220.0),
+                    ..default()
+                },
+                BoxScience,
             ));
             b.spawn((
                 ImageNode::new(turn_art[0].clone()),
@@ -583,7 +630,7 @@ pub fn update_bar(
     }
     if let Ok((mut t, mut color)) = info.single_mut() {
         let lit = (time.elapsed_secs() / BLINK) as u32 % 2 == 0;
-        color.0 = if unit.is_none() && !lit {
+        color.0 = if unit.is_none() && !lit && !crate::civs::is_ai(civs.active) {
             Color::srgba(0.23, 0.14, 0.06, 0.25)
         } else {
             Color::srgb(0.23, 0.14, 0.06)
@@ -614,19 +661,78 @@ pub fn update_bar(
                     Some(t) => format!("{:?}", t.base),
                     None => String::new(),
                 };
+                // Soldiers show their rank and hit points, as in Civ3.
+                let title = if d.attack > 0 {
+                    format!("{} ({})  HP {}/{}", d.name, u.level.name(), u.hp(), u.max_hp())
+                } else {
+                    d.name.to_string()
+                };
                 format!(
                     "{}\nMoves {}/{}  -  {}\n{terrain}",
-                    d.name,
+                    title,
                     units::fmt_moves(u.moves),
                     d.moves,
                     state
                 )
             }
+            None if crate::civs::is_ai(civs.active) => {
+                format!("{} is\nmaking its move...", CIVS[civs.active].name)
+            }
             None => "Press ENTER or click here\nfor next turn".to_string(),
         });
     }
     if let Ok(mut t) = status.single_mut() {
-        t.0 = format!("{}  -  Turn {}", CIVS[civs.active].adjective, turn.0);
+        t.0 = if civs.active == civs.viewer() {
+            format!("{}  -  Turn {}", CIVS[civs.active].adjective, turn.0)
+        } else {
+            format!(
+                "{}  -  Turn {}  -  {} moving",
+                CIVS[civs.viewer()].adjective,
+                turn.0,
+                CIVS[civs.active].name
+            )
+        };
+    }
+}
+
+/// The treasury line: gold on hand and what the next turn changes it by.
+fn gold_line(treasury: u32, net: i32) -> String {
+    format!("{treasury} Gold ({net:+} per turn)")
+}
+
+/// Keep the box's treasury line current: the active civ's gold and the
+/// change its coming turn brings. The change is `economy::finance`, the
+/// same books the turn end settles, so what is shown is what is applied.
+/// A deficit shows in red.
+pub fn update_gold(
+    civs: Res<Civilizations>,
+    treasury: Res<Treasury>,
+    map: Res<GameMap>,
+    cities: Query<&City>,
+    units: Query<&Unit>,
+    mut line: Query<(&mut Text, &mut TextColor), With<BoxGold>>,
+) {
+    let Ok((mut text, mut color)) = line.single_mut() else {
+        return;
+    };
+    let civ = civs.viewer();
+    let net = economy::finance(
+        &map,
+        cities.iter().filter(|c| c.civ == civ),
+        units.iter().filter(|u| u.civ == civ).count(),
+    )
+    .net();
+    let shown = gold_line(treasury.0[civ], net);
+    if text.0 != shown {
+        text.0 = shown;
+    }
+    let ink = if net < 0 {
+        Color::srgb(0.6, 0.1, 0.08)
+    } else {
+        Color::srgb(0.23, 0.14, 0.06)
+    };
+    if color.0 != ink {
+        color.0 = ink;
     }
 }
 
@@ -705,6 +811,84 @@ mod tests {
         assert_ne!(
             action_cell(clear, Cover::Jungle),
             action_cell(clear, Cover::Forest)
+        );
+    }
+
+    #[test]
+    fn the_gold_line_shows_the_treasury_and_its_signed_change() {
+        assert_eq!(gold_line(50, 3), "50 Gold (+3 per turn)");
+        assert_eq!(gold_line(0, 0), "0 Gold (+0 per turn)");
+        assert_eq!(gold_line(7, -2), "7 Gold (-2 per turn)");
+    }
+
+    /// The box shows `economy::finance` for the civ in play: its own gold,
+    /// its own cities and units, and red ink once it is losing gold.
+    #[test]
+    fn the_gold_line_follows_the_active_civ_and_reddens_in_deficit() {
+        use crate::cities::Production;
+        let mut map = GameMap::generate();
+        for t in map.tiles.iter_mut() {
+            t.base = crate::map::Base::Grassland;
+            t.relief = crate::map::Relief::Flat;
+            t.cover = Cover::Bare;
+            t.resource = None;
+            t.road = false;
+            t.seen = true;
+        }
+        let (x, y) = map.start;
+        let mut city = City {
+            civ: 0,
+            name: "Kyoto".to_string(),
+            x,
+            y,
+            size: 1,
+            food: 0,
+            shields: 0,
+            production: Production::Warrior,
+            queue: vec![],
+            buildings: vec![],
+            worked: Default::default(),
+            culture: 0,
+            founded: 1,
+        };
+        crate::cities::governor_assign(&map, &mut city, &Default::default());
+        // A road under the worked tile: two commerce, one gold of tax.
+        for &(wx, wy) in &city.worked {
+            let i = map.idx(wx, wy);
+            map.tiles[i].road = true;
+        }
+        let mut app = App::new();
+        app.insert_resource(map);
+        app.init_resource::<Civilizations>();
+        app.insert_resource(Treasury([12, 3, 0, 0]));
+        app.add_systems(Update, update_gold);
+        let line = app
+            .world_mut()
+            .spawn((Text::new(""), TextColor(Color::WHITE), BoxGold))
+            .id();
+        app.world_mut().spawn(city);
+        // Five units, four free: one gold of support against one of tax.
+        for _ in 0..5 {
+            app.world_mut().spawn(Unit::new(0, UnitType::Warrior, x, y));
+        }
+        app.update();
+        let shown = |app: &App| app.world().get::<Text>(line).unwrap().0.clone();
+        assert_eq!(shown(&app), "12 Gold (+0 per turn)");
+        // A sixth unit tips it into the red.
+        app.world_mut().spawn(Unit::new(0, UnitType::Warrior, x, y));
+        app.update();
+        assert_eq!(shown(&app), "12 Gold (-1 per turn)");
+        assert_ne!(
+            app.world().get::<TextColor>(line).unwrap().0,
+            Color::srgb(0.23, 0.14, 0.06)
+        );
+        // Civ 1 has its own purse, and no cities to pay for units.
+        app.world_mut().resource_mut::<Civilizations>().active = 1;
+        app.update();
+        assert_eq!(shown(&app), "3 Gold (+0 per turn)");
+        assert_eq!(
+            app.world().get::<TextColor>(line).unwrap().0,
+            Color::srgb(0.23, 0.14, 0.06)
         );
     }
 }

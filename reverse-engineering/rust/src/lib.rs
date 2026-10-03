@@ -8,8 +8,9 @@
 //! # What the generator actually is
 //!
 //! Given a set of world-setup options, Civ3's generator is a **pure function**
-//! of those options — it never consults the save file, the game RNG (`0x64a20e`)
-//! or the wall clock, except for a single `timeGetTime()` fallback when a
+//! of those options — it never consults the save file, MSVC `rand` (`0x64a20e`),
+//! the gameplay `Random` instance (`0xA526B4`, see [`combat`]) or the wall
+//! clock, except for a single `timeGetTime()` fallback when a
 //! fractal seed is zero. Re-rolling the same options in the Game Setup screen
 //! therefore produces the same map every time, which is why players can share
 //! "good" settings.
@@ -77,7 +78,7 @@
 //! use civ3mapgen::{generate, options::{map_size, Options}, water_percentile};
 //!
 //! let (w, h) = map_size(3);              // Large
-//! let opts = Options { map_size: 3, water_level: 40, ..Options::default() };
+//! let opts = Options { size: 3, ocean: 1, seed: 40, ..Options::default() };
 //! let map = generate(&opts);
 //!
 //! assert_eq!(map.grid.w, w);
@@ -92,25 +93,45 @@
 
 pub mod ai;
 pub mod air;
+pub mod art;
 pub mod blend;
+pub mod biomes;
 pub mod bugs;
+pub mod buildable;
+pub mod capture;
 pub mod cell;
+pub mod coast;
+pub mod city;
+pub mod combat;
+pub mod continents;
+pub mod crt;
 pub mod dcl;
 pub mod diplomacy;
 pub mod economy;
 pub mod fractal;
+pub mod government;
 pub mod graphics;
+pub mod happiness;
+pub mod lakes;
 pub mod landmass;
 pub mod media;
 pub mod net;
 pub mod options;
+pub mod oracle;
 pub mod pipeline;
+pub mod placement;
+pub mod starts;
+pub mod regions;
+pub mod rivergen;
+pub mod research;
+pub mod research_ai;
 pub mod resources;
 pub mod rivers;
 pub mod rng;
 pub mod spiral;
 pub mod stack;
 pub mod ui;
+pub mod yields;
 
 pub use bugs::OriginalBugs;
 pub use cell::{Cell, MapGrid};

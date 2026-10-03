@@ -138,6 +138,16 @@ Overlay gate table at `0xA53BC8`, row stride 8420, rows observed
 | 1 | 0, 8 |
 | 2 | 0, 20, 21, 22 |
 
+**Correction (2026-10-01, [`combat.md`](combat.md) section 14.3).** This table is not a
+river-overlay gate. `0xA53BC8` is the base of every player's **at-war byte table**
+(`Player +0xD30 + civ`, row stride 8420 = the player record stride): row 0 is the
+barbarians, who are at war with civs 1..31; row 1 says civ 1 is at war with civs 0 and 8; row 2
+that civ 2 is at war with 0, 20, 21, 22. The "mask" read through slot 38
+(`0x5EAA80`, `byte[cell+5]`) is the **owner civ id of the tile** (the same byte is the civ id
+handed to `provoke` at `0x5B358F` and compared with the victim civ in `declareWar`), so this
+render block draws an overlay where the viewer is at war with the tile's owner. The
+live-sample "mask" values (`0x06` and so on) are civ ids. Everything below that treats
+`byte[cell+5]` as a river mask is withdrawn.
 Live samples (load-screen render of `EGYPT.SAV`): cell `0x0B6BFCD0`
 = `[vtable 0x6701C8, +4 = 0x0600, +8 = FFFFFFFF, +12 = 0xD9]`
 (`byte[+5]` = `0x06`), `[+0x2C]` = `0x00001100` (nibble8-11 = 1,
@@ -156,15 +166,22 @@ null-checked `call *0xC4(%eax)` (slot 49), `ret 0x1C`.
 
 ## Storage: what selects the river segment (narrowed, not closed)
 
-* Presence/gate: tile flags (`0x48(%esp)` bits `0x78` all set) AND
-  `byte[cell+5] > 0` AND `table[esi][mask] != 0`.
-* Segment index candidates: low nibble of `byte[cell+5]` (16 values ↔
-  16 river-sheet cells), `[cell+0x2C]` bits 8–11 (slot 49, consumed by
+* ~~Presence/gate: tile flags (`0x48(%esp)` bits `0x78` all set) AND
+  `byte[cell+5] > 0` AND `table[esi][mask] != 0`.~~ **Withdrawn**: that is the
+  owner/war overlay gate (see the correction above), not the river layer.
+* Segment index candidates: ~~low nibble of `byte[cell+5]`~~ (withdrawn: it is the
+  owner), `byte[cell+4]` (the gameplay river set), `[cell+0x2C]` bits 8–11 (slot 49, consumed by
   the `0x4C31A0` wrapper), or bits 12–15 (slot 35, consumed by the
   render overlay code). Which layer `esi` selects (river vs road vs
   irrigation) and which nibble feeds the sheet blit need one
   `table = 1` trace on a river tile — recorded as the next dynamic
   step, not guessed.
+* **Gameplay consumer (2026-10-01, [`combat.md`](combat.md) section 4.1).** The
+  combat river bonus reads slot 37 (`0x5EAA70`, `byte[cell+4]`), not slot 38, and
+  tests `(byte >> dir) & 1` with `dir` in 0..7 (defender toward attacker). So the
+  river *edge* data that gameplay uses is the sibling byte `byte[cell+4]` in an
+  eight-direction index, while this section's renderer path reads `byte[cell+5]`.
+  How the two bytes relate (shared source, or one derived from the other) is open.
 
 ## Reference implementation
 

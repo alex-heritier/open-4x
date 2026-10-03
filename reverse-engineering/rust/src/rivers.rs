@@ -6,11 +6,19 @@
 //! mask getter, gate table `0xA53BC8`, `[cell+0x2C]` nibble extractors).
 //! See `../rivers.md`. Items beyond the traced path are marked
 //! `HYPOTHESIS`.
+//!
+//! **Correction (2026-10-01, `../combat.md` section 14.3).** The "mask"
+//! byte `byte[cell+5]` (slot `0x98`, `0x5EAA80`) is the tile's **owner civ
+//! id**, and the table `0xA53BC8` is every player's at-war byte table
+//! (`Player +0xD30`). So [`RiverMask`] and [`overlay_gate`] below describe an
+//! owner / at-war overlay, not river segments; they are kept because the
+//! trace behind them is real, but the river storage question is open.
 
 /// Overlay mask byte: `byte[cell+5]`, read via vtable slot 38
 /// (`0x5EAA80: mov al,[ecx+5]; ret`), three times per tile by the
-/// `0x57Fxxx`/`0x580xxx` renderer. Low nibble shape (16 values) matches
-/// the 16-cell river sheets; bit order still **HYPOTHESIS**.
+/// `0x57Fxxx`/`0x580xxx` renderer. **Withdrawn reading:** this byte is the
+/// tile's owner civ id (`../combat.md` section 14.3), so the nibble and edge
+/// names below are unfounded; the type is kept for the traced gate only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct RiverMask(pub u8);
 
@@ -71,10 +79,12 @@ pub fn city_background_name(mode_prefix: char, layer: &str) -> String {
     format!("{mode_prefix}-H2O-{layer}")
 }
 
-/// Overlay gate table at `0xA53BC8` (row stride 8420). The renderer draws
-/// the overlay layer `row` for `mask` only when `gate(row, mask) != 0,
-/// after requiring tile flags `0x78` and `mask > 0` (`0x57F8BF..0x57FEEB`).
-/// Rows dumped live: 0 → `1..=31`, 1 → `{0, 8}`, 2 → `{0, 20, 21, 22}`.
+/// Overlay gate table at `0xA53BC8` (row stride 8420): the at-war byte table.
+/// The renderer draws the overlay for `row` (the viewer) and `mask` (the owner
+/// civ of the tile) only when `gate(row, mask) != 0`, after requiring tile
+/// flags `0x78` and `mask > 0` (`0x57F8BF..0x57FEEB`).
+/// Rows dumped live: 0 → `1..=31`, 1 → `{0, 8}`, 2 → `{0, 20, 21, 22}`: the
+/// civs each civ is at war with.
 pub fn overlay_gate(row: usize, mask: u8) -> bool {
     match row {
         0 => (1..32).contains(&mask),

@@ -54,6 +54,18 @@ impl GameAudio {
             UnitType::Scout,
             assets.load("gen/audio/units/Scout/ScoutRunFoot1.wav"),
         );
+        run.insert(
+            UnitType::Archer,
+            assets.load("gen/audio/units/Archer/ArchRunFoot1.wav"),
+        );
+        run.insert(
+            UnitType::Spearman,
+            assets.load("gen/audio/units/Spearman/SpearmanRunFoot1.wav"),
+        );
+        run.insert(
+            UnitType::Horseman,
+            assets.load("gen/audio/units/Horseman/HorsemanRunHooves.wav"),
+        );
         Self {
             menu: assets.load("gen/audio/music/menu.ogg"),
             peace: assets.load("gen/audio/music/as_early_peace.ogg"),

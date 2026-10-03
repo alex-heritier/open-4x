@@ -68,7 +68,7 @@ The `GOOD` section sits at file offset 29 052 of the inflated stream:
 | `+0x1C` | 32 B | `GOOD_*` key (`GOOD_Horses`) |
 | `+0x3C` | u32 | class: 2 = strategic, 1 = luxury, 0 = bonus |
 | `+0x40` | u32 | **frequency** (confirmed) |
-| `+0x44` | u32 | `a`: 800/400/200/100 on strategics, 0 elsewhere (unmapped second rate; the editor's Good tab has both an appearance ratio and a disappearance probability, and `freq` is the first) |
+| `+0x44` | u32 | **disappearance probability** (the editor's second rate): 800/400/200/100 on strategics, 0 elsewhere. Read by the resource-upkeep routine `0x4F4CB0`, which runs only when `turn mod 5 == 0` and, for a worked or connected tile, removes the resource when `rand(p) == 0` (`p` this value, the draw only when `p > 0`); `world-events.md` section 2. It is **not** a per-turn rate |
 | `+0x48` | u32 | `b`: **icon/ordering id = the `resources.pcx` cell** (equals the row index except Sugar 24 / Tropical Fruit 22 / Oasis 23; see the icon section below) |
 | `+0x4C` | u32 | `c`: **the `TECH` row that reveals this resource** (8/8 correct below), `-1` on luxuries and bonus goods |
 | `+0x50` | 12 B | 3 small u32s per row |
@@ -496,6 +496,15 @@ civilopedia text is "{New Resource} Horses appear on the map"
 (`Conquests/Text/Civilopedia.txt`). Luxuries and bonus goods carry `-1`.
 Pinned by `resources::tests::strategic_reveal_tech_indices` (which reads the
 TECH row names out of the decoded file).
+
+**Consumers (2026-10-01, `yields.md` section 4).** The three tile-yield
+functions read this table: a tile's resource counts only when
+`Player::hasTech(+0x4C)` (`0x561440`, -1 always true; `0x5D7B4C..0x5D7B99` in
+the commerce twin), and then adds the three words at `+0x50 / +0x54 / +0x58`
+as food, shields and commerce. The row's `+0x3C` category word is tested by
+`0x5E3720` (`== 1`: a luxury) in the luxury-resource counter `0x4BAF80`
+(`yields.md` section 8). The words at `+0x50` are therefore the bonus yields,
+not "3 small u32s" of unknown meaning.
 
 Load pipeline temp files (all in the exe dir, all captured): the EGYPT
 load wrote `save0.tmp` (1748113B — the game's own DCL decompression of

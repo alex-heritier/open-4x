@@ -264,11 +264,14 @@ pub fn end_turn_work(
         for (x, y, action) in advance_work(&mut all) {
             let i = map.idx(x, y);
             apply_work(&mut map.tiles[i], action);
-            commands.spawn(AudioPlayer(audio.work_sfx(action)));
-            post(
-                &mut board,
-                format!("Workers complete {} ({x},{y}).", action_name(action)),
-            );
+            // The computer's workers finish their jobs unannounced.
+            if !crate::civs::is_ai(event.0) {
+                commands.spawn(AudioPlayer(audio.work_sfx(action)));
+                post(
+                    &mut board,
+                    format!("Workers complete {} ({x},{y}).", action_name(action)),
+                );
+            }
         }
     }
 }
@@ -647,6 +650,7 @@ mod tests {
                 action: WorkAction::Road,
                 turns_left: 1,
             }),
+            ..Unit::new(0, crate::units::UnitType::Worker, sx, sy)
         });
         app.add_systems(Update, end_turn_work);
         app.world_mut()
@@ -695,6 +699,7 @@ mod tests {
             sentry: false,
             exploring: false,
             work: Some(Work { action, turns_left }),
+            ..Unit::new(0, crate::units::UnitType::Worker, x, y)
         }
     }
 

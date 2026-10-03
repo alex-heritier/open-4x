@@ -49,7 +49,9 @@ log="$out_dir/shot.log"
 
 cargo build --quiet ${release:+--release} --manifest-path "$crate/Cargo.toml"
 
-env_args=(CIV3_SHOT="$out" CIV3_SHOT_FRAME="$frames")
+# Bevy resolves `assets/` next to the executable (target/<profile>/) unless told
+# otherwise; `cargo run` sets this implicitly, a direct launch does not.
+env_args=(CIV3_SHOT="$out" CIV3_SHOT_FRAME="$frames" BEVY_ASSET_ROOT="${BEVY_ASSET_ROOT:-$crate}")
 [ "$splash" = 0 ] && env_args+=(CIV3_NO_SPLASH=1)
 [ "$reveal" = 1 ] && env_args+=(CIV3_REVEAL=1)
 [ "$keep" = 1 ] && env_args+=(CIV3_SHOT_KEEP=1)

@@ -19,8 +19,32 @@ pub(crate) struct HoverLabel;
 #[derive(Component)]
 pub(crate) struct MessageLabel;
 
+/// The centered banner that says how the game ended.
+#[derive(Component)]
+pub(crate) struct GameOverLabel;
+
 pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
     let font = assets.load("gen/fonts/lsans.ttf");
+    commands.spawn((
+        Text::new(""),
+        TextFont {
+            font: font.clone(),
+            font_size: 34.0,
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 0.9, 0.5)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(90.0),
+            align_self: AlignSelf::Center,
+            justify_self: JustifySelf::Center,
+            padding: UiRect::axes(Val::Px(24.0), Val::Px(10.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+        Visibility::Hidden,
+        GameOverLabel,
+    ));
     commands.spawn((
         Text::new(""),
         TextFont {
@@ -68,8 +92,9 @@ pub fn end_turn_button(
     audio: Res<GameAudio>,
     view: Res<CityView>,
     splash: Res<SplashUp>,
+    civs: Res<crate::civs::Civilizations>,
 ) {
-    if view.0.is_some() || splash.0 {
+    if view.0.is_some() || splash.0 || crate::civs::is_ai(civs.active) {
         return;
     }
     let pressed = |i: &Interaction| *i == Interaction::Pressed;
@@ -153,3 +178,35 @@ pub fn update_message_label(
     }
 }
 
+
+/// Show the verdict once the game is decided.
+pub fn update_game_over(
+    civs: Res<crate::civs::Civilizations>,
+    mut q: Query<(&mut Text, &mut Visibility), With<GameOverLabel>>,
+) {
+    use crate::civs::{CIVS, Outcome};
+    let Ok((mut text, mut vis)) = q.single_mut() else {
+        return;
+    };
+    let (shown, v) = match civs.outcome {
+        Some(Outcome::Victory(c)) if !crate::civs::is_ai(c) => (
+            format!("Victory! The {} stand alone.", CIVS[c].name),
+            Visibility::Visible,
+        ),
+        Some(Outcome::Victory(c)) => (
+            format!("The {} have conquered the world.", CIVS[c].name),
+            Visibility::Visible,
+        ),
+        Some(Outcome::Defeat) => (
+            "Defeat. Your civilization has been destroyed.".to_string(),
+            Visibility::Visible,
+        ),
+        None => (String::new(), Visibility::Hidden),
+    };
+    if text.0 != shown {
+        text.0 = shown;
+    }
+    if *vis != v {
+        *vis = v;
+    }
+}

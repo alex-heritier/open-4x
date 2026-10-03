@@ -2,18 +2,25 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
 mod actionbar;
+mod advisors;
+mod ai;
 mod audio;
 mod blend;
 mod borders;
 mod cities;
 mod civs;
+mod combat;
+mod diplomacy;
+mod economy;
 mod features;
 mod improvements;
 mod input;
 mod map;
 mod production_prompt;
 mod render;
+mod research;
 mod rng;
+mod rules_data;
 mod screenshot;
 mod script;
 mod splash;
@@ -25,6 +32,7 @@ mod units;
 use map::GameMap;
 
 fn main() {
+    civs::set_controllers();
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -40,7 +48,15 @@ fn main() {
         )
         .add_message::<units::TurnEnded>()
         .add_message::<civs::CivilizationEnded>()
+        .add_message::<combat::AttackOrder>()
+        .add_message::<cities::FoundCityOrder>()
+        .init_resource::<ai::AiState>()
+        .init_resource::<combat::ActiveCombat>()
+        .init_resource::<combat::CombatSpeed>()
         .init_resource::<civs::Civilizations>()
+        .insert_resource(research::Research::new())
+        .insert_resource(diplomacy::Diplomacy::new())
+        .init_resource::<advisors::Advisors>()
         .add_message::<actionbar::UnitCommand>()
         .init_resource::<actionbar::GotoMode>()
         .insert_resource(GameMap::generate())
@@ -77,6 +93,9 @@ fn main() {
                 actionbar::spawn_bar,
                 screenshot::setup_shots,
                 script::setup_script,
+                diplomacy::setup,
+                research::begin,
+                advisors::spawn_buttons,
             )
                 .chain(),
         )
@@ -84,27 +103,57 @@ fn main() {
             Update,
             (
                 (
-                    script::drive_script,
+                    (
+                        script::drive_script,
+                        diplomacy::refresh,
+                        diplomacy::detect_contact,
+                        research::refresh,
+                        advisors::hotkeys,
+                        advisors::open_buttons,
+                        advisors::interrupt,
+                        advisors::respond,
+                    )
+                        .chain(),
                     input::camera_control.run_if(unit_picker::inactive),
                     (input::hover, unit_picker::update).chain(),
                     input::hold_preview.run_if(unit_picker::inactive),
                     input::orders
                         .run_if(production_prompt::inactive)
-                        .run_if(unit_picker::inactive),
-                    actionbar::run_commands.run_if(production_prompt::inactive),
-                    cities::found_city.run_if(production_prompt::inactive),
-                    units::end_turn_units,
-                    cities::end_turn_cities,
+                        .run_if(unit_picker::inactive)
+                        .run_if(combat::idle),
+                    actionbar::run_commands
+                        .run_if(production_prompt::inactive)
+                        .run_if(combat::idle),
+                    (
+                        ai::play_turn,
+                        cities::found_city.run_if(production_prompt::inactive),
+                        civs::check_elimination,
+                    )
+                        .chain()
+                        .run_if(combat::idle),
+                    // Research closes before the cities are processed, so an
+                    // advance that arrives this turn can be built this turn.
+                    (
+                        units::end_turn_units,
+                        research::end_turn,
+                        diplomacy::end_turn,
+                        cities::end_turn_cities,
+                    )
+                        .chain(),
                     improvements::end_turn_work,
-                    units::refresh_visibility,
-                    units::drive_movement,
+                    // Visibility first: it holds `seen` for the civ in play,
+                    // which the worked-tile check reads.
+                    (units::refresh_visibility, cities::reconcile_tiles).chain(),
+                    units::drive_movement.run_if(combat::idle),
                     units::advance_anims,
                     features::resolve_features,
                     units::restack,
                     units::auto_select,
                     civs::focus_active_civ,
                     splash::dismiss_splash,
-                    ui::end_turn_button.run_if(production_prompt::inactive),
+                    ui::end_turn_button
+                        .run_if(production_prompt::inactive)
+                        .run_if(combat::idle),
                     screenshot::drive_shots,
                 )
                     .chain(),
@@ -113,8 +162,7 @@ fn main() {
                     units::selection_gizmo,
                     units::ring_follow,
                     units::animate_units,
-                    cities::sync_city_visuals,
-                    cities::city_visibility,
+                    (cities::sync_city_visuals, cities::city_visibility).chain(),
                     cities::maintain_city_screen,
                     cities::city_screen_input.run_if(production_prompt::city_input_allowed),
                     (cities::city_screen_buttons, cities::update_panel_buttons).chain(),
@@ -125,15 +173,26 @@ fn main() {
                     render::update_fog,
                     render::sync_cover,
                     ui::update_hover_label,
-                    actionbar::update_bar,
+                    (actionbar::update_bar, actionbar::update_gold, advisors::update_science_line, advisors::show).chain(),
                     actionbar::blink_next_turn,
                     ui::update_message_label,
+                    ui::update_game_over,
                     screenshot::manual_shot,
                 )
                     .chain(),
             )
                 .chain(),
         )
+        // The fight on screen: after movement has asked for it, before the
+        // clips advance.
+        .add_systems(
+            Update,
+            (combat::start_attacks, combat::run_combat)
+                .chain()
+                .after(units::drive_movement)
+                .before(units::advance_anims),
+        )
+        .add_systems(Update, combat::sync_health_bars.after(units::animate_units))
         .run();
 }
 
@@ -179,4 +238,7 @@ fn setup_art(mut commands: Commands, assets: Res<AssetServer>, mut images: ResMu
 /// clock at game start; determinism per map is our deviation).
 fn setup_rng(mut commands: Commands, map: Res<GameMap>) {
     commands.insert_resource(rng::GameRng::new(map.seed as u32));
+    // Combat has its own dice in the binary (the `Random` instance at
+    // `0xA526B4`, the map generator's LCG), not the `rand()` of the hut rolls.
+    commands.insert_resource(combat::CombatRng(rng::MapRng::new(map.seed as u32)));
 }

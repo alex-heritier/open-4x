@@ -15,6 +15,7 @@ use std::fs;
 
 use crate::audio::{self, GameAudio};
 use crate::civs::{CIV_COUNT, CIVS, CivilizationEnded, Civilizations};
+use crate::economy::{self, despotism, food_box, granary_keep};
 use crate::features::{MessageBoard, post};
 use crate::improvements::{ImprovementArt, can_irrigate, tile_overlays};
 use crate::map::*;
@@ -23,22 +24,26 @@ use crate::splash::SplashUp;
 use crate::tiles::TileArt;
 use crate::units::{self, Selected, Unit, UnitArt, UnitType};
 
-pub const FOOD_BOX: u8 = 20;
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Production {
     Warrior,
     Scout,
     Settler,
     Worker,
+    Archer,
+    Spearman,
+    Horseman,
     Barracks,
     Granary,
     Temple,
 }
 
 impl Production {
-    pub const ALL: [Production; 7] = [
+    pub const ALL: [Production; 10] = [
         Production::Warrior,
+        Production::Archer,
+        Production::Spearman,
+        Production::Horseman,
         Production::Scout,
         Production::Settler,
         Production::Worker,
@@ -53,6 +58,9 @@ impl Production {
             Production::Scout => 20,
             Production::Settler => 30,
             Production::Worker => 10,
+            Production::Archer => 20,
+            Production::Spearman => 20,
+            Production::Horseman => 30,
             Production::Barracks => 30,
             Production::Granary => 40,
             Production::Temple => 30,
@@ -65,6 +73,9 @@ impl Production {
             Production::Scout => Some(UnitType::Scout),
             Production::Settler => Some(UnitType::Settler),
             Production::Worker => Some(UnitType::Worker),
+            Production::Archer => Some(UnitType::Archer),
+            Production::Spearman => Some(UnitType::Spearman),
+            Production::Horseman => Some(UnitType::Horseman),
             _ => None,
         }
     }
@@ -79,6 +90,9 @@ impl Production {
             Production::Scout => "Scout",
             Production::Settler => "Settler",
             Production::Worker => "Worker",
+            Production::Archer => "Archer",
+            Production::Spearman => "Spearman",
+            Production::Horseman => "Horseman",
             Production::Barracks => "Barracks",
             Production::Granary => "Granary",
             Production::Temple => "Temple",
@@ -92,6 +106,9 @@ impl Production {
             Production::Scout => "Moves 2, sees 2",
             Production::Settler => "Founds a city (costs 2 pop)",
             Production::Worker => "Builds improvements",
+            Production::Archer => "Attack 2, Defense 1",
+            Production::Spearman => "Attack 1, Defense 2",
+            Production::Horseman => "Attack 2, Defense 1, Moves 2",
             Production::Barracks => "Trains veteran land units",
             Production::Granary => "Keeps half the food box on growth",
             Production::Temple => "Adds culture; 1 upkeep",
@@ -128,6 +145,9 @@ impl Production {
             Production::Scout => "gen/ui/uniticon_scout.png",
             Production::Settler => "gen/ui/uniticon_settler.png",
             Production::Worker => "gen/ui/uniticon_worker.png",
+            Production::Archer => "gen/ui/uniticon_archer.png",
+            Production::Spearman => "gen/ui/uniticon_spearman.png",
+            Production::Horseman => "gen/ui/uniticon_horseman.png",
             _ => "",
         }
     }
@@ -158,6 +178,7 @@ pub struct City {
     pub x: i32,
     pub y: i32,
     pub size: u8,
+    /// Food stored toward the next citizen, always below `food_box(size)`.
     pub food: u8,
     pub shields: u8,
     pub production: Production,
@@ -175,7 +196,8 @@ pub struct City {
 #[derive(Resource, Default)]
 pub struct CityNamesUsed(pub [usize; CIV_COUNT]);
 
-/// Gold in each civ's treasury. Nothing spends it yet; taxes accumulate.
+/// Gold in each civ's treasury. A civ's turn adds its tax and pays for its
+/// improvements and units (`economy::pay`); it never goes below zero.
 #[derive(Resource, Default)]
 pub struct Treasury(pub [u32; CIV_COUNT]);
 
@@ -249,29 +271,75 @@ pub fn radius_tiles(map: &GameMap, x: i32, y: i32) -> Vec<(i32, i32)> {
     out
 }
 
-/// Tiles a city cannot work: every city center plus the tiles other
-/// cities already work (`me` is the asking city's center).
+/// Tiles a city cannot work: every city center, the tiles other cities
+/// already work, and every tile inside another civilization's cultural
+/// border. `me` is the asking city's center and must be among `cities`;
+/// without it the border rule has no civ to measure against and is skipped.
 pub fn taken_tiles<'a>(
+    map: &GameMap,
     cities: impl IntoIterator<Item = &'a City>,
     me: (i32, i32),
 ) -> HashSet<(i32, i32)> {
+    let all: Vec<&City> = cities.into_iter().collect();
     let mut out = HashSet::new();
-    for c in cities {
+    for c in &all {
         out.insert((c.x, c.y));
         if (c.x, c.y) != me {
             out.extend(c.worked.iter().copied());
         }
     }
+    if let Some(mine) = all.iter().find(|c| (c.x, c.y) == me) {
+        out.extend(
+            territory(map, &all)
+                .into_iter()
+                .filter(|&(_, owner)| all[owner].civ != mine.civ)
+                .map(|(tile, _)| tile),
+        );
+    }
     out
 }
 
-/// A radius tile the city may work: explored and not taken by another city.
+/// A radius tile the city may work: explored and not taken by another city
+/// or another civ's border.
 pub fn workable(map: &GameMap, taken: &HashSet<(i32, i32)>, tile: (i32, i32)) -> bool {
     !taken.contains(&tile) && map.get(tile.0, tile.1).is_some_and(|t| t.seen)
 }
 
-fn tile_rank(map: &GameMap, tile: &(i32, i32)) -> (u8, u8) {
-    yields(&map.tiles[map.idx(tile.0, tile.1)])
+/// `workable` for the city's own civilization: the computer's cities see
+/// the whole map, since `Tile::seen` only describes the human's view.
+fn can_work(map: &GameMap, taken: &HashSet<(i32, i32)>, tile: (i32, i32), civ: usize) -> bool {
+    if crate::civs::is_ai(civ) {
+        !taken.contains(&tile) && map.get(tile.0, tile.1).is_some()
+    } else {
+        workable(map, taken, tile)
+    }
+}
+
+/// Drop the worked tiles the city may no longer work: a foreign border
+/// grew over one, a city was founded on it, or a neighbor took it. True
+/// when anything was dropped. Fog is not rechecked: a tile once worked was
+/// explored, and `Tile::seen` only describes the civ in play.
+pub fn prune_worked(city: &mut City, taken: &HashSet<(i32, i32)>) -> bool {
+    let before = city.worked.len();
+    city.worked.retain(|t| !taken.contains(t));
+    city.worked.len() != before
+}
+
+/// What a worked tile gives its city under despotism: food, shields and
+/// commerce, each trimmed by `economy::despotism`.
+pub fn worked_yields(t: &Tile) -> (u8, u8, u8) {
+    let (food, shields) = yields(t);
+    (
+        despotism(food),
+        despotism(shields),
+        despotism(tile_commerce(t)),
+    )
+}
+
+/// The governor's ranking of a tile: food first, then shields, then
+/// commerce, as the city would get them.
+fn tile_rank(map: &GameMap, tile: &(i32, i32)) -> (u8, u8, u8) {
+    worked_yields(&map.tiles[map.idx(tile.0, tile.1)])
 }
 
 /// Governor: work the best `size` tiles, food first then shields.
@@ -297,14 +365,56 @@ pub fn governor_fill(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>
     }
     let mut free: Vec<(i32, i32)> = radius_tiles(map, city.x, city.y)
         .into_iter()
-        .filter(|t| !city.worked.contains(t) && workable(map, taken, *t))
+        .filter(|t| !city.worked.contains(t) && can_work(map, taken, *t, city.civ))
         .collect();
     free.sort_by_key(|t| {
-        let (f, s) = tile_rank(map, t);
-        (std::cmp::Reverse(f), std::cmp::Reverse(s))
+        let (f, s, c) = tile_rank(map, t);
+        (
+            std::cmp::Reverse(f),
+            std::cmp::Reverse(s),
+            std::cmp::Reverse(c),
+        )
     });
     let want = (city.size as usize).saturating_sub(city.worked.len());
     city.worked.extend(free.into_iter().take(want));
+}
+
+/// The computer's governor: start from the food-first picks, then trade
+/// food for shields and commerce while the city keeps growing (a surplus of
+/// 2 while small, 1 once it is a city). The human's governor stays
+/// food-first.
+pub fn balanced_governor(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>) {
+    governor_assign(map, city, taken);
+    let floor: i16 = if city.size < SETTLER_MIN_SIZE { 2 } else { 1 };
+    let value = |c: &City| {
+        let (food, shields) = city_income(map, c);
+        shields as i32 * 3 + food.clamp(0, 4) as i32 * 2 + city_commerce(map, c) as i32
+    };
+    let free: Vec<(i32, i32)> = radius_tiles(map, city.x, city.y)
+        .into_iter()
+        .filter(|t| can_work(map, taken, *t, city.civ))
+        .collect();
+    for _ in 0..(city.size as usize * 2).max(2) {
+        let base = value(city);
+        let mut best: Option<(i32, (i32, i32), (i32, i32))> = None;
+        for &out in city.worked.iter() {
+            for &into in free.iter().filter(|t| !city.worked.contains(t)) {
+                let mut trial = city.clone();
+                trial.worked.remove(&out);
+                trial.worked.insert(into);
+                let gain = value(&trial) - base;
+                if city_income(map, &trial).0 >= floor.min(city_income(map, city).0)
+                    && gain > 0
+                    && best.is_none_or(|(g, _, _)| gain > g)
+                {
+                    best = Some((gain, out, into));
+                }
+            }
+        }
+        let Some((_, out, into)) = best else { break };
+        city.worked.remove(&out);
+        city.worked.insert(into);
+    }
 }
 
 /// Toggle a worked tile. When every citizen is busy, the worst tile is
@@ -318,7 +428,7 @@ pub fn toggle_worked(
     if city.worked.remove(&tile) {
         return true;
     }
-    if !workable(map, taken, tile) {
+    if !can_work(map, taken, tile, city.civ) {
         return false;
     }
     if city.worked.len() >= city.size as usize {
@@ -347,11 +457,12 @@ pub fn center_yields(map: &GameMap, x: i32, y: i32) -> (u8, u8) {
     (f, s.max(1))
 }
 
-/// Gross (food, shields) from the center plus worked tiles.
+/// Gross (food, shields) from the center plus worked tiles. Worked tiles
+/// pay the despotism penalty; the center does not (`economy::despotism`).
 pub fn city_yields(map: &GameMap, city: &City) -> (u8, u8) {
     let (mut food, mut shields) = center_yields(map, city.x, city.y);
     for (x, y) in city.worked.iter() {
-        let (f, s) = yields(&map.tiles[map.idx(*x, *y)]);
+        let (f, s, _) = worked_yields(&map.tiles[map.idx(*x, *y)]);
         food += f;
         shields += s;
     }
@@ -376,12 +487,12 @@ pub fn tile_commerce(t: &Tile) -> u8 {
 }
 
 /// Gross commerce: the center always gives one (Civ3's city tile), plus
-/// every worked tile.
+/// every worked tile, trimmed by the despotism penalty.
 pub fn city_commerce(map: &GameMap, city: &City) -> u8 {
     let center = tile_commerce(&map.tiles[map.idx(city.x, city.y)]).max(1);
     city.worked
         .iter()
-        .map(|(x, y)| tile_commerce(&map.tiles[map.idx(*x, *y)]))
+        .map(|(x, y)| worked_yields(&map.tiles[map.idx(*x, *y)]).2)
         .fold(center, u8::saturating_add)
 }
 
@@ -405,12 +516,18 @@ pub fn culture_per_turn(city: &City, capital: bool) -> u32 {
     city.buildings.iter().map(|b| b.culture()).sum::<u32>() + u32::from(capital)
 }
 
+/// Gold a city pays its civ's treasury each turn: the tax share of its
+/// commerce.
+pub fn city_tax(map: &GameMap, city: &City) -> u32 {
+    commerce_split(city_commerce(map, city)).0 as u32
+}
+
 /// Culture and tax a city adds when its civ's turn ends. Everything comes
 /// from the city itself, so one civ's turn never moves another's numbers;
 /// `capital` is whether this city is its own civ's capital.
 pub fn accrue(map: &GameMap, city: &mut City, capital: bool) -> u32 {
     city.culture += culture_per_turn(city, capital);
-    commerce_split(city_commerce(map, city)).0 as u32
+    city_tax(map, city)
 }
 
 /// (current level, next border expansion) in culture. Levels are powers of
@@ -436,17 +553,18 @@ pub fn culture_level(culture: u32) -> u32 {
     level
 }
 
-/// Civ3's largest cultural border: five tiles from the city center.
-pub const CULTURE_RADIUS_MAX: i32 = 5;
+/// Squared distance, in tile steps, a culture level's border reaches:
+/// `level² + 1`. Levels 1 to 3 give 2, 5 and 10, the 3x3 square, the
+/// 21-tile city radius and 37 tiles; read off the border owners of 2,856
+/// cities in the shipped saves (`reverse-engineering/economy.md`). Levels
+/// 4 to 6 extend the same rule (**HYPOTHESIS**: no save is that old).
+pub fn culture_reach_sq(level: u32) -> i32 {
+    (level * level + 1) as i32
+}
 
-/// The initial claim is the 3x3 neighborhood, a diamond on the map.
-/// Higher levels retain their distance-based rings, capped at five tiles.
+/// How far, along a tile axis, a culture level's border extends.
 pub fn culture_radius(level: u32) -> i32 {
-    if level == 1 {
-        1
-    } else {
-        (level as i32 + 1).min(CULTURE_RADIUS_MAX)
-    }
+    level as i32
 }
 
 /// Owner of every claimed tile, as an index into `cities`.
@@ -477,7 +595,7 @@ pub fn territory(map: &GameMap, cities: &[&City]) -> HashMap<(i32, i32), usize> 
             }
             for dx in -r..=r {
                 let d2 = dx * dx + dy * dy;
-                if level > 1 && d2 > r * r {
+                if d2 > culture_reach_sq(level) {
                     continue;
                 }
                 let key = (map.wrap_x(c.x + dx), y);
@@ -541,13 +659,13 @@ impl City {
         self.buildings.contains(&p)
     }
 
-    /// Items offered in the build list: every unit, plus buildings not
-    /// yet owned.
+    /// Items offered in the build list: what the civ has the advance for,
+    /// except buildings the city already owns.
     pub fn buildable(&self) -> Vec<Production> {
         Production::ALL
             .iter()
             .copied()
-            .filter(|p| !(p.is_building() && self.has(*p)))
+            .filter(|p| !(p.is_building() && self.has(*p)) && crate::research::can_build(self.civ, *p))
             .collect()
     }
 
@@ -600,13 +718,15 @@ pub fn process_city_turn(
     let mut events = vec![];
     let (net_food, shields) = city_income(map, city);
     let food = city.food as i16 + net_food;
-    if food >= FOOD_BOX as i16 {
-        city.size += 1;
+    if food >= food_box(city.size) as i16 {
+        // The box that filled is the old size's, and a Granary keeps half
+        // of that one; without it the box empties and the overflow is lost.
         city.food = if city.has(Production::Granary) {
-            FOOD_BOX / 2
+            granary_keep(city.size)
         } else {
             0
         };
+        city.size += 1;
         governor_fill(map, city, taken);
         events.push(CityEvent::Grew);
     } else if food < 0 {
@@ -635,6 +755,9 @@ pub fn process_city_turn(
         if let Some(unit) = done.unit() {
             if done == Production::Settler {
                 city.size -= 2;
+                // A smaller city has a smaller box: what it stored cannot
+                // overflow it.
+                city.food = city.food.min(food_box(city.size) - 1);
                 governor_fill(map, city, taken);
             }
             events.push(CityEvent::Completed(unit));
@@ -814,7 +937,7 @@ fn ceil_div(a: u8, b: u8) -> u8 {
 fn banner_text(map: &GameMap, city: &City) -> String {
     let (net_food, shields) = city_income(map, city);
     let name = if net_food > 0 {
-        let left = FOOD_BOX.saturating_sub(city.food);
+        let left = food_box(city.size).saturating_sub(city.food);
         format!("{} : {}", city.name, ceil_div(left, net_food as u8))
     } else {
         format!("{} : --", city.name)
@@ -976,89 +1099,114 @@ fn estimate_text_width(s: &str) -> f32 {
     s.lines().map(|l| l.chars().count()).max().unwrap_or(0) as f32 * 7.5
 }
 
-/// Found a city with the selected settler (B key).
+/// The computer's settler asks to found a city where it stands.
+#[derive(Message, Clone, Copy)]
+pub struct FoundCityOrder(pub Entity);
+
+/// What founding a city touches besides the map and the units.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Founding<'w> {
+    names: ResMut<'w, CityNamesUsed>,
+    art: Res<'w, CityArt>,
+    assets: Res<'w, AssetServer>,
+    star: Res<'w, CapitalStar>,
+    capital: ResMut<'w, Capital>,
+    audio: Res<'w, GameAudio>,
+    turn: Res<'w, units::Turn>,
+}
+
+/// Found a city with the selected settler (B key), or with a settler the
+/// computer orders to.
 pub fn found_city(
     mut commands: Commands,
     mut cmds: MessageReader<crate::actionbar::UnitCommand>,
+    mut orders: MessageReader<FoundCityOrder>,
     selected: Res<Selected>,
     units: Query<(Entity, &Unit)>,
     cities: Query<&City>,
-    mut names: ResMut<CityNamesUsed>,
     mut map: ResMut<GameMap>,
-    art: Res<CityArt>,
-    assets: Res<AssetServer>,
-    star: Res<CapitalStar>,
-    mut capital: ResMut<Capital>,
+    mut f: Founding,
     view: Res<CityView>,
     splash: Res<SplashUp>,
-    audio: Res<GameAudio>,
-    turn: Res<units::Turn>,
     civs: Res<Civilizations>,
 ) {
     let asked = cmds
         .read()
         .any(|c| *c == crate::actionbar::UnitCommand::FoundCity);
-    if !asked || view.0.is_some() || splash.0 {
-        return;
+    let mut requests: Vec<Entity> = orders.read().map(|o| o.0).collect();
+    if asked && view.0.is_none() && !splash.0 {
+        requests.extend(selected.0);
     }
-    let Some(s) = selected.0 else {
-        return;
-    };
-    let Ok((e, u)) = units.get(s) else {
-        return;
-    };
-    // Only the civ whose turn it is may settle, and only with its own
-    // settler: the hotseat player never founds for another civ.
-    if u.utype != UnitType::Settler || u.civ != civs.active {
-        return;
+    // Cities founded in this call are not in the query yet.
+    let mut spots: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
+    let mut founded: Vec<City> = vec![];
+    for s in requests {
+        let Ok((e, u)) = units.get(s) else {
+            continue;
+        };
+        // Only the civ whose turn it is may settle, and only with its own
+        // settler: the hotseat player never founds for another civ.
+        if u.utype != UnitType::Settler || u.civ != civs.active {
+            continue;
+        }
+        let civ = u.civ;
+        if !can_found(&map, &spots, u.x, u.y) {
+            continue;
+        }
+        let (x, y) = (u.x, u.y);
+        commands.entity(e).despawn();
+        spots.push((x, y));
+        // Settling absorbs any hut or camp on the tile (no reward); a
+        // resource underneath stays for future trade.
+        let i = map.idx(x, y);
+        map.tiles[i].hut = false;
+        map.tiles[i].camp = false;
+        // Civ3 cities carry a road on their tile.
+        map.tiles[i].road = true;
+        let mut city = City {
+            civ,
+            name: next_name(&mut f.names, civ),
+            x,
+            y,
+            size: 1,
+            food: 0,
+            shields: 0,
+            production: Production::Warrior,
+            queue: vec![],
+            buildings: vec![],
+            worked: HashSet::new(),
+            culture: 0,
+            founded: f.turn.0,
+        };
+        // The new city draws a border too, so tiles another civ already owns
+        // are out of its reach from the first turn.
+        let taken = taken_tiles(
+            &map,
+            cities.iter().chain(founded.iter()).chain(std::iter::once(&city)),
+            (x, y),
+        );
+        governor_assign(&map, &mut city, &taken);
+        let entity = commands.spawn(city.clone()).id();
+        let is_capital = f.capital.0[civ].is_none();
+        if is_capital {
+            f.capital.0[civ] = Some(entity);
+        }
+        spawn_city_visuals(
+            &mut commands,
+            &f.art,
+            &f.assets,
+            &f.star,
+            &map,
+            entity,
+            &city,
+            is_capital,
+        );
+        // The computer founds quietly unless the human can see it happen.
+        if map.get(x, y).is_some_and(|t| t.visible) || !crate::civs::is_ai(civ) {
+            commands.spawn(AudioPlayer(f.audio.build.clone()));
+        }
+        founded.push(city);
     }
-    let civ = u.civ;
-    let spots: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
-    if !can_found(&map, &spots, u.x, u.y) {
-        return;
-    }
-    let (x, y) = (u.x, u.y);
-    commands.entity(e).despawn();
-    // Settling absorbs any hut or camp on the tile (no reward); a resource
-    // underneath stays for future trade.
-    let i = map.idx(x, y);
-    map.tiles[i].hut = false;
-    map.tiles[i].camp = false;
-    // Civ3 cities carry a road on their tile.
-    map.tiles[i].road = true;
-    let mut city = City {
-        civ,
-        name: next_name(&mut names, civ),
-        x,
-        y,
-        size: 1,
-        food: 0,
-        shields: 0,
-        production: Production::Warrior,
-        queue: vec![],
-        buildings: vec![],
-        worked: HashSet::new(),
-        culture: 0,
-        founded: turn.0,
-    };
-    let taken = taken_tiles(cities.iter(), (x, y));
-    governor_assign(&map, &mut city, &taken);
-    let entity = commands.spawn(city.clone()).id();
-    let is_capital = capital.0[civ].is_none();
-    if is_capital {
-        capital.0[civ] = Some(entity);
-    }
-    spawn_city_visuals(
-        &mut commands,
-        &art,
-        &assets,
-        &star,
-        &map,
-        entity,
-        &city,
-        is_capital,
-    );
-    commands.spawn(AudioPlayer(audio.build.clone()));
 }
 
 pub fn end_turn_cities(
@@ -1066,6 +1214,7 @@ pub fn end_turn_cities(
     mut ended: MessageReader<CivilizationEnded>,
     map: Res<GameMap>,
     mut cities: Query<(Entity, &mut City)>,
+    units: Query<(Entity, &Unit)>,
     art: Res<UnitArt>,
     audio: Res<GameAudio>,
     mut board: ResMut<MessageBoard>,
@@ -1077,8 +1226,15 @@ pub fn end_turn_cities(
 ) {
     // One civ's cities grow, build and pay taxes when that civ hands the
     // hotseat over; the other civs' cities wait for their own turn.
+    // Despawns wait for the end of the system, so when several turns end in
+    // one frame (a script's `end n`) the units already let go stay listed:
+    // they are skipped, not paid for or disbanded twice.
+    let mut disbanded: HashSet<Entity> = HashSet::new();
     for ev in ended.read() {
         let civ = ev.0;
+        // The computer's books are none of the human's business: whatever
+        // it would announce is dropped.
+        let quiet = crate::civs::is_ai(civ).then(|| (board.text.clone(), board.ttl));
         // The outgoing civ's city screen closes with its turn.
         if view
             .0
@@ -1092,35 +1248,115 @@ pub fn end_turn_cities(
             .filter(|(_, c)| c.civ == civ)
             .map(|(e, _)| e)
             .collect();
+        // The books close first, on the cities and units as they stand:
+        // the info box showed this very `Finance` all turn, so whatever a
+        // city grows or completes below is charged from the next turn on.
+        let owned: Vec<(Entity, UnitType)> = units
+            .iter()
+            .filter(|(e, u)| u.civ == civ && !disbanded.contains(e))
+            .map(|(e, u)| (e, u.utype))
+            .collect();
+        let fin = economy::finance(
+            &map,
+            cities.iter().filter(|(_, c)| c.civ == civ).map(|(_, c)| c),
+            owned.len(),
+        );
+        // Culture accrues and the tax is collected, city by city.
+        let mut collected = 0u32;
+        for &e in &order {
+            if let Ok((_, mut city)) = cities.get_mut(e) {
+                collected += accrue(&map, &mut city, capital.0[civ] == Some(e));
+            }
+        }
+        debug_assert_eq!(collected, fin.tax, "the info box promised another tax");
+        // The tax comes in, then the two bills go out: improvements, then
+        // units (`economy::pay`). Upkeep the gold cannot cover sells one
+        // improvement, whose price joins the treasury before the units are
+        // paid; units it cannot cover disband one unit.
+        let upkeep = economy::pay(treasury.0[civ].saturating_add(fin.tax), fin.upkeep);
+        let mut gold = upkeep.treasury;
+        if upkeep.short > 0 {
+            let mine = cities.iter().filter(|(_, c)| c.civ == civ);
+            if let Some((e, i)) = economy::sale_pick(mine)
+                && let Ok((_, mut city)) = cities.get_mut(e)
+            {
+                let sold = city.buildings.remove(i);
+                gold = gold.saturating_add(economy::sale_price(sold));
+                post(
+                    &mut board,
+                    format!(
+                        "We can no longer support our {} at {}. We must think more about our treasury!",
+                        sold.name(),
+                        city.name
+                    ),
+                );
+            }
+        }
+        let support = economy::pay(gold, fin.unit_cost);
+        treasury.0[civ] = support.treasury;
+        if support.short > 0
+            && let Some((e, kind)) = economy::disband_pick(owned.iter().copied())
+        {
+            disbanded.insert(e);
+            commands.entity(e).despawn();
+            post(
+                &mut board,
+                format!(
+                    "We have insufficient gold to continue supporting all our units. One {} unit will be disbanded. (Someone should be looking after our treasury!)",
+                    units::def(kind).name
+                ),
+            );
+        }
         for e in order {
             // Later cities see the tiles earlier ones claimed this turn,
             // and any civ's city keeps a tile out of another's radius.
             let me = cities.get(e).map(|(_, c)| (c.x, c.y)).unwrap();
-            let taken = taken_tiles(cities.iter().map(|(_, c)| c), me);
+            let taken = taken_tiles(&map, cities.iter().map(|(_, c)| c), me);
             let Ok((_, mut city)) = cities.get_mut(e) else {
                 continue;
             };
-            // Culture and taxes accrue every turn, like the rest of the
-            // turn's bookkeeping, each into its own civ's coffers.
-            let tax = accrue(&map, &mut city, capital.0[civ] == Some(e));
-            treasury.0[civ] = treasury.0[civ].saturating_add(tax);
             let completed = city.production;
             for event in process_city_turn(&map, &mut city, &taken) {
                 match event {
                     CityEvent::Completed(unit) => {
                         // The decision waits for the civ's next turn; the
                         // unit itself joins the civ that built it.
-                        prompts.push(e, civ, completed);
-                        units::spawn_unit(&mut commands, &art, unit, city.x, city.y, civ);
-                        audio::sfx(&mut commands, &audio, "WhatToBuild");
+                        if !crate::civs::is_ai(civ) {
+                            prompts.push(e, civ, completed);
+                        }
+                        // Barracks turn out Veterans (`Civilopedia`
+                        // #BLDG_Barracks), but only soldiers have a rank.
+                        let level = if units::def(unit).attack > 0
+                            && city.buildings.contains(&Production::Barracks)
+                        {
+                            crate::combat::Level::Veteran
+                        } else {
+                            crate::combat::Level::Regular
+                        };
+                        units::spawn_unit_at_level(
+                            &mut commands,
+                            &art,
+                            unit,
+                            city.x,
+                            city.y,
+                            civ,
+                            level,
+                        );
+                        if quiet.is_none() {
+                            audio::sfx(&mut commands, &audio, "WhatToBuild");
+                        }
                         post(
                             &mut board,
                             format!("{} completes {}.", city.name, units::def(unit).name),
                         );
                     }
                     CityEvent::Built(p) => {
-                        prompts.push(e, civ, p);
-                        audio::sfx(&mut commands, &audio, "WhatToBuild");
+                        if !crate::civs::is_ai(civ) {
+                            prompts.push(e, civ, p);
+                        }
+                        if quiet.is_none() {
+                            audio::sfx(&mut commands, &audio, "WhatToBuild");
+                        }
                         post(&mut board, format!("{} completes {}.", city.name, p.name()));
                     }
                     CityEvent::TooSmall => post(
@@ -1141,6 +1377,48 @@ pub fn end_turn_cities(
                 }
             }
         }
+        if let Some((text, ttl)) = quiet {
+            board.text = text;
+            board.ttl = ttl;
+        }
+    }
+}
+
+/// Keep the active civ's worked tiles legal as the world changes around
+/// them. A city founded on a tile, a border that grew over it, or a
+/// neighbor's pick takes it from the city; the governor fills the gap.
+///
+/// It runs after `refresh_visibility`, which keeps `Tile::seen` for the civ
+/// in play, so it only ever touches that civ's cities: the others are
+/// mended when their turn begins (`civs` changes then). Cities nothing
+/// affects are not written, so they do not read as changed.
+pub fn reconcile_tiles(
+    civs: Res<Civilizations>,
+    map: Res<GameMap>,
+    mut cities: Query<(Entity, &mut City)>,
+) {
+    let touched = cities.iter_mut().any(|(_, c)| c.is_changed());
+    if !civs.is_changed() && !touched {
+        return;
+    }
+    let order: Vec<Entity> = cities
+        .iter()
+        .filter(|(_, c)| c.civ == civs.active)
+        .map(|(e, _)| e)
+        .collect();
+    for e in order {
+        let Ok((_, city)) = cities.get(e) else {
+            continue;
+        };
+        let taken = taken_tiles(&map, cities.iter().map(|(_, c)| c), (city.x, city.y));
+        if !city.worked.iter().any(|t| taken.contains(t)) {
+            continue;
+        }
+        let Ok((_, mut city)) = cities.get_mut(e) else {
+            continue;
+        };
+        prune_worked(&mut city, &taken);
+        governor_fill(&map, &mut city, &taken);
     }
 }
 
@@ -1153,7 +1431,10 @@ pub fn sync_city_visuals(
     mut banners: Query<(&CityBanner, &mut Text2d), Without<CityBadgeText>>,
     layouts: Query<(&CityBanner, &TextLayoutInfo)>,
     mut badge_texts: Query<(&CityBadgeText, &mut Text2d), Without<CityBanner>>,
-    mut parts: Query<(&LabelPart, &mut Transform, Option<&mut Sprite>), Without<CitySprite>>,
+    mut parts: Query<
+        (&LabelPart, &mut Transform, Option<&mut Sprite>, &mut Visibility),
+        Without<CitySprite>,
+    >,
 ) {
     for (link, mut sprite) in sprites.iter_mut() {
         if let Ok(city) = cities.get(link.0) {
@@ -1171,7 +1452,7 @@ pub fn sync_city_visuals(
         }
     }
     // Lay the pieces out around the label center from the measured text.
-    for (part, mut tf, sprite) in parts.iter_mut() {
+    for (part, mut tf, sprite, mut vis) in parts.iter_mut() {
         let Ok(city) = cities.get(part.city) else {
             continue;
         };
@@ -1182,9 +1463,27 @@ pub fn sync_city_visuals(
             .filter(|w| *w >= 1.0)
             .unwrap_or_else(|| estimate_text_width(&banner_text(&map, city)));
         let layout = label_layout(w, capital.0[city.civ] == Some(part.city));
+        // A captured city wears its new owner's color, and a lost Palace
+        // takes its star down.
+        let is_capital = capital.0[city.civ] == Some(part.city);
         match part.piece {
-            LabelPiece::Badge => tf.translation.x = layout.badge,
-            LabelPiece::Star => tf.translation.x = layout.star,
+            LabelPiece::Badge => {
+                tf.translation.x = layout.badge;
+                if let Some(mut sprite) = sprite {
+                    sprite.color = CIVS[city.civ].color;
+                }
+            }
+            LabelPiece::Star => {
+                tf.translation.x = layout.star;
+                if let Some(mut sprite) = sprite {
+                    sprite.color = CIVS[city.civ].color;
+                }
+                *vis = if is_capital {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                };
+            }
             LabelPiece::Text => tf.translation.x = layout.text,
             LabelPiece::Box => {
                 tf.translation.x = layout.text;
@@ -1708,13 +2007,15 @@ fn yield_node(cluster: &mut ChildSpawnerCommands<'_>, ctx: &ClusterCtx, rx: i32,
     if ny < 0 || ny >= map.h || !(center || city.worked.contains(&(nx, ny))) {
         return;
     }
-    let (f, s) = if center {
-        center_yields(map, nx, ny)
+    let (f, s, c) = if center {
+        let (f, s) = center_yields(map, nx, ny);
+        (f, s, tile_commerce(&map.tiles[map.idx(nx, ny)]).max(1))
     } else {
-        yields(&map.tiles[map.idx(nx, ny)])
+        worked_yields(&map.tiles[map.idx(nx, ny)])
     };
     let icons: Vec<u32> = std::iter::repeat_n(ICON_FOOD, f as usize)
         .chain(std::iter::repeat_n(ICON_SHIELD, s as usize))
+        .chain(std::iter::repeat_n(ICON_COMMERCE, c as usize))
         .collect();
     // Civ3 packs the icons in a row across the tile, overlapping them when
     // there are many. The center's row sits below the city sprite.
@@ -1901,6 +2202,7 @@ const SMALL_TEXT: f32 = 13.0;
 const GOVERNMENT: &str = "DESPOTISM";
 
 /// `CityIcons.png` cell indices, as used across the city screen.
+const ICON_COMMERCE: u32 = 2;
 const ICON_SHIELD: u32 = 4;
 const ICON_FOOD: u32 = 6;
 const ICON_BOX: u32 = 9;
@@ -1911,6 +2213,20 @@ const ICON_SHIELD_BOX: u32 = 8;
 const ICON_FOOD_BOX: u32 = 23;
 const ICON_TREASURY: u32 = 24;
 const ICON_FLASK: u32 = 16;
+
+/// Cells in the city screen's food box grid, whatever the city's box size.
+const FOOD_BOX_CELLS: usize = 20;
+
+/// Cells of the food grid a store fills: rounded to the nearest cell, and
+/// never the whole grid until the box is full, so a city one food short of
+/// growing does not look ready.
+fn box_cells(food: u8, box_size: u8) -> usize {
+    if food >= box_size {
+        return FOOD_BOX_CELLS;
+    }
+    ((food as usize * FOOD_BOX_CELLS + box_size as usize / 2) / box_size as usize)
+        .min(FOOD_BOX_CELLS - 1)
+}
 
 /// A `CityIcons.png` cell (25 cells of 31 px) drawn at a pixel size.
 fn icon(
@@ -2011,6 +2327,9 @@ fn unit_icon(t: UnitType) -> String {
         UnitType::Scout => "scout",
         UnitType::Settler => "settler",
         UnitType::Worker => "worker",
+        UnitType::Archer => "archer",
+        UnitType::Spearman => "spearman",
+        UnitType::Horseman => "horseman",
     };
     format!("gen/ui/uniticon_{stem}.png")
 }
@@ -2082,6 +2401,7 @@ fn city_panel(
     } = *ctx;
     let (net_food, shields_pt) = city_income(map, city);
     let (food, _) = city_yields(map, city);
+    let box_size = food_box(city.size);
     let commerce = city_commerce(map, city);
     let (tax, sci, lux) = commerce_split(commerce);
     let culture_pt = culture_per_turn(city, p.capital);
@@ -2543,7 +2863,7 @@ fn city_panel(
         14.0,
     );
     // The growth box: one icon per ten food still needed.
-    let need = FOOD_BOX.saturating_sub(city.food) as u32;
+    let need = box_size.saturating_sub(city.food) as u32;
     icons_right(
         content,
         assets,
@@ -2559,7 +2879,7 @@ fn city_panel(
     } else {
         format!(
             "{} turns",
-            ceil_div(FOOD_BOX.saturating_sub(city.food), net_food as u8)
+            ceil_div(box_size.saturating_sub(city.food), net_food as u8)
         )
     };
     txt(
@@ -2572,7 +2892,15 @@ fn city_panel(
         INK_SOFT,
     );
     txt(content, font, "COMMERCE", LABEL_TEXT, 296.0, 600.0, INK);
-    icon(content, assets, ICON_FOOD, 378.0, 602.0, 16.0, Color::WHITE);
+    icon(
+        content,
+        assets,
+        ICON_COMMERCE,
+        378.0,
+        602.0,
+        16.0,
+        Color::WHITE,
+    );
     txt(
         content,
         font,
@@ -2582,10 +2910,12 @@ fn city_panel(
         603.0,
         INK,
     );
-    for (row, (amount, rate, icon_cell)) in [
-        (tax, TAX_RATE, ICON_TREASURY),
-        (sci, SCI_RATE, ICON_FLASK),
-        (lux, LUX_RATE, ICON_HAPPY),
+    // Each row leads with its own badge and counts its points in coins,
+    // flasks or faces.
+    for (row, (amount, rate, icon_cell, point)) in [
+        (tax, TAX_RATE, ICON_TREASURY, ICON_COMMERCE),
+        (sci, SCI_RATE, ICON_FLASK, ICON_FLASK),
+        (lux, LUX_RATE, ICON_HAPPY, ICON_HAPPY),
     ]
     .iter()
     .enumerate()
@@ -2594,7 +2924,7 @@ fn city_panel(
         icons_right(
             content,
             assets,
-            ICON_FOOD,
+            *point,
             *amount as u32,
             19.3,
             720.0,
@@ -2622,8 +2952,10 @@ fn city_panel(
     }
 
     // ---- the boxes: food, the granary's store, and the build's shields ----
-    for i in 0..FOOD_BOX as usize {
-        let stored = i >= FOOD_BOX as usize - city.food as usize;
+    // The grid always has twenty cells; a bigger city's cell holds more.
+    let filled = box_cells(city.food, box_size);
+    for i in 0..FOOD_BOX_CELLS {
+        let stored = i >= FOOD_BOX_CELLS - filled;
         icon(
             content,
             assets,
@@ -2635,7 +2967,7 @@ fn city_panel(
         );
     }
     if city.has(Production::Granary) {
-        let row = (FOOD_BOX as usize - city.food as usize) / 4;
+        let row = (FOOD_BOX_CELLS - filled) / 4;
         txt(
             content,
             font,
@@ -2834,7 +3166,7 @@ pub fn maintain_city_screen(
     }
     *last = (open, sig);
     let Some((e, city)) = open_city else { return };
-    let taken = taken_tiles(cities.iter(), (city.x, city.y));
+    let taken = taken_tiles(&map, cities.iter(), (city.x, city.y));
     let hubs: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
     let ctx = ClusterCtx {
         assets: &art.assets,
@@ -2903,7 +3235,7 @@ pub fn city_screen_input(
     if !click_cluster(&map, &mut cities, e, rx, ry) {
         post(
             &mut board,
-            "Another city works that tile, or it is unexplored.",
+            "That tile is unexplored, worked by another city, or inside a foreign border.",
         );
     }
 }
@@ -2928,7 +3260,7 @@ pub fn click_cluster(
         return true;
     }
     let tile = (map.wrap_x(city.x + rx), ny);
-    let taken = taken_tiles(cities.iter(), (city.x, city.y));
+    let taken = taken_tiles(map, cities.iter(), (city.x, city.y));
     let Ok(mut city) = cities.get_mut(e) else {
         return true;
     };
@@ -2980,7 +3312,7 @@ pub fn city_screen_buttons(
                 let taken = views
                     .0
                     .and_then(|e| cities.get(e).ok())
-                    .map(|(_, c)| taken_tiles(cities.iter().map(|(_, c)| c), (c.x, c.y)))
+                    .map(|(_, c)| taken_tiles(&map, cities.iter().map(|(_, c)| c), (c.x, c.y)))
                     .unwrap_or_default();
                 let Some((_, mut city)) = views.0.and_then(|e| cities.get_mut(e).ok()) else {
                     continue;
@@ -3108,30 +3440,20 @@ mod tests {
         city.size = 3;
         governor_assign(&map, &mut city, &none());
         assert_eq!(city.worked.len(), 3);
-        let mut all: Vec<(u8, u8)> = radius_tiles(&map, city.x, city.y)
+        // What the city gets from a tile is the despotism-trimmed yield,
+        // and the governor takes food first, then shields.
+        let got_by = |tile: &(i32, i32)| {
+            let (f, s, _) = worked_yields(&map.tiles[map.idx(tile.0, tile.1)]);
+            (f, s)
+        };
+        let mut best: Vec<(u8, u8)> = radius_tiles(&map, city.x, city.y)
             .iter()
-            .map(|(x, y)| yields(&map.tiles[map.idx(*x, *y)]))
+            .map(got_by)
             .collect();
-        all.sort_by(|a, b| b.cmp(a));
-        let mut got: Vec<(u8, u8)> = city
-            .worked
-            .iter()
-            .map(|(x, y)| yields(&map.tiles[map.idx(*x, *y)]))
-            .collect();
-        got.sort_by(|a, b| b.cmp(a));
-        // governor sorts food-first, so food totals must match the top-3
-        // food-first ordering, not the tuple ordering; just check count
-        // here and food optimality below
-        assert_eq!(got.len(), 3);
-        let food_got: u8 = got.iter().map(|(f, _)| f).sum();
-        let mut by_food: Vec<(u8, u8)> = radius_tiles(&map, city.x, city.y)
-            .iter()
-            .map(|(x, y)| yields(&map.tiles[map.idx(*x, *y)]))
-            .collect();
-        by_food.sort_by_key(|(f, s)| (std::cmp::Reverse(*f), std::cmp::Reverse(*s)));
-        let food_best: u8 = by_food.iter().take(3).map(|(f, _)| f).sum();
-        assert_eq!(food_got, food_best);
-        let _ = all;
+        best.sort_by_key(|&(f, s)| (std::cmp::Reverse(f), std::cmp::Reverse(s)));
+        let mut got: Vec<(u8, u8)> = city.worked.iter().map(got_by).collect();
+        got.sort_by_key(|&(f, s)| (std::cmp::Reverse(f), std::cmp::Reverse(s)));
+        assert_eq!(got, best[..3]);
     }
 
     #[test]
@@ -3154,7 +3476,7 @@ mod tests {
     fn growth_and_starvation() {
         let map = test_map();
         let mut city = test_city(&map);
-        city.food = FOOD_BOX - 1;
+        city.food = food_box(city.size) - 1;
         // force growth regardless of terrain: rig by size-1978 trick is
         // overkill; instead directly verify the thresholds with income
         let (net, _) = city_income(&map, &city);
@@ -3280,11 +3602,12 @@ mod tests {
         assert_eq!(city.queue, vec![Production::Worker]);
         assert!(!city.buildable().contains(&Production::Granary));
         // granary keeps half the food box on growth
-        city.food = FOOD_BOX - 1;
+        let boxed = food_box(city.size);
+        city.food = boxed - 1;
         let (net, _) = city_income(&map, &city);
         if net >= 1 {
             process_city_turn(&map, &mut city, &none());
-            assert_eq!(city.food, FOOD_BOX / 2);
+            assert_eq!(city.food, boxed / 2);
         }
     }
 
@@ -3321,7 +3644,7 @@ mod tests {
         let mut b = test_city(&map);
         b.name = "B".into();
         b.x = map.wrap_x(a.x + 2);
-        let taken = taken_tiles([&a], (b.x, b.y));
+        let taken = taken_tiles(&map, [&a], (b.x, b.y));
         assert!(taken.contains(&(a.x, a.y)), "city centers are taken");
         assert!(taken.contains(&tile), "a's worked tile is taken for b");
         b.worked.clear();
@@ -3330,7 +3653,7 @@ mod tests {
         governor_assign(&map, &mut b, &taken);
         assert!(b.worked.is_disjoint(&a.worked));
         // a city never counts its own tiles as taken
-        assert!(!taken_tiles([&a], (a.x, a.y)).contains(&tile));
+        assert!(!taken_tiles(&map, [&a], (a.x, a.y)).contains(&tile));
         // unexplored tiles cannot be worked
         let (ux, uy) = radius_tiles(&map, b.x, b.y)
             .into_iter()
@@ -3502,7 +3825,28 @@ mod tests {
         city.culture = 10;
         let expanded = territory(&map, &[&city]);
         assert!(expected.iter().all(|tile| expanded.contains_key(tile)));
-        assert!(expanded.contains_key(&(40, 33)));
+        assert!(expanded.contains_key(&(40, 32)));
+        assert!(expanded.contains_key(&(42, 31)));
+        assert!(!expanded.contains_key(&(42, 32)), "the radius' corners stay out");
+        assert!(!expanded.contains_key(&(40, 33)));
+    }
+
+    #[test]
+    fn borders_grow_like_the_shipped_saves_show() {
+        // Tiles claimed at each level: the 3x3 square, the 21-tile city
+        // radius, then 37.
+        let map = test_map();
+        let mut city = test_city(&map);
+        city.x = 40;
+        city.y = 30;
+        for (culture, tiles) in [(0, 9), (10, 21), (100, 37)] {
+            city.culture = culture;
+            assert_eq!(territory(&map, &[&city]).len(), tiles, "culture {culture}");
+        }
+        // Level 3 reaches (3, 1) but not (3, 2).
+        let owned = territory(&map, &[&city]);
+        assert!(owned.contains_key(&(43, 31)));
+        assert!(!owned.contains_key(&(43, 32)));
     }
 
     #[test]
@@ -3541,7 +3885,8 @@ mod tests {
         assert_eq!(next_name(&mut used, 0), CIVS[0].city_names[1]);
         assert_eq!(next_name(&mut used, 1), CIVS[1].city_names[0]);
         assert_eq!(next_name(&mut used, 2), CIVS[2].city_names[0]);
-        assert_eq!(used.0, [2, 1, 1], "each civ counts its own foundings");
+        assert_eq!(next_name(&mut used, 3), CIVS[3].city_names[0]);
+        assert_eq!(used.0, [2, 1, 1, 1], "each civ counts its own foundings");
         // Past the end of its list a civ numbers its own first name
         // instead of borrowing a neighbour's still-unused one.
         let mut used = CityNamesUsed::default();
@@ -3630,5 +3975,441 @@ mod tests {
         );
         assert_eq!(resources_owned(&map, &cities, 0).0, vec![]);
         assert_eq!(resources_owned(&map, &cities, 1).0, vec![(id, 1)]);
+    }
+
+    /// Explored, flat grassland everywhere: a worked tile feeds two and
+    /// gives nothing else, so a city nets the same two food at any size
+    /// (its center gives two and a free shield).
+    fn flat_land() -> GameMap {
+        let mut map = test_map();
+        for t in map.tiles.iter_mut() {
+            t.base = Base::Grassland;
+            t.relief = Relief::Flat;
+            t.cover = Cover::Bare;
+            t.resource = None;
+            t.road = false;
+            t.irrigation = false;
+            t.mine = false;
+        }
+        map
+    }
+
+    /// A city of the size, its citizens put to work, on `flat_land`.
+    fn sized_city(map: &GameMap, size: u8) -> City {
+        let mut city = test_city(map);
+        city.size = size;
+        governor_fill(map, &mut city, &none());
+        assert_eq!(city_income(map, &city).0, 2, "flat land nets two at {size}");
+        city
+    }
+
+    #[test]
+    fn a_city_grows_when_the_box_of_its_size_class_fills() {
+        let map = flat_land();
+        // Towns fill 20 food, cities 40, metropolises 60.
+        for (size, boxed) in [(1, 20), (6, 20), (7, 40), (12, 40), (13, 60), (16, 60)] {
+            let turn = |food: u8| {
+                let mut city = sized_city(&map, size);
+                city.food = food;
+                let events = process_city_turn(&map, &mut city, &none());
+                (city, events.iter().any(|e| matches!(e, CityEvent::Grew)))
+            };
+            let (city, grew) = turn(boxed - 3);
+            assert!(!grew, "size {size} grew a turn early");
+            assert_eq!((city.size, city.food), (size, boxed - 1));
+            let (city, grew) = turn(boxed - 2);
+            assert!(grew, "size {size} stayed put with a full box");
+            assert_eq!((city.size, city.food), (size + 1, 0));
+            // Without a Granary what overflows the box is lost.
+            let (city, _) = turn(boxed - 1);
+            assert_eq!((city.size, city.food), (size + 1, 0));
+        }
+    }
+
+    #[test]
+    fn a_granary_keeps_half_of_the_box_that_filled() {
+        let map = flat_land();
+        // Growing from 6 to 7 keeps half of the town's box, not the city's.
+        for (size, kept) in [(3, 10), (6, 10), (7, 20), (12, 20), (13, 30)] {
+            let mut city = sized_city(&map, size);
+            city.buildings.push(Production::Granary);
+            city.food = food_box(size) - 2;
+            process_city_turn(&map, &mut city, &none());
+            assert_eq!(city.size, size + 1);
+            assert_eq!(city.food, kept, "size {size}");
+        }
+    }
+
+    #[test]
+    fn a_settler_leaves_a_smaller_city_with_a_smaller_box() {
+        let map = flat_land();
+        let mut city = sized_city(&map, 13);
+        city.food = 50;
+        city.production = Production::Settler;
+        city.shields = Production::Settler.cost();
+        let events = process_city_turn(&map, &mut city, &none());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CityEvent::Completed(UnitType::Settler)))
+        );
+        assert_eq!(city.size, 11);
+        // Fifty of sixty fits no box of forty: the store tops out below it.
+        assert_eq!(city.food, food_box(11) - 1);
+    }
+
+    #[test]
+    fn a_city_starves_only_once_its_box_runs_dry() {
+        let map = flat_land();
+        let mut city = test_city(&map);
+        city.size = 3;
+        // Idle citizens: the center's two food against six eaten.
+        city.worked.clear();
+        city.food = 5;
+        assert!(process_city_turn(&map, &mut city, &none()).is_empty());
+        assert_eq!((city.size, city.food), (3, 1));
+        let events = process_city_turn(&map, &mut city, &none());
+        assert!(events.iter().any(|e| matches!(e, CityEvent::Starved)));
+        assert_eq!((city.size, city.food), (2, 0));
+    }
+
+    #[test]
+    fn worked_tiles_pay_despotism_but_the_city_center_does_not() {
+        let mut map = flat_land();
+        let (x, y) = map.start;
+        let near = (map.wrap_x(x + 1), y);
+        for spot in [(x, y), near] {
+            let i = map.idx(spot.0, spot.1);
+            map.tiles[i].irrigation = true;
+        }
+        let tile = map.tiles[map.idx(near.0, near.1)].clone();
+        assert_eq!(yields(&tile).0, 3);
+        assert_eq!(center_yields(&map, x, y).0, 3, "the center keeps all three");
+        assert_eq!(worked_yields(&tile).0, 2, "a worked tile loses one");
+        // A road makes coast three commerce; worked, it gives two.
+        let mut coast = tile.clone();
+        coast.base = Base::Coast;
+        coast.irrigation = false;
+        coast.road = true;
+        assert_eq!(tile_commerce(&coast), 3);
+        assert_eq!(worked_yields(&coast).2, 2);
+        // Small yields pass untouched.
+        assert_eq!(worked_yields(&map.tiles[map.idx(x, y + 1)]), (2, 0, 0));
+        // The city sums the trimmed amounts.
+        let mut city = test_city(&map);
+        city.worked = HashSet::from([near]);
+        assert_eq!(city_yields(&map, &city).0, 3 + 2);
+    }
+
+    /// Civ 0's city at the start and civ 1's city two tiles east: each
+    /// owns a 3x3 border, and each has in its radius a tile only the other
+    /// one's border covers.
+    fn neighbors(map: &GameMap) -> (City, City, (i32, i32), (i32, i32)) {
+        let (sx, sy) = map.start;
+        let mut mine = test_city_of(map, 0);
+        let mut theirs = test_city_of(map, 1);
+        theirs.x = map.wrap_x(sx + 2);
+        mine.worked.clear();
+        theirs.worked.clear();
+        let theirs_only = (map.wrap_x(sx + 2), sy + 1);
+        let mine_only = (sx, sy + 1);
+        (mine, theirs, theirs_only, mine_only)
+    }
+
+    #[test]
+    fn a_foreign_border_keeps_a_tile_out_of_reach() {
+        let map = flat_land();
+        let (mut mine, mut theirs, theirs_only, mine_only) = neighbors(&map);
+        let taken = taken_tiles(&map, [&mine, &theirs], (mine.x, mine.y));
+        assert!(taken.contains(&theirs_only));
+        assert!(!workable(&map, &taken, theirs_only));
+        assert!(!toggle_worked(&map, &mut mine, theirs_only, &taken));
+        // A fellow citizen's border is no obstacle.
+        theirs.civ = 0;
+        let taken = taken_tiles(&map, [&mine, &theirs], (mine.x, mine.y));
+        assert!(workable(&map, &taken, theirs_only));
+        theirs.civ = 1;
+        // The same ground is open to the civ that owns it, and the tile
+        // only my border covers is closed to it.
+        let taken = taken_tiles(&map, [&mine, &theirs], (theirs.x, theirs.y));
+        assert!(workable(&map, &taken, theirs_only));
+        assert!(!workable(&map, &taken, mine_only));
+        assert!(toggle_worked(&map, &mut theirs, theirs_only, &taken));
+    }
+
+    #[test]
+    fn a_border_that_grows_over_a_worked_tile_takes_it_back() {
+        let mut map = flat_land();
+        let (mut mine, theirs, theirs_only, _) = neighbors(&map);
+        mine.worked = HashSet::from([theirs_only]);
+        let taken = taken_tiles(&map, [&mine, &theirs], (mine.x, mine.y));
+        assert!(prune_worked(&mut mine, &taken));
+        assert!(mine.worked.is_empty());
+        assert!(!prune_worked(&mut mine, &taken), "nothing left to drop");
+        // Fog is not rechecked: `seen` describes the civ in play, and the
+        // pick was explored when it was made.
+        let own = (mine.x, mine.y + 1);
+        let i = map.idx(own.0, own.1);
+        map.tiles[i].seen = false;
+        mine.worked = HashSet::from([own]);
+        let taken = taken_tiles(&map, [&mine, &theirs], (mine.x, mine.y));
+        assert!(!prune_worked(&mut mine, &taken));
+        assert!(mine.worked.contains(&own));
+    }
+
+    #[test]
+    fn reconcile_mends_the_active_civs_cities_and_the_rest_in_their_turn() {
+        let map = flat_land();
+        let (mut mine, mut theirs, theirs_only, mine_only) = neighbors(&map);
+        mine.worked = HashSet::from([theirs_only]);
+        theirs.worked = HashSet::from([mine_only]);
+        let mut app = App::new();
+        app.insert_resource(map);
+        app.init_resource::<Civilizations>();
+        app.add_systems(Update, reconcile_tiles);
+        let mine = app.world_mut().spawn(mine).id();
+        let theirs = app.world_mut().spawn(theirs).id();
+        app.update();
+        let worked = |app: &App, e| app.world().get::<City>(e).unwrap().worked.clone();
+        let fixed = worked(&app, mine);
+        assert_eq!(fixed.len(), 1, "the governor found the citizen work");
+        assert!(!fixed.contains(&theirs_only));
+        assert_eq!(
+            worked(&app, theirs),
+            HashSet::from([mine_only]),
+            "civ 1 waits for its own turn"
+        );
+        app.world_mut().resource_mut::<Civilizations>().active = 1;
+        app.update();
+        let fixed = worked(&app, theirs);
+        assert_eq!(fixed.len(), 1);
+        assert!(!fixed.contains(&mine_only));
+        assert_eq!(worked(&app, mine).len(), 1);
+    }
+
+    #[test]
+    fn a_city_founded_mid_turn_takes_its_site_from_a_neighbor() {
+        let map = flat_land();
+        let mine = test_city(&map);
+        let site = *mine.worked.iter().next().unwrap();
+        let mut app = App::new();
+        app.insert_resource(map);
+        app.init_resource::<Civilizations>();
+        app.add_systems(Update, reconcile_tiles);
+        let mine = app.world_mut().spawn(mine).id();
+        app.update();
+        assert!(app.world().get::<City>(mine).unwrap().worked.contains(&site));
+        // The same civ founds on the worked tile; no hotseat handoff.
+        let mut founded = test_city(app.world().resource::<GameMap>());
+        (founded.x, founded.y) = site;
+        founded.worked.clear();
+        app.world_mut().spawn(founded);
+        app.update();
+        let worked = &app.world().get::<City>(mine).unwrap().worked;
+        assert_eq!(worked.len(), 1, "the citizen found other work");
+        assert!(!worked.contains(&site));
+    }
+
+    #[test]
+    fn the_food_grid_scales_with_the_box_and_is_full_only_when_the_box_is() {
+        // A town's box is the grid: one cell a food.
+        let cells: Vec<usize> = (0..=20).map(|food| box_cells(food, 20)).collect();
+        assert_eq!(cells, (0..=20).collect::<Vec<_>>());
+        // A city's cell holds two, a metropolis's three.
+        assert_eq!(box_cells(20, 40), 10);
+        assert_eq!(box_cells(30, 60), 10);
+        assert_eq!(box_cells(0, 60), 0);
+        // One short of growing never reads as ready.
+        assert_eq!(box_cells(39, 40), FOOD_BOX_CELLS - 1);
+        assert_eq!(box_cells(59, 60), FOOD_BOX_CELLS - 1);
+        assert_eq!(box_cells(40, 40), FOOD_BOX_CELLS);
+    }
+
+    /// A world for `end_turn_cities`: what the system reads, and nothing
+    /// else. `flat_land` with a road under each of civ 0's worked tiles, so
+    /// its one city makes two commerce and one gold of tax.
+    fn books(buildings: &[Production], treasury: u32) -> (App, Entity) {
+        let mut map = flat_land();
+        let mut city = test_city(&map);
+        for &(x, y) in &city.worked {
+            let i = map.idx(x, y);
+            map.tiles[i].road = true;
+        }
+        city.buildings = buildings.to_vec();
+        assert_eq!(city_tax(&map, &city), 1);
+        let mut app = App::new();
+        app.add_message::<CivilizationEnded>();
+        app.insert_resource(map);
+        app.insert_resource(UnitArt::default());
+        app.insert_resource(GameAudio {
+            menu: Handle::default(),
+            peace: Handle::default(),
+            ui: Default::default(),
+            run: Default::default(),
+            build: Handle::default(),
+            fortify: Handle::default(),
+            work_road: Handle::default(),
+            work_irrigate: Handle::default(),
+            work_mine: Handle::default(),
+            work_clear: Handle::default(),
+            music: None,
+        });
+        app.init_resource::<MessageBoard>();
+        app.init_resource::<Capital>();
+        app.insert_resource(Treasury([treasury, 0, 0, 0]));
+        app.init_resource::<crate::production_prompt::ProductionPrompts>();
+        app.init_resource::<CityView>();
+        app.init_resource::<BuildMenu>();
+        app.add_systems(Update, end_turn_cities);
+        let city = app.world_mut().spawn(city).id();
+        (app, city)
+    }
+
+    fn muster(app: &mut App, civ: usize, kinds: &[UnitType]) {
+        let (x, y) = app.world().resource::<GameMap>().start;
+        for &kind in kinds {
+            app.world_mut().spawn(Unit::new(civ, kind, x, y));
+        }
+    }
+
+    fn headcount(app: &mut App, civ: usize) -> usize {
+        let mut units = app.world_mut().query::<&Unit>();
+        units.iter(app.world()).filter(|u| u.civ == civ).count()
+    }
+
+    fn end_turn(app: &mut App, civ: usize) {
+        app.world_mut().write_message(CivilizationEnded(civ));
+        app.update();
+    }
+
+    #[test]
+    fn the_turn_pays_tax_in_and_support_out_of_the_treasury() {
+        let (mut app, _) = books(&[], 10);
+        // Six units, four free: two gold of support against one of tax.
+        muster(&mut app, 0, &[UnitType::Warrior; 6]);
+        // Civ 1 has units but no city, so nothing is charged.
+        muster(&mut app, 1, &[UnitType::Warrior; 9]);
+        end_turn(&mut app, 0);
+        assert_eq!(app.world().resource::<Treasury>().0[0], 10 + 1 - 2);
+        assert_eq!(headcount(&mut app, 0), 6, "it could pay, so nobody left");
+        end_turn(&mut app, 1);
+        assert_eq!(app.world().resource::<Treasury>().0[1], 0);
+        assert_eq!(headcount(&mut app, 1), 9);
+    }
+
+    #[test]
+    fn a_civ_that_cannot_pay_for_its_units_disbands_the_cheapest() {
+        let (mut app, _) = books(&[], 0);
+        let mut kinds = vec![UnitType::Warrior; 7];
+        kinds.push(UnitType::Scout);
+        muster(&mut app, 0, &kinds);
+        // Eight units: four gold of support against one of tax and none saved.
+        end_turn(&mut app, 0);
+        assert_eq!(app.world().resource::<Treasury>().0[0], 0);
+        assert_eq!(headcount(&mut app, 0), 7);
+        let mut units = app.world_mut().query::<&Unit>();
+        let scouts = units
+            .iter(app.world())
+            .filter(|u| u.utype == UnitType::Scout)
+            .count();
+        assert_eq!(scouts, 1, "a Warrior goes before the dearer Scout");
+        let board = app.world().resource::<MessageBoard>();
+        assert!(board.text.contains("Warrior"), "got: {}", board.text);
+        assert!(board.text.contains("disbanded"), "got: {}", board.text);
+    }
+
+    #[test]
+    fn a_civ_that_cannot_pay_keeps_its_worker_while_warriors_remain() {
+        // A Worker costs what a Warrior costs, and still a Warrior goes,
+        // whatever id the Worker has. Bevy ranks an id by its generation
+        // before its index, so the Worker is tried first, in the middle and
+        // last in the muster.
+        for at in [0, 4, 8] {
+            let (mut app, _) = books(&[], 0);
+            let mut kinds = vec![UnitType::Warrior; 8];
+            kinds.insert(at, UnitType::Worker);
+            muster(&mut app, 0, &kinds);
+            end_turn(&mut app, 0);
+            assert_eq!(headcount(&mut app, 0), 8, "Worker mustered at {at}");
+            let mut units = app.world_mut().query::<&Unit>();
+            let workers = units
+                .iter(app.world())
+                .filter(|u| u.utype == UnitType::Worker)
+                .count();
+            assert_eq!(workers, 1, "the Worker mustered at {at} was disbanded");
+        }
+    }
+
+    #[test]
+    fn turns_ending_in_one_frame_let_go_of_different_units() {
+        let (mut app, _) = books(&[], 0);
+        muster(&mut app, 0, &[UnitType::Warrior; 9]);
+        // Nine units against four free and one gold of tax: broke twice.
+        app.world_mut().write_message(CivilizationEnded(0));
+        app.world_mut().write_message(CivilizationEnded(0));
+        app.update();
+        assert_eq!(headcount(&mut app, 0), 7, "the same unit went twice");
+    }
+
+    #[test]
+    fn upkeep_the_treasury_cannot_cover_sells_an_improvement_for_gold() {
+        // Two upkeep, one tax, an empty treasury: one gold short. The
+        // treasury empties, the newest building goes, and its price is
+        // what the civ has left.
+        let (mut app, city) = books(&[Production::Temple, Production::Barracks], 0);
+        end_turn(&mut app, 0);
+        let price = economy::sale_price(Production::Barracks);
+        assert_eq!(app.world().resource::<Treasury>().0[0], price);
+        let kept = &app.world().get::<City>(city).unwrap().buildings;
+        assert_eq!(kept, &[Production::Temple], "the newest building goes");
+        let board = app.world().resource::<MessageBoard>();
+        assert!(board.text.contains("Barracks"), "got: {}", board.text);
+        // Covered by savings, upkeep sells nothing.
+        let (mut app, city) = books(&[Production::Temple, Production::Barracks], 5);
+        end_turn(&mut app, 0);
+        assert_eq!(app.world().resource::<Treasury>().0[0], 5 + 1 - 2);
+        assert_eq!(app.world().get::<City>(city).unwrap().buildings.len(), 2);
+    }
+
+    #[test]
+    fn a_short_turn_sells_one_improvement_and_no_more() {
+        // Three upkeep against one tax: two short, but the binary's sale
+        // routine runs once a turn. The price covers the gap for good.
+        let all = [Production::Temple, Production::Barracks, Production::Granary];
+        let (mut app, city) = books(&all, 0);
+        end_turn(&mut app, 0);
+        let kept = &app.world().get::<City>(city).unwrap().buildings;
+        assert_eq!(kept, &[Production::Temple, Production::Barracks]);
+        assert_eq!(
+            app.world().resource::<Treasury>().0[0],
+            economy::sale_price(Production::Granary)
+        );
+    }
+
+    #[test]
+    fn improvements_are_paid_before_units() {
+        // One upkeep, one gold of support, one gold of tax: only one of the
+        // two bills can be met. Upkeep goes first, so a unit goes and the
+        // Temple stays.
+        let (mut app, city) = books(&[Production::Temple], 0);
+        muster(&mut app, 0, &[UnitType::Warrior; 5]);
+        end_turn(&mut app, 0);
+        assert_eq!(app.world().resource::<Treasury>().0[0], 0);
+        assert_eq!(headcount(&mut app, 0), 4);
+        let kept = &app.world().get::<City>(city).unwrap().buildings;
+        assert_eq!(kept, &[Production::Temple]);
+    }
+
+    #[test]
+    fn a_sale_pays_for_the_units_that_follow_it() {
+        // Two upkeep, one tax: the Barracks sells, and its price covers the
+        // two gold of support, so nobody is disbanded.
+        let (mut app, city) = books(&[Production::Temple, Production::Barracks], 0);
+        muster(&mut app, 0, &[UnitType::Warrior; 6]);
+        end_turn(&mut app, 0);
+        let price = economy::sale_price(Production::Barracks);
+        assert_eq!(app.world().resource::<Treasury>().0[0], price - 2);
+        assert_eq!(headcount(&mut app, 0), 6);
+        assert_eq!(app.world().get::<City>(city).unwrap().buildings.len(), 1);
     }
 }

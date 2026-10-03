@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 
+use crate::combat::Level;
 use crate::improvements::{Work, action_slot};
 use crate::map::*;
 use crate::render::{RevealAll, sprite_z};
@@ -16,6 +17,22 @@ pub enum UnitType {
     Worker,
     Warrior,
     Scout,
+    Archer,
+    Spearman,
+    Horseman,
+}
+
+impl UnitType {
+    /// Every unit type, for loading art and iterating rules.
+    pub const ALL: [UnitType; 7] = [
+        UnitType::Settler,
+        UnitType::Worker,
+        UnitType::Warrior,
+        UnitType::Scout,
+        UnitType::Archer,
+        UnitType::Spearman,
+        UnitType::Horseman,
+    ];
 }
 
 pub struct UnitDef {
@@ -23,6 +40,13 @@ pub struct UnitDef {
     pub sight: u8,
     pub dir: &'static str,
     pub name: &'static str,
+    /// Attack factor, `PRTO` dword +92 of `conquests.biq` (0 = noncombatant).
+    pub attack: i32,
+    /// Defense factor, `PRTO` dword +84 (0 = cannot defend, is captured).
+    pub defense: i32,
+    /// Extra hit points, `PRTO` dword +160 (only War Elephant and Ancient
+    /// Cavalry have one, so no unit here does).
+    pub hp_bonus: i32,
 }
 
 pub fn def(t: UnitType) -> UnitDef {
@@ -32,24 +56,63 @@ pub fn def(t: UnitType) -> UnitDef {
             sight: 1,
             dir: "Settler",
             name: "Settler",
+            attack: 0,
+            defense: 0,
+            hp_bonus: 0,
         },
         UnitType::Worker => UnitDef {
             moves: 1,
             sight: 1,
             dir: "Worker",
             name: "Worker",
+            attack: 0,
+            defense: 0,
+            hp_bonus: 0,
         },
         UnitType::Warrior => UnitDef {
             moves: 1,
             sight: 1,
             dir: "warrior",
             name: "Warrior",
+            attack: 1,
+            defense: 1,
+            hp_bonus: 0,
         },
         UnitType::Scout => UnitDef {
             moves: 2,
             sight: 2,
             dir: "Scout",
             name: "Scout",
+            attack: 0,
+            defense: 0,
+            hp_bonus: 0,
+        },
+        UnitType::Archer => UnitDef {
+            moves: 1,
+            sight: 1,
+            dir: "Archer",
+            name: "Archer",
+            attack: 2,
+            defense: 1,
+            hp_bonus: 0,
+        },
+        UnitType::Spearman => UnitDef {
+            moves: 1,
+            sight: 1,
+            dir: "Spearman",
+            name: "Spearman",
+            attack: 1,
+            defense: 2,
+            hp_bonus: 0,
+        },
+        UnitType::Horseman => UnitDef {
+            moves: 2,
+            sight: 1,
+            dir: "Horseman",
+            name: "Horseman",
+            attack: 2,
+            defense: 1,
+            hp_bonus: 0,
         },
     }
 }
@@ -60,6 +123,13 @@ struct ClipEntry {
     frames: usize,
     #[allow(dead_code)]
     dirs: usize,
+    /// FLC header speed: milliseconds per frame.
+    ms: f32,
+    /// Per direction, rows of padding under the lowest solid pixel.
+    feet: [i32; 8],
+    /// The slot's sound cues, `[seconds into the clip, wav]`.
+    #[serde(default)]
+    sounds: Vec<(f32, String)>,
 }
 
 pub struct Clip {
@@ -67,6 +137,25 @@ pub struct Clip {
     pub frame_w: f32,
     pub frame_h: f32,
     pub frames: usize,
+    /// Milliseconds per frame, from the FLC header.
+    pub ms: f32,
+    pub feet: [i32; 8],
+    /// Sound cues of the clip, in seconds from its first frame.
+    pub sounds: Vec<(f32, Handle<AudioSource>)>,
+}
+
+impl Clip {
+    /// Playing time in seconds.
+    pub fn duration(&self) -> f32 {
+        self.frames as f32 * self.ms / 1000.0
+    }
+
+    /// Frame to show `t` seconds in; a looping clip wraps, others hold the
+    /// last frame.
+    pub fn frame_at(&self, t: f32, looped: bool) -> usize {
+        let f = (t.max(0.0) * 1000.0 / self.ms) as usize;
+        if looped { f % self.frames } else { f.min(self.frames - 1) }
+    }
 }
 
 pub struct UnitClipSet {
@@ -81,12 +170,7 @@ pub struct UnitArt {
 impl UnitArt {
     pub fn load(asset_server: &AssetServer) -> Self {
         let mut sets = HashMap::new();
-        for t in [
-            UnitType::Settler,
-            UnitType::Worker,
-            UnitType::Warrior,
-            UnitType::Scout,
-        ] {
+        for t in UnitType::ALL {
             let dir = def(t).dir;
             let text = fs::read_to_string(format!("assets/gen/units/{dir}/manifest.json"))
                 .expect("run from the repo root after tools/prep_assets.py");
@@ -104,6 +188,15 @@ impl UnitArt {
                         frame_w: e.frame[0] as f32,
                         frame_h: e.frame[1] as f32,
                         frames: e.frames,
+                        ms: e.ms,
+                        feet: e.feet,
+                        sounds: e
+                            .sounds
+                            .iter()
+                            .map(|(at, wav)| {
+                                (*at, asset_server.load(format!("gen/audio/units/{dir}/{wav}")))
+                            })
+                            .collect(),
                     },
                 );
             }
@@ -115,9 +208,21 @@ impl UnitArt {
     pub fn clip(&self, t: UnitType, slot: &str) -> Option<&Clip> {
         self.sets.get(&t)?.clips.get(slot)
     }
+
+    /// Where a clip's origin sits for facing `dir`: Civ3 frames pad their
+    /// feet by different amounts per clip, so each is lifted by its
+    /// difference to DEFAULT and the feet stay planted on the tile.
+    pub fn anchor(&self, t: UnitType, clip: &Clip, dir: usize) -> Anchor {
+        let base = self.clip(t, "DEFAULT").map_or(0, |d| d.feet[dir]);
+        let lift = FEET_PX + (clip.feet[dir] - base) as f32;
+        Anchor(Vec2::new(0.0, -0.5 + lift / clip.frame_h))
+    }
 }
 
-#[derive(Component)]
+/// Rows between a standing unit's lowest solid pixel and the tile center.
+const FEET_PX: f32 = 6.0;
+
+#[derive(Component, Clone)]
 pub struct Unit {
     pub civ: usize,
     pub utype: UnitType,
@@ -134,6 +239,49 @@ pub struct Unit {
     /// Auto-exploring: each turn the unit routes itself toward unseen tiles
     /// until none are reachable. Any manual order cancels it.
     pub exploring: bool,
+    /// Experience level: sets the hit points (`EXPR`).
+    pub level: Level,
+    /// Hit points lost, as the exe keeps them (`unit+0x4C`): the unit dies
+    /// when `max_hp - damage` reaches 0, and a promotion heals by itself.
+    pub damage: i32,
+    /// Has not moved or attacked since its civ's last turn began: only a
+    /// rested unit heals.
+    pub rested: bool,
+    /// Attacked this turn (a unit without Blitz may not attack twice).
+    pub attacked: bool,
+}
+
+impl Unit {
+    /// A fresh, rested, undamaged Regular facing the viewer.
+    pub fn new(civ: usize, utype: UnitType, x: i32, y: i32) -> Self {
+        Unit {
+            civ,
+            utype,
+            x,
+            y,
+            moves: def(utype).moves * MP,
+            fortified: false,
+            facing: 0, // south: a fresh unit faces the viewer
+            path: VecDeque::new(),
+            anim: UnitAnim::Idle { t: 0.0 },
+            work: None,
+            sentry: false,
+            exploring: false,
+            level: Level::Regular,
+            damage: 0,
+            rested: true,
+            attacked: false,
+        }
+    }
+
+    pub fn max_hp(&self) -> i32 {
+        crate::combat::max_hp(self.level, def(self.utype).hp_bonus)
+    }
+
+    /// Hit points left.
+    pub fn hp(&self) -> i32 {
+        self.max_hp() - self.damage
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -150,6 +298,13 @@ pub enum UnitAnim {
     OneShot {
         slot: &'static str,
         t: f32,
+    },
+    /// Played by the combat sequencer, at the clip's own FLC speed: it
+    /// holds the last frame (or loops) until the sequencer lets go.
+    Held {
+        slot: &'static str,
+        t: f32,
+        looped: bool,
     },
 }
 
@@ -197,34 +352,38 @@ pub(crate) fn spawn_unit(
     y: i32,
     civ: usize,
 ) -> Entity {
+    spawn_unit_at_level(commands, art, utype, x, y, civ, Level::Regular)
+}
+
+/// `spawn_unit` with an experience level (Barracks turn out Veterans).
+pub(crate) fn spawn_unit_at_level(
+    commands: &mut Commands,
+    art: &UnitArt,
+    utype: UnitType,
+    x: i32,
+    y: i32,
+    civ: usize,
+    level: Level,
+) -> Entity {
     let clip = art.clip(utype, "DEFAULT").expect("DEFAULT clip");
     let pos = tile_to_world(x, y);
-    let h = clip.frame_h;
-    commands
+    let e = commands
         .spawn((
             Sprite {
                 image: clip.strips[0].clone(),
                 rect: Some(frame_rect(clip, 0)),
                 ..default()
             },
-            Anchor(Vec2::new(0.0, -0.5 + 6.0 / h)),
+            art.anchor(utype, clip, 0),
             Transform::from_xyz(pos.x, pos.y, sprite_z(x, y, 4.0)),
             Unit {
-                civ,
-                utype,
-                x,
-                y,
-                moves: def(utype).moves * MP,
-                fortified: false,
-                facing: 0, // south: a fresh unit faces the viewer
-                path: VecDeque::new(),
-                anim: UnitAnim::Idle { t: 0.0 },
-                work: None,
-                sentry: false,
-                exploring: false,
+                level,
+                ..Unit::new(civ, utype, x, y)
             },
         ))
-        .id()
+        .id();
+    crate::combat::spawn_health_bar(commands, e);
+    e
 }
 
 pub fn spawn_party(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>) {
@@ -347,18 +506,36 @@ pub fn end_turn_units(
     mut selected: ResMut<Selected>,
     mut goto: ResMut<crate::actionbar::GotoMode>,
     mut units: Query<&mut Unit>,
+    cities: Query<&crate::cities::City>,
 ) {
     for _ in events.read() {
+        // Once the game is decided there are no more turns to play.
+        if civs.outcome.is_some() {
+            continue;
+        }
         ended.write(crate::civs::CivilizationEnded(civs.active));
-        civs.active = (civs.active + 1) % crate::civs::CIV_COUNT;
-        if civs.active == 0 {
+        let next = civs.next_active();
+        // The round counter ticks when the order wraps past the end.
+        if next <= civs.active {
             turn.0 += 1;
+        }
+        civs.active = next;
+        if !crate::civs::is_ai(next) {
+            civs.last_human = next;
         }
         selected.0 = None;
         goto.0 = false;
         for mut u in units.iter_mut() {
             if u.civ == civs.active {
                 u.moves = def(u.utype).moves * MP;
+                u.attacked = false;
+                // A unit that sat out its last turn heals; one that moved
+                // or fought did not.
+                if u.rested {
+                    let rest = crate::combat::rest_of(&u, cities.iter());
+                    u.damage = crate::combat::heal(u.damage, rest);
+                }
+                u.rested = true;
             }
         }
     }
@@ -367,9 +544,18 @@ pub fn end_turn_units(
 pub fn drive_movement(
     map: Res<GameMap>,
     civs: Res<crate::civs::Civilizations>,
+    cities: Query<&crate::cities::City>,
+    mut diplomacy: ResMut<crate::diplomacy::Diplomacy>,
+    mut attacks: MessageWriter<crate::combat::AttackOrder>,
     mut units: Query<(Entity, &mut Unit)>,
 ) {
-    for (_, mut u) in units.iter_mut() {
+    // Which civs have units on each tile: a step onto a tile held by
+    // another civ is an attack, not a move, and only against a civ at war.
+    let mut held: HashMap<(i32, i32), u32> = HashMap::new();
+    for (_, u) in units.iter() {
+        *held.entry((u.x, u.y)).or_default() |= 1 << u.civ;
+    }
+    for (e, mut u) in units.iter_mut() {
         if u.civ != civs.active {
             continue;
         }
@@ -388,6 +574,36 @@ pub fn drive_movement(
         let Some(&(nx, ny)) = u.path.front() else {
             continue;
         };
+        let mut others = held.get(&(nx, ny)).copied().unwrap_or(0) & !(1 << u.civ);
+        if let Some(c) = cities.iter().find(|c| (c.x, c.y) == (nx, ny) && c.civ != u.civ) {
+            others |= 1 << c.civ;
+        }
+        if others != 0 {
+            // Routes stop short of another civ; only the last step attacks,
+            // and only a civ at war: a human is asked whether to declare it.
+            if u.path.len() == 1 {
+                match diplomacy.first_at_peace(u.civ, others) {
+                    None => {
+                        diplomacy.note_attack(u.civ, others);
+                        attacks.write(crate::combat::AttackOrder {
+                            attacker: e,
+                            to: (nx, ny),
+                        });
+                        // One fight at a time: the rest wait for the sequencer.
+                        break;
+                    }
+                    Some(target) => {
+                        if !crate::civs::is_ai(u.civ) && diplomacy.war_ask.is_none() {
+                            diplomacy.war_ask =
+                                Some(crate::diplomacy::WarAsk { attacker: e, to: (nx, ny), target });
+                        }
+                    }
+                }
+            }
+            u.path.clear();
+            u.exploring = false;
+            continue;
+        }
         let cost = match (map.get(u.x, u.y), map.get(nx, ny)) {
             (Some(from), Some(to)) => step_cost(from, to),
             _ => None,
@@ -399,24 +615,44 @@ pub fn drive_movement(
         // Civ3 rule: any unit with movement left may enter, spending it all
         // when the tile costs more than it has.
         u.moves -= cost.min(u.moves);
-        u.facing = facing_for_step(nx - u.x, ny - u.y);
-        let from = tile_to_world(u.x, u.y);
-        let to = tile_to_world(nx, ny);
-        u.x = nx;
-        u.y = ny;
-        u.path.pop_front();
-        u.fortified = false;
-        u.anim = UnitAnim::Stepping {
-            from,
-            to,
-            t: 0.0,
-            dur: STEP_DUR,
-        };
+        let from = (u.x, u.y);
+        step_to(&mut u, nx, ny);
+        // The computer's moves out of the human's sight are not worth
+        // watching: they hop, so its turn does not drag.
+        let lit = |(x, y): (i32, i32)| map.get(x, y).is_some_and(|t| t.visible);
+        if crate::civs::is_ai(u.civ) && !lit(from) && !lit((nx, ny)) {
+            if let UnitAnim::Stepping { dur, .. } = &mut u.anim {
+                *dur = HIDDEN_STEP_DUR;
+            }
+        }
     }
+}
+
+/// Seconds a step takes when nobody is looking.
+const HIDDEN_STEP_DUR: f32 = 0.03;
+
+/// Walk `u` onto the adjacent tile: face it, take the tile and start the
+/// stepping animation. Movement points are the caller's business.
+pub fn step_to(u: &mut Unit, nx: i32, ny: i32) {
+    u.facing = facing_for_step(nx - u.x, ny - u.y);
+    let from = tile_to_world(u.x, u.y);
+    let to = tile_to_world(nx, ny);
+    u.x = nx;
+    u.y = ny;
+    u.path.pop_front();
+    u.fortified = false;
+    u.rested = false;
+    u.anim = UnitAnim::Stepping {
+        from,
+        to,
+        t: 0.0,
+        dur: STEP_DUR,
+    };
 }
 
 pub fn advance_anims(
     time: Res<Time>,
+    speed: Res<crate::combat::CombatSpeed>,
     art: Res<UnitArt>,
     mut q: Query<(&mut Unit, &mut Transform)>,
 ) {
@@ -442,12 +678,28 @@ pub fn advance_anims(
                     u.anim = UnitAnim::Idle { t: 0.0 };
                 }
             }
+            // The sequencer ends it; the clock runs at its speed.
+            UnitAnim::Held { t, .. } => *t += time.delta_secs() * speed.0,
         }
     }
 }
 
-pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
-    for (u, mut sprite) in q.iter_mut() {
+/// Put `frame` of `clip` on the sprite, facing `u.facing`, feet on the tile.
+fn show(
+    art: &UnitArt,
+    u: &Unit,
+    clip: &Clip,
+    frame: usize,
+    sprite: &mut Sprite,
+    anchor: &mut Anchor,
+) {
+    sprite.image = clip.strips[u.facing].clone();
+    sprite.rect = Some(frame_rect(clip, frame));
+    *anchor = art.anchor(u.utype, clip, u.facing);
+}
+
+pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite, &mut Anchor)>) {
+    for (u, mut sprite, mut anchor) in q.iter_mut() {
         let (slot, t, fps, looped) = match u.anim {
             UnitAnim::Idle { t } => {
                 // Standing orders show: a working unit keeps looping its
@@ -459,8 +711,7 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
                 } else if u.fortified {
                     match art.clip(u.utype, "FORTIFY") {
                         Some(clip) => {
-                            sprite.image = clip.strips[u.facing].clone();
-                            sprite.rect = Some(frame_rect(clip, clip.frames - 1));
+                            show(&art, u, clip, clip.frames - 1, &mut sprite, &mut anchor);
                             continue;
                         }
                         None => ("DEFAULT", t, 8.0, true),
@@ -477,11 +728,19 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
                     continue;
                 };
                 let f = ((t * fps) as usize) % clip.frames;
-                sprite.image = clip.strips[u.facing].clone();
-                sprite.rect = Some(frame_rect(clip, f));
+                show(&art, u, clip, f, &mut sprite, &mut anchor);
                 continue;
             }
             UnitAnim::OneShot { slot, t } => (slot, t, 12.0, false),
+            UnitAnim::Held { slot, t, looped } => {
+                // Combat clips run at their FLC speed.
+                let clip = art.clip(u.utype, slot).or_else(|| art.clip(u.utype, "DEFAULT"));
+                let Some(clip) = clip else {
+                    continue;
+                };
+                show(&art, u, clip, clip.frame_at(t, looped), &mut sprite, &mut anchor);
+                continue;
+            }
         };
         let Some(clip) = art
             .clip(u.utype, slot)
@@ -494,8 +753,7 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite)>) {
         } else {
             ((t * fps) as usize).min(clip.frames - 1)
         };
-        sprite.image = clip.strips[u.facing].clone();
-        sprite.rect = Some(frame_rect(clip, f));
+        show(&art, u, clip, f, &mut sprite, &mut anchor);
     }
 }
 
@@ -512,15 +770,17 @@ pub fn refresh_visibility(
             *seen = tile.seen;
         }
     }
-    *previous = Some(civs.active);
-    let memory = &mut explored[civs.active];
+    // The screen shows the human's view, even while the computer plays.
+    let viewer = civs.viewer();
+    *previous = Some(viewer);
+    let memory = &mut explored[viewer];
     memory.resize(map.tiles.len(), false);
     for (t, &seen) in map.tiles.iter_mut().zip(memory.iter()) {
         t.visible = false;
         t.seen = seen;
     }
     for u in units.iter() {
-        if u.civ != civs.active {
+        if u.civ != viewer {
             continue;
         }
         let bonus = match map.get(u.x, u.y).map(|t| t.relief) {
@@ -544,7 +804,7 @@ pub fn refresh_visibility(
     }
     // Cities light their workable radius, as in Civ3.
     for c in cities.iter() {
-        if c.civ != civs.active {
+        if c.civ != viewer {
             continue;
         }
         let mut tiles = crate::cities::radius_tiles(&map, c.x, c.y);
@@ -563,7 +823,10 @@ pub fn refresh_visibility(
 
 fn defender_rank(t: UnitType) -> u8 {
     match t {
-        UnitType::Warrior => 3,
+        UnitType::Spearman => 8,
+        UnitType::Archer => 7,
+        UnitType::Horseman => 6,
+        UnitType::Warrior => 5,
         UnitType::Scout => 2,
         UnitType::Settler => 1,
         UnitType::Worker => 0,
@@ -631,6 +894,11 @@ pub fn auto_select(
     mut selected: ResMut<Selected>,
     mut last_pos: Local<(i32, i32)>,
 ) {
+    // Nothing is selected while the computer plays.
+    if crate::civs::is_ai(civs.active) {
+        selected.0 = None;
+        return;
+    }
     if let Some((_, u)) = selected.0.and_then(|s| units.get(s).ok()) {
         *last_pos = (u.x, u.y);
         if u.civ == civs.active && (needs_orders(u) || (selectable(u) && !u.path.is_empty())) {
@@ -718,7 +986,7 @@ mod tests {
             })
             .collect();
         app.world_mut().resource_mut::<Selected>().0 = Some(ids[0]);
-        for incoming in [1, 2, 0] {
+        for incoming in (1..crate::civs::CIV_COUNT).chain([0]) {
             app.world_mut().write_message(TurnEnded);
             app.update();
             assert_eq!(
@@ -831,6 +1099,7 @@ mod tests {
             work: None,
             sentry: false,
             exploring: false,
+            ..Unit::new(0, UnitType::Scout, x, y)
         }
     }
 

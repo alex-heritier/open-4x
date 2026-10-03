@@ -23,6 +23,15 @@
 //! `index = xi * 65 + yi` with `xi = (int)(x * 128.0/W)` and
 //! `yi = (int)(y * 64.0/H)`.
 //!
+//! # Sampling is bilinear
+//!
+//! [`Fractal::sample`] does not read the nearest grid byte. It blends the four grid
+//! points around `(x * 128/W, y * 64/H)` with the fractional parts as weights and
+//! truncates. Treating it as nearest-neighbour gives the same coastline to within a few
+//! per cent of the cells and is wrong exactly where it matters: a cell whose height sits
+//! next to the coast threshold lands on the other side of it. Against generator-made
+//! maps that was the whole of the 3-5% residual (`NOTES.md` section 19).
+//!
 //! # Midpoint displacement
 //!
 //! ```text
@@ -106,6 +115,21 @@ impl Fractal {
     /// A `seed` of 0 falls back to a fixed constant rather than a clock, so the
     /// function stays deterministic; the binary calls `timeGetTime()` there.
     pub fn generate(w: i32, h: i32, level_arg: i32, flags: u32, seed: u32) -> Self {
+        Self::generate_with(w, h, level_arg, flags, seed, None)
+    }
+
+    /// [`Fractal::generate`] with the original's seventh argument, `out`: when a
+    /// second fractal is given, [`Fractal::smear_from`] runs on the result
+    /// (`0x5e1fb4`). `generateLandmass` passes `fmC` here for landmass styles 1
+    /// and 2.
+    pub fn generate_with(
+        w: i32,
+        h: i32,
+        level_arg: i32,
+        flags: u32,
+        seed: u32,
+        out: Option<&Fractal>,
+    ) -> Self {
         let mut f = Fractal {
             w,
             h,
@@ -116,6 +140,9 @@ impl Fractal {
             heights: Box::new([0u8; HEIGHT_LEN]),
         };
         f.run(level_arg);
+        if let Some(src) = out {
+            f.smear_from(src);
+        }
         f
     }
 
@@ -257,15 +284,54 @@ impl Fractal {
         self.heights[Fractal::idx(x, y)]
     }
 
-    /// `0x5e2180` — samples the field at **map** coordinates.
+    /// `0x5e2180` — samples the field at **map** coordinates, with bilinear
+    /// interpolation.
     ///
     /// The first argument is the column (`x`, range `0..W`) and the second the
     /// row (`y`, range `0..H`); the original pushes them in that order, so `x`
     /// lands in `arg1` and picks up the `128.0/W` scale factor.
+    ///
+    /// The map coordinate is scaled onto the grid (`px = x * 128/W`,
+    /// `py = y * 64/H`), split into a cell `(ix, iy)` by truncation and a
+    /// fraction `(fx, fy)`, and the four surrounding grid heights are blended:
+    ///
+    /// ```text
+    /// S = h[ix][iy]     * (1-fx) * (1-fy)
+    ///   + h[ix+1][iy]   * (1-fy) * fx
+    ///   + h[ix][iy+1]   * (1-fx) * fy
+    ///   + h[ix+1][iy+1] * fy     * fx
+    /// ```
+    ///
+    /// The result is `trunc(S)` (`_ftol`, `0x64a230`: round toward zero), clamped to
+    /// `0..=255`, and scaled by `* 100 >> 8` when [`flags::SCALE_100`] is set.
+    ///
+    /// The products are formed in the order the FPU code forms them
+    /// (`0x5e21e9..0x5e2234`) so the double-precision rounding matches: with the C
+    /// runtime's 53-bit precision control the x87 results are exactly IEEE doubles.
+    /// That matters at grid-aligned points, where `x * 128/W` is within an ulp of an
+    /// integer and `fx` is `1e-16` rather than `0`.
     pub fn sample(&self, x: i32, y: i32) -> u8 {
-        let gx = ((f64::from(x) * self.scale_x) as i64).clamp(0, FX as i64 - 1) as usize;
-        let gy = ((f64::from(y) * self.scale_y) as i64).clamp(0, FY as i64 - 1) as usize;
-        let v = self.get(gx, gy) as u32;
+        let px = f64::from(x) * self.scale_x;
+        let ix = px as i64;
+        let py = f64::from(y) * self.scale_y;
+        let iy = py as i64;
+        let fx = px - ix as f64;
+        let fy = py - iy as f64;
+
+        // The original reads past the grid for out-of-range input; callers bounds-check
+        // first, so clamping only keeps this safe.
+        let ix = ix.clamp(0, FX as i64 - 1) as usize;
+        let iy = iy.clamp(0, FY as i64 - 1) as usize;
+        let h = |dx: usize, dy: usize| f64::from(self.get(ix + dx, iy + dy));
+
+        let one_minus_fy = 1.0 - fy;
+        let one_minus_fx = 1.0 - fx;
+        let mut s = h(0, 0) * one_minus_fx * one_minus_fy;
+        s += h(1, 0) * one_minus_fy * fx;
+        s += h(0, 1) * one_minus_fx * fy;
+        s += h(1, 1) * fy * fx;
+
+        let v = (s as i64).clamp(0, 255) as u32;
         if self.flags & flags::SCALE_100 != 0 {
             ((v * 100) >> 8) as u8
         } else {
@@ -353,45 +419,55 @@ impl Fractal {
         n
     }
 
-    /// `0x5e1fd0` — the optional post-pass, applied when the caller passes a
-    /// non-null `out` buffer.
+    /// `0x5e1fd0` — the post-pass `fractal()` runs when its `out` argument is
+    /// non-null (`0x5e1fb4`: `test eax,eax; je; push eax; call 0x5e1fd0`).
     ///
-    /// The routine walks 65 columns x 16 steps, reading a signed per-column
-    /// delta out of the `out` structure and scaling two (or four, when
-    /// [`flags::SMEAR_WIDE`] is set) *diagonal* tracks of the field by a
-    /// `step / 16` ramp, with the wide variant blending towards 16. The result
-    /// is a pair of slanted streaks — a directional smear of the coastline
-    /// toward the pole the delta points at.
+    /// `src` is the *other* fractal the caller passes, `fmC` in
+    /// `generateLandmass`. Its columns are the random source of two ocean
+    /// channels, so the pass is a **seam carver**, not a no-op:
     ///
-    /// # Why it is a no-op in practice
+    /// * for every row `y` (65 of them), column 96 of `src` (`src + 0x1880 + y`)
+    ///   gives a centre `d = trunc((b - 128) / 8)`, in `-16..=15`;
+    /// * for `step = 0..16` the columns `d + step` and `d - step` (wrapped into
+    ///   `0..128`) are scaled to `h * step / 16`. The centre goes to 0 and the
+    ///   height ramps back up over 15 columns on both sides: a V-shaped trough
+    ///   near the left/right seam of the world, wandering with `y`;
+    /// * with [`flags::SMEAR_WIDE`] (landmass style 1 only), column 32 of `src`
+    ///   (`src + 0x840 + y`) gives a second centre `w = trunc((b - 128) / 4)`
+    ///   around `x = 64`, and columns `64 + w +- step` become
+    ///   `(h * step + 16 - step) / 16`, a second trough through the middle of the
+    ///   world. That is what splits the style into 3-5 continents.
     ///
-    /// Both call sites that pass `out` point it at a stack scratch buffer whose
-    /// delta tables are never initialised, and the pass is immediately followed
-    /// by a 50/50 blend that halves whatever it wrote. `deltas` is therefore
-    /// exposed rather than hidden so a caller can supply the real tables.
-    pub fn smear(&mut self, deltas_narrow: &[u8; STRIDE], deltas_wide: Option<&[u8; STRIDE]>) {
-        for x in 0..STRIDE {
-            // (byte - 0x80) * 0x80, then a signed shift right by 7 and 3: /8.
-            let dn = ((i32::from(deltas_narrow[x]) - 0x80) >> 3).clamp(-16, 15);
-            let dw = deltas_wide.map(|t| ((i32::from(t[x]) - 0x80) >> 2).clamp(-32, 31));
-
-            for step in 0..16usize {
-                for (row, bias) in [
-                    (wrap8(dn + step as i32), 0i32),
-                    (wrap8(dn - step as i32), 0),
-                ] {
-                    let v = self.get(x, row) as i32;
-                    let v = (v * step as i32 + bias + 15) >> 4;
-                    self.set(x, row, v.clamp(0, 255) as u8);
+    /// The earlier version of this routine indexed `x` and `y` the wrong way
+    /// round, floored the `/8` instead of truncating, and added a spurious `+15`;
+    /// `NOTES.md` section 19 records the differential test against the original
+    /// machine code that exposed it.
+    ///
+    /// The routine ends by copying column 0 over column 128 (`0x5e2166`:
+    /// `rep movsb` of 65 bytes from `+0x20` to `+0x20a0`, which is `h[128][0]`),
+    /// whatever the flags say. Nothing samples column 128, but it keeps the
+    /// grid byte-identical to the original's.
+    pub fn smear_from(&mut self, src: &Fractal) {
+        let wide = self.flags & flags::SMEAR_WIDE != 0;
+        for y in 0..STRIDE {
+            let d = (i32::from(src.get(96, y)) - 0x80) / 8;
+            let w = (i32::from(src.get(32, y)) - 0x80) / 4;
+            for step in 0..16i32 {
+                for x in [wrap8(d + step), wrap8(d - step)] {
+                    let v = i32::from(self.get(x, y));
+                    self.set(x, y, ((v * step) >> 4) as u8);
                 }
-                if let Some(dw) = dw {
-                    for row in [wrap8(dw + 0x40 + step as i32), wrap8(dw - step as i32 + 0x40)] {
-                        let v = self.get(x, row) as i32;
-                        let v = (v * step as i32 + (16 - step as i32) + 15) >> 4;
-                        self.set(x, row, v.clamp(0, 255) as u8);
+                if wide {
+                    for x in [wrap8(w + step + 0x40), wrap8(w - step + 0x40)] {
+                        let v = i32::from(self.get(x, y));
+                        self.set(x, y, ((v * step + (16 - step)) >> 4) as u8);
                     }
                 }
             }
+        }
+        for y in 0..STRIDE {
+            let v = self.get(0, y);
+            self.set(FX, y, v);
         }
     }
 }
@@ -473,6 +549,89 @@ mod tests {
         for x in 0..=FX {
             assert_eq!(f.height(x, FY), 0, "x = {x}");
         }
+    }
+
+    /// `Fractal` with every grid byte set from `f(x, y)`, over a `w x h` map.
+    fn field(w: i32, h: i32, flags: u32, f: impl Fn(usize, usize) -> u8) -> Fractal {
+        let mut fm = Fractal::generate(w, h, 3, flags, 1);
+        for x in 0..=FX {
+            for y in 0..=FY {
+                fm.heights[Fractal::idx(x, y)] = f(x, y);
+            }
+        }
+        fm
+    }
+
+    #[test]
+    fn sample_on_a_grid_point_returns_that_grid_byte() {
+        // W = 128, H = 64: the scale factors are exactly 1.0.
+        let fm = field(128, 64, 0, |x, y| ((x * 7 + y * 3) % 256) as u8);
+        for (x, y) in [(0, 0), (5, 9), (127, 63), (64, 32), (100, 1)] {
+            assert_eq!(fm.sample(x, y), fm.height(x as usize, y as usize), "({x}, {y})");
+        }
+        // W = 64, H = 32: the scale factors are exactly 2.0.
+        let fm = field(64, 32, 0, |x, y| ((x * 7 + y * 3) % 256) as u8);
+        assert_eq!(fm.sample(10, 7), fm.height(20, 14));
+    }
+
+    #[test]
+    fn sample_between_grid_points_blends_the_four_neighbours() {
+        // W = 256, H = 128: the scale factors are exactly 0.5, so odd map
+        // coordinates sit half way between grid points.
+        let fm = field(256, 128, 0, |x, y| match (x, y) {
+            (0, 0) => 10,
+            (1, 0) => 21,
+            (0, 1) => 30,
+            (1, 1) => 41,
+            _ => 0,
+        });
+        assert_eq!(fm.sample(0, 0), 10);
+        assert_eq!(fm.sample(1, 0), 15, "(10 + 21) / 2 = 15.5, truncated");
+        assert_eq!(fm.sample(0, 1), 20, "(10 + 30) / 2");
+        assert_eq!(fm.sample(1, 1), 25, "(10 + 21 + 30 + 41) / 4 = 25.5, truncated");
+    }
+
+    #[test]
+    fn scale_100_maps_the_byte_range_onto_zero_to_ninety_nine() {
+        let fm = field(128, 64, flags::SCALE_100, |_, _| 255);
+        assert_eq!(fm.sample(3, 3), 99);
+        let fm = field(128, 64, flags::SCALE_100, |_, _| 128);
+        assert_eq!(fm.sample(3, 3), 50);
+    }
+
+    /// Answers of the exe's own `sampleHeight` (`0x5e2180`) and `percentileLookup`
+    /// (`0x5e2280`) on fractals the exe generated, under the C runtime's x87 control
+    /// word. `tests/data/fractal_probe.txt`, regenerated by
+    /// `.agents/skills/reverse-engineering-executables/scripts/emu/diff_sample.py`.
+    ///
+    /// Every sample set includes grid-aligned points, where `x * 128/W` is within an
+    /// ulp of an integer and the order of the floating-point operations decides the
+    /// answer.
+    #[test]
+    fn sample_and_percentile_match_the_exes_answers() {
+        const CASES: &str = include_str!("../tests/data/fractal_probe.txt");
+        let (mut samples, mut percentiles) = (0, 0);
+        for line in CASES.lines().filter(|l| !l.trim().is_empty()) {
+            let (query, answer) = line.split_once(" = ").expect("fixture line");
+            let t: Vec<&str> = query.split_whitespace().collect();
+            let n: Vec<i64> = t[..5].iter().map(|v| v.parse().unwrap()).collect();
+            let args: Vec<i32> = t[6..].iter().map(|v| v.parse().unwrap()).collect();
+            let want: Vec<u8> = answer.split_whitespace().map(|v| v.parse().unwrap()).collect();
+            let fm = Fractal::generate(n[0] as i32, n[1] as i32, n[2] as i32, n[3] as u32, n[4] as u32);
+            let got: Vec<u8> = match t[5] {
+                "S" => args.chunks(2).map(|p| fm.sample(p[0], p[1])).collect(),
+                "P" => args.iter().map(|&p| fm.percentile(p)).collect(),
+                other => panic!("mode {other}"),
+            };
+            assert_eq!(got.len(), want.len());
+            let wrong: Vec<_> = (0..got.len()).filter(|&i| got[i] != want[i]).take(5).collect();
+            assert!(wrong.is_empty(), "{}: {} differ, first at {:?}", &query[..30], wrong.len(), wrong);
+            match t[5] {
+                "S" => samples += got.len(),
+                _ => percentiles += got.len(),
+            }
+        }
+        assert!(samples > 2000 && percentiles > 1000, "{samples} samples, {percentiles} percentiles");
     }
 
     #[test]
@@ -612,12 +771,71 @@ mod tests {
         assert_eq!(a.heights(), want.as_slice());
     }
 
+    /// A source whose columns 96 and 32 are all `b96` / `b32`.
+    fn smear_source(b96: u8, b32: u8) -> Fractal {
+        let mut src = Fractal::generate(64, 64, 3, 0, 9);
+        for y in 0..STRIDE {
+            src.heights[Fractal::idx(96, y)] = b96;
+            src.heights[Fractal::idx(32, y)] = b32;
+        }
+        src
+    }
+
     #[test]
-    fn smear_keeps_everything_in_range() {
-        let mut f = Fractal::generate(64, 64, 3, flags::SMEAR_WIDE, 3);
-        let narrow = [0x40u8; STRIDE];
-        let wide = [0xC0u8; STRIDE];
-        f.smear(&narrow, Some(&wide));
-        assert!(f.heights().iter().any(|&v| v > 0), "the smear wiped the field");
+    fn smear_carves_a_v_shaped_trough_at_the_seam() {
+        // 0x80 -> centre 0: columns 0 +- step, ramping h * step / 16.
+        let src = smear_source(0x80, 0x80);
+        let plain = Fractal::generate(64, 64, 3, 0, 5);
+        let smeared = Fractal::generate_with(64, 64, 3, 0, 5, Some(&src));
+        for y in 0..STRIDE {
+            assert_eq!(smeared.get(0, y), 0, "the centre column is zeroed");
+            for step in 1..16usize {
+                let want = ((plain.get(step, y) as usize * step) >> 4) as u8;
+                assert_eq!(smeared.get(step, y), want, "x = {step}, y = {y}");
+                let mirrored = 128 - step;
+                let want = ((plain.get(mirrored, y) as usize * step) >> 4) as u8;
+                assert_eq!(smeared.get(mirrored, y), want, "x = {mirrored}, y = {y}");
+            }
+            // Outside the trough nothing changes.
+            assert_eq!(smeared.get(40, y), plain.get(40, y));
+            assert_eq!(smeared.get(100, y), plain.get(100, y));
+        }
+    }
+
+    #[test]
+    fn smear_centre_follows_the_source_byte_and_truncates_toward_zero() {
+        // (0x7F - 0x80) / 8 truncates to 0, not -1: the original divides, it does not shift.
+        let src = smear_source(0x7F, 0x80);
+        let smeared = Fractal::generate_with(64, 64, 3, 0, 5, Some(&src));
+        assert!((0..STRIDE).all(|y| smeared.get(0, y) == 0));
+        // 0xA0 -> +4: the zero sits at column 4.
+        let src = smear_source(0xA0, 0x80);
+        let smeared = Fractal::generate_with(64, 64, 3, 0, 5, Some(&src));
+        assert!((0..STRIDE).all(|y| smeared.get(4, y) == 0));
+    }
+
+    #[test]
+    fn the_middle_trough_exists_only_with_the_wide_flag() {
+        let src = smear_source(0x80, 0x80);
+        let narrow = Fractal::generate_with(64, 64, 3, 0, 5, Some(&src));
+        let wide = Fractal::generate_with(64, 64, 3, flags::SMEAR_WIDE, 5, Some(&src));
+        let plain = Fractal::generate(64, 64, 3, flags::SMEAR_WIDE, 5);
+        // x = 64 is the centre of the second trough: (h * 0 + 16) / 16 = 1.
+        assert!((0..STRIDE).all(|y| wide.get(64, y) == 1));
+        // Without the flag column 64 is untouched.
+        let plain_narrow = Fractal::generate(64, 64, 3, 0, 5);
+        assert!((0..STRIDE).all(|y| narrow.get(64, y) == plain_narrow.get(64, y)));
+        // The wide pass leaves its far edge close to the unsmeared value.
+        assert!((0..STRIDE).all(|y| {
+            let want = ((plain.get(79, y) as usize * 15 + 1) >> 4) as u8;
+            wide.get(79, y) == want
+        }));
+    }
+
+    #[test]
+    fn no_source_means_no_smear() {
+        let a = Fractal::generate(64, 64, 3, flags::SMEAR_WIDE, 3);
+        let b = Fractal::generate_with(64, 64, 3, flags::SMEAR_WIDE, 3, None);
+        assert_eq!(a.heights(), b.heights());
     }
 }

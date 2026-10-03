@@ -32,6 +32,7 @@ investigation are listed in §1.2.
 16. [The four opt-in original bugs](#16-the-four-opt-in-original-bugs)
 17. [Reference implementation status](#17-reference-implementation-status)
 18. [Open questions](#18-open-questions)
+19. [Ground truth: maps the exe generated](#19-ground-truth-maps-the-exe-generated)
 
 ---
 
@@ -64,7 +65,7 @@ several were load-bearing.
 | `vfunc(0x8c)` is "is a start candidate" | **Wrong.** It is **"is water"**: `terrainClass >= 11 && terrainClass <= 13`. |
 | `0x5f07d0` is the river generator | **Wrong.** It is the **hills / mountains** pass. Its chain endpoint writes BIQ terrain class **6**, and `vfunc(0x40)` is `isHillsOrMountains()`. |
 | `0x5f1480` is resource placement | **Wrong.** It is the **biome / climate** stage. Resources are `0x5f22a0`. |
-| `0x5f22a0` places goody huts too | **Wrong.** Goody huts are placed by `0x5f21b0` and barbarian camps by `0x5f2090`. |
+| `0x5f22a0` places goody huts too | **Wrong.** Goody huts are placed by `0x5f21b0` and the bonus-grassland feature bit by `0x5f2090` (not barbarian camps, see section 11.10). |
 | `0x5e1b60` reads out of bounds | **Wrong.** An exhaustive scan shows the flat index never leaves `0..=8384`; the height array is exactly `129*65 = 8385` bytes. |
 | `h == p70` should be `h <= p70` | **Wrong.** `==` marks 0.0–0.5 % of land; `<=` would mark 52–61 %, i.e. most of the map as hills. Both readings are bad, so `==` is the default. |
 | Sea level is a constant, or the water-level slider | **Wrong.** Both thresholds are **percentiles of the generated fractal**; the slider is only ever a *seed*. |
@@ -93,7 +94,7 @@ several were load-bearing.
 | `0x5f07d0` | `growHillsAndMountains()` | helpers `0x5f00c0`, `0x5f0530`, `0x5f1240` |
 | `0x5f22a0` | `placeResources(1)` | `'GOOD'` × `'TERR'` |
 | `0x5f21b0` | `placeGoodyHuts(1)` | feature 0, qty `0x20` |
-| `0x5f2090` | `placeBarbarianCamps(1)` | feature 2, qty `0x10000` |
+| `0x5f2090` | `placeBarbarianCamps(1)` (misnamed: bonus grassland) | feature plane 2, bit `0x10000` |
 | `0x5eeee0` | `finalPass(...)` | civ list + start-tile content; helper `0x5eedb0` |
 | `0x5d3100` | contour smoothing | after `generateMap` |
 | `0x5d6500` | `placeStartLocation(x, y)` (2 933 B) | the actual site commit |
@@ -151,7 +152,7 @@ several were load-bearing.
 +0x04  option A  (0..3)     +0x08  derived, 0..2
 +0x0c  option B  (0..4)     +0x10  derived, −2..3   <- goody-hut count
 +0x14  option C  (0..3)     +0x18  derived, 0..2    <- "Landmass"
-+0x1c  option D  (0..3)     +0x20  derived, 0..4    <- "Map Size"
++0x1c  option D  (0..3)     +0x20  derived, 0..4    <- Ocean Coverage (section 19; NOT "Map Size")
 +0x24  option E  (0..3)     +0x28  derived, 0..2    <- "Resources"
 +0x2c  option F  (0..3)     +0x30  derived, 0..2    <- climate
 +0x38  scratch: uint8  per-continent census (freed in the pipeline)
@@ -208,7 +209,9 @@ See §4 for the full table and the field layout.
 | `0x40` | `isHillsOrMountains()` |
 | `0x44` / `0x48` | raw/secondary class accessors |
 | `0x8c` | `return class >= 11 && class <= 13` — **is water** |
-| `0x94` / `0x9c` | feature id, `dword[cell+8]`; `-1` = none |
+| `0x94` | `byte[cell+4]`, the connection (river) mask |
+| `0x98` | `byte[cell+5]`, the tile owner civ id |
+| `0x9c` | `dword[cell+8]`, the **resource (GOOD row index)**, `-1` = none; the AI's raze scan indexes the GOOD table with it (`capture.md` section 12) |
 | `0xa0` | a second "has X" id |
 | `0xb8` | `word[cell+0x1e]` — **continent / region id** |
 | `0xc4` | `(flags(cell+0x2c) >> 8) & 0xF` — secondary class |
@@ -277,8 +280,8 @@ disassembling each entry and extracting the field it touches.
 | `0x8c` | `0x5eaa30` | | **is water** (class 11..13) |
 | `0x90` | `0x5eaa60` | `dword[+0x24]` | |
 | `0x94` | `0x5eaa70` | **`byte[+4]`** | connection mask getter |
-| `0x98` | `0x5eaa80` | | |
-| `0x9c` | `0x405d00` | **`dword[+8]`** | feature id, `-1` = none |
+| `0x98` | `0x5eaa80` | **`byte[+5]`** | **tile owner civ id** (0 = none; `combat.md` section 14.3); setter slot `0x108` = `0x5ead20` |
+| `0x9c` | `0x405d00` | **`dword[+8]`** | resource (GOOD row index; the generator's "feature id"), `-1` = none |
 | `0xa0` | `0x5eaa90` | `dword[+0xc]` | second "has X" id |
 | `0xa4` | `0x5eaaa0` | | |
 | `0xa8` | `0x5dc300` | | |
@@ -338,9 +341,10 @@ Two things worth noting:
 * **`byte[cell+4]` is the only per-tile connection field in the struct.** It has
   both a getter (`0x94`) and two setters (`0xd0` value, `0xf4` OR). The hills pass
   `0x5f07d0` ORs bits into it and `0x5f0450` clears it.
-* **`byte[cell+5]` has no vtable accessor at all.** It is only ever reached by
-  direct (non-virtual) code. Any per-tile flag living there cannot be read through
-  the published interface.
+* **`byte[cell+5]` is the tile's owner civ id** (corrected 2026-10-01: it has a getter,
+  slot `0x98` = `0x5EAA80`, and a setter, slot `0x108` = `0x5EAD20`; the earlier claim
+  that no accessor exists was wrong). It is a territory field, not a connection mask
+  (`combat.md` section 14.3 lists the evidence).
 
 The Cell constructor (`0x5d9b10` → `0x5da7d0`) calls `FUN_005e9940(0xd)`, so a
 freshly constructed cell is **class 13 (abyssal)**. That is load-bearing for
@@ -367,15 +371,20 @@ nominal slot and a cell's linear index are interchangeable.
 
 ---
 
-## 5. The two PRNGs
+## 5. The PRNGs
 
-There are two, and they are completely separate.
+*Corrected 2026-10-01 ([`combat.md`](combat.md) section 1): there are three random
+sources, not two. The earlier text called MSVC `rand` the "game RNG" used for
+combat. The combat dice are actually drawn from the `Random` class described
+second, through a global instance.*
 
-**Game RNG** — `0x64a20e`, state in `this+0x14`, seeded from `timeGetTime()` in
-`main` (`0x56c1f9`) and again at game start (`0x6389dd`). Used for AI and combat.
-**The map generator does not use it.**
+**MSVC `rand`** — `0x64a20e`, state in `this+0x14` (per-thread data), seeded from
+`timeGetTime()` in `main` (`0x56c1f9`) and again at game start (`0x6389dd`). Used by
+AI/advisor scans and pickers; it rolls no combat die. **The map generator does not
+use it.**
 
-**Map RNG** — `0x60ba80` / `0x60bab0`:
+**The `Random` class (map instances and the gameplay instance)** — `0x60ba80` /
+`0x60bab0`:
 
 ```c
 double rand01(uint32 *s) {                       // 0x60ba80
@@ -386,8 +395,11 @@ int rand_int(uint32 n) { return (int)(n * rand01(s)); }   // 0x60bab0
 ```
 
 The classic ANSI-C LCG, but only the **high 16 bits** of the state are used for
-the output. The state is always a *local* seeded from `waterLevel + K`, so every
-stage is independently reproducible from the map seed.
+the output. In the map generator the state is always a *local* seeded from
+`waterLevel + K`, so every stage is independently reproducible from the map seed.
+The same class also backs the **global gameplay instance `0xA526B4`** (seeded from
+`timeGetTime()` or the shared multiplayer seed), which supplies the combat,
+retreat and bombard dice; the two uses never share state.
 
 | K | used by |
 |---|---|
@@ -403,7 +415,7 @@ stage is independently reproducible from the map seed.
 | `0x87B01` | `0x5f07d0` hills stage RNG |
 | `0x180E3` | `0x5f22a0` resources |
 | `0x8ACE` | `0x5f21b0` goody huts |
-| `0x8CF78` | `0x5f2090` barbarian camps |
+| `0x8CF78` | `0x5f2090` bonus grassland (misnamed "barbarian camps") |
 | `0x16062` | `0x5eeee0` final pass |
 | `29 * continentId` | `0x5ee470` region painting |
 
@@ -1284,7 +1296,11 @@ for (i = 0; i < this->[0x10]; i++) {
 free(idx);
 ```
 
-Feature id `2`, quantity `0x10000` — a **barbarian camp**. `vfunc(0xC4)` is the
+Feature id `2`, quantity `0x10000` — ~~a **barbarian camp**~~. **Correction (barbarians.md,
+world-events.md 7):** this sets the *bonus grassland* feature bit (`0x10000` = bit 16 of the feature
+word, `yields.md`), not a barbarian camp. A camp is bit 7 (`0x80`) of the *overlay* word (plane 0) and is
+created only by `0x55F9F0` during play and by scenario data; there is no camp placement in the map
+generator. The routine is therefore `placeBonusGrassland`, not `placeBarbarianCamps`. `vfunc(0xC4)` is the
 secondary class, compared against 2.
 
 ### 11.11 `finalPass` (`0x5eeee0`)
@@ -1462,12 +1478,21 @@ That matters because a C3C river is drawn as a set of *segments*: the game ships
 a segment at map borders. A one-byte nibble of four edge bits is exactly the right
 shape for that.
 
-`byte[cell+5]` is the other candidate: it is read by the tile record reader and
-written by it, but it has **no vtable accessor at all**, so nothing in the
-published interface can read it back.
+`byte[cell+5]` was the other candidate. **Withdrawn (2026-10-01):** it is the
+tile's owner civ id (getter slot `0x98`, setter slot `0x108`), see
+[`combat.md`](combat.md) sections 9 and 14.3.
 
 **Unproven.** What would confirm it: the renderer that draws `RiverFore.pcx`, which
 must read the field and would settle the bit order.
+
+**New evidence (2026-10-01, [`combat.md`](combat.md) section 4.1).** The combat river
+bonus (`0x56CD80`) calls `vfunc(0x94)` (`0x5EAA70: mov al,[ecx+4]`, i.e.
+`byte[cell+4]`) and tests `(byte >> dir) & 1` for `dir` in 0..7, where `dir` is the
+direction from the defender toward the attacker. So a consumer that cares about river
+edges reads `byte[cell+4]`, as an eight-direction-indexed set. The bit order is still
+open: the four-bit nibble reading above has to be reconciled with an eight-direction
+index. The renderer evidence in [`rivers.md`](rivers.md) that pointed at `byte[cell+5]`
+concerns the tile **owner**, not rivers (corrected 2026-10-01).
 
 ### 14.4 Art evidence
 
@@ -1569,7 +1594,10 @@ So they can be rebuilt from scratch without needing the code table that
 A second, unrelated codec also lives in the binary at `0x648920` / `0x648AC0` with
 tables at `0x73A088`, `0x73A188`, `0x73A058`, `0x73A068`, `0x73A078`, `0x739FD8`
 and `0x73A018`. That one is the **compressor** for save-game writing, not the
-`.biq` reader, and it should not be confused with the above.
+`.biq` reader, and it should not be confused with the above. (It is ported in
+`biq/src/implode.rs` and reproduces every shipped compressed file byte for
+byte; see `biq.md`, "The compressor". Its `0x73A088`/`0x73A188` literal tables
+are byte-identical to the explode copies at `0x73A520`/`0x73A620`.)
 
 The binary carries three copies of the string
 
@@ -1640,7 +1668,7 @@ flagged where both readings are defensible (`sea_level_split`).
 | stage | address | status |
 |---|---|---|
 | option randomiser | `0x5f1f50` | exact |
-| land/sea generation | `0x5eceb0` | exact |
+| land/sea generation | `0x5eceb0` | exact for the draw it is given; 89-95 % of cells match three real maps (ocean 0 and 2) at the game's draw, but the port picks an earlier draw (continent-balance test missing), and five ocean-1 saves do not match at any draw (section 19) |
 | landmass fix | `0x5ed440` | not implemented |
 | start deconfliction | `0x5eeb00` | exact, including the original's index bug |
 | desert conversion at starts | `0x5edb70` | exact |
@@ -1651,7 +1679,7 @@ flagged where both readings are defensible (`sea_level_split`).
 | post-process | `0x5ebe80` | not implemented |
 | resources | `0x5f22a0` | not implemented — needs `.biq` data |
 | goody huts | `0x5f21b0` | not implemented — fully specified, no data needed |
-| barbarian camps | `0x5f2090` | not implemented — fully specified, no data needed |
+| bonus grassland (was "barbarian camps") | `0x5f2090` | not implemented; the barbarian camp machinery is `barbarians.md` |
 | final pass | `0x5eeee0` | not implemented |
 | contour smoothing | `0x5d3100` | not implemented |
 | start location commit | `0x5d6500` | not implemented |
@@ -1688,11 +1716,12 @@ the existing pipeline.
    byte-identical to the game's own `save1.tmp`. The GOOD/TERR file rows
    are length-prefixed `[u32 len][body]` (26 GOOD rows, TERR with its
    allow-mask) — see `biq.md` and `resources.md`.
-3. **The river system.** `byte[cell+5]` (slot 38) is confirmed as the render
-   path's per-tile mask getter, with the overlay gate and table `0xA53BC8`
-   dumped live (`rivers.md`); the render path lives at `0x57Fxxx/0x580xxx`.
-   Still open: which value (mask low nibble vs `[cell+0x2C]` nibbles)
-   selects the river segment — one live trace (`dynamic-tracing.md` Q1).
+3. **The river system.** Slot 38 (`byte[cell+5]`) is the render path's per-tile
+   getter of the tile **owner** civ, and the table `0xA53BC8` dumped live
+   (`rivers.md`) is the **at-war table** (`Player +0xD30`): the render block at
+   `0x57Fxxx/0x580xxx` is an owner/war overlay, not the river layer (corrected
+   2026-10-01, `combat.md` section 14.3). Still open: which value (`byte[cell+4]`
+   or the `[cell+0x2C]` nibbles) selects the river segment.
 4. ~~**The `this->[0x3C]` allocation size**~~ ~~in `0x5eb580`~~ **SOLVED
    (2026-09-29): both arrays are per-cell and `[+0x40]` is the cell count.**
    `0x5EB5E8`: `[+0x38] = malloc(2 * vfunc(0x88)())`, zero-filled;
@@ -1737,8 +1766,18 @@ the existing pipeline.
    | `0x9C739C` | `ActualWorldAge` |
    | `0x9C73A0` | `WorldSize` **and** `ActualWorldSize` (one global) |
 
-   Remaining: tie each global to the map object's option fields (`[+0x18]`,
-   `[+0x20]`, `[+0x28]`, …) by following the copy from global to field.
+   **Partly solved by ground truth (section 19):** map option `[+0x20]` is
+   *Ocean Coverage* (`ActualWorldOceanCoverage`), and `[+0x18]` is *Landmass*
+   (`ActualWorldLandmass`). The reference port labelled `[+0x20]` "Map Size", which
+   is wrong: the map's size comes from `WMAP`, and the coast/sea percentile tables
+   are indexed by the ocean slider. The other four derived slots (`+0x08`, `+0x10`,
+   `+0x28`, `+0x30`; section 3 has them as "goody-hut count", "Resources" and
+   "climate") are Climate, Barbarian Activity, Temperature and World Age in some
+   order, none verified. Hints only: `+0x10` is the one slot with sentinel 4 and a
+   `rand_int(5) - 1` draw (`options.rs`), which fits Barbarian Activity (five
+   settings); and if the pairs follow `WCHR`'s order (climate,
+   barbarian, landform, ocean, temperature, age) then `+0x28` is Temperature and
+   `+0x30` is World Age. `WCHR` has no field for "Resources".
 7. **The meaning of `vfunc(0xb8)`** (`word[cell+0x1e]`) — **write side SOLVED
    (2026-09-29):** the slot pair is `0x5EAAF0` (getter, `0x6701C8+0xB8`) and
    `0x5EACA0` (setter, `+0xE8`). The numbering pass is `0x5EB7D0`:
@@ -1781,3 +1820,112 @@ the existing pipeline.
    block 3's loop bound is `cell_count >> 5` (`0x5F2C29: shr edx,5`), a
    map-proportional extra-placement budget. So the guards scale placements
    with map size — no 32-player feature, no MP leftover.
+
+---
+
+## 19. Ground truth: maps the exe generated
+
+Until 2026-10-02 every stage in this file was checked against the disassembly
+only. Three shipped maps are the generator's own output, and they measure how
+faithful the land/sea stage (section 9) is. The repeatable part is
+`rust/tests/ground_truth.rs` (the two scenarios; the corpus is git-ignored and the
+tests skip without it). Everything below was measured with
+`landmass::generate_landmass_from_draw`, which enters the retry loop at a chosen draw
+with the file's own seed (the fractal moves with the draw, the painting pass does not).
+
+### 19.1 Where a generated map keeps its inputs
+
+* **`WMAP.water_level` (`Map+0x1EC`) is a full seed, not a 0..100 slider.** Generator
+  output stores values such as `2 984 833`, `23 442 062`, `434 817 328`; other files
+  store `-1` or a small number. Section 5's "`water_level` + stage constant" is a
+  32-bit seed plus a constant.
+* `WMAP` gives the size and the wrap flags (generator output stores `5`: X wrap plus
+  bit 2); `WCHR` gives the resolved sliders (`landform_actual`, `ocean_coverage_actual`,
+  `world_size_index`).
+* **Saved games hold the same data in another layout** (decoded by hand with
+  `biq/examples/unpack` and a tag scan; the `biq` crate does not read saves). A
+  `WRLD` chunk of 164 bytes is the `WMAP` row without its resource count and rolls
+  (41 dwords: land continents, height, radius, players, isqrt, 0, width, 32 start seeds,
+  seed, wrap flags) and a `WRLD` chunk of 52 bytes is `WCHR` (13 dwords). Each cell is a
+  run of `TILE` chunks (tag, length, body) of 36, 12, 4 and 128 bytes; the second dword of
+  the 12-byte chunk is the terrain word, whose bits 12..15 are the terrain class (water
+  = 11..=13), the same word as `Cell+0x2C` (section 4). All 22 shipped saves give
+  `(width / 2) * height` cells.
+
+### 19.2 Method
+
+For each map: run the land/sea stage with the file's size, wrap flags and seed,
+`landmass = landform_actual`, percentile row `= ocean_coverage_actual`, entering the
+retry loop at draw `n`, then compare the water mask with the file's terrain. Raw agreement
+is dominated by the ocean fraction (an unrelated map with the same fraction already
+agrees on about 70-75 %), so each result is read against the same map at other draws,
+and the sweeps also use the phi coefficient of land/water. The wide seed-offset search
+in 19.5 is the exception: it used `generate_landmass_wrapped` with the offset seed for
+both the fractal and the painting pass (a difference of about 0.1 % of cells).
+
+### 19.3 Results
+
+| map | size | landform | ocean | water | seed | game's draw | port's pick | agreement | phi |
+|---|---|---|---|---|---|---|---|---|---|
+| `dinobarbs.bix` | 60x60 | 2 | 2 | 62.9 % | 2 984 833 | **12** | 5 | **94.9 %** | 0.890 |
+| `Strategic Conquest (Small).bix` | 80x80 | 1 | 0 | 80.0 % | 23 442 062 | **1** | 0 | **89.2 %** | 0.645 |
+| `EGYPT.SAV` | 100x100 | 2 | 0 | 83.5 % | 434 817 328 | **3** | 0 | **93.3 %** | 0.759 |
+
+"Port's pick" is the first draw the port's coast test accepts, which is where it stops.
+The other coast-accepted draws in `0..=20` (9, 20 and 19 of them) agree 53.7-84.7 %,
+68.8-75.2 % and 70.6-82.0 %; the nearest rival is `dinobarbs` draw 11 at 84.7 %.
+Changing one setting at the game's draw:
+
+| change | `dinobarbs` | `Strategic Conquest` | `EGYPT` |
+|---|---|---|---|
+| other percentile rows (rows 2 and 3 are equal) | 78.8, 89.1, 80.2 | 65.1, 62.9, 47.4 | 73.3, 65.5, 54.0 |
+| `world_size_index` as the row (0 / 1 / 2) | 78.8 | 65.1 | 65.5 |
+| other landform styles | 62.4, 83.5 | 69.5, 83.8 | 75.5, 80.4 |
+| wrap flags 0 (or 4) | 87.2 | 81.2 | 82.4 |
+| wrap flags 2, 3, 7 | 50.4, 55.2, 55.2 | 76.7, 73.9, 73.9 | 71.0, 71.3, 71.3 |
+| wrap flags 1 (bit 2 cleared) | 94.9 | 89.2 | 93.3 |
+
+### 19.4 What it proved
+
+1. **The seed field, the `113 n` retry stride, the three landmass styles and X-wrap
+   handling are right**: every other value in the table is clearly worse, and bit 2 of the
+   wrap flags changes nothing in the port.
+2. **The coast and sea percentile tables are indexed by Ocean Coverage, not by map
+   size.** `Options::map_size` (`Map+0x20`) is that slider; the map's size is `WMAP`'s
+   width and height. The water amount agrees too: the port's mean water fraction at the
+   file's ocean setting, over the draws of `0..=60` that its loop accepts (56-58 for
+   the ocean-1 saves, 60 for `EGYPT`), is 73.2-73.4 % for the five ocean-1 saves (files:
+   73.4-74.7 %) and 83.1 % for `EGYPT` (file: 83.5 %). `pipeline::generate_with`
+   (`pipeline.rs:106`) still takes the dimensions from that field and is wrong until
+   the field is renamed.
+3. **The game's accepted draw is later than the first draw that passes the coast test**,
+   in all three maps (3 vs 0, 12 vs 5, 1 vs 0), so another test (or input) rejected the
+   earlier ones. The continent-balance test of sections 9.3 and 9.5 is the documented
+   candidate and is not implemented. Its output is now checkable: among the draws the
+   coast test accepts it must reject `EGYPT` 0, 1, 2; `dinobarbs` 5, 11; `Strategic
+   Conquest` 0, and accept the game's draw.
+
+### 19.5 Not explained
+
+* **The residual 5-11 % of cells** sits mostly along the coasts; on `EGYPT` it also
+  includes a strip on the east continent. Not characterised further. Candidates, none
+  tested: contour smoothing (`0x5d3100`), `postProcess` (`0x5ebe80`).
+* **Five 100x100 saves (`12345`, `1234`, Inca, Spanish / `1111110 BC`, `Three players`)
+  do not match at all.** All five have landform 1 and ocean 1, are 100x100 with two or
+  three players, and have a seed, so they look like plain new random-map games. Over
+  every draw in `0..=60`, all three styles and all five rows the best agreement is
+  77.2-82.4 %, which wrong draws of the matched maps reach too; a wider search (every seed offset within
+  +-4000, and `113 k` up to `k = 3000`) peaks at phi 0.44-0.54 against 0.76 for `EGYPT`'s
+  real draw. The water amount is right (above), so the percentile row is not the cause;
+  the shape is. Not landform 1 as such, because `Strategic Conquest` is landform 1 and
+  matches. Open: the continent-balance loop re-seeding between its up to 10 outer
+  iterations (the port runs one), `landmassFix` (`0x5ed440`), or a `Game Setup` input
+  not stored in `WCHR` / `WMAP`. **Until this is resolved, nothing here shows the
+  generator reproduced for ocean 1, the middle setting.**
+* The 256x256 `TETurkhan` game (7 saves) is a scenario game, not generator output: its
+  map is 65.5 % water where ocean 1 gives 73.4 %. Of the 23 shipped scenarios with a
+  seed-like value only the two above match; the rest are presumably hand-edited.
+* Whether wrap bit 2 (and 3) changes the exe's fractal is untested; every generated file
+  stores bit 2 set, and the port ignores it.
+* Climate, World Age, Temperature and Barbarian Activity do not enter the land/sea
+  stage, so this says nothing about those four slots (section 18, item 6).

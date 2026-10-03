@@ -31,7 +31,9 @@ retry worked.
 
 Address corrections: the byte-mask getter is at **`0x5EAA80`**
 (`mov al,[ecx+5]` — cell in `ecx`, returns **`byte[cell+5]`**), not
-`0x5EAA70` (that is the sibling `byte[cell+4]` getter, slot `0x94`).
+`0x5EAA70` (that is the sibling `byte[cell+4]` getter, slot `0x94`). **Later
+correction (2026-10-01, [`combat.md`](combat.md) section 14.3):** `byte[cell+5]` is the
+tile's owner civ id, not a river mask, and `0xA53BC8` is the at-war table.
 `display` auto-print silently fails — use explicit `x`/`info reg` per
 stop, or bulk `stepi` traces (each step auto-prints). Conditional
 breakpoints with `&`/`==` expressions are rejected ("No type or type
@@ -95,6 +97,10 @@ breakpoint catches it). Trying to break on its write is a dead end; decode
 `conquests.biq` instead.
 
 ## Q1: which field selects river segments? (half done)
+
+*Note (2026-10-01): the slot-38 byte traced below is the tile owner and the `0xA53BC8` table
+is the at-war table (`combat.md` section 14.3), so the trace characterises an owner/war
+overlay; the river question stays open.*
 
 Done live: break `*0x5EAA80` (slot 38); render calls it 3×/tile
 (`0x57F895`, `0x57F8A8`, `0x580B7A`); combine gate + table `0xA53BC8`
@@ -162,10 +168,13 @@ foreground; nothing else is missing.
    once the four flag bits (`0x48(%esp) & 0x78`), `byte[cell+5] > 0` and
    `table[esi][mask] != 0` all pass, so a hit is already a candidate river
    tile.
-2. **Combat odds + HP field.** Arm `break *0x64a20e` (game RNG) and
-   `break *0x5bbbc0` (kill path), then start a fight in the loaded save (the
-   kill path fires on a death). Capture `info reg` + the caller's frame at
-   each RNG draw; the draw that precedes an HP write names the dice.
+2. **Combat odds + HP field.** *Superseded 2026-10-01: both were recovered
+   statically, see [`combat.md`](combat.md).* The plan below was wrong about the
+   die: `0x64a20e` is MSVC `rand`, which combat does not use. If a live
+   confirmation is still wanted, arm `break *0x4a5b3c` (the round die, `ecx =
+   0xA526B4`), `break *0x4a5ba4` (the defender damage write) and `break *0x5bbbc0`
+   (kill path), start a fight in the loaded save, and compare the die against the
+   `cmp eax,[esp+0x30]` that follows the call (that operand is the odds).
 3. **Settler scorer.** Arm `break *0x5c1ad0` (action gate) and
    `break *0x5b9f90` (the `0x20000002` founding-gate caller), then run AI
    turns (`press_key return` twice per turn) and log the return addresses on
@@ -187,3 +196,13 @@ argument (no `save0.tmp` after 40s, menu screenshot). There is no CLI
 save-load: every dynamic trace needs GUI driving (Load Game dialog) by
 a human or the CUA driver — never foreground-drive while the user is
 working in another window.
+
+**A headless load does exist, outside the game.** `tools/emu/` runs the
+exe's own save loader (`game_data`, `0x590030`) under Unicorn on a decoded
+`.SAV`, with the Win32 imports stubbed; it needs no display, no Wine and no
+game data beyond the exe and the default `conquests.biq`. It traces which
+chunks and raw runs the loader reads, and the objects it fills (`Game`, map,
+players, units, cities) stay in emulated memory, so a question about *loaded
+state* needs no GUI session (the trace pickle keeps a copy of the `Game`
+object). It does not run the game loop or the post-load UI. See [`savegame.md`](savegame.md) section 7 and
+[`tools/emu/README.md`](tools/emu/README.md).
