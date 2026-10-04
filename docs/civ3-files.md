@@ -4,8 +4,9 @@ Status: **brainstorm / proposal**. Open questions at the end.
 
 ## Goal
 
-open-4x plays Civ3's own files directly. There is no import step, no
-converted rules, no open-4x content format. Everything is chosen on the
+open-4x plays Civ3's own `.biq` and `.sav` files directly. There is no
+import step for rules, maps or saves, and no open-4x content format. Art and
+sound are still converted once to PNG/OGG (section 7). Everything is chosen on the
 command line, with no main menu or setup screen:
 
 ```
@@ -31,7 +32,7 @@ What happens with a `.biq` depends on what it holds:
 | Game logic tied to specific rows | ~640 uses of named constants: `UnitType::Warrior` (104), `UnitType::Worker` (59), `Production::Temple` (37), `Production::ThePyramids` (17), ... | A mod that changes or drops those rows breaks the game |
 | Player count | `civs::CIV_COUNT = 4`, `[T; CIV_COUNT]` arrays everywhere | Scenarios have 2 to 31 players |
 | Map | `GameMap::generate` from `MAP_SEED` | No way to play a scenario's map |
-| Art and audio | `tools/prep_assets.py` → `assets/gen/` PNG/OGG plus JSON manifests. It gets the unit list by pattern-matching `rules_data.rs`, hardcodes the leaders of four civs, and has a hand-written wonder table | Not driven by the rules being played, and blind to a scenario's own art |
+| Art and audio | `tools/prep_assets.py` → `assets/gen/` PNG/OGG plus JSON manifests. It gets the unit list by pattern-matching `rules_data.rs`, hardcodes the leaders of four civs, and has a hand-written wonder table | Fine as a format (section 7), but it misses most leaders and every scenario's own art |
 | Saves | `src/save.rs`, our own JSON (format 11) | Not a Civ3 save |
 
 What already exists:
@@ -43,7 +44,6 @@ What already exists:
   tiles, players, the turn and the embedded BIQ are decoded. Most of the big
   runtime blocks (`LEAD`, `CITY`, `CTZN`, `UNIT` bodies) are only partly
   decoded (`reverse-engineering/savegame.md` section 9).
-* `terrain-builder/src/pcx.rs` already decodes PCX in Rust.
 * Civ3 itself is fully data-driven: the exe never knows what a "Granary" is,
   only BIQ fields and flags. Almost every named constant has a field that
   means the same thing (step 2 below).
@@ -56,8 +56,8 @@ What already exists:
                     ▼
           biq crate: Biq / Save  ──▶  Ruleset (in memory)  ──▶  game
                     │                     │
-                    │                     └─ art, sounds, text read from the
-                    │                        Civ3 dirs through one resolver
+                    │                     └─ art, sounds, text from assets/gen/
+                    │                        (converted once by prep_assets.py)
                     └─ map / scenario / saved state ──▶ game world
 ```
 
@@ -184,34 +184,44 @@ decoded yet (AI attitude memory, flip ratings, culture, war weariness, ...).
 Until it is all mapped, the current JSON quicksave would stay as a stopgap,
 and be deleted once `.SAV` writing covers it.
 
-## 7. Art, sound and text straight from the install
+## 7. Art and sound: converted once, by `prep_assets.py`
 
-To be consistent with "no intermediate format", the game reads PCX, FLC,
-WAV and `.txt` files from the install at runtime and `prep_assets.py` goes
-away (along with the Python, PIL and ffmpeg prerequisites).
+Rules, maps and saves are read straight from Civ3's files. Art and sound are
+not: `prep_assets.py` keeps converting them into formats Bevy loads natively
+(PNG, OGG, WAV) under the gitignored `assets/gen/`. That output is a cache
+regenerated from the install, never edited by hand, so it isn't an open-4x
+content format.
 
-* **Resolver**: one function, `civ3::path("Art/Units/Warrior/Warrior.ini")`,
-  that searches, in Civ3's order, the scenario's own folder and
-  `GAME.search_folders`, then `Conquests/`, `civ3PTW/`, then the base
-  install. **Case-insensitive**: the install's file names do not match their
-  references in case, which works on Windows and breaks on macOS/Linux.
-* **PCX**: lift `terrain-builder/src/pcx.rs`, apply the transparency rules
-  already documented in `prep_assets.py` (magenta and index 255 clear, pure
-  red as shadow).
-* **FLC**: a small Rust decoder (the format is a palette plus a handful of
-  delta chunk types), replacing ffmpeg. Team colors are a palette swap of
-  entries 0-63, which is easier on palette-indexed frames than on the PNGs we
-  have now.
-* **Sound**: WAV loads as is. The MP3 music needs an MP3 decoder in Bevy (a
-  feature flag) or stays out.
-* **Text**: `diplomacy.txt`, `PediaIcons.txt`, unit INIs parsed at load.
+Why keep converting:
 
-Decoding everything at startup may be slow (141 units × several clips × 8
-directions). Decode on first use, per unit and per clip, and that goes away.
+* Bevy loads PNG/OGG/WAV with no extra code. PCX and FLC would need custom
+  decoders and asset loaders, and the MP3 music an MP3 decoder.
+* The pipeline already works and already holds the hard-won details: the
+  transparency rules, unit shadows, team-color ramps, facing order, foot
+  offsets, `.amb` sound cues, terrain cropping.
+* Decoding FLCs at runtime (141 units × several clips × 8 directions) would
+  cost startup time or need lazy loading. Converting once costs neither.
+* Python/PIL/ffmpeg are a developer-side prerequisite only, which is fine
+  while players have to supply their own Civ3 install anyway.
 
-This is the step with the most new code, and it is independent of steps 2-6:
-until it lands, `prep_assets.py` keeps working, just reading the unit list
-and leaders from the BIQ instead of `rules_data.rs`.
+What changes:
+
+* **The art list comes from the BIQ, not from `rules_data.rs` and hardcoded
+  tables.** Simplest version: convert everything the install has (every
+  `Art/Units` folder, every leader clip in `Art/Flics`, every wonder splash)
+  instead of what the rules name, so prep never needs to parse a BIQ. That
+  fixes the four-leader limit.
+* **Scenario art.** A scenario's own art (its folder and
+  `GAME.search_folders`) is converted into its own cache directory:
+  `python3 tools/prep_assets.py --scenario path/to/X.biq` →
+  `assets/gen/scenarios/<X>/`. The game looks there first, then in
+  `assets/gen/`, the same override order Civ3 uses. To find the search
+  folders, prep reads them from the BIQ through a tiny `biq` example that
+  prints them; that keeps BIQ parsing in Rust. When converted art is missing,
+  the game prints the exact prep command to run.
+* **Case-insensitive lookup** in prep: the install's file names don't match
+  their references in case. That works on Windows and breaks on macOS/Linux.
+* Text files the game reads (`diplomacy.txt`, ...) keep being copied by prep.
 
 ## Suggested order
 
@@ -224,7 +234,8 @@ Each step leaves the game playable.
 4. **Any number of players.**
 5. **Scenario maps, players, cities and units** from the BIQ.
 6. **Load `.SAV`**, then **write `.SAV`**.
-7. **Art from the install** (resolver, PCX, FLC), delete `prep_assets.py`.
+7. **Prep driven by the install, not `rules_data.rs`** (all units, all
+   leaders, all wonders), plus per-scenario art caches.
 
 2 and 3 are the bulk and unblock the rest. 7 can run in parallel with any of
 them.
@@ -233,12 +244,9 @@ them.
 
 1. **Must `.SAV` files written by open-4x open in real Civ3**, or only in
    open-4x? The first is much more work (section 6).
-2. **Art straight from the install too** (section 7), or keep
-   `prep_assets.py` converting PCX/FLC to PNG? "No intermediate format" reads
-   as rules and saves, so this is worth confirming.
-3. **Vanilla and PTW files**: Conquests `.biq` and Conquests `.SAV` first, or
+2. **Vanilla and PTW files**: Conquests `.biq` and Conquests `.SAV` first, or
    do Civ3 1.x `.bic` / PTW `.bix` and their saves need to work from the
    start? The parser reads all `.biq` versions; the SAV reader only reads
    Conquests saves (format 24).
-4. **Rules the engine does not implement** (a mod's flag nobody has coded):
+3. **Rules the engine does not implement** (a mod's flag nobody has coded):
    print a warning at startup and ignore it (proposed), or refuse to start?
