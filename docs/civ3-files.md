@@ -274,6 +274,22 @@ cells out of them with texture atlases instead of loading pre-cropped files.
 The few computed picks (the purest terrain cells, splitting canopy sprites)
 run when the sheet is first converted and go into its sidecar JSON.
 
+Feasibility: everything the script does is pixel work (crops, pastes, alpha
+masks, palette swaps, connected components) plus two calls to ffmpeg: FLC
+decoding and MP3 → OGG. The MP3 step disappears (Bevy plays MP3). The risks
+are narrow:
+
+* **FLC must decode exactly like ffmpeg**: same frame count (including the
+  trailing ring frame), same pixels, every chunk type the install uses.
+* **PCX variants**: `terrain-builder`'s reader only takes 8-bit single-plane
+  files. Any other variant in the install needs adding.
+* **The wonder thumbnails** use PIL's Lanczos resize; a Rust Lanczos will
+  differ by a few levels per pixel. Invisible, but not byte-identical.
+
+Each ported stage is checked by **diffing its output pixel by pixel against
+`prep_assets.py`'s output** over the whole install, before the Python stage
+is removed.
+
 Port stage by stage. Until a stage is ported, its `assets/gen/` files keep
 working; once all are, `prep_assets.py` and `assets/gen/` are deleted.
 
