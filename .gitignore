@@ -1,0 +1,14 @@
+target/
+assets/gen/
+.DS_Store
+shot-*.png
+/shots/
+__pycache__/
+*.py[cod]
+
+civ3/
+
+# terrain-builder outputs and generated materials
+terrain-builder/packs/*/out/
+terrain-builder/packs/*/*.png
+saves/
