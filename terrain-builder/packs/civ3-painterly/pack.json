@@ -1,0 +1,40 @@
+{
+  "name": "civ3-painterly",
+  "style": "hand-painted 2000s strategy game ground art, soft painterly detail, slightly saturated",
+  "model": "fal-ai/flux/dev",
+  "image_size": "square_hd",
+  "masks": "civ3",
+  "blend": "height",
+  "seed": 1,
+  "tiles_across": 8.0,
+  "shore_width": 2.0,
+  "shoreline_darken": 0.3,
+  "color_match": false,
+  "flatten": true,
+  "terrains": {
+    "coast": {
+      "prompt": "shallow clear turquoise coastal water over a sandy bottom, gentle ripples"
+    },
+    "desert": {
+      "prompt": "pale sandy desert ground, fine sand with faint wind ripples"
+    },
+    "grassland": {
+      "prompt": "lush green grassland ground, short grass with subtle patches of lighter and darker green"
+    },
+    "ocean": {
+      "prompt": "deep blue-green ocean water surface with small even waves"
+    },
+    "plains": {
+      "prompt": "dry golden plains ground, yellow-ochre short grass with small patches of bare brown earth"
+    },
+    "sea": {
+      "prompt": "medium-depth teal sea water surface with small even waves"
+    },
+    "shore": {
+      "prompt": "light wet beach sand with fine grain"
+    },
+    "tundra": {
+      "prompt": "cold tundra ground, pale grey-green moss and lichen with small patches of frost"
+    }
+  }
+}
