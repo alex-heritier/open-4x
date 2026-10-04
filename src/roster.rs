@@ -34,6 +34,7 @@ pub struct UnitRow {
     pub abilities: u32,
     pub special: u32,
     pub worker: u32,
+    pub worker_strength: f32,
     pub bombard: i32,
     pub bomb_range: i32,
     pub rof: i32,
@@ -80,12 +81,17 @@ pub struct BldgDef {
     pub other: u32,
     pub small: u32,
     pub wonder: u32,
+    /// `PRTO` row this building produces on a timer (`flags` bit 30), -1 for none.
+    pub produces: i32,
+    /// Turns between two of those units.
+    pub frequency: i32,
     /// The game implements the building's effects.
     pub playable: bool,
 }
 
 /// `PRTO` ability bits (`biq::sections::prto::ability`).
 pub mod ability {
+    pub const WHEELED: u32 = 1 << 0;
     pub const FOOT_UNIT: u32 = 1 << 1;
     pub const BLITZ: u32 = 1 << 2;
     pub const IMMOBILE: u32 = 1 << 10;
@@ -126,6 +132,8 @@ pub mod imp {
     pub const VETERAN_GROUND_UNITS: u32 = 1 << 1;
     pub const RESEARCH_BONUS: u32 = 1 << 2;
     pub const VETERAN_SEA_UNITS: u32 = 1 << 17;
+    /// *Produces Units*: `BldgDef.produces` every `frequency` turns.
+    pub const PRODUCES_UNITS: u32 = 1 << 30;
     pub const LUXURY_BONUS: u32 = 1 << 3;
     pub const TAX_BONUS: u32 = 1 << 4;
     pub const REDUCES_CORRUPTION: u32 = 1 << 8;
@@ -250,6 +258,19 @@ mod tests {
         for u in UNITS.iter().filter(|u| u.playable) {
             let m = format!("assets/gen/units/{}/manifest.json", u.art);
             assert!(std::path::Path::new(&m).is_file(), "{}: no {m}", u.name);
+        }
+    }
+
+    #[test]
+    fn leaders_and_armies_have_art_for_every_era() {
+        if !std::path::Path::new("assets/gen/units").is_dir() {
+            return;
+        }
+        for u in UNITS.iter().filter(|u| u.playable && u.art.ends_with("Ancient Times")) {
+            for era in ["Ancient Times", "Middle Ages", "Industrial Ages", "Modern Times"] {
+                let m = format!("assets/gen/units/{}/manifest.json", u.art.replace("Ancient Times", era));
+                assert!(std::path::Path::new(&m).is_file(), "{}: no {m}", u.name);
+            }
         }
     }
 

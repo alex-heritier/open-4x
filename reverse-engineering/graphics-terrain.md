@@ -174,5 +174,6 @@ counterpart (dispatch tables, not algorithms).
 
 `civ3-clone`'s counterpart is `src/borders.rs` (art, the per-edge rule,
 the sprite sync) with the plot model in `cities::{culture_level,
-culture_radius, territory}` and the prep stage `borders`. The straight
+recompute_borders, territory}` (`borders-culture.md` 5; the owner lives on
+`Tile::owner`) and the prep stage `borders`. The straight
 column is what ships.

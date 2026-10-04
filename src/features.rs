@@ -277,7 +277,13 @@ pub fn terr_score(id: u8) -> u32 {
                 resource: None,
                 road: false,
                 irrigation: false,
+            river: 0,
                 mine: false,
+                site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+                owner: None,
             };
             if suitable(id, &t) {
                 score += 1;
@@ -297,7 +303,13 @@ pub fn terr_score(id: u8) -> u32 {
             resource: None,
             road: false,
             irrigation: false,
+            river: 0,
             mine: false,
+            site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+            owner: None,
         };
         if suitable(id, &t) {
             score += 1 + 4;
@@ -804,7 +816,13 @@ mod tests {
             resource: None,
             road: false,
             irrigation: false,
+            river: 0,
             mine: false,
+            site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+            owner: None,
         }
     }
 

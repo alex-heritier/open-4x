@@ -471,3 +471,37 @@ only caller is the AI's improvement scorer `0x42C8A0` (`0x42F7FF`), which adds
 `4 * (table[n] - n)` to the score of a Marketplace-class building. The table is
 **happy faces**: the recompute `0x4BCFF0` runs the same count (`0x4BD0E3..0x4BD14C`) and adds
 `table[n]` happy faces with such a building, `n` without (`happiness.md` section 3, step 6).
+
+
+### Clone Agricultural food integration
+
+`src/citycalc.rs::Rules` now follows section 4.1's two Agricultural effects:
++1 food for irrigated effective TERR Desert (`0x5D737A..0x5D73D0`), and the
+freshwater exemption from the center food cap (`0x5D7564..0x5D75AE`). Flood
+Plain, Hill and covered Desert do not receive the Desert bonus. Freshwater
+comes from the same map query as irrigation and the Aqueduct exemption.
+The center exemption changes food alone; shield and commerce caps remain.
+The shared calculation feeds city screens, governor assignments, AI and
+city-turn food storage. Existing native `yields.rs` vectors already cover
+these conditions; game regression covers dry/freshwater centers, the lake
+20/21 threshold, Monarchy, irrigated Desert versus Flood Plain, owner traits
+and actual `process_city_turn` food storage.
+
+
+### Clone lakes, Seafaring and the Colossus
+
+`src/citycalc.rs::Rules::tile` queries the map's bounded water-body traversal
+for water tiles. Bodies of at most 20 tiles gain one food independently of a
+Harbor; larger bodies receive Harbor food instead (`0x5D7470..0x5D748E`).
+The government cap follows either bonus. The same threshold already drives
+freshwater and coastal construction eligibility.
+
+Seafaring city centers adjacent to larger water bodies gain one commerce
+after the capital floor and before Golden Age/government/cap
+(`0x5D7EF4..0x5D7F55`). The query uses current map topology, not a stale
+coastal flag. The Colossus affects every commerce-producing worked tile and
+the center (`0x5D7F82..0x5D7F9C`); the clone's previous Sea/Ocean-only filter
+and missing center bonus were removed. Zero-commerce tiles gain nothing.
+Game regressions cover lake/ocean/Harbor food, the 20/21 boundary, owner
+traits, capital floor and cap order, land/Coast/center wonder commerce, and
+zero-commerce tiles. Existing native reference vectors cover these rules.

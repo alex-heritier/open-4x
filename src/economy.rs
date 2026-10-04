@@ -93,7 +93,7 @@ pub fn finance<'a>(
     for c in cities {
         tax += city_tax(map, c);
         upkeep += building_upkeep(c);
-        sizes.push(c.size);
+        sizes.push(c.size());
         civ = Some(c.civ);
     }
     Finance {
@@ -284,17 +284,20 @@ mod tests {
             river: false,
             unrest: 0,
             hurry_timer: 0,
+            stakes: Default::default(),
+            cooldown: 0,
+            unit_clocks: Vec::new(),
             civ,
             name: format!("C{x}"),
             x,
             y,
-            size: 1,
+            diseased: false,
+            citizens: crate::citizens::new_pool(civ, 1),
             food: 0,
             shields: 0,
             production: Production::Warrior,
             queue: vec![],
             buildings: vec![],
-            worked: HashSet::new(),
             culture: 0,
             founded: x as u32,
         };
@@ -310,7 +313,7 @@ mod tests {
         // A road under each worked tile: 2 commerce each (the center's one
         // plus the road), so 1 tax per city.
         for c in [&a, &b] {
-            for &(x, y) in &c.worked {
+            for &(x, y) in &c.worked(&map) {
                 let i = map.idx(x, y);
                 map.tiles[i].road = true;
             }

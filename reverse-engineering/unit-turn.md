@@ -418,3 +418,34 @@ status reset exactly **once per round**, in unit-id order within its owner's pas
 5. Capture-mode details (section 5.1), the byte `[0x9C5B40]`, and the nationality field `U.+0x38`.
 6. Unit movement, orders and ZOC (`0x5B3040`, `0x5C1AD0`, `0x5BD220`), and the AI planners that drive barbarian
    and AI units.
+
+## 10. Clone jungle-disease integration (2026-10-04)
+
+`rust/src/disease.rs::unit_jungle_loss` implements the carried-unit gate and
+the literal PRTO population-cost / fortified order / TERR 8 / rand(1000)
+branch. Re-read `0x5C771B` and `0x5C7A9B..0x5C7B0A` for this integration.
+Only a zero low-word result kills; skipped units consume no draw. No city
+disease strength or cure technology enters this unit rule.
+
+`src/naval.rs::unit_hazards` now handles this after the existing sea hazard,
+using the shared gameplay RNG and the tile's effective terrain row. Carried
+units skip both hazards. Despawn uses the existing cargo cleanup and
+elimination systems; this does not implement every side effect of native
+`Unit::kill`, nor the native pool-index walk. Deferred losses are excluded
+from later boundaries delivered in the same frame.
+
+Regression coverage includes death/survival, population-cost immunity,
+fortification, carried units, terrain and owner skips, exact RNG state and
+multiple boundaries after death. The rendered clone was loaded from v8
+fixtures with RNG seeds 0 and 1: respectively roll 0 / death / state 12345
+and roll 513 / survival / state 1103527590. Settler, Worker and the foreign
+Warrior survived in both. F5/F8 preserved the outcome and RNG state.
+These are clone checks, not dynamic execution of the original executable.
+
+Verified 473 game tests, a game build, 613 native library tests, 22 native
+integration tests and two doctests. Release clippy has no disease-module
+warnings (ten existing library warnings, plus existing test-target warnings).
+Logs: `/tmp/open4x-unit-disease-{game-tests,updated-targeted,build-now,native,clippy}.log`.
+Rendered cases: `/tmp/open4x-unit-disease-{loss,survive}.json` and corresponding
+`-map.png` captures. City terrain disease and persistent citizen identity
+remain separate pending work (`disease.md`, `hurry.md`).

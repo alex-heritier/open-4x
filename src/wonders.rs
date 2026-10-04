@@ -39,7 +39,7 @@ pub struct Seen {
 }
 
 /// A great wonder in the ledger.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Built {
     pub row: usize,
     pub civ: usize,
@@ -76,6 +76,30 @@ pub struct Wonders {
     /// Small wonders standing, by row and owner.
     small: HashSet<(usize, usize)>,
     primed: bool,
+}
+
+/// What a saved game keeps of the wonders: the ledger and the small
+/// wonders standing.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Saved {
+    built: Vec<Built>,
+    small: Vec<(usize, usize)>,
+}
+
+impl Wonders {
+    pub fn snapshot(&self) -> Saved {
+        let mut small: Vec<_> = self.small.iter().copied().collect();
+        small.sort();
+        Saved { built: self.built.clone(), small }
+    }
+
+    /// The ledger as saved, with no splash waiting.
+    pub fn restore(&mut self, saved: &Saved) {
+        self.built = saved.built.clone();
+        self.small = saved.small.iter().copied().collect();
+        self.splash.clear();
+        self.primed = true;
+    }
 }
 
 fn is_great(row: usize) -> bool {
@@ -367,7 +391,7 @@ pub fn window(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c
             ui.button(stage, 980.0, 180.0, 36.0, 36.0, "v", 20.0, Action::Page(1), false);
         }
     }
-    ui.button(stage, 432.0, 722.0, 160.0, 32.0, "Close (F7)", 18.0, Action::Close, false);
+    crate::advisor_frame::close_box(stage, ui, assets, Action::Close);
 }
 
 #[cfg(test)]
@@ -386,17 +410,20 @@ mod tests {
             river: false,
             unrest: 0,
             hurry_timer: 0,
+            stakes: Default::default(),
+            cooldown: 0,
+            unit_clocks: Vec::new(),
             civ,
             name: name.into(),
             x: 3,
             y: 4,
-            size: 3,
+            diseased: false,
+            citizens: crate::citizens::new_pool(civ, 3),
             food: 0,
             shields: 0,
             production: Production::Warrior,
             queue: vec![],
             buildings: vec![],
-            worked: Default::default(),
             culture: 0,
             founded: 1,
         }

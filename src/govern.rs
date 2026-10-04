@@ -137,7 +137,7 @@ pub fn ai_turn(
             wars,
             religious: exe_econ::has_trait(crate::cities::traits(civ), exe_econ::trait_bit::RELIGIOUS),
             weariness: realm::govt(civ).war_weariness,
-            enemy_weariness: &[],
+            enemy_weariness: &diplomacy.enemy_weariness(civ),
         });
         if !cooling && exe::considers_revolution(&mut rng_from(&mut dice), gate) {
             let choice = choose_government(civ, &mine, owned);
@@ -167,10 +167,11 @@ pub fn ai_turn(
 /// The government the AI would take (`0x4448F0`), among those it may adopt.
 pub fn choose_government(civ: usize, mine: &[&City], units: usize) -> Option<usize> {
     let cities = mine.len() as i32;
-    let classes: Vec<i32> = mine.iter().map(|c| i32::from(economy::size_class(c.size))).collect();
+    let classes: Vec<i32> = mine.iter().map(|c| i32::from(economy::size_class(c.size()))).collect();
     let upkeep: i32 = mine.iter().map(|c| crate::citycalc::upkeep(c)).sum();
     let ai_bonus = is_ai(civ).then_some((AI_FREE_FLAT[DIFFICULTY], AI_FREE_PER_CITY[DIFFICULTY]));
-    let race = &crate::rules_data::RACES[civ];
+    let race = &crate::civs::RACES[civ];
+    let (enemy_weariness, average_weariness) = realm::read(civ, |r| (r.war_counters.clone(), r.average_weariness));
     let scores = (0..exe::SHIPPED.len()).map(|g| {
         if !realm::read(civ, |r| r.can_adopt(g)) {
             return None;
@@ -189,8 +190,8 @@ pub fn choose_government(civ: usize, mine: &[&City], units: usize) -> Option<usi
                 cities,
                 support_charge: support,
                 upkeep,
-                average_weariness: 0,
-                enemy_weariness: &[],
+                average_weariness,
+                enemy_weariness: &enemy_weariness,
                 favorite: race.favorite_government == g as i32,
                 shunned: race.shunned_government == g as i32,
             },
@@ -261,7 +262,7 @@ mod tests {
             m
         };
         let mut city = City::new(1, "Rome", 20, 20);
-        city.size = 4;
+        city.set_size(4);
         city.buildings = vec![crate::cities::Production::Temple, crate::cities::Production::Granary];
         crate::cities::governor_assign(&map, &mut city, &Default::default());
         let one = [&city];

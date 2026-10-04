@@ -412,3 +412,107 @@ A size-7 city cannot execute P1 (`7/2 = 3 < 4`): `HURRY_NOT_ENOUGH_PEOPLE` with 
   sections 3, 4 and 5; the validator does not apply the hurry, `0x4B5CA0` does.
 * `city-turn.md` section 12 and `capture.md`: `0x4BA230` is specified here (section 8) rather than left as
   a shrink routine of unknown body.
+
+
+## 12. Population reference and clone food retention
+
+`rust/src/population.rs` models citizen slot allocation and victim selection.
+`City::addCitizens` `0x4B9F60` calls pool allocator `0x4C2040` at
+`0x4B9F98`. That allocator uses the free head when freeCount > 0
+(`0x4C2114..0x4C212C`), otherwise increments last (`0x4C2131..0x4C213E`).
+Removal nulls the slot and pushes it onto the free head
+(`0x4BA3F3..0x4BA411`), without lowering last. The reference stores slots
+through last and a LIFO free list, not native pointers/heap capacity.
+Returned Citizen fields preserve race, worked-radius index, job and resistance
+for caller bookkeeping. Selection consumes one gameplay draw per attempt,
+including absent races or no occupied citizens, and walks cyclically through
+holes. It does not silently replace slot selection with uniform citizen choice.
+
+`food_after_loss` implements section 8.4. `src/cities.rs::City::lose_population`
+shares it across starvation, Settler completion, forced labor, capture,
+barbarian raids and bombardment. Captured-city population loss now precedes
+building/owner transfer, as `0x5642F1` precedes `takeCity`: retention uses the
+old owner's active Granary. Size changes in the same class preserve stored
+food even when full. A class change empties it without a Granary, or caps it
+at half the new box with one. The game still uses X=10; AI/difficulty and
+accelerated-production X remain pending.
+
+The citizen pool is a tested native reference, not yet the gameplay source
+of truth. Game population still uses aggregate foreign/work/specialist data;
+random victim selection, nationality/job effects and disease integration
+remain pending. The shared food rule does not claim those mechanics solved.
+
+
+### Citizen pool snapshot boundary
+
+`population::Pool::to_words/restore` now preserves every slot through last,
+including holes, race/work/job/resistance data, and the free list in LIFO
+reuse order. This is the clone's integer-stream representation, not a native
+SAV chunk. Format: slot count; for each slot a 0/1 presence word followed,
+when present, by race, work, job and 0/1 resistance; then free-list length and
+indices from oldest to newest. An empty pool is `[0, 0]`.
+
+Restoration is atomic. Each hole must appear once in the free list; duplicate,
+occupied, negative or out-of-range indices fail. Presence/resistance must be
+0/1, fields fit their native integer widths, the stream must end exactly, and
+lengths are bounded by available input before allocation. Game-specific
+RACE/job/radius validity remains the City's integration responsibility.
+
+New behavior tests preserve victim selection and future allocation after
+roundtrip, reject malformed snapshots without altering the previous pool,
+and compare uninterrupted play with restoration between citizen removal
+and disease recovery (including the restored gameplay RNG). Independent
+Python encoder/decoder agrees on the golden 16-word stream, checksum 15,
+head `[4,1,1,1,0,0]`, tail `[0,2,1,2]`, and malformed-input rejection.
+The stream is now included in format-9 City saves (section 13).
+
+## 13. Persistent gameplay citizens (2026-10-04)
+
+`src/citizens.rs` makes `population::Pool` the City's source for size,
+nationality, work and specialist jobs. Removed the former size, foreign,
+worked-tile and specialist aggregates. Citizens retain slots and holes;
+births reuse the native free head. Jobs are stock CTZN 0 Laborer, 1
+Entertainer, 2 Tax Collector, 3 Scientist. Native spiral indices 1..20
+(`0x5E6E50`) map onto the clone's square coordinates via
+`((dx+dy)/2, (dy-dx)/2)`, including cylindrical wrapping. Race values use
+the clone's civilization roster indices, as `Unit.nationality` does; the
+stream is not native SAV decoding.
+
+Starvation, hurry, capture, bombardment and barbarian raids now consume
+the native cyclic-slot draw and release the victim's own job/tile. Raids
+count and remove only the owner's nationals. Ownership changes preserve
+citizen race and identity. Joining units add citizens of their nationality.
+Unit production pays PRTO population cost, including Workers, using owner
+race first and then other players in slot order (`0x4B8DC4..0x4B8EB1`). The
+produced unit takes the last foreign race consumed. Same-class food is
+retained; size-class changes use the recovered Granary rule.
+
+Save format 9 stores the pool words instead of the four aggregates and
+validates field ranges and worker/job consistency on decode. Older save
+formats remain unsupported; no compatibility layer or dependency was added.
+Game regressions cover snapshot holes and RNG continuation, specialist and
+worker victims, LIFO births, native radius/seam mapping, foreign unit
+production and foreign Settler joining. All 477 game tests pass. Native
+release tests: 613 library, 22 integration, two doctests; release clippy has
+the ten existing library warnings, none in population.
+
+Rendered evidence: `/tmp/open4x-citizens-{90,270}.png`, visually inspected.
+Amsterdam starts with four citizens (two Dutch workers, a Roman Scientist,
+an Egyptian Entertainer). Seed 20 starvation removes Scientist slot 1,
+keeps both work assignments and the Entertainer, and saves exactly state
+595480765. F5/F8 restores the hole and population 3; science drops from 3
+to 0. Fixture/result `/tmp/open4x-citizens-{before,roundtrip}.json`; logs
+`/tmp/open4x-citizens-{render,game-tests-verified,build,native,clippy}.log`.
+
+An actual Worker-completion run also starts with three Roman citizens in
+Dutch Amsterdam. Owner search fails, foreign search removes worker slot 0,
+and the produced Worker has Roman nationality (clone roster index 0).
+The city retains two citizens, food 9 and RNG state 2524885223 across F5/F8.
+Evidence: `/tmp/open4x-citizens-worker.{json,png,log}`; capture inspected.
+
+Still pending: nationality-loss diplomacy counters and resistance lifecycle
+messages, foreign-at-war mood input, City terrain disease, and the native
+ABANDONBASE dialog (`city-turn.md` 7). Growing cities correctly wait when
+size <= population cost; the clone still holds nongrowing cities instead
+of asking to consume their last citizen. Unit/building shield overflow also
+still differs from the native empty-box production commit.

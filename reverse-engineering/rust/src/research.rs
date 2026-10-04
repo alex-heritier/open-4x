@@ -164,6 +164,9 @@ pub enum Event {
         /// The advance.
         tech: i32,
     },
+    /// The scientific-leader die succeeded. The caller creates a Leader
+    /// at the capital if that city exists (`research.md` 10.2).
+    ScientificLeader { player: u32, tech: i32 },
     /// The second civ to reach an era (`enterEra`, `turn > 0`): the barbarian
     /// landing `0x55FD00` triggers.
     BarbarianLanding {
@@ -226,6 +229,8 @@ pub struct Player {
     pub free_techs: [i32; 4],
     /// The civilization has the Scientific trait (`hasTrait(3)`).
     pub scientific: bool,
+    /// Science Age last turn, inclusive (`research.md` 11).
+    pub science_until: Option<i32>,
     /// Great Library notice (`+0xAC`): `(tech, first, second)`.
     pub notice: Option<(i32, u32, u32)>,
     /// `PALV +0x1C`: eras finished while nobody was ahead (7.4).
@@ -236,6 +241,58 @@ pub struct Player {
 }
 
 impl Player {
+    fn write(&self, w: &mut crate::words::Writer) {
+        w.put(self.slot);
+        for v in [self.era, self.beakers, self.current, self.turns, self.future, self.known_count, self.cities, self.rate] {
+            w.put(v);
+        }
+        w.put(self.contact);
+        w.run(&self.queue.iter().copied().collect::<Vec<i32>>());
+        w.flag(self.interactive);
+        w.flag(self.great_library);
+        w.put(self.great_library_obsolete);
+        w.run(&self.free_techs);
+        w.flag(self.scientific);
+        w.put(self.science_until.unwrap_or(NONE));
+        match self.notice {
+            Some((t, a, b)) => {
+                w.put(1);
+                w.put(t);
+                w.put(a);
+                w.put(b);
+            }
+            None => w.put(0),
+        }
+        w.put(self.achievements);
+        w.flag(self.awaiting_choice);
+    }
+
+    fn read(r: &mut crate::words::Reader) -> Option<Player> {
+        let slot = r.u32()?;
+        let mut p = Player::new(slot);
+        p.era = r.i32()?;
+        p.beakers = r.i32()?;
+        p.current = r.i32()?;
+        p.turns = r.i32()?;
+        p.future = r.i32()?;
+        p.known_count = r.i32()?;
+        p.cities = r.i32()?;
+        p.rate = r.i32()?;
+        p.contact = r.u32()?;
+        p.queue = r.run(|v| i32::try_from(v).ok())?.into();
+        p.interactive = r.flag()?;
+        p.great_library = r.flag()?;
+        p.great_library_obsolete = r.i32()?;
+        p.free_techs = r.run(|v| i32::try_from(v).ok())?.try_into().ok()?;
+        p.scientific = r.flag()?;
+        let until = r.i32()?;
+        p.science_until = (until != NONE).then_some(until);
+        p.notice = if r.flag()? { Some((r.i32()?, r.u32()?, r.u32()?)) } else { None };
+        p.achievements = r.u32()?;
+        p.awaiting_choice = r.flag()?;
+        Some(p)
+    }
+
     /// A fresh slot (`Player::init`, 7.5): no target, era 0, nothing known.
     pub fn new(slot: u32) -> Self {
         Player {
@@ -255,6 +312,7 @@ impl Player {
             great_library_obsolete: NONE,
             free_techs: [NONE; 4],
             scientific: false,
+            science_until: None,
             notice: None,
             achievements: 0,
             awaiting_choice: false,
@@ -291,10 +349,61 @@ pub struct World {
     pub size_tech_rate: i32,
     /// Game flag `0x200` (Accelerated Production).
     pub accelerated: bool,
+    /// Game flag `0x40000`: enable first-discoverer scientific leaders.
+    pub scientific_leaders: bool,
     /// `[0xA526AC]`: the turn number (0 during setup).
     pub turn: i32,
     /// One entry per slot.
     pub players: Vec<Player>,
+}
+
+impl World {
+    /// Everything that changes in play, as words (the rules are not saved).
+    pub fn to_words(&self) -> Vec<i64> {
+        let mut w = crate::words::Writer::default();
+        w.run(&self.known);
+        w.put(self.in_play);
+        w.put(self.human);
+        w.put(self.difficulty_cost_factor);
+        w.put(self.size_tech_rate);
+        w.flag(self.accelerated);
+        w.flag(self.scientific_leaders);
+        w.put(self.turn);
+        w.put(self.players.len() as i64);
+        for p in &self.players {
+            p.write(&mut w);
+        }
+        w.0
+    }
+
+    /// Put saved state back. False, with `self` untouched, when the words do
+    /// not fit this world.
+    pub fn restore(&mut self, words: &[i64]) -> bool {
+        let mut r = crate::words::Reader::new(words);
+        let parsed = (|| {
+            let known = r.run(|v| u32::try_from(v).ok())?;
+            let (in_play, human) = (r.u32()?, r.u32()?);
+            let (cost, rate) = (r.i32()?, r.i32()?);
+            let accelerated = r.flag()?;
+            let scientific_leaders = r.flag()?;
+            let turn = r.i32()?;
+            let n = usize::try_from(r.get()?).ok()?;
+            let players = (0..n).map(|_| Player::read(&mut r)).collect::<Option<Vec<_>>>()?;
+            (r.done() && known.len() == self.known.len() && players.len() == self.players.len())
+                .then_some((known, in_play, human, cost, rate, accelerated, scientific_leaders, turn, players))
+        })();
+        let Some((known, in_play, human, cost, rate, accelerated, scientific_leaders, turn, players)) = parsed else { return false };
+        self.known = known;
+        self.in_play = in_play;
+        self.human = human;
+        self.difficulty_cost_factor = cost;
+        self.size_tech_rate = rate;
+        self.accelerated = accelerated;
+        self.scientific_leaders = scientific_leaders;
+        self.turn = turn;
+        self.players = players;
+        true
+    }
 }
 
 /// `tdiv`: C integer division (truncates toward zero), which Rust's `/` is.
@@ -314,6 +423,7 @@ impl World {
             difficulty_cost_factor: 10,
             size_tech_rate: 240,
             accelerated: false,
+            scientific_leaders: false,
             turn: 0,
             players: (0..SLOTS as u32).map(Player::new).collect(),
         }
@@ -743,6 +853,12 @@ impl World {
         let bonus = first && flags & flags::BONUS_TECH != 0;
         if first && by_research && self.turn > 0 {
             events.push(Event::FirstDiscoverer { player: p, tech: t });
+            if self.scientific_leaders {
+                let chance = if self.players[p as usize].scientific { 5 } else { 3 };
+                if ctx.dice.below(100) < chance {
+                    events.push(Event::ScientificLeader { player: p, tech: t });
+                }
+            }
         }
         // 10.
         if run_eras {
@@ -927,6 +1043,79 @@ mod tests {
         fn value(&mut self, w: &World, _p: u32, t: i32, _d: &mut dyn Dice) -> i32 {
             w.rules.techs[t as usize].cost * 100
         }
+    }
+
+    #[test]
+    fn a_world_round_trips_through_words() {
+        let mut w = world(3);
+        w.known[2] = 0b101;
+        w.turn = 17;
+        w.scientific_leaders = true;
+        w.players[1].science_until = Some(37);
+        w.players[1].beakers = 9;
+        w.players[1].current = 3;
+        w.players[1].queue = VecDeque::from([4, 5]);
+        w.players[2].notice = Some((3, 1, 2));
+        w.players[2].free_techs = [0, 2, -1, -1];
+        let words = w.to_words();
+        let mut fresh = world(3);
+        assert!(fresh.restore(&words));
+        assert_eq!(fresh.to_words(), words);
+        assert_eq!((fresh.known[2], fresh.turn, fresh.players[1].beakers), (0b101, 17, 9));
+        assert_eq!(fresh.players[1].queue, VecDeque::from([4, 5]));
+        assert_eq!(fresh.players[2].notice, Some((3, 1, 2)));
+        assert!(fresh.scientific_leaders);
+        assert_eq!(fresh.players[1].science_until, Some(37));
+        // A short or foreign stream changes nothing.
+        let mut other = world(3);
+        assert!(!other.restore(&words[..words.len() - 1]));
+        assert!(other.to_words() == world(3).to_words());
+    }
+
+    #[test]
+    fn scientific_leader_chances_and_gates_use_one_native_die() {
+        struct Roll { value: i32, draws: Vec<u32> }
+        impl Dice for Roll {
+            fn below(&mut self, n: u32) -> i32 { self.draws.push(n); self.value }
+        }
+        for scientific in [false, true] {
+            for value in 0..=5 {
+                let mut w = world(3);
+                w.scientific_leaders = true;
+                w.turn = 1;
+                w.players[1].scientific = scientific;
+                let mut dice = Roll { value, draws: vec![] };
+                let mut events = vec![];
+                w.acquire(1, 0, true, true, false, &mut events, &mut Ctx { brain: &mut Lowest, dice: &mut dice });
+                assert_eq!(dice.draws, [100]);
+                assert_eq!(events.iter().any(|e| matches!(e, Event::ScientificLeader { player: 1, tech: 0 })), value < if scientific { 5 } else { 3 });
+                w.acquire(2, 0, true, true, false, &mut events, &mut Ctx { brain: &mut Lowest, dice: &mut dice });
+                assert_eq!(dice.draws, [100], "second discoverers do not roll");
+            }
+        }
+        for (enabled, turn, researched) in [(false, 1, true), (true, 0, true), (true, 1, false)] {
+            let mut w = world(3);
+            w.scientific_leaders = enabled;
+            w.turn = turn;
+            let mut dice = Roll { value: 0, draws: vec![] };
+            w.acquire(1, 0, researched, true, false, &mut vec![], &mut Ctx { brain: &mut Lowest, dice: &mut dice });
+            assert!(dice.draws.is_empty());
+        }
+        // Philosophy's gift is a full acquire: its leader roll happens after
+        // the first discovery's roll and after choosing the free advance.
+        let mut w = world(3);
+        w.scientific_leaders = true;
+        w.turn = 1;
+        w.rules.techs[0].flags = flags::BONUS_TECH;
+        w.players[1].current = 0;
+        let mut dice = Roll { value: 0, draws: vec![] };
+        let mut events = vec![];
+        w.acquire(1, 0, true, true, false, &mut events, &mut Ctx { brain: &mut Lowest, dice: &mut dice });
+        assert_eq!(dice.draws, [100, 100]);
+        let rewards: Vec<_> = events.iter().filter_map(|e| match e {
+            Event::ScientificLeader { tech, .. } => Some(*tech), _ => None,
+        }).collect();
+        assert_eq!(rewards, [0, 1]);
     }
 
     fn world(n_civs: u32) -> World {

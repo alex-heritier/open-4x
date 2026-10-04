@@ -6,7 +6,7 @@ Strength*), the infection and cure rolls and their draw order, the citizen loss,
 (different mechanisms with their own documents): the scenario **plague** (`world-events.md` 6, city fields `+0x3AC..+0x3B4`)
 and the **jungle disease of units** (`unit-turn.md` 3.3). Tags: **V** read from the instructions with the body opened,
 **E** executed in an emulator over the unmodified exe (scratch harness, not committed), **H** hypothesis, **O** open.
-No reference code is given on purpose.
+Reference roll code: `rust/src/disease.rs`. Citizen removal is a separate caller operation, specified in `hurry.md` section 8.
 
 Conventions (`primitives.md`): `__thiscall` (`ecx` = this), `ret N`, the last pushed argument is the first parameter;
 `rand(n)` is `0x60BAB0(0xA526B4; n)` = `(k * (n & 0xFFFF)) >> 15` with a 15-bit draw `k`; it always consumes exactly one
@@ -199,3 +199,53 @@ called notifications and citizen removals, the final size, flag and cause code.
 2. **O** The body of the dialog `0x4B40D0` beyond the variant selection; the multiplayer event with kind 4.
 3. **O** Whether and where the save file stores `City +0x68` and `+0xD8` (`savegame.md` has the city record grammar; the two fields were not located in it).
 4. **H** The intended technology of the cure (the code tests row 8; the editor text says Sanitation).
+
+
+## 8. Reference integration status
+
+`rust/src/disease.rs::infection` takes worked counts in native TERR order,
+the single-bit terrain flags and strength, and whether literal technology
+row 8 is known. It consumes one gameplay draw per tile, skipping cured or
+nonpositive-strength rows and ending at the first successful roll even at
+size one. Its optional terrain result tells the caller to set diseased and
+cause 3, notify, and remove a citizen. `recovers` takes the size **after**
+removal and consumes the one low-word recovery draw. Raw head, row-8,
+strength/roll and recovery branches were rechecked this turn.
+
+Five golden tests cover D1-D8, early-exit draw order and strength boundaries,
+including zero and negative RNG bounds. Population removal consumes a
+cyclic-slot-selection draw before recovery and resets food at size-class
+changes (hurry.md 8.2-8.5). Unit jungle disease is integrated independently
+(`unit-turn.md` 10).
+
+## 12. Gameplay integration (2026-10-04)
+
+`src/disease.rs` uses generated TERR flags/strength and actual worked citizen
+assignments plus the center. Literal technology row 8 is read from the
+owner's realm. `process_city_turn` invokes disease before food, growth and
+production, matching `0x4BEB00` in the sequencer (`city-turn.md` 3).
+The shared gameplay RNG selects the native citizen victim before recovery.
+Save version 10 persists the disease flag with citizen slots and RNG state.
+New cities start healthy. Disease notices survive later city events; the
+city screen reports active disease. No extra yield or mood penalty is added.
+
+Four game regressions cover center/worked counts, unworked exclusion,
+Writing's terrain-specific suppression, specialist victims, loss before
+recovery, population-one survival, and disease before food and population-cost
+production. The save snapshot regression includes a diseased city and pool
+holes. All 481 game tests and the game build pass.
+
+Actual F8/end/F5/F8 checks used Amsterdam with four mixed citizens, a Flood
+Plain center and seed 0. Infection selects occupied slot 2 (Dutch worker),
+leaving three citizens and RNG 3554416254. The flag and hole survive reload.
+On the next owner turn, native scaled rolls are 1 for victim selection and
+86 for recovery: the Roman scientist in slot 1 dies, population becomes two,
+disease clears, and RNG is 3596950572. Granting Writing in the original fixture preserves all four citizens, leaves
+the city healthy and consumes no RNG draw on the Flood Plain. Both rendered
+city screens were
+inspected (`/tmp/open4x-city-disease-{140,250}.png` and
+`/tmp/open4x-city-disease-recovery.png`).
+
+Nationality-loss attitude counters, resistance lifecycle and the complete
+player-turn ordering remain separate fidelity gaps. This integration covers
+the disease phase, not every native city-turn side effect.

@@ -9,22 +9,23 @@
 //! the human is asked, in the Science Advisor (`advisors.rs`).
 //!
 //! The Great Library reads its current owner, government and obsolescence
-//! before each research step. Scientific-leader rolls are not wired into
-//! gameplay. The game uses four civilizations on a Regent standard world.
+//! before each research step. Scientific leaders appear at the capital after
+//! the native first-discoverer roll. The game uses four civilizations on a
+//! Regent standard world.
 use bevy::prelude::*;
 
 use civ3mapgen::research::{Ctx, Dice, Event, NONE, World};
 use civ3mapgen::research_ai::{Profile, Tables, Valuer, category_mask_from_flags};
 
 use crate::cities::{City, Production};
-use crate::civs::{CIV_COUNT, CivilizationEnded, Civilizations, is_ai};
+use crate::civs::{CIV_COUNT, RACES, CivilizationEnded, Civilizations, is_ai};
 use crate::combat::CombatRng;
 use crate::diplomacy::Diplomacy;
 use crate::features::{MessageBoard, post};
 use crate::map::GameMap;
 use crate::rng::MapRng;
 use crate::roster::{BLDG_COUNT, UNIT_COUNT, upgrade_chain};
-use crate::rules_data::{self, ERA_NAMES, RACES, TECH_NAMES};
+use crate::rules_data::{self, ERA_NAMES, TECH_NAMES};
 use crate::units::{Turn, Unit, def};
 
 impl Dice for MapRng {
@@ -173,12 +174,14 @@ pub struct Research {
     profiles: Vec<Profile>,
     categories: Vec<u32>,
     started: bool,
+    leaders: Vec<usize>,
 }
 
 impl Research {
     /// The game's four civilizations, nothing known yet.
     pub fn new() -> Self {
         let mut world = World::new(rules_data::rules());
+        world.scientific_leaders = true;
         world.difficulty_cost_factor = rules_data::DIFFICULTY_COST_FACTOR[DIFFICULTY];
         world.size_tech_rate = rules_data::WORLD_TECH_RATE[WORLD_SIZE];
         let mut profiles = vec![Profile::default(); civ3mapgen::research::SLOTS];
@@ -203,7 +206,32 @@ impl Research {
             };
         }
         let categories = world.rules.techs.iter().map(|t| category_mask_from_flags(t.flags)).collect();
-        Research { world, tables: rules_data::tables(), profiles, categories, started: false }
+        Research { world, tables: rules_data::tables(), profiles, categories, started: false, leaders: vec![] }
+    }
+
+    /// Everything that changes in play: the started flag, pending leader
+    /// rewards, then the world (`civ3mapgen::research::World::to_words`).
+    pub fn snapshot(&self) -> Vec<i64> {
+        let mut words = vec![i64::from(self.started)];
+        words.push(self.leaders.len() as i64);
+        words.extend(self.leaders.iter().map(|&c| c as i64));
+        words.extend(self.world.to_words());
+        words
+    }
+
+    /// Put a snapshot back; false, with nothing changed, if it does not fit.
+    pub fn restore(&mut self, words: &[i64]) -> bool {
+        let Some((&started, rest)) = words.split_first() else { return false };
+        let Some((&n, rest)) = rest.split_first() else { return false };
+        let Ok(n) = usize::try_from(n) else { return false };
+        if n > rest.len() { return false; }
+        let (leaders, rest) = rest.split_at(n);
+        if leaders.iter().any(|&c| c < 0 || c >= CIV_COUNT as i64) || !self.world.restore(rest) {
+            return false;
+        }
+        self.started = started != 0;
+        self.leaders = leaders.iter().map(|&c| c as usize).collect();
+        true
     }
 
     /// Run `f` with the AI valuation as the brain of the research code.
@@ -263,6 +291,26 @@ impl Research {
     /// Beakers a turn.
     pub fn rate(&self, civ: usize) -> i32 {
         self.world.players[slot(civ) as usize].rate
+    }
+
+    pub fn science_age(&self, civ: usize, turn: i32) -> bool {
+        self.world.players[slot(civ) as usize].science_until.is_some_and(|last| turn <= last)
+    }
+
+    pub fn start_science_age(&mut self, civ: usize, turn: i32) {
+        self.world.players[slot(civ) as usize].science_until = Some(turn + 20);
+    }
+
+    fn apply_rewards(&mut self, events: &[Event]) {
+        // Era effects must run even when no human announcement is shown
+        // (computer research, hut rewards and computer-to-computer trades).
+        if events.iter().any(|e| matches!(e, Event::BarbarianLanding { .. })) {
+            crate::barbarians::request_uprising();
+        }
+        self.leaders.extend(events.iter().filter_map(|e| match *e {
+            Event::ScientificLeader { player, .. } => Some(civ_of(player)),
+            _ => None,
+        }));
     }
 
     /// Does `civ` know tech `need` (`-1` is always met; the advance count
@@ -380,6 +428,7 @@ impl Research {
         self.world.turn = turn;
         self.world.add_beakers(s, beakers);
         self.with_brain(dice, |w, ctx| w.step(s, &mut events, ctx));
+        self.apply_rewards(&events);
         self.sync_locks();
         events
     }
@@ -398,6 +447,7 @@ impl Research {
         let s = slot(civ);
         let mut events = vec![];
         self.with_brain(dice, |w, ctx| w.acquire(s, t, false, true, true, &mut events, ctx));
+        self.apply_rewards(&events);
         self.sync_locks();
         events
     }
@@ -466,9 +516,6 @@ pub fn announce(events: &[Event], board: &mut MessageBoard) {
                     },
                 );
             }
-            // The second civ to reach an era wakes the barbarians
-            // (`research.md` 7.2, `barbarians.md` 5).
-            Event::BarbarianLanding { .. } => crate::barbarians::request_uprising(),
             Event::EnteredEra { player, era } if !is_ai(civ_of(player)) => {
                 post(board, format!("Our civilization enters the {} Age.", ERA_NAMES[era as usize]));
             }
@@ -508,7 +555,9 @@ pub fn refresh(
     for civ in 0..CIV_COUNT {
         let s = slot(civ) as usize;
         let me = &mut research.world.players[s];
-        me.rate = rate[civ];
+        me.rate = if me.science_until.is_some_and(|last| turn.0 as i32 <= last) {
+            (rate[civ] as f32 * 1.25) as i32
+        } else { rate[civ] };
         me.cities = count[civ];
         me.contact = diplomacy.contacts(civ);
         research.profiles[s].defenders = defenders[civ];
@@ -525,15 +574,23 @@ pub fn end_turn(
     civs: Res<Civilizations>,
     turn: Res<Turn>,
     cities: Query<&City>,
+    map: Res<GameMap>,
 ) {
     for ev in ended.read() {
         let civ = ev.0;
         if civs.outcome.is_some() {
             continue;
         }
-        let beakers = research.rate(civ);
+        // The native Science Age changes estimates and cost clamps, but the
+        // income pass still adds the raw city science (`research.md` 3.2).
+        let beakers = cities.iter().filter(|c| c.civ == civ).map(|c| crate::citycalc::totals(&map, c).sci).sum();
         research.refresh_wonders(cities.iter());
         let events = research.finish_turn(civ, beakers, turn.0 as i32, &mut rng.0);
+        let player = &mut research.world.players[slot(civ) as usize];
+        if player.science_until.is_some_and(|last| turn.0 as i32 > last) {
+            player.science_until = None;
+            if !is_ai(civ) { post(&mut board, "Our Science Age has ended."); }
+        }
         // The computer's discoveries are its own business.
         if is_ai(civ) {
             if std::env::var("CIV3_AI_LOG").is_ok() {
@@ -546,6 +603,23 @@ pub fn end_turn(
             continue;
         }
         announce(&events, &mut board);
+    }
+}
+
+/// Complete successful native rolls after all research/trade/hut acquisitions.
+pub fn spawn_leaders(
+    mut commands: Commands,
+    mut research: ResMut<Research>,
+    capital: Res<crate::cities::Capital>,
+    cities: Query<&City>,
+    art: Res<crate::units::UnitArt>,
+    mut board: ResMut<MessageBoard>,
+) {
+    for civ in std::mem::take(&mut research.leaders) {
+        let Some(city) = capital.0[civ].and_then(|e| cities.get(e).ok()).filter(|c| c.civ == civ) else { continue };
+        let e = crate::units::spawn_unit(&mut commands, &art, crate::units::UnitType::Leader, city.x, city.y, civ);
+        commands.entity(e).entry::<Unit>().and_modify(|mut u| u.scientific_leader = true);
+        if !is_ai(civ) { post(&mut board, format!("A Scientific Leader has emerged in {}!", city.name)); }
     }
 }
 
@@ -569,6 +643,84 @@ mod tests {
             }
         }
         r
+    }
+
+    #[test]
+    fn a_research_discovery_spawns_a_scientific_leader_at_the_capital() {
+        let mut r = game();
+        let bw = tech("Bronze Working");
+        let p = &mut r.world.players[slot(0) as usize];
+        p.current = bw;
+        p.rate = 10;
+        p.cities = 1;
+        p.beakers = 1000;
+        p.turns = 3;
+        // A seed whose first native roll is below the non-Scientific 3%.
+        let seed = (0..10000).find(|&s| MapRng::new(s).below(100) < 3).unwrap();
+        let events = r.finish_turn(0, 0, 1, &mut MapRng::new(seed));
+        assert!(events.iter().any(|e| matches!(e, Event::ScientificLeader { player: 1, .. })));
+        let mut app = App::new();
+        app.insert_resource(r);
+        app.init_resource::<crate::cities::Capital>();
+        app.init_resource::<MessageBoard>();
+        app.insert_resource(crate::units::UnitArt::blank());
+        let capital = app.world_mut().spawn(City::new(0, "Kyoto", 10, 11)).id();
+        app.world_mut().resource_mut::<crate::cities::Capital>().0[0] = Some(capital);
+        app.add_systems(Update, spawn_leaders);
+        app.update();
+        let leaders: Vec<_> = app.world_mut().query::<&Unit>().iter(app.world()).collect();
+        assert_eq!(leaders.len(), 1);
+        assert_eq!((leaders[0].civ, leaders[0].x, leaders[0].y), (0, 10, 11));
+        assert!(leaders[0].scientific_leader);
+        assert_eq!(leaders[0].utype, crate::units::UnitType::Leader);
+        app.update();
+        assert_eq!(app.world_mut().query::<&Unit>().iter(app.world()).count(), 1);
+        // Successful rolls still consume their die when no capital exists.
+        app.world_mut().resource_mut::<Research>().leaders.push(1);
+        app.update();
+        assert_eq!(app.world_mut().query::<&Unit>().iter(app.world()).count(), 1);
+    }
+
+    #[test]
+    fn science_age_changes_the_estimate_rate_but_not_beaker_income() {
+        crate::realm::reset();
+        crate::realm::set_rates(0, crate::realm::Rates { tax: 0, sci: 10, lux: 0 });
+        let mut r = game();
+        let bw = tech("Bronze Working");
+        r.world.players[slot(0) as usize].current = bw;
+        r.start_science_age(0, 1);
+        let mut app = App::new();
+        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.insert_resource(r);
+        app.insert_resource(GameMap::generate());
+        app.insert_resource(Diplomacy::new());
+        app.insert_resource(CombatRng(MapRng::new(5)));
+        app.init_resource::<MessageBoard>();
+        app.init_resource::<Civilizations>();
+        app.insert_resource(Turn(1));
+        app.add_message::<CivilizationEnded>();
+        let mut city = City::new(0, "Kyoto", 10, 10);
+        city.work_tile(app.world().resource::<GameMap>(), (11, 10));
+        city.buildings.push(Production::Library);
+        let mut map = app.world_mut().resource_mut::<GameMap>();
+        let i = map.idx(11, 10);
+        map.tiles[i].base = crate::map::Base::Coast;
+        app.world_mut().spawn(city);
+        app.add_systems(Update, (refresh, end_turn).chain());
+        app.update();
+        let raw: i32 = app.world_mut().query::<&City>().iter(app.world()).map(|c| crate::citycalc::totals(app.world().resource::<GameMap>(), c).sci).sum();
+        assert!(raw >= 4);
+        assert_eq!(app.world().resource::<Research>().rate(0), (raw as f32 * 1.25) as i32);
+        app.world_mut().write_message(CivilizationEnded(0));
+        app.update();
+        assert_eq!(app.world().resource::<Research>().world.players[1].beakers, raw);
+        assert!(app.world().resource::<Research>().science_age(0, 21));
+        assert!(!app.world().resource::<Research>().science_age(0, 22));
+        app.world_mut().resource_mut::<Turn>().0 = 22;
+        app.world_mut().write_message(CivilizationEnded(0));
+        app.update();
+        assert_eq!(app.world().resource::<Research>().world.players[1].science_until, None);
+        assert_eq!(app.world().resource::<Research>().rate(0), raw);
     }
 
     fn tech(name: &str) -> i32 {
@@ -862,6 +1014,60 @@ mod tests {
         let ev = [Event::Acquired { player: slot(0), tech: 0, by_research: true }];
         announce(&ev, &mut board);
         assert_eq!(board.text, "Our scientists have discovered Bronze Working!");
+    }
+
+    #[test]
+    fn computer_era_entry_spawns_an_uprising_without_an_announcement() {
+        crate::realm::reset();
+        crate::civs::set_controllers();
+        for researched in [true, false] {
+            let mut r = game();
+            let last = tech("Construction");
+            r.world.turn = 10;
+            r.world.players[slot(0) as usize].era = 1;
+            for (i, row) in r.world.rules.techs.iter().enumerate() {
+                if row.era == 0 && i as i32 != last { r.world.known[i] |= 1 << slot(1); }
+            }
+            let p = &mut r.world.players[slot(1) as usize];
+            p.known_count = r.world.known.iter().filter(|&&mask| mask & (1 << slot(1)) != 0).count() as i32;
+            p.current = last;
+            p.beakers = 10000;
+            p.turns = 10;
+            p.rate = 10;
+            p.cities = 1;
+            if !researched {
+                // The external-acquisition path used by huts and trades. The
+                // caller deliberately does not show research announcements.
+                let ev = r.award(1, last, &mut MapRng::new(1));
+                assert!(ev.iter().any(|e| matches!(e, Event::BarbarianLanding { era: 1 })));
+            }
+            let mut app = App::new();
+            app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+            let mut map = GameMap::generate_with_seed(1);
+            for t in &mut map.tiles { t.camp = false; }
+            // Four camps fill the native camp quota, so the uprising adds
+            // exactly eight advanced units per existing camp.
+            for (x, y) in crate::civs::starting_positions(&map) {
+                let i = map.idx(x, y); map.tiles[i].camp = true;
+            }
+            app.insert_resource(map);
+            app.insert_resource(r);
+            app.insert_resource(CombatRng(MapRng::new(1)));
+            app.insert_resource(Turn(10));
+            app.init_resource::<Civilizations>();
+            app.init_resource::<MessageBoard>();
+            app.init_resource::<crate::barbarians::Barbarians>();
+            app.insert_resource(crate::units::UnitArt::blank());
+            app.add_message::<CivilizationEnded>();
+            app.add_systems(Update, (end_turn, crate::barbarians::uprising).chain());
+            app.world_mut().spawn(City::new(1, "Rome", 33, 33));
+            if researched { app.world_mut().write_message(CivilizationEnded(1)); }
+            app.update();
+            assert_eq!(app.world().resource::<Research>().era(1), 1);
+            let horses = app.world_mut().query::<&Unit>().iter(app.world())
+                .filter(|u| u.civ == crate::civs::BARBARIANS && u.utype == crate::units::UnitType::Horseman).count();
+            assert_eq!(horses, 32, "researched={researched}");
+        }
     }
 
     #[test]

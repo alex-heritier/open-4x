@@ -1,3 +1,9 @@
+> River correction: the historical claims below that `0x5F07D0` places
+> mountains rather than rivers, and that map generation cannot place rivers,
+> are withdrawn. `rust/src/rivergen.rs` is the recovered generator: it writes
+> Cell +4, including desert-to-floodplain transitions. See `rivers.md` for
+> the owner-byte trace correction and current playable-map integration.
+
 # Civilization III Conquests — how random map generation works
 
 Consolidated reverse-engineering notes for

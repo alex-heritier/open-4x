@@ -34,8 +34,8 @@ const DRAFT_PENALTY: i32 = hap::shipped::DRAFT_TURN_PENALTY;
 const HURRY_PENALTY: i32 = hap::shipped::HURRY_SACRIFICE_TURN_PENALTY;
 
 /// The tile penalty (Anarchy, Despotism): a yield above two loses one.
-/// The city center is exempt: nobody works it (a choice of this clone; the
-/// sources only say "city production square").
+/// Agricultural city-center food with freshwater is the sole exemption
+/// (`yields.md` 4.1); shields and commerce are still capped.
 fn trim(yield_: u8) -> i32 {
     trim_to(i32::from(yield_))
 }
@@ -50,8 +50,10 @@ pub struct Mood {
     pub happy: u8,
     pub content: u8,
     pub unhappy: u8,
-    /// Citizens with no tile: they entertain.
+    /// Idle citizens assigned to entertainment.
     pub entertainers: u8,
+    pub scientists: u8,
+    pub tax_collectors: u8,
 }
 
 /// The city's turn.
@@ -75,7 +77,7 @@ pub struct Totals {
     /// Commerce lost to corruption.
     pub corruption: i32,
     /// The three streams after the split, the buildings' multipliers and
-    /// the entertainers.
+    /// the specialists.
     pub tax: i32,
     pub sci: i32,
     pub lux: i32,
@@ -120,6 +122,7 @@ pub fn holds(city: &City, p: Production) -> bool {
 /// the republics' extra commerce.
 struct Rules {
     govt: &'static Govt,
+    agricultural: bool,
     harbor: bool,
     colossus: bool,
     golden: bool,
@@ -129,6 +132,7 @@ impl Rules {
     fn of(city: &City) -> Rules {
         Rules {
             govt: realm::govt(city.civ),
+            agricultural: exe_econ::has_trait(crate::cities::traits(city.civ), exe_econ::trait_bit::AGRICULTURAL),
             harbor: has_flag(city, imp::INCREASES_FOOD_IN_WATER),
             colossus: active(city).any(|(_, b)| b.wonder & wonder::PLUS_ONE_TRADE != 0),
             golden: realm::read(city.civ, |r| r.golden),
@@ -138,12 +142,21 @@ impl Rules {
     /// `yields.md` 4.1 to 4.3: the bonuses come before the Despotism cap,
     /// and the Golden Age, Colossus and trade bonus only reach a tile that
     /// already yields.
-    fn tile(&self, t: &Tile) -> (i32, i32, i32) {
+    fn tile(&self, map: &GameMap, x: i32, y: i32) -> (i32, i32, i32) {
+        let t = &map.tiles[map.idx(x, y)];
         let (f, s) = yields(t);
         let (mut f, mut s, mut c) = (i32::from(f), i32::from(s), i32::from(tile_commerce(t)));
         let water = matches!(t.base, Base::Coast | Base::Sea | Base::Ocean);
-        if self.harbor && water {
+        // `0x5D737A..0x5D73D0`: only effective TERR Desert, not Flood Plain,
+        // gets the Agricultural irrigation bonus, before the government cap.
+        if self.agricultural && t.irrigation && crate::map::terrain_row(t) == 0 {
             f += 1;
+        }
+        if water {
+            // `0x5D7470`: lakes add one food independently of a Harbor.
+            // `0x5D7484`: only larger water bodies receive Harbor food.
+            let lake = map.water_body_size((x, y)) <= civ3mapgen::lakes::LAKE_MAX;
+            if lake || self.harbor { f += 1; }
         }
         if self.golden && s > 0 {
             s += 1;
@@ -151,7 +164,7 @@ impl Rules {
         if self.golden && c > 0 {
             c += 1;
         }
-        if self.colossus && matches!(t.base, Base::Sea | Base::Ocean) && c > 0 {
+        if self.colossus && c > 0 {
             c += 1;
         }
         if self.govt.trade_bonus && c > 0 {
@@ -171,12 +184,12 @@ impl Rules {
     /// government's tile penalty still applies.
     fn center(&self, map: &GameMap, city: &City) -> (i32, i32, i32) {
         let t = &map.tiles[map.idx(city.x, city.y)];
-        let class = i32::from(crate::economy::size_class(city.size));
+        let class = i32::from(crate::economy::size_class(city.size()));
         let capital = realm::read(city.civ, |r| r.capital) == Some((city.x, city.y));
         let (_, shields) = yields(t);
         let traits = crate::cities::traits(city.civ);
         let has = |bit| exe_econ::has_trait(traits, bit);
-        let f = FOOD_PER_CITIZEN + i32::from(has(exe_econ::trait_bit::AGRICULTURAL));
+        let f = FOOD_PER_CITIZEN + i32::from(self.agricultural);
         // `yields.md` 4.2 step 7: class 2 adds 2 shields, one more for an
         // Industrious civ; class 1 adds 1.
         let s_class = match class {
@@ -195,14 +208,21 @@ impl Rules {
             (n, _) => n,
         };
         let mut c = (i32::from(tile_commerce(t)) + c_class).max(if capital { 4 } else { 1 });
+        // `0x5D7EF4..0x5D7F56`: Seafaring adds commerce on an ocean coast,
+        // after the capital floor, before Golden Age and government effects.
+        if has(exe_econ::trait_bit::SEAFARING) && map.coastal_site(city.x, city.y) {
+            c += 1;
+        }
         if self.golden {
             c += 1;
         }
+        if self.colossus { c += 1; }
         if self.govt.trade_bonus {
             c += 1;
         }
         if self.govt.tile_penalty {
-            (trim_to(f), trim_to(s), trim_to(c))
+            let food = if self.agricultural && map.fresh_water(city.x, city.y) { f } else { trim_to(f) };
+            (food, trim_to(s), trim_to(c))
         } else {
             (f, s, c)
         }
@@ -211,7 +231,7 @@ impl Rules {
 
 /// Food, shields and commerce one tile gives `city` if it works it.
 pub fn tile_yields(map: &GameMap, city: &City, x: i32, y: i32) -> (i32, i32, i32) {
-    Rules::of(city).tile(&map.tiles[map.idx(x, y)])
+    Rules::of(city).tile(map, x, y)
 }
 
 /// What the city center gives.
@@ -223,8 +243,8 @@ pub fn center(map: &GameMap, city: &City) -> (i32, i32, i32) {
 pub fn gross(map: &GameMap, city: &City) -> (i32, i32, i32) {
     let rules = Rules::of(city);
     let mut sum = rules.center(map, city);
-    for &(x, y) in city.worked.iter() {
-        let (f, s, c) = rules.tile(&map.tiles[map.idx(x, y)]);
+    for &(x, y) in city.worked(&map).iter() {
+        let (f, s, c) = rules.tile(map, x, y);
         sum = (sum.0 + f, sum.1 + s, sum.2 + c);
     }
     sum
@@ -290,9 +310,9 @@ pub fn shield_quarters(city: &City) -> i32 {
     a + b
 }
 
-/// Citizens with no tile to work.
+/// Idle citizens assigned to entertainment.
 pub fn entertainers(city: &City) -> u8 {
-    (city.size as usize).saturating_sub(city.worked.len()) as u8
+    city.specialist_jobs().filter(|s| *s == crate::cities::Specialist::Entertainer).count() as u8
 }
 
 /// Faces and flags of every improvement, as the mood code reads them.
@@ -329,19 +349,15 @@ fn faces(city: &City, r: &Realm) -> Vec<BuildingFaces> {
 /// The moods of the city's citizens, given the luxury its commerce and
 /// entertainers make (`0x4BCFF0`).
 pub fn moods(city: &City, luxury: i32) -> Mood {
-    let size = city.size as usize;
-    let working = size.min(city.worked.len());
-    let mut citizens = vec![Citizen::native(mood::CONTENT); working];
-    citizens.extend(std::iter::repeat_n(
-        Citizen {
-            mood: mood::SPECIALIST,
-            resisting: false,
-            specialist: true,
-            foreign: false,
+    let size = city.size() as usize;
+    let owner_race = crate::civs::roster_index(city.civ) as i32;
+    let citizens = city.citizens.slots().iter().flatten().map(|c| Citizen {
+            mood: if c.resister { mood::RESISTING } else if c.job != 0 { mood::SPECIALIST } else { mood::CONTENT },
+            resisting: c.resister,
+            specialist: c.job != 0,
+            foreign: c.race != owner_race,
             foreign_at_war: false,
-        },
-        size - working,
-    ));
+        }).collect::<Vec<_>>();
     let inputs = realm::read(city.civ, |r| hap::Inputs {
         citizens: citizens.clone(),
         size: size as i32,
@@ -358,7 +374,7 @@ pub fn moods(city: &City, luxury: i32) -> Mood {
         propaganda: 0,
         hurry_timer: i32::from(city.hurry_timer),
         hurry_penalty: HURRY_PENALTY,
-        war_counters: vec![],
+        war_counters: r.war_counters.clone(),
         weariness_class: r.govt().war_weariness,
         police_buildings: 0,
         suffrage: r.suffrage,
@@ -372,7 +388,9 @@ pub fn moods(city: &City, luxury: i32) -> Mood {
         happy: count(mood::HAPPY),
         content: count(mood::CONTENT),
         unhappy: count(mood::UNHAPPY),
-        entertainers: (size - working) as u8,
+        entertainers: entertainers(city),
+        scientists: city.specialist_jobs().filter(|s| *s == crate::cities::Specialist::Scientist).count() as u8,
+        tax_collectors: city.specialist_jobs().filter(|s| *s == crate::cities::Specialist::TaxCollector).count() as u8,
     }
 }
 
@@ -412,11 +430,11 @@ pub fn totals(map: &GameMap, city: &City) -> Totals {
         wealth,
     });
     let ent = entertainers(city) as i32;
-    // An entertainer makes one luxury (`CTZN` row 0).
+    // An entertainer makes one luxury (`CTZN` row 1).
     let lux = split.luxury + ent;
     let m = moods(city, lux);
     let disorder = riots(m);
-    let eaten = if disorder { food } else { FOOD_PER_CITIZEN * city.size as i32 };
+    let eaten = if disorder { food } else { FOOD_PER_CITIZEN * city.size() as i32 };
     if disorder {
         return Totals {
             food,
@@ -427,9 +445,9 @@ pub fn totals(map: &GameMap, city: &City) -> Totals {
             shields: 0,
             commerce,
             corruption: commerce,
-            tax: 0,
-            sci: 0,
-            lux: 0,
+            tax: m.tax_collectors as i32 * 2,
+            sci: m.scientists as i32 * 3,
+            lux: ent,
             wealth: 0,
             mood: m,
             disorder,
@@ -444,8 +462,8 @@ pub fn totals(map: &GameMap, city: &City) -> Totals {
         shields,
         commerce,
         corruption: split.lost,
-        tax: split.tax,
-        sci: split.science,
+        tax: split.tax + m.tax_collectors as i32 * 2,
+        sci: split.science + m.scientists as i32 * 3,
         lux,
         wealth,
         mood: m,
@@ -459,7 +477,7 @@ pub fn keep_order(map: &GameMap, city: &mut City) -> bool {
     let mut changed = false;
     while totals(map, city).disorder {
         let worst = city
-            .worked
+            .worked(&map)
             .iter()
             .min_by_key(|&&(x, y)| {
                 let (f, s, c) = tile_yields(map, city, x, y);
@@ -467,10 +485,23 @@ pub fn keep_order(map: &GameMap, city: &mut City) -> bool {
             })
             .copied();
         let Some(w) = worst else { break };
-        city.worked.remove(&w);
+        city.unwork(map, w, true);
         changed = true;
     }
     changed
+}
+
+/// HYPOTHESIS: the computer uses idle citizens for research (taxes when
+/// its science slider is off), keeping entertainers needed for order.
+pub fn assign_specialists(map: &GameMap, city: &mut City) {
+    use crate::cities::Specialist;
+    let idle = (city.size() as usize).saturating_sub(city.worked(&map).len());
+    let job = if realm::rates(city.civ).sci == 0 { Specialist::TaxCollector } else { Specialist::Scientist };
+    for i in 0..idle {
+        if city.idle_job(i) != Some(Specialist::Entertainer) { continue; }
+        city.set_specialist(i, job);
+        if totals(map, city).disorder { city.set_specialist(i, Specialist::Entertainer); }
+    }
 }
 
 /// A new unit of this type starts as a Veteran: its city has the building
@@ -488,6 +519,37 @@ pub fn trains_veterans(city: &City, unit: crate::units::UnitType) -> bool {
     }
 }
 
+/// The produces-units tick (`0x4BE730`, `happiness.md` 10) for one city:
+/// every active building with improvement flag 30 counts a turn, and when
+/// its counter has reached `frequency - 1` and the owner has the resources
+/// it hands out its unit and starts over. HYPOTHESIS: the unit appears on
+/// the turn after the counter fills, so the period is `frequency` turns.
+pub fn produced_units(city: &mut City, has_good: impl Fn(i32) -> bool) -> Vec<crate::units::UnitType> {
+    let mut made = vec![];
+    let rows: Vec<(u16, i32, i32, [i32; 2], i32)> = active(city)
+        .filter(|(_, b)| b.flags & roster::imp::PRODUCES_UNITS != 0 && b.produces >= 0)
+        .filter_map(|(p, b)| Some((p.building_row()? as u16, b.produces, b.frequency, b.resources, 0)))
+        .collect();
+    city.unit_clocks.retain(|(r, _)| rows.iter().any(|x| x.0 == *r));
+    for (row, unit, freq, need, _) in rows {
+        let at = match city.unit_clocks.iter().position(|(r, _)| *r == row) {
+            Some(i) => i,
+            None => {
+                city.unit_clocks.push((row, 0));
+                city.unit_clocks.len() - 1
+            }
+        };
+        let full = (freq - 1).clamp(0, 250) as u8;
+        if city.unit_clocks[at].1 < full {
+            city.unit_clocks[at].1 += 1;
+        } else if need.iter().all(|&g| has_good(g)) {
+            city.unit_clocks[at].1 = 0;
+            made.push(crate::units::UnitType(unit as u8));
+        }
+    }
+    made
+}
+
 /// The riot roll of a city that stays in disorder (`0x4BE0B0`,
 /// `happiness::riot`): returns the index into `city.buildings` of the
 /// improvement the rioters destroy, if any. The capital is spared, wonders
@@ -498,7 +560,7 @@ pub fn riot(rng: &mut crate::rng::MapRng, city: &City, is_capital: bool) -> Opti
     if rng.below(100) >= chance || is_capital {
         return None;
     }
-    let size = city.size as i32;
+    let size = city.size() as i32;
     if size <= CITY_MAX && size <= TOWN_MAX && rng.below(100) >= 2 * chance {
         return None;
     }
@@ -512,24 +574,16 @@ pub fn riot(rng: &mut crate::rng::MapRng, city: &City, is_capital: bool) -> Opti
     })
 }
 
-/// The city cannot grow past its class without the improvement the size
-/// needs: an Aqueduct above the town limit, a Hospital above the city limit
-/// (`0x4B1DC0`, improvement flags `0x800`, `0x1000`).
-pub fn growth_blocked(city: &City) -> bool {
-    city.size as i32 >= size_limit(city)
+/// `0x4B1DC0`: freshwater replaces an Aqueduct, but not a Hospital.
+pub fn growth_blocked(city: &City, fresh_water: bool) -> bool {
+    city.size() as i32 >= size_limit(city, fresh_water)
 }
 
-/// The size the city's improvements let it reach: a town stops at
-/// `TOWN_MAX` without an Aqueduct, a city at `CITY_MAX` without a Hospital.
-pub fn size_limit(city: &City) -> i32 {
-    use civ3mapgen::economy::{CITY_MAX, TOWN_MAX};
-    if !has_flag(city, imp::ALLOWS_SIZE_LEVEL_2) {
-        TOWN_MAX
-    } else if !has_flag(city, imp::ALLOWS_SIZE_LEVEL_3) {
-        CITY_MAX
-    } else {
-        i32::MAX
-    }
+/// The size allowed by active improvement effects and local freshwater.
+pub fn size_limit(city: &City, fresh_water: bool) -> i32 {
+    civ3mapgen::economy::growth_limit(fresh_water,
+        has_flag(city, imp::ALLOWS_SIZE_LEVEL_2),
+        has_flag(city, imp::ALLOWS_SIZE_LEVEL_3))
 }
 
 /// Gold the city's improvements cost each turn: nothing under a government
@@ -544,6 +598,50 @@ pub fn upkeep(city: &City) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn specialists_bypass_commerce_multipliers_corruption_and_anarchy() {
+        realm::reset();
+        let map = flat();
+        let mut city = City::new(0, "Kyoto", 5, 5);
+        city.set_size(2);
+        city.buildings.extend([Production::Library, Production::Marketplace]);
+        city.set_specialists(vec![crate::cities::Specialist::Entertainer; 2]);
+        let before = totals(&map, &city);
+        city.set_specialists(vec![crate::cities::Specialist::Scientist, crate::cities::Specialist::TaxCollector]);
+        let after = totals(&map, &city);
+        assert_eq!(after.sci, before.sci + 3);
+        assert_eq!(after.tax, before.tax + 2);
+        assert_eq!(after.commerce, before.commerce);
+        assert_eq!(after.lux, before.lux - 2);
+        assert_eq!((after.mood.entertainers, after.mood.scientists, after.mood.tax_collectors), (0, 1, 1));
+        realm::write(0, |r| { r.govt = civ3mapgen::government::row::ANARCHY; r.capital = Some((5, 5)); });
+        let anarchy = totals(&map, &city);
+        assert_eq!((anarchy.sci, anarchy.tax), (3, 2));
+    }
+
+    #[test]
+    fn computer_specialists_keep_required_entertainers_and_use_the_rest() {
+        realm::reset();
+        let map = flat();
+        let mut city = City::new(0, "Kyoto", 5, 5);
+        city.set_size(2);
+        assign_specialists(&map, &mut city);
+        assert_eq!(city.specialists(), [crate::cities::Specialist::Scientist; 2]);
+        city.clear_specialists();
+        realm::set_rates(0, realm::Rates { tax: 10, sci: 0, lux: 0 });
+        assign_specialists(&map, &mut city);
+        assert_eq!(city.specialists(), [crate::cities::Specialist::TaxCollector; 2]);
+        realm::write(0, |r| r.born_content = 0);
+        city.set_size(4);
+        city.work_tile(&map, (4, 5));
+        city.work_tile(&map, (5, 4));
+        city.set_specialists(vec![crate::cities::Specialist::Entertainer; 2]);
+        assert!(!totals(&map, &city).disorder);
+        assign_specialists(&map, &mut city);
+        assert_eq!(city.specialists(), [crate::cities::Specialist::Entertainer; 2]);
+        assert!(!totals(&map, &city).disorder);
+    }
     use crate::map::{Cover, Relief};
     use crate::realm;
 
@@ -553,6 +651,7 @@ mod tests {
             t.base = Base::Grassland;
             t.relief = Relief::Flat;
             t.cover = Cover::Bare;
+            t.river = 0;
             t.resource = None;
             t.road = false;
             t.irrigation = false;
@@ -564,8 +663,33 @@ mod tests {
 
     pub fn town(size: u8) -> City {
         let mut c = City::new(0, "Tokyo", 10, 10);
-        c.size = size;
+        c.set_size(size);
         c
+    }
+
+    #[test]
+    fn the_statue_of_zeus_hands_out_cavalry_while_the_bronze_lasts() {
+        realm::reset();
+        let row = roster::BLDGS.iter().position(|b| b.name == "The Statue of Zeus").unwrap();
+        let mut c = town(3);
+        c.buildings.push(Production(crate::roster::UNIT_COUNT as u16 + row as u16));
+        let b = roster::bldg(row);
+        assert_eq!((b.produces, b.frequency), (118, 5));
+        let mut turns = vec![];
+        for t in 1..=12 {
+            if !produced_units(&mut c, |_| true).is_empty() {
+                turns.push(t);
+            }
+        }
+        assert_eq!(turns, [5, 10]);
+        for _ in 0..2 {
+            assert!(produced_units(&mut c, |_| true).is_empty());
+        }
+        for _ in 0..3 {
+            assert!(produced_units(&mut c, |_| false).is_empty());
+            assert_eq!(c.unit_clocks[0].1, 4, "the clock waits, full, for the resource");
+        }
+        assert_eq!(produced_units(&mut c, |_| true).len(), 1);
     }
 
     fn work_all(map: &GameMap, c: &mut City) {
@@ -587,6 +711,40 @@ mod tests {
     }
 
     #[test]
+    fn agricultural_food_follows_freshwater_and_effective_desert_terrain() {
+        realm::reset();
+        let old = std::array::from_fn(crate::civs::roster_index);
+        let dutch = crate::civs::roster_index_named("Netherlands").unwrap();
+        crate::civs::set_players_for_test([dutch, 0, 1, 6]);
+        let mut map = flat();
+        let mut city = town(1);
+        work_all(&map, &mut city);
+        assert_eq!(center(&map, &city).0, 2, "dry Despotism center is capped");
+        let at = map.idx(10, 10);
+        map.tiles[at].river = crate::rivers::EAST;
+        assert_eq!(center(&map, &city).0, 3);
+        assert_eq!(totals(&map, &city).surplus, 3);
+        crate::cities::process_city_turn(&map, &mut city, &Default::default(), &mut crate::rng::MapRng::new(1));
+        assert_eq!(city.food, 3, "the freshwater bonus reaches turn production");
+        map.tiles[at].river = 0;
+        let neighbor = map.idx(11, 10);
+        map.tiles[neighbor].base = Base::Coast;
+        assert_eq!(center(&map, &city).0, 3, "a small lake also exempts food");
+        for x in 11..=31 { let i = map.idx(x, 10); map.tiles[i].base = Base::Coast; }
+        assert_eq!(center(&map, &city).0, 2, "21 water tiles are ocean-like");
+        realm::write(0, |r| r.adopt(realm::govt_row::MONARCHY));
+        assert_eq!(center(&map, &city).0, 3, "non-penalty governments need no freshwater");
+        map.tiles[neighbor].base = Base::Desert;
+        assert_eq!(tile_yields(&map, &city, 11, 10).0, 0);
+        map.tiles[neighbor].irrigation = true;
+        assert_eq!(tile_yields(&map, &city, 11, 10).0, 2);
+        map.tiles[neighbor].river = crate::rivers::EAST;
+        assert_eq!(tile_yields(&map, &city, 11, 10).0, 4, "Flood Plain gets no Desert trait bonus");
+        crate::civs::set_players_for_test(old);
+        assert_eq!(center(&map, &city).0, 2, "the bonus belongs to the Agricultural owner");
+    }
+
+    #[test]
     fn despotism_trims_a_rich_tile_and_a_monarchy_does_not() {
         realm::reset();
         let mut map = flat();
@@ -594,7 +752,7 @@ mod tests {
         map.tiles[i].resource = Some(20); // wheat: grassland 2 + 2 food
         map.tiles[i].irrigation = true;
         let mut c = town(1);
-        c.worked.insert((11, 10));
+        c.work_tile(&map, (11, 10));
         let despot = tile_yields(&map, &c, 11, 10).0;
         realm::write(0, |r| r.adopt(realm::govt_row::MONARCHY));
         let monarch = tile_yields(&map, &c, 11, 10).0;
@@ -624,9 +782,52 @@ mod tests {
         let i = map.idx(11, 10);
         map.tiles[i].base = Base::Ocean;
         let mut c = town(1);
+        let lake = tile_yields(&map, &c, 11, 10).0;
+        c.buildings.push(Production::Harbor);
+        assert_eq!(tile_yields(&map, &c, 11, 10).0, lake, "Harbors do not boost lakes");
+        for x in 12..=31 { let i = map.idx(x, 10); map.tiles[i].base = Base::Ocean; }
+        c.buildings.clear();
         let dry = tile_yields(&map, &c, 11, 10).0;
+        assert_eq!(lake, dry + 1);
         c.buildings.push(Production::Harbor);
         assert_eq!(tile_yields(&map, &c, 11, 10).0, dry + 1);
+    }
+
+    #[test]
+    fn seafaring_commerce_requires_an_ocean_coast_and_obeys_the_cap() {
+        realm::reset();
+        let old = std::array::from_fn(crate::civs::roster_index);
+        crate::civs::set_players_for_test([crate::civs::roster_index_named("Netherlands").unwrap(), 0, 1, 6]);
+        let mut map = flat();
+        let city = town(1);
+        assert_eq!(center(&map, &city).2, 1);
+        for x in 11..=30 { let i = map.idx(x, 10); map.tiles[i].base = Base::Coast; }
+        assert_eq!(center(&map, &city).2, 1, "20-tile lake is not a Seafaring coast");
+        let i = map.idx(31, 10); map.tiles[i].base = Base::Coast;
+        assert_eq!(center(&map, &city).2, 2);
+        realm::write(0, |r| r.capital = Some((10, 10)));
+        assert_eq!(center(&map, &city).2, 4, "capital floor then Seafaring then Despotism cap");
+        realm::write(0, |r| r.adopt(realm::govt_row::MONARCHY));
+        assert_eq!(center(&map, &city).2, 5);
+        crate::civs::set_players_for_test(old);
+        assert_eq!(center(&map, &city).2, 4, "a non-Seafaring capital gets no bonus");
+    }
+
+    #[test]
+    fn colossus_boosts_land_coast_and_center_but_requires_existing_commerce() {
+        realm::reset();
+        realm::write(0, |r| r.adopt(realm::govt_row::MONARCHY));
+        let mut map = flat();
+        let mut city = town(1);
+        let coast = map.idx(11, 10); map.tiles[coast].base = Base::Coast;
+        let road = map.idx(10, 11); map.tiles[road].road = true;
+        let before = [center(&map, &city).2, tile_yields(&map, &city, 11, 10).2, tile_yields(&map, &city, 10, 11).2];
+        city.buildings.push(Production::TheColossus);
+        let after = [center(&map, &city).2, tile_yields(&map, &city, 11, 10).2, tile_yields(&map, &city, 10, 11).2];
+        assert_eq!(after, before.map(|n| n + 1));
+        assert_eq!(tile_yields(&map, &city, 9, 10).2, 0);
+        realm::write(0, |r| r.govt = realm::govt_row::DESPOTISM);
+        assert_eq!(tile_yields(&map, &city, 11, 10).2, 2, "cap follows the wonder bonus");
     }
 
     #[test]
@@ -731,6 +932,11 @@ mod tests {
         assert!(t.disorder);
         assert_eq!((t.surplus, t.shields, t.tax, t.sci), (0, 0, 0, 0));
         assert_eq!(t.eaten, t.food);
+        c.add_citizens(2, crate::civs::roster_index(c.civ));
+        c.set_specialists(vec![crate::cities::Specialist::Scientist, crate::cities::Specialist::TaxCollector]);
+        let t = totals(&map, &c);
+        assert!(t.disorder);
+        assert_eq!((t.surplus, t.shields, t.tax, t.sci), (0, 0, 2, 3));
     }
 
     #[test]
@@ -804,15 +1010,15 @@ mod tests {
     #[test]
     fn the_aqueduct_lets_a_town_grow_past_six() {
         let mut c = town(5);
-        assert!(!growth_blocked(&c));
-        c.size = 6;
-        assert!(growth_blocked(&c));
+        assert!(!growth_blocked(&c, false));
+        c.set_size(6);
+        assert!(growth_blocked(&c, false));
         c.buildings.push(Production::Aqueduct);
-        assert!(!growth_blocked(&c));
-        c.size = 12;
-        assert!(growth_blocked(&c));
+        assert!(!growth_blocked(&c, false));
+        c.set_size(12);
+        assert!(growth_blocked(&c, false));
         c.buildings.push(Production::Hospital);
-        assert!(!growth_blocked(&c));
+        assert!(!growth_blocked(&c, false));
     }
 
     #[test]

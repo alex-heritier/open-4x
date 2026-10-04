@@ -17,6 +17,10 @@ use crate::blend::{cell_rect, VERTEX_TILES};
 use crate::map::*;
 use crate::tiles::TileArt;
 
+/// Terrain entities rebuilt when a saved map replaces the current one.
+#[derive(Component)]
+pub struct TerrainLayer;
+
 /// Tree-cover sprite; despawned when the cover is cleared.
 #[derive(Component)]
 pub struct CoverLayer;
@@ -189,7 +193,23 @@ pub fn spawn_terrain(
                     ..default()
                 },
                 Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 0.0)),
+                TerrainLayer,
             ));
+            let river = crate::rivers::corner_mask(&map, x, y);
+            if river != 0 {
+                let mouth = crate::blend::CORNER_TILES.iter().any(|&(dx, dy)|
+                    map.get(x + dx, y + dy).is_some_and(|t| crate::improvements::is_water_base(t.base)));
+                let sheet = if mouth { "deltaRivers" } else { "mtnRivers" };
+                commands.spawn((
+                    Sprite {
+                        image: assets.load(format!("gen/terrain/sheets/{sheet}.png")),
+                        rect: Some(cell_rect((river % 4) as u32, (river / 4) as u32)),
+                        ..default()
+                    },
+                    Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 0.1)),
+                    TerrainLayer,
+                ));
+            }
         }
     }
     for y in 0..map.h {
@@ -205,6 +225,7 @@ pub fn spawn_terrain(
                 },
                 Transform::from_xyz(pos.x, pos.y, fog_z(x, y)),
                 FogSprite { x, y },
+                TerrainLayer,
             ));
             // Ice keeps its own unblended art over the tundra the cells
             // give it.
@@ -218,6 +239,7 @@ pub fn spawn_terrain(
                     art.anchor(&base),
                     Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 0.5)),
                     TileSprite { x, y },
+                    TerrainLayer,
                 ));
             }
             if let Some(c) = crate::blend::cover_sprite(&map, x, y) {
@@ -236,6 +258,7 @@ pub fn spawn_terrain(
                     TileSprite { x, y },
                     CoverLayer,
                     OverlayLayer,
+                    TerrainLayer,
                 ));
             } else if let Some(ov) = overlay_name(t) {
                 let odef = &art.defs[&ov];
@@ -248,6 +271,7 @@ pub fn spawn_terrain(
                     Transform::from_xyz(pos.x, pos.y, tile_z(x, y, 1.0)),
                     TileSprite { x, y },
                     OverlayLayer,
+                    TerrainLayer,
                 ));
             }
         }
@@ -328,7 +352,13 @@ mod tests {
             resource: None,
             road: false,
             irrigation: false,
+            river: 0,
             mine: false,
+            site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+            owner: None,
         }
     }
 

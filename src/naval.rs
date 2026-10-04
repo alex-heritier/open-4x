@@ -1,4 +1,4 @@
-//! Ship movement bonuses and unsafe-water losses (`movement.md` 2, `unit-turn.md` 3.2).
+//! Ship movement, cargo and owner-turn hazards (`movement.md` 2, `unit-turn.md` 3).
 use bevy::prelude::*;
 
 use crate::combat::CombatRng;
@@ -6,16 +6,81 @@ use crate::features::{MessageBoard, post};
 use crate::map::{Base, GameMap, MP};
 use crate::units::{Unit, UnitType, def};
 
-pub fn pick_carrier(passenger: &Unit, at: (i32, i32), units: &[(Entity, Unit)]) -> Option<Entity> {
-    if def(passenger.utype).class != 0 { return None; }
-    units.iter().filter(|(e, u)| {
+/// Every ship on the tile that could carry the passenger, oldest first
+/// (`0x5C5F70`: the candidates it lists).
+pub fn carriers(passenger: &Unit, at: (i32, i32), units: &[(Entity, Unit)]) -> Vec<Entity> {
+    if def(passenger.utype).class != 0 { return vec![]; }
+    let mut list: Vec<Entity> = units.iter().filter(|(e, u)| {
         let d = def(u.utype);
         u.civ == passenger.civ && (u.x, u.y) == at && u.carrier.is_none()
             && d.class == 1 && d.capacity > 0 && d.abilities & ((1 << 8) | (1 << 24)) == 0
             && (d.abilities & (1 << 14) == 0 || def(passenger.utype).abilities & (1 << 1) != 0)
             && units.iter().filter(|(_, v)| v.carrier == Some(*e)).count() < d.capacity as usize
-    }).map(|(e, _)| *e).min()
-    // HYPOTHESIS: choose the oldest available carrier; native offers a choice dialog.
+    }).map(|(e, _)| *e).collect();
+    list.sort();
+    list
+}
+
+/// The oldest carrier: what the computer takes (`0x5C5F70` with `dialog == 0`
+/// returns the first eligible candidate).
+pub fn pick_carrier(passenger: &Unit, at: (i32, i32), units: &[(Entity, Unit)]) -> Option<Entity> {
+    carriers(passenger, at, units).first().copied()
+}
+
+/// What boarding a tile of ships comes to.
+pub enum Boarding {
+    /// Nothing there can take the unit.
+    None,
+    Ship(Entity),
+    /// A human has to choose: the question is up.
+    Asking,
+}
+
+/// `0x5C5F70` with the dialog on: a human gets a list when several ships
+/// qualify, and one candidate is taken without asking.
+pub fn choose_carrier(
+    e: Entity,
+    passenger: &Unit,
+    at: (i32, i32),
+    units: &[(Entity, Unit)],
+    ask: &mut Option<crate::diplomacy::BoardAsk>,
+    load: bool,
+) -> Boarding {
+    let list = carriers(passenger, at, units);
+    match list.len() {
+        0 => Boarding::None,
+        1 => Boarding::Ship(list[0]),
+        _ if crate::civs::is_ai(passenger.civ) => Boarding::Ship(list[0]),
+        _ => match ask {
+            Some(a) if a.unit == e && a.at == at => match a.answer {
+                Some(ship) if list.contains(&ship) => {
+                    *ask = None;
+                    Boarding::Ship(ship)
+                }
+                Some(_) => {
+                    *ask = None;
+                    Boarding::None
+                }
+                None => Boarding::Asking,
+            },
+            // Another question is up: this one waits its turn.
+            Some(_) => Boarding::Asking,
+            None => {
+                let options = list
+                    .iter()
+                    .map(|&s| {
+                        let ship = units.iter().find(|(id, _)| *id == s).map(|(_, v)| v);
+                        let aboard = units.iter().filter(|(_, v)| v.carrier == Some(s)).count();
+                        let name = ship.map_or("Ship", |v| def(v.utype).name);
+                        let room = ship.map_or(0, |v| def(v.utype).capacity);
+                        (s, format!("{name} ({aboard}/{room})"))
+                    })
+                    .collect();
+                *ask = Some(crate::diplomacy::BoardAsk { unit: e, at, options, load, answer: None });
+                Boarding::Asking
+            }
+        },
+    }
 }
 
 /// Native refusal gate 0x5B5DDC..0x5B5E22 and cargo landing gate
@@ -64,6 +129,17 @@ pub fn disembark(map: &crate::map::GameMap, u: &mut Unit, shore: Option<(i32, i3
     true
 }
 
+/// 0x4D8B70 -> 0x5C5110: set carrier/order, no movement charge.
+fn load_onto(u: &mut Unit, carrier: Entity) {
+    u.carrier = Some(carrier);
+    u.sentry = true;
+    u.fortified = false;
+    u.path.clear();
+    u.work = None;
+    u.exploring = false;
+    u.auto = false;
+}
+
 pub fn cargo_commands(
     mut commands: MessageReader<crate::actionbar::UnitCommand>,
     selected: Res<crate::units::Selected>,
@@ -72,8 +148,21 @@ pub fn cargo_commands(
     map: Res<GameMap>,
     mut units: Query<(Entity, &mut Unit)>,
     mut board: ResMut<MessageBoard>,
+    mut diplomacy: ResMut<crate::diplomacy::Diplomacy>,
 ) {
     use crate::actionbar::UnitCommand;
+    // The human's pick for a Load order that found several ships.
+    if let Some(ask) = diplomacy.board_ask.clone()
+        && ask.load
+        && let Some(ship) = ask.answer
+    {
+        diplomacy.board_ask = None;
+        if let Ok((_, mut u)) = units.get_mut(ask.unit)
+            && u.carrier.is_none()
+        {
+            load_onto(&mut u, ship);
+        }
+    }
     for cmd in commands.read() {
         if !matches!(cmd, UnitCommand::Load | UnitCommand::Unload) { continue; }
         let Some(e) = selected.0 else { continue };
@@ -85,17 +174,11 @@ pub fn cargo_commands(
             let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
             // An Army on the tile takes the soldier (`army::commands`).
             if crate::army::joinable(u, &snapshot).is_some() { continue; }
-            if let Some(carrier) = pick_carrier(u, at, &snapshot) {
-                let mut u = units.get_mut(e).unwrap().1;
-                // 0x4D8B70 -> 0x5C5110: set carrier/order, no movement charge.
-                u.carrier = Some(carrier);
-                u.sentry = true;
-                u.fortified = false;
-                u.path.clear();
-                u.work = None;
-                u.exploring = false;
-                u.auto = false;
-            } else { post(&mut board, "No friendly transport has room here."); }
+            match choose_carrier(e, u, at, &snapshot, &mut diplomacy.board_ask, true) {
+                Boarding::Ship(carrier) => load_onto(&mut units.get_mut(e).unwrap().1, carrier),
+                Boarding::None => post(&mut board, "No friendly transport has room here."),
+                Boarding::Asking => {}
+            }
         } else if map.get(at.0, at.1).is_some_and(|t| !crate::improvements::is_water_base(t.base)) {
             // 0x5C1C45: Unload is a port command. The native UI lets the
             // human choose one passenger, including an exhausted passenger.
@@ -147,7 +230,7 @@ pub fn moves(t: UnitType, civ: usize) -> u8 {
         let w = wonders(civ);
         m += MP * u8::from(w & 8 != 0);
         m += 2 * MP * u8::from(w & 0x4000 != 0);
-        m += MP * u8::from(crate::rules_data::RACES[civ].traits & (1 << 7) != 0);
+        m += MP * u8::from(crate::civs::RACES[civ].traits & (1 << 7) != 0);
     }
     m
 }
@@ -158,8 +241,8 @@ fn sinking_die(base: Base, abilities: u32, tech_flags: u32, safe_sea: bool, seaf
     (sea || ocean).then_some(if seafaring { 4 } else { 2 })
 }
 
-/// One loss roll at the owner's turn boundary, only when the ship is unsafe.
-pub fn sea_hazards(
+/// Unit::turn's sea and jungle losses at the owner's turn boundary.
+pub fn unit_hazards(
     mut ended: MessageReader<crate::civs::CivilizationEnded>,
     mut commands: Commands,
     units: Query<(Entity, &Unit)>,
@@ -168,20 +251,33 @@ pub fn sea_hazards(
     mut rng: ResMut<CombatRng>,
     mut board: ResMut<MessageBoard>,
 ) {
+    // Scripted turn advances can deliver several boundaries in one frame;
+    // despawns are deferred, so a lost unit must not roll again.
+    let mut lost = std::collections::HashSet::new();
     for event in ended.read() {
         let civ = event.0;
         let rules = crate::rules_data::rules();
         let tech_flags = crate::realm::read(civ, |r| rules.techs.iter().enumerate()
             .filter(|(i, _)| r.knows(*i as i32)).fold(0, |flags, (_, t)| flags | t.flags));
         let safe_sea = wonders(civ) & 1 != 0;
-        let seafaring = crate::rules_data::RACES[civ].traits & (1 << 7) != 0;
-        for (e, u) in units.iter().filter(|(_, u)| u.civ == civ && def(u.utype).class == 1) {
+        let seafaring = crate::civs::RACES[civ].traits & (1 << 7) != 0;
+        for (e, u) in units.iter().filter(|(_, u)| u.civ == civ && u.carrier.is_none()) {
+            if lost.contains(&e) { continue; }
             let Some(t) = map.get(u.x, u.y) else { continue };
             if let Some(die) = sinking_die(t.base, def(u.utype).abilities, tech_flags, safe_sea, seafaring)
                 && rng.0.below(die) == 0
             {
                 commands.entity(e).despawn();
+                lost.insert(e);
                 if civ == civs.viewer() { post(&mut board, format!("Our {} has sunk in unsafe waters!", def(u.utype).name)); }
+                continue;
+            }
+            if civ3mapgen::disease::unit_jungle_loss(false, def(u.utype).pop_cost,
+                u.fortified, crate::map::terrain_row(t), |n| rng.0.below(n))
+            {
+                commands.entity(e).despawn();
+                lost.insert(e);
+                if civ == civs.viewer() { post(&mut board, format!("Our {} has died from disease in the jungle!", def(u.utype).name)); }
             }
         }
     }
@@ -191,6 +287,35 @@ pub fn sea_hazards(
 mod tests {
     use super::*;
     use crate::cities::{City, Production};
+
+    #[test]
+    fn several_ships_make_a_human_choose_and_the_computer_take_the_oldest() {
+        crate::civs::set_controllers();
+        let mut w = World::new();
+        let (a, b, p) = (w.spawn_empty().id(), w.spawn_empty().id(), w.spawn_empty().id());
+        let ships = vec![
+            (b, Unit::new(0, UnitType::Galley, 5, 5)),
+            (a, Unit::new(0, UnitType::Galley, 5, 5)),
+        ];
+        let passenger = Unit::new(0, UnitType::Warrior, 5, 5);
+        let mut ask = None;
+        assert!(matches!(choose_carrier(p, &passenger, (5, 5), &ships, &mut ask, false), Boarding::Asking));
+        let shown = ask.as_ref().unwrap();
+        let first = a.min(b);
+        assert_eq!(shown.options.iter().map(|(e, _)| *e).collect::<Vec<_>>(), vec![first, a.max(b)], "the entity order");
+        assert!(shown.options[0].1.contains("(0/2)"));
+        // No answer yet: still asking, and the same question stands.
+        assert!(matches!(choose_carrier(p, &passenger, (5, 5), &ships, &mut ask, false), Boarding::Asking));
+        ask.as_mut().unwrap().answer = Some(b);
+        assert!(matches!(choose_carrier(p, &passenger, (5, 5), &ships, &mut ask, false), Boarding::Ship(s) if s == b));
+        assert!(ask.is_none());
+        // One ship needs no question, and the computer never asks.
+        assert!(matches!(choose_carrier(p, &passenger, (5, 5), &ships[..1], &mut ask, false), Boarding::Ship(s) if s == b));
+        let ai = Unit::new(1, UnitType::Warrior, 5, 5);
+        let theirs = vec![(b, Unit::new(1, UnitType::Galley, 5, 5)), (a, Unit::new(1, UnitType::Galley, 5, 5))];
+        assert!(matches!(choose_carrier(p, &ai, (5, 5), &theirs, &mut ask, false), Boarding::Ship(s) if s == first));
+        assert!(ask.is_none());
+    }
 
     fn cargo_app() -> App {
         crate::realm::reset();
@@ -422,6 +547,62 @@ mod tests {
     }
 
     #[test]
+    fn jungle_disease_kills_only_eligible_outgoing_units_and_preserves_rng_skips() {
+        for seed in [0, 1] {
+            crate::realm::reset();
+            let mut map = GameMap::generate();
+            for x in 10..=16 {
+                let i = map.idx(x, 10);
+                map.tiles[i].base = Base::Grassland;
+                map.tiles[i].relief = crate::map::Relief::Flat;
+                map.tiles[i].cover = if x == 15 { crate::map::Cover::Bare } else { crate::map::Cover::Jungle };
+            }
+            let mut app = App::new();
+            app.insert_resource(map);
+            app.init_resource::<crate::civs::Civilizations>();
+            app.init_resource::<MessageBoard>();
+            app.insert_resource(CombatRng(crate::rng::MapRng::new(seed)));
+            app.add_message::<crate::civs::CivilizationEnded>();
+            app.add_systems(Update, (unit_hazards, sync_cargo).chain());
+            let mut warrior = Unit::new(0, UnitType::Warrior, 10, 10);
+            warrior.fortified = true;
+            let exposed = app.world_mut().spawn(warrior.clone()).id();
+            let mut immune = Vec::new();
+            for (x, kind) in [(11, UnitType::Settler), (12, UnitType::Worker)] {
+                let mut u = Unit::new(0, kind, x, 10);
+                assert_ne!(def(kind).pop_cost, 0);
+                u.fortified = true;
+                immune.push(app.world_mut().spawn(u).id());
+            }
+            warrior.x = 13;
+            warrior.fortified = false;
+            immune.push(app.world_mut().spawn(warrior.clone()).id());
+            warrior.x = 14;
+            warrior.fortified = true;
+            let carrier = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 14, 10)).id();
+            immune.push(carrier);
+            warrior.carrier = Some(carrier);
+            immune.push(app.world_mut().spawn(warrior.clone()).id());
+            warrior.x = 15;
+            warrior.carrier = None;
+            immune.push(app.world_mut().spawn(warrior.clone()).id());
+            warrior.x = 16;
+            warrior.civ = 1;
+            immune.push(app.world_mut().spawn(warrior).id());
+            let mut reference = crate::rng::MapRng::new(seed);
+            let lost = reference.below(1000) == 0;
+            assert_eq!(lost, seed == 0);
+            app.world_mut().write_message(crate::civs::CivilizationEnded(0));
+            if lost { app.world_mut().write_message(crate::civs::CivilizationEnded(0)); }
+            app.update();
+            assert_eq!(app.world().get::<Unit>(exposed).is_none(), lost);
+            for e in immune { assert!(app.world().get::<Unit>(e).is_some()); }
+            assert_eq!(app.world().resource::<CombatRng>().0.state(), reference.state());
+            assert_eq!(app.world().resource::<MessageBoard>().text.contains("disease"), lost);
+        }
+    }
+
+    #[test]
     fn unsafe_water_losses_match_the_gameplay_rng_and_only_the_outgoing_owner_rolls() {
         for seed in 0..30 {
             crate::realm::reset();
@@ -435,7 +616,7 @@ mod tests {
             app.init_resource::<MessageBoard>();
             app.insert_resource(CombatRng(crate::rng::MapRng::new(seed)));
             app.add_message::<crate::civs::CivilizationEnded>();
-            app.add_systems(Update, (sea_hazards, sync_cargo).chain());
+            app.add_systems(Update, (unit_hazards, sync_cargo).chain());
             let unsafe_ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 10, 10)).id();
             let mut cargo = Unit::new(0, UnitType::Settler, 10, 10);
             cargo.carrier = Some(unsafe_ship);

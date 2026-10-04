@@ -192,8 +192,8 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
     let traits = crate::cities::traits(ctx.civ);
     let expansionist = traits & EXPANSIONIST != 0;
     let idx = row(ctx.difficulty, expansionist);
-    let group = crate::rules_data::RACES.get(ctx.civ).map_or(0, |r| r.culture_group as usize);
-    let race = crate::rules_data::RACES.get(ctx.civ).map_or(0, |r| r.race as usize);
+    let group = crate::civs::RACES.get(ctx.civ).map_or(0, |r| r.culture_group as usize);
+    let race = crate::civs::RACES.get(ctx.civ).map_or(0, |r| r.race as usize);
     let map = ctx.map;
     let (x, y) = ctx.tile;
     let land = crate::realm::continents(map);

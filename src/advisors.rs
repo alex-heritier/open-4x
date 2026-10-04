@@ -44,6 +44,9 @@ const TREATY_ROWS: usize = 4;
 pub enum Screen {
     #[default]
     Closed,
+    /// "Our Sages need direction": the Science Advisor's popup that asks
+    /// for the next advance; the big picture behind it is `Science`.
+    ResearchAsk,
     Science,
     Foreign,
     /// A leader greets us: first contact with this civ.
@@ -54,6 +57,10 @@ pub enum Screen {
     Proposal,
     /// "Declare war?" for the strike in `Diplomacy::war_ask`.
     WarAsk,
+    /// "Install a new governor?" for the city in `Diplomacy::convert_ask`.
+    Convert,
+    /// "Select transport" for the boarding in `Diplomacy::board_ask`.
+    Transport,
     /// The Wonders of the World window (F7).
     Wonders,
     /// The wonder splash at the front of `Wonders::splash`.
@@ -82,6 +89,11 @@ pub struct Advisors {
     page: usize,
     /// The era page of the Science Advisor; the viewer's era until turned.
     era: Option<usize>,
+    /// The advance shown in the research popup's pull-down; the advisor's
+    /// suggestion until another is chosen.
+    ask: Option<i32>,
+    /// The research popup's pull-down is open.
+    pulldown: bool,
 }
 
 impl Advisors {
@@ -148,6 +160,11 @@ pub enum Action {
     Decline,
     WarYes,
     WarNo,
+    /// A city's culture flip toward us: take it, or rebuff the rebels.
+    ConvertYes,
+    ConvertNo,
+    /// A ship picked from the transport list.
+    Transport(Entity),
     /// The Wonders window (F7).
     Wonders,
     /// The page of the Wonders window, a step back or forward.
@@ -156,6 +173,13 @@ pub enum Action {
     Zoom(i32, i32),
     /// Turn the Science Advisor's era page a step back or forward.
     Era(i32),
+    /// The research popup: open or shut its pull-down, put an advance in
+    /// it, research the advance in it ("OK."), or see the tree ("What's
+    /// the big picture?").
+    Pulldown,
+    Choose(i32),
+    Ok,
+    BigPicture,
 }
 
 impl Action {
@@ -178,10 +202,17 @@ impl Action {
             Action::Decline => "Decline".into(),
             Action::WarYes => "WarYes".into(),
             Action::WarNo => "WarNo".into(),
+            Action::ConvertYes => "ConvertYes".into(),
+            Action::ConvertNo => "ConvertNo".into(),
+            Action::Transport(e) => format!("Transport:{}", e.index()),
             Action::Wonders => "Wonders".into(),
             Action::Page(d) => format!("Page:{d}"),
             Action::Zoom(..) => "Zoom".into(),
             Action::Era(d) => format!("Era:{d}"),
+            Action::Pulldown => "Pulldown".into(),
+            Action::Choose(t) => format!("Choose:{}", tech_name(*t)),
+            Action::Ok => "Ok".into(),
+            Action::BigPicture => "BigPicture".into(),
         }
     }
 }
@@ -198,24 +229,38 @@ fn human(civs: &Civilizations) -> Option<usize> {
 /// F6, F4 and F7 open the advisors and the Wonders window; Escape closes one
 /// that is not a question, and any of Escape, Enter and Space ends a splash.
 pub fn hotkeys(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
     civs: Res<Civilizations>,
     prompts: Res<ProductionPrompts>,
     view: Res<CityView>,
-    research: Res<Research>,
+    mut research: ResMut<Research>,
+    mut rng: ResMut<CombatRng>,
     mut advisors: ResMut<Advisors>,
     mut wonders: ResMut<Wonders>,
 ) {
     let Some(me) = human(&civs) else { return };
     if advisors.is_open() {
-        let forced = advisors.screen == Screen::Science && research.needs_choice(me);
-        let question = matches!(advisors.screen, Screen::Proposal | Screen::WarAsk);
-        if advisors.screen == Screen::Splash {
-            if keys.any_just_pressed([KeyCode::Escape, KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space]) {
+        let question = matches!(
+            advisors.screen,
+            Screen::ResearchAsk | Screen::Proposal | Screen::WarAsk | Screen::Convert | Screen::Transport
+        );
+        if advisors.screen == Screen::ResearchAsk {
+            if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+                if let Some(t) = asked(&advisors, &research, me) {
+                    research.pick(me, t, &mut rng.0);
+                    advisors.close();
+                }
+                // The key answered the popup; it must not end the turn too.
+                consume(&mut keys, &[KeyCode::Enter, KeyCode::NumpadEnter]);
+            }
+        } else if advisors.screen == Screen::Splash {
+            let ends = [KeyCode::Escape, KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space];
+            if keys.any_just_pressed(ends) {
                 wonders.dismiss(me);
                 advisors.close();
+                consume(&mut keys, &ends);
             }
-        } else if (keys.just_pressed(KeyCode::Escape) && !forced && !question)
+        } else if (keys.just_pressed(KeyCode::Escape) && !question)
             || (keys.just_pressed(KeyCode::F7) && advisors.screen == Screen::Wonders)
         {
             advisors.close();
@@ -234,6 +279,20 @@ pub fn hotkeys(
     }
 }
 
+/// `me` has a city from an earlier turn: the Sages have something to study
+/// with.
+fn settled(cities: &Query<&City>, me: usize, turn: u32) -> bool {
+    cities.iter().any(|c| c.civ == me && c.founded < turn)
+}
+
+/// Spend a key press on a modal, so the map's orders read later in the
+/// frame (Enter ends the turn, Space skips) never see it.
+fn consume(keys: &mut ButtonInput<KeyCode>, codes: &[KeyCode]) {
+    for &k in codes {
+        keys.clear_just_pressed(k);
+    }
+}
+
 /// Things that stop the turn: a strike against a civ at peace, a wonder of
 /// ours to look at, a research target to pick, a proposal to answer, a leader
 /// we have just met.
@@ -244,6 +303,9 @@ pub fn interrupt(
     research: Res<Research>,
     diplomacy: Res<Diplomacy>,
     wonders: Res<Wonders>,
+    domestic: Res<crate::domestic::Domestic>,
+    cities: Query<&City>,
+    turn: Res<Turn>,
     mut advisors: ResMut<Advisors>,
 ) {
     let Some(me) = human(&civs) else { return };
@@ -253,13 +315,23 @@ pub fn interrupt(
         }
         return;
     }
-    if advisors.is_open() || prompts.blocks(civs.active) || view.0.is_some() {
+    if diplomacy.convert_ask.is_some_and(|a| a.answer.is_none() && a.to == me)
+        && !advisors.is_open()
+    {
+        advisors.open(Screen::Convert);
+    }
+    if diplomacy.board_ask.as_ref().is_some_and(|a| a.answer.is_none()) && !advisors.is_open() {
+        advisors.open(Screen::Transport);
+    }
+    if advisors.is_open() || domestic.is_open() || prompts.blocks(civs.active) || view.0.is_some() {
         return;
     }
     if wonders.next_for(me).is_some() {
         advisors.open(Screen::Splash);
-    } else if research.needs_choice(me) {
-        advisors.open(Screen::Science);
+    } else if research.needs_choice(me) && !research.options(me).is_empty() && settled(&cities, me, turn.0) {
+        // Civ3 asks in the advisor's popup, from the turn after the first
+        // city is founded; the tree is a click away.
+        advisors.open(Screen::ResearchAsk);
     } else if diplomacy.proposals.iter().any(|p| p.to == me) {
         advisors.open(Screen::Proposal);
     } else if let Some(other) = (0..CIV_COUNT).find(|&o| o != me && diplomacy.contact(me, o) && !advisors.greeted[o]) {
@@ -372,7 +444,127 @@ fn foreign(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
             }
         });
     }
-    button(p, font, "Close".into(), Action::Close, false);
+    // Room for the boxed X in the corner.
+    p.spawn(Node { height: Val::Px(40.0), ..default() });
+}
+
+// ---------------------------------------------------------------------
+// The research popup
+// ---------------------------------------------------------------------
+
+/// The advance in the research popup's pull-down: the one chosen there,
+/// else the advisor's suggestion, the cheapest open advance.
+fn asked(advisors: &Advisors, research: &Research, me: usize) -> Option<i32> {
+    let options = research.options(me);
+    advisors.ask.filter(|t| options.contains(t)).or_else(|| options.first().copied())
+}
+
+/// The popup's size, and where it sits below the top of the window, read
+/// off Conquests' screen; everything inside is placed from its corner.
+const ASK: (f32, f32, f32) = (370.0, 230.0, 110.0);
+/// The pull-down: corner and size.
+const PULLDOWN: (f32, f32, f32, f32) = (63.0, 98.0, 234.0, 23.0);
+const ASK_LINK: Color = Color::srgb(0.1, 0.1, 0.85);
+const ASK_FOCUS: Color = Color::srgb(0.25, 0.55, 0.8);
+
+/// "Great One, our Sages need direction." Civ3's small advisor popup at the
+/// top of the map, the Science Advisor's head over its corner: an advance
+/// to pick from a pull-down, "OK." to research it, and "What's the big
+/// picture?" for the tree.
+fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
+    let st = ui.st;
+    let (w, h, top) = ASK;
+    let options = v.research.options(v.me);
+    let chosen = asked(v.advisors, v.research, v.me);
+    let label = |t: i32| format!("{} ({})", tech_name(t), turns_text(v.research.turns(v.me, t)));
+    let slices = TextureSlicer { border: BorderRect::all(6.0), ..default() };
+    let parchment = |assets: &AssetServer| {
+        ImageNode::new(assets.load("gen/advisors/popup.png")).with_mode(NodeImageMode::Sliced(slices.clone()))
+    };
+    commands
+        .spawn((
+            AdvisorRoot(scale),
+            GlobalZIndex(100),
+            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() },
+        ))
+        .with_children(|root| {
+            root.spawn(Node { width: st.px(w), height: st.px(h), margin: UiRect::top(st.px(top)), ..default() })
+                .with_children(|s| {
+                    // The head rises over the popup, which hides the shoulders.
+                    let era = crate::tech_tree::era_of(v.research, v.me);
+                    ui.picture(s, ImageNode::new(v.assets.load(format!("gen/advisors/portrait_science_{era}.png"))), 221.0, -132.0, 150.0, 150.0);
+                    s.spawn((parchment(v.assets), st.rect(0.0, 0.0, w, h)));
+                    ui.words(s, 0.0, 10.0, w, 30.0, "Science Advisor", 24.0, Color::BLACK, true);
+                    ui.words(s, 27.0, 59.0, w - 40.0, 44.0, "Great One, our Sages need direction.\nShall we look into the secrets of", 16.0, Color::BLACK, false);
+                    let (px, py, pw, ph) = PULLDOWN;
+                    s.spawn((
+                        Button,
+                        Action::Pulldown,
+                        Node {
+                            border: UiRect::all(Val::Px(1.0)),
+                            align_items: AlignItems::Center,
+                            padding: UiRect::left(st.px(4.0)),
+                            overflow: Overflow::clip(),
+                            ..st.rect(px, py, pw, ph)
+                        },
+                        BackgroundColor(Color::srgb(0.97, 0.95, 0.88)),
+                        BorderColor::all(Color::srgb(0.35, 0.35, 0.35)),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new(chosen.map(label).unwrap_or_default()),
+                            TextFont { font: ui.font.clone(), font_size: st.font(15.0), ..default() },
+                            TextColor(ASK_LINK),
+                            TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                            Underline,
+                        ));
+                        b.spawn((ImageNode::new(v.assets.load("gen/advisors/pulldown.png")), st.rect(pw - 23.0, 0.0, 21.0, 21.0)));
+                    });
+                    ui.words(s, px + pw + 3.0, py, 12.0, ph, "?", 16.0, Color::BLACK, false);
+                    for (k, (text, action, focus)) in
+                        [("OK.", Action::Ok, true), ("What's the big picture?", Action::BigPicture, false)].into_iter().enumerate()
+                    {
+                        let y = 128.0 + 27.0 * k as f32;
+                        s.spawn((Button, action, Node { column_gap: st.px(3.0), align_items: AlignItems::Center, ..st.rect(27.0, y, 300.0, 22.0) }))
+                            .with_children(|b| {
+                                let bullet = if focus { "bullet_2" } else { "bullet_0" };
+                                b.spawn((
+                                    ImageNode::new(v.assets.load(format!("gen/advisors/{bullet}.png"))),
+                                    Node { width: st.px(19.0), height: st.px(20.0), ..default() },
+                                ));
+                                b.spawn((
+                                    Text::new(text),
+                                    TextFont { font: ui.font.clone(), font_size: st.font(16.0), ..default() },
+                                    TextColor(if focus { ASK_FOCUS } else { Color::BLACK }),
+                                ));
+                            });
+                    }
+                    if v.advisors.pulldown {
+                        let row = 20.0;
+                        s.spawn((
+                            parchment(v.assets),
+                            GlobalZIndex(101),
+                            Node { flex_direction: FlexDirection::Column, padding: UiRect::all(st.px(4.0)), ..st.rect(px, py + ph, pw, row * options.len() as f32 + 8.0) },
+                        ))
+                        .with_children(|list| {
+                            for &t in &options {
+                                list.spawn((
+                                    Button,
+                                    Action::Choose(t),
+                                    Node { height: st.px(row), align_items: AlignItems::Center, padding: UiRect::left(st.px(4.0)), ..default() },
+                                    BackgroundColor(if Some(t) == chosen { SELECTED } else { Color::NONE }),
+                                ))
+                                .with_child((
+                                    Text::new(label(t)),
+                                    TextFont { font: ui.font.clone(), font_size: st.font(15.0), ..default() },
+                                    TextColor(ASK_LINK),
+                                    TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                                ));
+                            }
+                        });
+                    }
+                });
+        });
 }
 
 // ---------------------------------------------------------------------
@@ -569,6 +761,31 @@ fn proposal(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt
     ui.button(s, 522.0, 522.0, 180.0, 28.0, "Decline", 16.0, Action::Decline, false);
 }
 
+fn convert_ask(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View, cities: &Query<&City>) {
+    let Some(ask) = v.diplomacy.convert_ask else { return };
+    let name = cities.get(ask.city).map_or("The city".to_string(), |c| c.name.clone());
+    text(p, font, format!("{name} wishes to join us!"), 30.0);
+    text(
+        p,
+        font,
+        format!("The people of {name} want to switch their allegiance to our civilization. Shall we install a new governor?"),
+        20.0,
+    );
+    row(p, |r| {
+        button(r, font, "Great! Install a new governor.".into(), Action::ConvertYes, false);
+        button(r, font, format!("We don't want {name}. Rebuff the rebels."), Action::ConvertNo, false);
+    });
+}
+
+fn transport_ask(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
+    let Some(ask) = v.diplomacy.board_ask.as_ref() else { return };
+    text(p, font, "Select transport", 30.0);
+    text(p, font, "Several ships here could take the unit aboard. Which one?", 20.0);
+    for (ship, line) in &ask.options {
+        button(p, font, line.clone(), Action::Transport(*ship), false);
+    }
+}
+
 fn war_ask(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
     let Some(ask) = v.diplomacy.war_ask else { return };
     text(p, font, "Declare war?", 30.0);
@@ -632,7 +849,11 @@ pub fn show(
     };
     let st = Stage(scale);
     let ui = Ui { font: &font, st };
-    let staged = !matches!(advisors.screen, Screen::Foreign | Screen::WarAsk);
+    if advisors.screen == Screen::ResearchAsk {
+        research_ask(&mut commands, &ui, &v, scale);
+        return;
+    }
+    let staged = !matches!(advisors.screen, Screen::Foreign | Screen::WarAsk | Screen::Convert | Screen::Transport);
     if staged {
         // Civ3's advisors sit over the map undimmed.
         let dim = if advisors.screen == Screen::Science { 0.0 } else { 0.55 };
@@ -652,10 +873,9 @@ pub fn show(
             }
             Screen::Science => {
                 let era = advisors.era.unwrap_or_else(|| crate::tech_tree::era_of(&research, v.me));
-                let closable = !research.needs_choice(v.me) || research.options(v.me).is_empty();
-                crate::tech_tree::page(s, &ui, &assets, &research, v.me, era, closable);
+                crate::tech_tree::page(s, &ui, &assets, &research, v.me, era);
             }
-            Screen::Foreign | Screen::WarAsk | Screen::Closed => {}
+            Screen::ResearchAsk | Screen::Foreign | Screen::WarAsk | Screen::Convert | Screen::Transport | Screen::Closed => {}
         });
         return;
     }
@@ -688,8 +908,28 @@ pub fn show(
                 BorderColor::all(Color::srgb(0.25, 0.4, 0.28)),
             ))
             .with_children(|panel| match advisors.screen {
-                Screen::Foreign => foreign(panel, &font, &v),
+                Screen::Foreign => {
+                    foreign(panel, &font, &v);
+                    // The advisor's boxed X in the panel's corner.
+                    let (_, _, w, h) = crate::advisor_frame::CLOSE_BOX;
+                    panel.spawn((
+                        Button,
+                        crate::advisor_frame::ArtButton("exitbox"),
+                        Action::Close,
+                        crate::advisor_frame::art(&assets, "exitbox_0"),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: Val::Px(0.0),
+                            bottom: Val::Px(0.0),
+                            width: st.px(w),
+                            height: st.px(h),
+                            ..default()
+                        },
+                    ));
+                }
                 Screen::WarAsk => war_ask(panel, &font, &v),
+                Screen::Convert => convert_ask(panel, &font, &v, &cities),
+                Screen::Transport => transport_ask(panel, &font, &v),
                 _ => {}
             });
         });
@@ -791,6 +1031,18 @@ pub fn respond(
             research.pick(me, t, &mut rng.0);
             advisors.close();
         }
+        Action::Pulldown => advisors.pulldown = !advisors.pulldown,
+        Action::Choose(t) => {
+            advisors.ask = Some(t);
+            advisors.pulldown = false;
+        }
+        Action::Ok => {
+            if let Some(t) = asked(&advisors, &research, me) {
+                research.pick(me, t, &mut rng.0);
+            }
+            advisors.close();
+        }
+        Action::BigPicture => advisors.open(Screen::Science),
         Action::Treaty(c) => {
             advisors.note.clear();
             toggle_clause(&mut advisors.deal, true, c);
@@ -861,6 +1113,18 @@ pub fn respond(
                 let events = diplomacy.execute(&facts, &mut research, &mut treasury.0, &offer.deal, turn.0 as i32, &mut rng.0, &mut board);
                 announce(&events, &mut board);
                 post(&mut board, format!("We have a deal with the {}.", people(offer.from)));
+            }
+            advisors.close();
+        }
+        Action::Transport(ship) => {
+            if let Some(ask) = diplomacy.board_ask.as_mut() {
+                ask.answer = Some(ship);
+            }
+            advisors.close();
+        }
+        Action::ConvertYes | Action::ConvertNo => {
+            if let Some(ask) = diplomacy.convert_ask.as_mut() {
+                ask.answer = Some(action == Action::ConvertYes);
             }
             advisors.close();
         }
@@ -1019,6 +1283,7 @@ mod tests {
         app.init_resource::<ProductionPrompts>();
         app.init_resource::<CityView>();
         app.init_resource::<Advisors>();
+        app.init_resource::<crate::domestic::Domestic>();
         app.init_resource::<Treasury>();
         app.init_resource::<MessageBoard>();
         app.insert_resource(Turn(1));
@@ -1032,18 +1297,92 @@ mod tests {
         app
     }
 
+    /// Japan founded Kyoto last turn: the research popup is due.
+    fn settle(app: &mut App) {
+        let mut kyoto = City::new(0, "Kyoto", 10, 11);
+        kyoto.founded = 0;
+        app.world_mut().spawn(kyoto);
+        // The continents the diplomacy facts place the city on.
+        let land = crate::diplomacy::label_land(app.world().resource::<GameMap>());
+        app.world_mut().resource_mut::<Diplomacy>().land = land;
+    }
+
     #[test]
-    fn a_research_target_owed_opens_the_science_advisor_and_a_pick_closes_it() {
+    fn a_research_target_owed_asks_in_the_popup_and_ok_researches_the_suggestion() {
         let mut app = app();
+        settle(&mut app);
         app.add_systems(Update, (interrupt, respond).chain());
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Science);
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk);
         let t = app.world().resource::<Research>().options(0)[0];
-        app.world_mut().spawn((Interaction::Pressed, Action::Pick(t)));
-        app.update();
+        press(&mut app, Action::Ok);
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
         assert_eq!(app.world().resource::<Research>().target(0), Some(t));
         assert!(!app.world().resource::<Research>().needs_choice(0));
+    }
+
+    #[test]
+    fn the_popup_waits_for_the_turn_after_the_first_city() {
+        let mut app = app();
+        app.add_systems(Update, interrupt);
+        app.update();
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed, "no city, nothing to study with");
+        let kyoto = City::new(0, "Kyoto", 10, 11);
+        app.world_mut().spawn(kyoto);
+        app.update();
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed, "founded this turn");
+        app.world_mut().resource_mut::<Turn>().0 = 2;
+        app.update();
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk);
+    }
+
+    #[test]
+    fn the_pulldown_changes_the_advance_ok_researches() {
+        let mut app = app();
+        settle(&mut app);
+        app.add_systems(Update, (interrupt, respond).chain());
+        app.update();
+        let t = app.world().resource::<Research>().options(0)[1];
+        press(&mut app, Action::Pulldown);
+        assert!(app.world().resource::<Advisors>().pulldown);
+        press(&mut app, Action::Choose(t));
+        assert!(!app.world().resource::<Advisors>().pulldown);
+        press(&mut app, Action::Ok);
+        assert_eq!(app.world().resource::<Research>().target(0), Some(t));
+    }
+
+    #[test]
+    fn enter_answers_the_popup_and_does_not_also_end_the_turn() {
+        let mut app = app();
+        settle(&mut app);
+        app.add_systems(Update, (hotkeys, interrupt).chain());
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.update();
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk);
+        let t = app.world().resource::<Research>().options(0)[0];
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Enter);
+        app.update();
+        assert_eq!(app.world().resource::<Research>().target(0), Some(t));
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Enter), "spent on the popup");
+    }
+
+    #[test]
+    fn the_big_picture_opens_the_tree_and_closing_it_asks_again() {
+        let mut app = app();
+        settle(&mut app);
+        app.add_systems(Update, (interrupt, respond).chain());
+        app.update();
+        press(&mut app, Action::BigPicture);
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Science);
+        press(&mut app, Action::Close);
+        app.update();
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk, "the choice is still owed");
+        let t = app.world().resource::<Research>().options(0)[0];
+        press(&mut app, Action::BigPicture);
+        press(&mut app, Action::Pick(t));
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
+        assert_eq!(app.world().resource::<Research>().target(0), Some(t));
     }
 
     #[test]
@@ -1202,6 +1541,7 @@ mod tests {
     #[test]
     fn a_wonder_of_ours_gets_a_splash_before_anything_else_and_zoom_looks_at_the_city() {
         let mut app = app();
+        settle(&mut app);
         app.add_systems(Update, (hotkeys, interrupt, respond).chain());
         app.init_resource::<ButtonInput<KeyCode>>();
         let camera = app.world_mut().spawn((Camera2d, Transform::default())).id();
@@ -1213,7 +1553,7 @@ mod tests {
         press(&mut app, Action::Zoom(5, 6));
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Science, "the splash is over; research is next");
+        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk, "the splash is over; research is next");
         assert!(app.world().resource::<Wonders>().splash.is_empty());
         let at = crate::map::tile_to_world(5, 6);
         let eye = app.world().get::<Transform>(camera).unwrap().translation;

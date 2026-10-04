@@ -11,3 +11,4 @@ civ3/
 # terrain-builder outputs and generated materials
 terrain-builder/packs/*/out/
 terrain-builder/packs/*/*.png
+saves/

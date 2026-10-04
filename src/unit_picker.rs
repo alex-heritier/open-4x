@@ -223,7 +223,7 @@ pub fn update(
                                 row.spawn((
                                     Text::new(format!(
                                         "{}  ({}/{} moves){}",
-                                        units::def(u.utype).name,
+                                        if u.scientific_leader { "Scientific Leader" } else { units::def(u.utype).name },
                                         units::fmt_moves(u.moves),
                                         units::def(u.utype).moves,
                                         state

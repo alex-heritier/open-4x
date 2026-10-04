@@ -349,3 +349,30 @@ was already set, or the tile was not a forest, nothing happens. In the shipped f
 3. The reader(s) of `TFRM +0x50` and of cell `+0x24`.
 4. The coast/lake recomputation in `0x5D59E0` after a terrain change (`0x5EBDC0`).
 5. Token `0x20001000`.
+
+## Clone: fortress and colony sites (partly HYPOTHESIS)
+
+`src/sites.rs` now holds Colony / Outpost objects separately from the tile's Fortress and Barricade overlay bits. Fortress and Barricade need Construction; Barricade requires a Fortress and keeps both native bits. The defense reader tests Fortress first, so it contributes 50 when both are present (`combat.md` 4.2). Outpost needs Masonry, consumes one completing Worker, and gives terrain-dependent structure sight (`colonies.md` 4.1); foreign entry or ownership destroys it. Fortress and Barricade completion destroy an Outpost but preserve a plain Colony. Pillage / terrain strikes use the section 8 destruction classes of `colonies.md`. Art comes from the Conquests `TerrainBuildings.PCX`: Fortress column 0, Colony column 1, Barricade column 3 per era; Outpost column 2 row 0. Labor now follows sections 6 and 6.1, with generated TFRM costs and PRTO worker strength, individual accumulated work, pooling across owners, and nationality preserved through capture and saves. Still simplified: no railroad on Colony founding and no AI choice of the structure jobs.
+
+
+Game integration also uses generated normal TERR bonuses for Mine / Road /
+Irrigation and the TERR worker-job field plus tile ownership for clearing.
+Forest harvesting follows section 9, including recipient spiral order,
+production eligibility, price cap, pine-as-Forest and the persistent spent
+bit. Completion now precedes city production. Irrigation uses section 3.2's
+small-lake test and one neighboring city relay in worker commands and AI job
+choices. Water regions connect through shared edges (native diagonal cell
+neighbors become orthogonal neighbors in the square game grid); the threshold
+is at most 20 tiles, shared with shipyard coastal eligibility. Arbitrary ocean
+adjacency no longer supplies irrigation. Mountains now permit unwheeled entry;
+wheeled restrictions and road exceptions follow movement.md section 13.
+The post-Ancient water-free irrigation tech override, the native
+work-in-progress revalidation query and AI structure choices remain open.
+The native city +0x30 bit 0x10 reader is still open and has no game equivalent.
+
+The playable map now has river masks from the recovered `rivergen` adapter;
+`fresh_water` accepts a river on the target tile in addition to small lakes.
+Native mask bytes persist in save format 8. Floodplain TERR values apply to
+bare, flat desert tiles with a river, so these cannot receive mines. See
+`rivers.md` for generation/rendering limits and `combat.md` for the directional
+river defense term. River-crossing movement costs remain unfinished.

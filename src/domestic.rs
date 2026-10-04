@@ -208,6 +208,8 @@ pub struct CityLine {
     content: u8,
     unhappy: u8,
     entertainers: u8,
+    scientists: u8,
+    tax_collectors: u8,
     disorder: bool,
     producing: Production,
     /// Turns to finish the build, `None` when it never will.
@@ -292,6 +294,8 @@ fn page(me: usize, map: &GameMap, cities: &[&City], owned: usize, gold: u32, dom
             content: t.mood.content,
             unhappy: t.mood.unhappy,
             entertainers: t.mood.entertainers,
+            scientists: t.mood.scientists,
+            tax_collectors: t.mood.tax_collectors,
             disorder: t.disorder,
             producing: c.production,
             turns: (t.shields > 0).then(|| left.div_ceil(t.shields as u16)),
@@ -407,17 +411,20 @@ fn city_row(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c: &Cit
         .chain(std::iter::repeat_n("head_content", c.content as usize))
         .chain(std::iter::repeat_n("head_unhappy", c.unhappy as usize))
         .collect();
-    let total = heads.len() + c.entertainers as usize;
+    let total = heads.len() + (c.entertainers + c.scientists + c.tax_collectors) as usize;
     let step = if total == 0 { 30.0 } else { (240.0 / (total as f32 + 1.0)).min(30.0) };
     let mut x = 607.0;
     for head in heads {
         ui.picture(s, art(assets, head), x, y - 19.0, 34.0, 34.0);
         x += step;
     }
-    if c.entertainers > 0 {
+    if c.entertainers + c.scientists + c.tax_collectors > 0 {
         x += step;
-        for _ in 0..c.entertainers {
-            ui.picture(s, ImageNode::new(assets.load("gen/ui/entertainer.png")), x, y - 19.0, 34.0, 34.0);
+        for head in std::iter::repeat_n("gen/ui/entertainer.png", c.entertainers as usize)
+            .chain(std::iter::repeat_n("gen/ui/scientist.png", c.scientists as usize))
+            .chain(std::iter::repeat_n("gen/ui/tax_collector.png", c.tax_collectors as usize))
+        {
+            ui.picture(s, ImageNode::new(assets.load(head)), x, y - 19.0, 34.0, 34.0);
             x += step;
         }
     }

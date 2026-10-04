@@ -53,16 +53,20 @@ pub fn inactive(
     civs: Res<Civilizations>,
     advisors: Res<crate::advisors::Advisors>,
     domestic: Res<crate::domestic::Domestic>,
+    switch: Res<crate::build_switch::BuildSwitch>,
+    abandon: Res<crate::abandon::Abandon>,
 ) -> bool {
-    !prompts.blocks(civs.active) && !advisors.is_open() && !domestic.is_open()
+    !abandon.blocks(civs.active) && !switch.is_pending() && !prompts.blocks(civs.active) && !advisors.is_open() && !domestic.is_open()
 }
 
 pub fn city_input_allowed(
     prompts: Res<ProductionPrompts>,
     view: Res<CityView>,
     civs: Res<Civilizations>,
+    switch: Res<crate::build_switch::BuildSwitch>,
+    abandon: Res<crate::abandon::Abandon>,
 ) -> bool {
-    !prompts.blocks(civs.active) || view.0.is_some()
+    !abandon.blocks(civs.active) && !switch.is_pending() && (!prompts.blocks(civs.active) || view.0.is_some())
 }
 
 #[derive(Component)]
@@ -118,9 +122,11 @@ pub fn show(
     advisors: Res<crate::advisors::Advisors>,
     domestic: Res<crate::domestic::Domestic>,
     roots: Query<Entity, With<PromptRoot>>,
+    switch: Res<crate::build_switch::BuildSwitch>,
+    abandon: Res<crate::abandon::Abandon>,
 ) {
     // One modal at a time: a build decision waits for the advisor's.
-    if advisors.is_open() || domestic.is_open() {
+    if abandon.blocks(civs.active) || switch.is_pending() || advisors.is_open() || domestic.is_open() {
         return;
     }
     // A panel left over from the civ that just ended its turn comes down
@@ -236,7 +242,11 @@ pub fn respond(
     mut prompts: ResMut<ProductionPrompts>,
     mut cities: Query<&mut City>,
     mut view: ResMut<CityView>,
+    mut switch: ResMut<crate::build_switch::BuildSwitch>,
+    abandon: Res<crate::abandon::Abandon>,
+    civs: Res<Civilizations>,
 ) {
+    if switch.is_pending() || abandon.blocks(civs.active) { return; }
     for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
             continue;
@@ -251,7 +261,7 @@ pub fn respond(
             PromptButton::Pick(p) => {
                 if let Ok(mut city) = cities.get_mut(entity) {
                     if city.buildable().contains(p) {
-                        city.change_build(*p);
+                        switch.request(entity, &mut city, *p);
                     }
                 }
                 prompts.expanded = false;
@@ -273,6 +283,43 @@ pub fn respond(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advisor_pick_requires_confirmation_before_losing_shields() {
+        for accept in [false, true] {
+            crate::realm::reset();
+            crate::realm::write(0, |r| r.known = u128::MAX);
+            let mut app = App::new();
+            app.init_resource::<ProductionPrompts>();
+            app.init_resource::<crate::abandon::Abandon>();
+            app.init_resource::<crate::build_switch::BuildSwitch>();
+            app.init_resource::<CityView>();
+            app.init_resource::<Civilizations>();
+            app.init_resource::<ButtonInput<KeyCode>>();
+            app.add_systems(Update, (respond, crate::build_switch::respond).chain());
+            let mut city = City::new(0, "Town", 5, 5);
+            city.production = Production::Barracks;
+            city.shields = 30;
+            let entity = app.world_mut().spawn(city).id();
+            let mut prompts = app.world_mut().resource_mut::<ProductionPrompts>();
+            prompts.push(entity, 0, Production::Warrior);
+            prompts.open = Some(0);
+            app.world_mut().spawn((Interaction::Pressed, PromptButton::Pick(Production::Warrior)));
+            app.update();
+            assert!(app.world().resource::<crate::build_switch::BuildSwitch>().is_pending());
+            let city = app.world().get::<City>(entity).unwrap();
+            assert_eq!((city.production, city.shields), (Production::Barracks, 30));
+            app.world_mut().spawn((Interaction::Pressed, if accept {
+                crate::cities::ScreenButton::SwitchYes
+            } else { crate::cities::ScreenButton::SwitchNo }));
+            app.update();
+            let city = app.world().get::<City>(entity).unwrap();
+            assert_eq!((city.production, city.shields), if accept {
+                (Production::Warrior, 10)
+            } else { (Production::Barracks, 30) });
+            assert!(app.world().resource::<ProductionPrompts>().blocks(0), "the advisor decision remains pending");
+        }
+    }
 
     fn prompt(city: u64, civ: usize, p: Production) -> (Entity, usize, Production) {
         (Entity::from_bits(city), civ, p)

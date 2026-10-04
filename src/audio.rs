@@ -118,6 +118,7 @@ impl GameAudio {
             Irrigate => self.work_irrigate.clone(),
             Mine => self.work_mine.clone(),
             Clear => self.work_clear.clone(),
+            Fortress | Barricade | Outpost => self.work_mine.clone(),
         }
     }
 }

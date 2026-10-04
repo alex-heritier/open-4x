@@ -295,7 +295,134 @@ pub struct Relations {
     pub packages: Vec<Package>,
 }
 
+impl Clause {
+    fn write(&self, w: &mut crate::words::Writer) {
+        let (kind, arg) = match self {
+            Clause::Peace => (0, 0),
+            Clause::MutualProtection => (1, 0),
+            Clause::RightOfPassage => (2, 0),
+            Clause::MilitaryAlliance(a) => (3, i64::from(*a)),
+            Clause::Embargo(a) => (4, i64::from(*a)),
+            Clause::WorldMap => (5, 0),
+            Clause::Contact(a) => (6, i64::from(*a)),
+            Clause::Gold(a) => (7, i64::from(*a)),
+            Clause::GoldPerTurn(a) => (8, i64::from(*a)),
+            Clause::Tech(a) => (9, i64::from(*a)),
+            Clause::City(a) => (10, i64::from(*a)),
+        };
+        w.put(kind);
+        w.put(arg);
+    }
+
+    fn read(r: &mut crate::words::Reader) -> Option<Clause> {
+        let (kind, arg) = (r.get()?, r.get()?);
+        let u = u32::try_from(arg).ok();
+        let i = i32::try_from(arg).ok();
+        Some(match kind {
+            0 => Clause::Peace,
+            1 => Clause::MutualProtection,
+            2 => Clause::RightOfPassage,
+            3 => Clause::MilitaryAlliance(u?),
+            4 => Clause::Embargo(u?),
+            5 => Clause::WorldMap,
+            6 => Clause::Contact(u?),
+            7 => Clause::Gold(i?),
+            8 => Clause::GoldPerTurn(i?),
+            9 => Clause::Tech(i?),
+            10 => Clause::City(u?),
+            _ => return None,
+        })
+    }
+}
+
 impl Relations {
+    /// Every book, as words (see [`crate::words`]).
+    pub fn to_words(&self) -> Vec<i64> {
+        let mut w = crate::words::Writer::default();
+        w.put(self.in_play);
+        w.put(self.human);
+        w.flags(&self.war);
+        w.flags(&self.embassy);
+        for v in [&self.rel, &self.treaty, &self.allies_vs, &self.embargo] {
+            w.run(v);
+        }
+        for v in [&self.memory, &self.greeting, &self.war_counter, &self.tension] {
+            w.run(v);
+        }
+        w.put(self.rec.len() as i64);
+        for row in &self.rec {
+            for &c in row {
+                w.put(c);
+            }
+        }
+        w.put(self.packages.len() as i64);
+        for p in &self.packages {
+            w.put(p.a);
+            w.put(p.b);
+            w.put(p.ends);
+            w.put(p.clauses.len() as i64);
+            for c in &p.clauses {
+                c.write(&mut w);
+            }
+        }
+        w.0
+    }
+
+    /// Put saved books back. False, with `self` untouched, when the words do
+    /// not fit.
+    pub fn restore(&mut self, words: &[i64]) -> bool {
+        let mut r = crate::words::Reader::new(words);
+        let n = self.war.len();
+        let parsed = (|| {
+            let (in_play, human) = (r.u32()?, r.u32()?);
+            let flags = |r: &mut crate::words::Reader| r.run(|v| Some(v != 0)).filter(|v| v.len() == n);
+            let war = flags(&mut r)?;
+            let embassy = flags(&mut r)?;
+            let mut us = vec![];
+            for _ in 0..4 {
+                us.push(r.run(|v| u32::try_from(v).ok()).filter(|v| v.len() == n)?);
+            }
+            let mut is = vec![];
+            for _ in 0..4 {
+                is.push(r.run(|v| i32::try_from(v).ok()).filter(|v| v.len() == n)?);
+            }
+            if usize::try_from(r.get()?).ok()? != n {
+                return None;
+            }
+            let mut rec = vec![[0i32; rec::LEN]; n];
+            for row in &mut rec {
+                for c in row.iter_mut() {
+                    *c = r.i32()?;
+                }
+            }
+            let count = usize::try_from(r.get()?).ok()?;
+            let mut packages = vec![];
+            for _ in 0..count {
+                let (a, b, ends) = (r.u32()?, r.u32()?, r.i32()?);
+                let k = usize::try_from(r.get()?).ok()?;
+                let clauses = (0..k).map(|_| Clause::read(&mut r)).collect::<Option<Vec<_>>>()?;
+                packages.push(Package { a, b, ends, clauses });
+            }
+            r.done().then_some((in_play, human, war, embassy, us, is, rec, packages))
+        })();
+        let Some((in_play, human, war, embassy, mut us, mut is, rec, packages)) = parsed else { return false };
+        self.in_play = in_play;
+        self.human = human;
+        self.war = war;
+        self.embassy = embassy;
+        self.embargo = us.pop().unwrap();
+        self.allies_vs = us.pop().unwrap();
+        self.treaty = us.pop().unwrap();
+        self.rel = us.pop().unwrap();
+        self.tension = is.pop().unwrap();
+        self.war_counter = is.pop().unwrap();
+        self.greeting = is.pop().unwrap();
+        self.memory = is.pop().unwrap();
+        self.rec = rec;
+        self.packages = packages;
+        true
+    }
+
     /// No contact, no war, empty books.
     pub fn new(in_play: u32, human: u32) -> Self {
         let n = SLOTS * SLOTS;
@@ -931,6 +1058,24 @@ pub fn weigh(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relations_round_trip_through_words() {
+        let mut r = Relations::new(0b111, 0b1);
+        r.war[Relations::ix(0, 1)] = true;
+        r.embassy[Relations::ix(1, 2)] = true;
+        r.rel[Relations::ix(2, 0)] = 5;
+        r.tension[Relations::ix(1, 0)] = -3;
+        r.rec[Relations::ix(0, 2)][3] = 7;
+        r.packages.push(Package { a: 0, b: 2, ends: 40, clauses: vec![Clause::Peace, Clause::GoldPerTurn(6), Clause::Embargo(1), Clause::City(9)] });
+        let words = r.to_words();
+        let mut fresh = Relations::new(1, 1);
+        assert!(fresh.restore(&words));
+        assert_eq!(fresh.to_words(), words);
+        assert!(fresh.at_war(0, 1) && fresh.embassy(1, 2) && fresh.rel(2, 0) == 5);
+        assert_eq!(fresh.packages, r.packages);
+        assert!(!fresh.restore(&words[..words.len() - 2]));
+    }
 
     /// A fixed world: all civs alike unless a test changes the fields.
     struct World {

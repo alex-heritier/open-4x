@@ -106,6 +106,8 @@ pub mod combat;
 pub mod continents;
 pub mod crt;
 pub mod dcl;
+pub mod disease;
+pub mod population;
 pub mod diplomacy;
 pub mod economy;
 pub mod fractal;
@@ -115,6 +117,7 @@ pub mod happiness;
 pub mod lakes;
 pub mod landmass;
 pub mod media;
+pub mod movement;
 pub mod net;
 pub mod options;
 pub mod oracle;
@@ -132,6 +135,7 @@ pub mod spiral;
 pub mod stack;
 pub mod ui;
 pub mod upgrade;
+pub mod words;
 pub mod yields;
 
 pub use bugs::OriginalBugs;
@@ -148,3 +152,5 @@ pub use rng::Rng;
 pub fn water_percentile(water_level: i32) -> i32 {
     water_level.clamp(0, 100)
 }
+
+pub mod capital;

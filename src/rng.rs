@@ -30,6 +30,11 @@ impl MapRng {
         MapRng { inner: civ3mapgen::rng::Rng::new(seed) }
     }
 
+    /// The state, for a saved game (`new` takes it back).
+    pub fn state(&self) -> u32 {
+        self.inner.state()
+    }
+
     /// `rand01()` — a double in `[0, 1)`.
     #[inline]
     pub fn next_f64(&mut self) -> f64 {
@@ -73,6 +78,11 @@ impl GameRng {
     #[inline]
     pub fn new(seed: u32) -> Self {
         GameRng { state: seed }
+    }
+
+    /// The state, for a saved game (`new` takes it back).
+    pub fn state(&self) -> u32 {
+        self.state
     }
 
     /// One `rand()` draw, range `0..32768`.

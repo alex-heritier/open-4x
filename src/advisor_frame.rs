@@ -102,8 +102,17 @@ pub fn frame<A: Component>(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &Asset
         }
     }
     if let Some(close) = close {
-        art_button(s, ui, assets, "exit", (977.0, 730.0, 26.0, 30.0), close);
+        close_box(s, ui, assets, close);
     }
+}
+
+/// Where Civ3 puts every advisor's close X: the boxed X flush in the
+/// bottom-right corner of the 1024 x 768 art (`exitBox-backgroundStates`).
+pub const CLOSE_BOX: (f32, f32, f32, f32) = (952.0, 720.0, 72.0, 48.0);
+
+/// The boxed close X in the corner of a 1024 x 768 screen.
+pub fn close_box<A: Component>(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, close: A) -> Entity {
+    art_button(s, ui, assets, "exitbox", CLOSE_BOX, close)
 }
 
 /// `ArtButton` stems of the tabs (a tab pressed shows its active cell).

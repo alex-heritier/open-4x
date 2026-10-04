@@ -114,6 +114,11 @@ pub struct Realm {
     pub cities: usize,
     /// Wonders that ease war weariness everywhere (Universal Suffrage).
     pub suffrage: i32,
+    /// The war weariness against every civ at war with this one
+    /// (`Player +0xCB4`), the figures the happiness routine reads.
+    pub war_counters: Vec<i32>,
+    /// The average weariness (`0x5007B0`), which brings down a Democracy.
+    pub average_weariness: i32,
     /// Turn the Golden Age ends (`Player +0x3C`), `None` while the civ has
     /// never had one: a civilization has one Golden Age.
     pub golden_end: Option<u32>,
@@ -127,7 +132,48 @@ pub struct Realm {
     pub born_content: i32,
 }
 
+/// What a saved game keeps of a realm: the standing policy. Everything
+/// else is read off the world again by [`sync`].
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Saved {
+    govt: usize,
+    rates: (u8, u8, u8),
+    anarchy: u8,
+    then: usize,
+    cooldown: u8,
+    war_counters: Vec<i32>,
+    average_weariness: i32,
+    golden_end: Option<u32>,
+    golden_due: bool,
+}
+
 impl Realm {
+    pub fn snapshot(&self) -> Saved {
+        Saved {
+            govt: self.govt,
+            rates: (self.rates.tax, self.rates.sci, self.rates.lux),
+            anarchy: self.anarchy,
+            then: self.then,
+            cooldown: self.cooldown,
+            war_counters: self.war_counters.clone(),
+            average_weariness: self.average_weariness,
+            golden_end: self.golden_end,
+            golden_due: self.golden_due,
+        }
+    }
+
+    pub fn restore(&mut self, s: &Saved) {
+        self.govt = s.govt;
+        self.rates = Rates { tax: s.rates.0, sci: s.rates.1, lux: s.rates.2 };
+        self.anarchy = s.anarchy;
+        self.then = s.then;
+        self.cooldown = s.cooldown;
+        self.war_counters = s.war_counters.clone();
+        self.average_weariness = s.average_weariness;
+        self.golden_end = s.golden_end;
+        self.golden_due = s.golden_due;
+    }
+
     pub fn new() -> Realm {
         Realm {
             govt: row::DESPOTISM,
@@ -146,6 +192,8 @@ impl Realm {
             garrison: HashMap::new(),
             cities: 0,
             suffrage: 0,
+            war_counters: vec![],
+            average_weariness: 0,
             golden_end: None,
             golden: false,
             golden_due: false,
@@ -359,14 +407,14 @@ pub fn sync(
     capital: Res<Capital>,
     mut cities: Query<(Entity, &mut City)>,
     units: Query<&Unit>,
+    diplomacy: Option<Res<crate::diplomacy::Diplomacy>>,
     mut labels: Local<Vec<u16>>,
 ) {
     if labels.is_empty() {
         *labels = continents(&map);
     }
     let all: Vec<(Entity, City)> = cities.iter().map(|(e, c)| (e, c.clone())).collect();
-    let refs: Vec<&City> = all.iter().map(|(_, c)| c).collect();
-    let owners = territory(&map, &refs);
+    let owners = territory(&map);
     let tech_count = crate::rules_data::TECH_NAMES.len() as i32;
 
     let mut built = [false; BLDG_COUNT];
@@ -443,10 +491,28 @@ pub fn sync(
         let mut goods = 0u32;
         let mut luxuries = std::collections::BTreeSet::new();
         for ((x, y), owner) in &owners {
-            if refs[*owner].civ != civ {
+            if *owner != civ {
                 continue;
             }
             let Some(id) = map.tiles[map.idx(*x, *y)].resource else { continue };
+            match crate::features::GOODS[id as usize].kind {
+                crate::features::GoodKind::Strategic => {
+                    if let Some(row) = strategic_row(id) {
+                        let need = crate::rules_data::GOOD[row];
+                        if need < 0 || known >> need & 1 != 0 {
+                            goods |= 1 << row;
+                        }
+                    }
+                }
+                crate::features::GoodKind::Luxury => {
+                    luxuries.insert(id);
+                }
+                crate::features::GoodKind::Bonus => {}
+            }
+        }
+        // Colonies tie their resource to the network wherever they stand.
+        let border = |x: i32, y: i32| owners.get(&(x, y)).copied();
+        for id in crate::sites::colony_goods(&map, civ, &border) {
             match crate::features::GOODS[id as usize].kind {
                 crate::features::GoodKind::Strategic => {
                     if let Some(row) = strategic_row(id) {
@@ -471,6 +537,19 @@ pub fn sync(
             .and_then(|e| all.iter().find(|(id, _)| *id == e))
             .map(|(_, c)| (c.x, c.y));
         let double_wealth = research_state.knows_flag(civ, 0x1000);
+        // Universal Suffrage's relief: one citizen per live wonder with the flag.
+        let suffrage = mine
+            .iter()
+            .flat_map(|(_, c)| c.buildings.iter())
+            .filter_map(|b| b.building_row())
+            .filter(|&row| {
+                let b = roster::bldg(row);
+                b.wonder & roster::wonder::SUFFRAGE != 0 && !obsolete(row)
+            })
+            .count() as i32;
+        let (war_counters, average_weariness) = diplomacy
+            .as_ref()
+            .map_or((vec![], 0), |d| (d.enemy_weariness(civ), d.average_weariness(civ)));
         write(civ, |r| {
             r.known = known;
             r.owned = owned;
@@ -482,6 +561,9 @@ pub fn sync(
             r.cities = mine.len();
             r.capital = capital_at;
             r.double_wealth = double_wealth;
+            r.suffrage = suffrage;
+            r.war_counters = war_counters;
+            r.average_weariness = average_weariness;
         });
         if changed {
             research_state.goods_changed();

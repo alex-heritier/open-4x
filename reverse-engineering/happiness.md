@@ -413,3 +413,7 @@ method requires) and is described here so it can be rebuilt:
 * `yields.md` sections 7 and 8: the happiness family is now decoded; the table `0x665868` is the
   happy-face count for luxury resources with a Marketplace-class building (section 3, step 6), and
   the Civilopedia lists the same numbers.
+
+### Clone: how the produces-units tick is ported
+
+`citycalc::produced_units` keeps one counter per producing building in `City.unit_clocks`. Each turn the counter rises to `frequency - 1`; on the next turn, if the owner has both required goods, the unit is handed out and the counter returns to 0, so the period is `frequency` turns. HYPOTHESIS: the executable's exact turn of creation (this reading versus one turn earlier) was not tested. The shipped rows: The Statue of Zeus makes an Ancient Cavalry (PRTO 118) every 5 turns, Knights Templar a Crusader (117) every 5 turns. The new unit is a Veteran when it can attack (the exe's `0x4B0160` level is unread).

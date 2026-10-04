@@ -13,11 +13,6 @@ use civ3_biq::sections::prto::ability as ab;
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
-/// The civilizations the game plays, as `RACE.civilization_name` values.
-const CIVS: [&str; 4] = ["Japan", "Rome", "Egypt", "China"];
-/// The same list, for the unit-availability mask.
-const RACES_OF_CIVS: [&str; 4] = CIVS;
-
 /// Improvements whose effects the game implements, by `BLDG` name. Every
 /// great wonder is playable besides `BLDG_NOT_PLAYABLE` (they all pay
 /// culture and the game's border and score rules use it).
@@ -52,6 +47,39 @@ fn is_great_wonder(other: u32) -> bool {
     other & oc::WONDER != 0
 }
 
+/// A team color the clone keeps Civ3's hand-picked tone for, so the default
+/// four civilizations look unchanged after the roster import. The rest are
+/// derived from the `ntpNN.pcx` ramp (most saturated entry).
+fn civ_color_override(name: &str) -> Option<(u8, u8, u8)> {
+    Some(match name {
+        "Japan" => (25, 148, 24),
+        "Rome" => (190, 48, 48),
+        "Egypt" => (220, 184, 48),
+        "China" => (40, 180, 190),
+        _ => return None,
+    })
+}
+
+/// The most saturated entry of the 64-color team ramp of `ntpNN.pcx`, the
+/// color city badges, borders and the unit tint share. The VGA palette is the
+/// last 768 bytes of a 256-color PCX.
+fn team_rgb(n: i32) -> (u8, u8, u8) {
+    let path = format!("civ3/civ3-gog/app/Art/Units/Palettes/ntp{n:02}.pcx");
+    let Ok(bytes) = std::fs::read(&path) else { return (128, 128, 128) };
+    let pal = &bytes[bytes.len() - 768..];
+    let mut best = (0i32, (128u8, 128u8, 128u8));
+    for i in 0..64 {
+        let (r, g, b) = (pal[i * 3], pal[i * 3 + 1], pal[i * 3 + 2]);
+        let hi = r.max(g).max(b) as i32;
+        let lo = r.min(g).min(b) as i32;
+        let score = (hi - lo) * 2 + hi;
+        if score > best.0 {
+            best = (score, (r, g, b));
+        }
+    }
+    best.1
+}
+
 fn q(s: &str) -> String {
     format!("{s:?}")
 }
@@ -76,7 +104,7 @@ fn ident(name: &str) -> String {
 }
 
 /// The `Art/Units` folder of a unit, when the install has one (Conquests
-/// folders win over the base game's).
+/// folders win over the Play the World and base game folders).
 fn art_dir(name: &str) -> Option<String> {
     let want = match name {
         "Warrior" => "warrior",
@@ -86,6 +114,10 @@ fn art_dir(name: &str) -> Option<String> {
         "Modern Paratrooper" => "Paratrooper",
         "Mech Infantry" => "Mech Infantry",
         "Javelin Thrower" => "Javelin Thrower",
+        "Hwach'a" => "Hwacha",
+        // The only unit without its own art folder anywhere in the install;
+        // its brother mercenaries use the Hoplite's art.
+        "Numidian Mercenary" => "Hoplite",
         // The Ancient Age art; the later eras' art would follow the era.
         "Leader" => "Leader Ancient Times",
         "Army" => "Army Ancient Times",
@@ -93,6 +125,7 @@ fn art_dir(name: &str) -> Option<String> {
     };
     for root in [
         "civ3/civ3-gog/app/Conquests/Art/Units",
+        "civ3/civ3-gog/app/civ3PTW/Art/Units",
         "civ3/civ3-gog/app/Art/Units",
     ] {
         if std::path::Path::new(root).join(want).is_dir() {
@@ -129,6 +162,7 @@ fn main() -> ExitCode {
     p!("//! re-running the generator and diffing.");
     p!("#![allow(clippy::type_complexity)]");
     p!("");
+    p!("use bevy::prelude::Color;");
     p!("use crate::cities::Production;");
     p!("use crate::roster::{{BldgDef, UnitRow}};");
     p!("use crate::units::UnitType;");
@@ -190,6 +224,26 @@ fn main() -> ExitCode {
     p!("pub const WORLD_TECH_RATE: [i32; {}] = {:?};", r.world_sizes.len(), r.world_sizes.iter().map(|d| d.tech_rate).collect::<Vec<_>>());
     p!("");
 
+    p!("/// `TFRM` base labor needed, before terrain movement cost.");
+    p!("pub const WORK_NEEDED: [i32; {}] = {:?};", r.worker_jobs.len(), r.worker_jobs.iter().map(|j| j.turns_to_complete).collect::<Vec<_>>());
+    p!("/// Advances that double the worker rate (`TECH` flag `0x40000`).");
+    let doubles_work: u128 = r.techs.iter().enumerate().filter(|(_, t)| t.flags & 0x40000 != 0).fold(0, |bits, (i, _)| bits | (1u128 << i));
+    p!("pub const DOUBLES_WORK: u128 = {doubles_work:#x};");
+    let bridges: u128 = r.techs.iter().enumerate().filter(|(_, t)| t.flags & 4 != 0).fold(0, |bits, (i, _)| bits | (1u128 << i));
+    p!("/// Advances enabling road/rail bridges (`TECH` flag `4`).");
+    p!("pub const BRIDGES: u128 = {bridges:#x};");
+    p!("");
+
+    p!("/// Normal TERR values used by tile yields, worker jobs and land movement.");
+    p!("pub struct TerrainFacts {{ pub name: &'static str, pub disease: civ3mapgen::disease::Terrain, pub food: u8, pub shields: u8, pub commerce: u8, pub irrigation: u8, pub mining: u8, pub road: u8, pub movement: u8, pub worker_job: i32, pub impassable: bool, pub impassable_wheeled: bool }}");
+    p!("pub const TERRAINS: [TerrainFacts; {}] = [", r.terrains.len());
+    for t in &r.terrains {
+        p!("    TerrainFacts {{ name: {:?}, disease: civ3mapgen::disease::Terrain {{ causes: {}, cured: {}, strength: {} }}, food: {}, shields: {}, commerce: {}, irrigation: {}, mining: {}, road: {}, movement: {}, worker_job: {}, impassable: {}, impassable_wheeled: {} }}, // {}", t.name.text(), t.causes_disease(), t.cured_by_sanitation(), t.disease_strength, t.food, t.shields, t.commerce, t.irrigation_bonus, t.mining_bonus, t.road_bonus, t.movement_cost, t.worker_job, t.flags.impassable != 0, t.flags.impassable_wheeled != 0, t.name.text());
+    }
+    p!("];");
+    p!("pub const FOREST_SHIELDS: u16 = {};", g.forest_value_in_shields);
+    p!("");
+
     // --- valuation tables ---------------------------------------------------
     p!("const TFRM: [i32; {}] = {:?};", r.worker_jobs.len(), r.worker_jobs.iter().map(|j| j.required_tech).collect::<Vec<_>>());
     p!("/// `GOOD.prerequisite` per `GOOD` row (strategic resources need it to be usable).\npub const GOOD: [i32; {}] = {:?};", r.goods.len(), r.goods.iter().map(|j| j.prerequisite).collect::<Vec<_>>());
@@ -228,6 +282,38 @@ fn main() -> ExitCode {
     p!("");
 
     // --- civilizations ------------------------------------------------------
+    // The playable roster is every `RACE` row but the barbarians (row 0, the
+    // one with `civilization_index == 0`). Roster index `i` is `RACE` row
+    // `i + 1`, so a roster entry's `race` field is its row.
+    let roster: Vec<&_> = r
+        .civilizations
+        .iter()
+        .filter(|c| c.civilization_index != 0)
+        .collect();
+    let nr = roster.len();
+    p!("/// The fixed data of one civilization (a `RACE` row), the fields the");
+    p!("/// clone reads: the names the interface shows, the team color (`ntpNN.pcx`");
+    p!("/// for the unit tint, `color` for badges) and the city name list. The");
+    p!("/// ruler lives in `LEADER_ROSTER`.");
+    p!("#[derive(Clone, Copy, Debug)]");
+    p!("pub struct CivDefinition {{");
+    p!("    pub name: &'static str,");
+    p!("    pub adjective: &'static str,");
+    p!("    pub noun: &'static str,");
+    p!("    pub color: Color,");
+    p!("    /// The team-color ramp of the art (`RACE.default_color`).");
+    p!("    pub team_color: u8,");
+    p!("    pub city_names: &'static [&'static str],");
+    p!("}}");
+    p!("");
+    p!("/// One civilization's ruler, as the diplomacy screens name them.");
+    p!("#[derive(Clone, Copy, Debug)]");
+    p!("pub struct Leader {{");
+    p!("    pub name: &'static str,");
+    p!("    pub title: &'static str,");
+    p!("    pub text_set: usize,");
+    p!("}}");
+    p!("");
     p!("/// The `RACE` facts the research and diplomacy rules read for one civ.");
     p!("#[derive(Clone, Copy, Debug)]");
     p!("pub struct RaceFacts {{");
@@ -251,21 +337,51 @@ fn main() -> ExitCode {
     p!("    pub free_techs: [i32; 4],");
     p!("}}");
     p!("");
-    p!("/// The playable civilizations, in the game's order.");
-    p!("pub const RACES: [RaceFacts; {}] = [", CIVS.len());
-    for name in CIVS {
-        let Some((i, c)) = r
-            .civilizations
+    p!("/// Every playable civilization, in `RACE` row order (the barbarians, row 0,");
+    p!("/// are not one).");
+    p!("pub static CIV_ROSTER: [CivDefinition; {nr}] = [");
+    for (i, c) in roster.iter().enumerate() {
+        let name = c.civilization_name.text();
+        let (r, g, b) = civ_color_override(&name).unwrap_or_else(|| team_rgb(c.default_color));
+        let cities: Vec<String> = c
+            .city_names
             .iter()
-            .enumerate()
-            .find(|(_, c)| c.civilization_name.text() == name)
-        else {
-            eprintln!("no RACE called {name}");
-            return ExitCode::from(1);
-        };
+            .map(|s| s.text())
+            .filter(|s| !s.is_empty())
+            .map(|s| q(&s))
+            .collect();
+        p!(
+            "    CivDefinition {{ name: {}, adjective: {}, noun: {}, color: Color::srgb_u8({r}, {g}, {b}), team_color: {}, city_names: &[{}] }}, // row {}",
+            q(&name),
+            q(&c.adjective.text()),
+            q(&c.noun.text()),
+            c.default_color,
+            cities.join(", "),
+            i + 1,
+        );
+    }
+    p!("];");
+    p!("");
+    p!("/// Every playable civilization's ruler, in the same order as `CIV_ROSTER`.");
+    p!("pub static LEADER_ROSTER: [Leader; {nr}] = [");
+    for (i, c) in roster.iter().enumerate() {
+        p!(
+            "    Leader {{ name: {}, title: {}, text_set: {} }}, // {}",
+            q(&c.leader_name.text()),
+            q(&c.title.text()),
+            i,
+            c.civilization_name.text(),
+        );
+    }
+    p!("];");
+    p!("");
+    p!("/// The `RACE` facts of every playable civilization, in `CIV_ROSTER` order.");
+    p!("pub static RACE_ROSTER: [RaceFacts; {nr}] = [");
+    for (i, c) in roster.iter().enumerate() {
         let ext = c.conquests.as_ref();
         p!(
-            "    RaceFacts {{ race: {i}, flavors: {:#x}, build_often: {:#x}, traits: {:#x}, aggression: {}, culture_group: {}, shunned_government: {}, favorite_government: {}, free_techs: {:?} }}, // {name}",
+            "    RaceFacts {{ race: {}, flavors: {:#x}, build_often: {:#x}, traits: {:#x}, aggression: {}, culture_group: {}, shunned_government: {}, favorite_government: {}, free_techs: {:?} }}, // {}",
+            i + 1,
             ext.map_or(0, |e| e.flavors),
             c.build_often,
             c.traits,
@@ -273,24 +389,15 @@ fn main() -> ExitCode {
             c.culture_group,
             c.shunned_government,
             c.favorite_government,
-            c.free_techs
+            c.free_techs,
+            c.civilization_name.text(),
         );
     }
     p!("];");
     p!("");
 
     // --- the unit and building rosters -------------------------------------
-    let our_mask: u32 = RACES_OF_CIVS
-        .iter()
-        .map(|n| {
-            let i = r
-                .civilizations
-                .iter()
-                .position(|c| c.civilization_name.text() == *n)
-                .unwrap_or_else(|| panic!("no RACE called {n}"));
-            1u32 << i
-        })
-        .fold(0, |a, b| a | b);
+    let our_mask: u32 = roster.iter().enumerate().fold(0u32, |a, (i, _)| a | (1 << (i + 1)));
     let nu = r.unit_types.len();
     let nb = r.buildings.len();
     p!("/// Number of `PRTO` rows: `UnitType(i)` is row `i`, `Production(i)` the same unit.");
@@ -312,10 +419,12 @@ fn main() -> ExitCode {
                 | ab::NUCLEAR_WEAPON
                 | ab::TACTICAL_MISSILE)
             != 0;
+        // Nobody builds the units a wonder hands out (`races` is empty), but
+        // they have to exist as units.
+        let produced = r.buildings.iter().any(|b| b.unit_produced == i as i32);
         let playable = u.alt_strategy_of == -1
-            && (u.unit_class == 0 || &*name == "Galley")
             && !excluded
-            && ((u.available_to_civs as u32) & our_mask != 0 || &*name == "Scout")
+            && ((u.available_to_civs as u32) & our_mask != 0 || &*name == "Scout" || produced)
             && art.is_some();
         let sight = match (u.unit_class, &*name) {
             (1, _) => 2,
@@ -324,7 +433,7 @@ fn main() -> ExitCode {
             _ => 1,
         };
         p!(
-            "    UnitRow {{ name: {}, art: {}, icon: {}, attack: {}, defense: {}, moves: {}, sight: {sight}, hp_bonus: {}, cost: {}, pop_cost: {}, tech: {}, upgrade_to: {}, resources: [{}, {}, {}], abilities: {:#x}, special: {:#x}, worker: {:#x}, bombard: {}, bomb_range: {}, rof: {}, capacity: {}, class: {}, races: {:#x}, ai: {:#x}, zoc: {}, playable: {playable} }}, // {i}",
+            "    UnitRow {{ name: {}, art: {}, icon: {}, attack: {}, defense: {}, moves: {}, sight: {sight}, hp_bonus: {}, cost: {}, pop_cost: {}, tech: {}, upgrade_to: {}, resources: [{}, {}, {}], abilities: {:#x}, special: {:#x}, worker: {:#x}, worker_strength: {:?}, bombard: {}, bomb_range: {}, rof: {}, capacity: {}, class: {}, races: {:#x}, ai: {:#x}, zoc: {}, playable: {playable} }}, // {i}",
             q(&name),
             q(if playable { art.as_deref().unwrap_or("") } else { "" }),
             u.icon,
@@ -342,6 +451,7 @@ fn main() -> ExitCode {
             abil,
             u.special_actions,
             u.worker_actions,
+            u.worker_strength,
             u.bombard_strength,
             u.bombard_range,
             u.rate_of_fire,
@@ -362,7 +472,7 @@ fn main() -> ExitCode {
         let name = b.name.text();
         let playable = BLDG_PLAYABLE.iter().any(|n| *n == &*name) || is_great_wonder(b.other_characteristics as u32) && !BLDG_NOT_PLAYABLE.iter().any(|n| *n == &*name);
         p!(
-            "    BldgDef {{ name: {}, cost: {}, upkeep: {}, culture: {}, tech: {}, obsolete: {}, requires: {}, govt: {}, resources: [{}, {}], happy: {}, happy_all: {}, unhappy: {}, unhappy_all: {}, defense: {}, production: {}, grant_all: {}, grant_continent: {}, doubles: {}, flags: {:#x}, other: {:#x}, small: {:#x}, wonder: {:#x}, playable: {playable} }}, // {i}",
+            "    BldgDef {{ name: {}, cost: {}, upkeep: {}, culture: {}, tech: {}, obsolete: {}, requires: {}, govt: {}, resources: [{}, {}], happy: {}, happy_all: {}, unhappy: {}, unhappy_all: {}, defense: {}, production: {}, grant_all: {}, grant_continent: {}, doubles: {}, flags: {:#x}, other: {:#x}, small: {:#x}, wonder: {:#x}, produces: {}, frequency: {}, playable: {playable} }}, // {i}",
             q(&name),
             b.cost,
             b.maintenance,
@@ -386,6 +496,8 @@ fn main() -> ExitCode {
             b.other_characteristics as u32,
             b.small_wonder_flags as u32,
             b.wonder_flags as u32,
+            b.unit_produced,
+            b.unit_frequency,
         );
         bldg_names.push((i, name));
     }

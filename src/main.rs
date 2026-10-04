@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
 mod actionbar;
+mod abandon;
 mod actions;
 mod advisor_frame;
 mod advisors;
@@ -12,8 +13,12 @@ mod audio;
 mod blend;
 mod borders;
 mod bombard;
+mod build_switch;
 mod calendar;
+mod capital;
 mod cities;
+mod citizens;
+mod disease;
 mod citycalc;
 mod civs;
 mod combat;
@@ -21,6 +26,7 @@ mod diplomacy;
 mod domestic;
 mod economy;
 mod features;
+mod flip;
 mod golden;
 mod govern;
 mod hurry;
@@ -35,6 +41,8 @@ mod render;
 mod realm;
 mod research;
 mod rng;
+mod rivers;
+mod save;
 mod roster;
 mod rules_data;
 mod screenshot;
@@ -48,6 +56,9 @@ mod ui;
 mod unit_picker;
 mod units;
 mod upgrades;
+mod sites;
+mod weariness;
+mod zoc;
 mod wonders;
 
 use map::GameMap;
@@ -68,15 +79,18 @@ fn main() {
                 .set(ImagePlugin::default_nearest()),
         )
         .add_message::<units::TurnEnded>()
+        .add_message::<save::Command>()
         .add_message::<civs::CivilizationEnded>()
         .add_message::<combat::AttackOrder>()
         .add_message::<bombard::Order>()
         .init_resource::<bombard::TargetMode>()
+        .init_resource::<cities::BorderKey>()
         .add_message::<cities::FoundCityOrder>()
         .init_resource::<ai::AiState>()
         .init_resource::<combat::ActiveCombat>()
         .init_resource::<combat::CombatSpeed>()
         .init_resource::<civs::Civilizations>()
+        .init_resource::<units::Exploration>()
         .insert_resource(research::Research::new())
         .insert_resource(diplomacy::Diplomacy::new())
         .init_resource::<advisors::Advisors>()
@@ -101,8 +115,11 @@ fn main() {
         .init_resource::<cities::Treasury>()
         .init_resource::<cities::BuildMenu>()
         .init_resource::<cities::HurryAsk>()
+        .init_resource::<build_switch::BuildSwitch>()
         .init_resource::<barbarians::Barbarians>()
+        .init_resource::<flip::Flips>()
         .init_resource::<production_prompt::ProductionPrompts>()
+        .init_resource::<abandon::Abandon>()
         .init_resource::<splash::SplashUp>()
         .init_resource::<features::MessageBoard>()
         .init_resource::<screenshot::Shots>()
@@ -175,6 +192,7 @@ fn main() {
                 barbarians::uprising,
                         (
                             govern::ai_turn,
+                            army::ai_science_leaders,
                             upgrades::ai_turn,
                             ai::play_turn,
                             cities::found_city.run_if(production_prompt::inactive),
@@ -189,19 +207,31 @@ fn main() {
                     // advance that arrives this turn can be built this turn.
                     (
                         units::end_turn_units,
+                        improvements::end_turn_work,
                         research::end_turn,
                         diplomacy::end_turn,
+                        weariness::end_turn,
+                        flip::run,
+                        civs::check_domination,
                         cities::end_turn_cities,
                         wonders::track,
                     )
                         .chain(),
-                    improvements::end_turn_work,
                     // Visibility first: it holds `seen` for the civ in play,
-                    // which the worked-tile check reads.
-                    (units::refresh_visibility, cities::reconcile_tiles).chain(),
+                    // which the worked-tile check reads; so do the borders,
+                    // recomputed when a city's level, owner or existence
+                    // changed this frame.
+                    (
+                        capital::replace_missing,
+                        sites::remove_overrun,
+                        units::refresh_visibility,
+                        cities::update_borders,
+                        cities::reconcile_tiles,
+                    )
+                        .chain(),
                     units::drive_movement.run_if(combat::idle),
                     units::advance_anims,
-                    features::resolve_features,
+                    (features::resolve_features, research::spawn_leaders).chain(),
                     units::restack,
                     units::auto_select,
                     civs::focus_active_civ,
@@ -222,7 +252,9 @@ fn main() {
                     cities::maintain_city_screen,
                     cities::city_screen_input.run_if(production_prompt::city_input_allowed),
                     (cities::city_screen_buttons, cities::update_panel_buttons).chain(),
-                    (production_prompt::respond, production_prompt::show).chain(),
+                    (production_prompt::respond, production_prompt::show,
+                        build_switch::respond, build_switch::show,
+                        abandon::respond, abandon::show).chain(),
                     features::sync_feature_sprites,
                     improvements::sync_improvement_sprites,
                     borders::sync_borders,
@@ -252,13 +284,17 @@ fn main() {
         // clips advance.
         .add_systems(
             Update,
-            (naval::sea_hazards, bombard::resolve, combat::start_attacks, combat::run_combat)
+            (naval::unit_hazards, bombard::resolve, combat::start_attacks, combat::run_combat)
                 .chain()
                 .after(units::drive_movement)
                 .before(units::advance_anims),
         )
         .add_systems(Update, naval::sync_cargo.after(combat::run_combat).before(units::advance_anims))
         .add_systems(Update, combat::sync_health_bars.after(units::animate_units))
+        .add_systems(Update, units::sync_art_eras.before(units::animate_units))
+        // Saving and loading change the whole world, so they run on their own,
+        // before the turn's systems look at it.
+        .add_systems(First, (save::keys, save::run).chain())
         .add_systems(Update, cities::frame_city_view.after(cities::maintain_city_screen))
         .add_systems(Update, cities::highlight_menu_rows)
         .add_systems(Update, (advisor_frame::hover_art, advisor_frame::switch_tabs))

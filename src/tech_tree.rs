@@ -25,7 +25,8 @@ use crate::advisors::Action;
 use crate::cities::Production;
 use crate::research::{Research, tech_name};
 use crate::roster::{self, BLDG_COUNT, UNIT_COUNT};
-use crate::rules_data::{RACES, TECH_TREE};
+use crate::civs::RACES;
+use crate::rules_data::TECH_TREE;
 use crate::stage::Ui;
 use crate::units::UnitType;
 
@@ -208,7 +209,7 @@ pub fn says(r: &Research, civ: usize) -> String {
 }
 
 /// The page of `era`.
-pub fn page(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Research, civ: usize, era: usize, closable: bool) {
+pub fn page(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Research, civ: usize, era: usize) {
     let background = format!("science_{era}");
     let f = Frame {
         background: &background,
@@ -217,9 +218,8 @@ pub fn page(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Res
         says: says(r, civ),
         tab: Tab::Science,
     };
-    // While a target must be picked there is no X and no way to another
-    // advisor.
-    advisor_frame::frame(s, ui, assets, &f, closable.then_some(Action::Close));
+    // Closing with a target still owed brings back the research popup.
+    advisor_frame::frame(s, ui, assets, &f, Some(Action::Close));
     for t in 0..TECH_TREE.len() as i32 {
         if TECH_TREE[t as usize].0 == era as i32 {
             tech_box(s, ui, assets, r, civ, t);

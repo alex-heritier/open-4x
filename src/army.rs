@@ -133,6 +133,81 @@ mod tests {
         assert_eq!(leader_die(0, false), 16);
         assert_eq!(leader_die(0, true), 32);
     }
+
+    #[test]
+    fn only_a_scientific_leader_can_start_an_age_and_it_cannot_form_an_army() {
+        let mut app = App::new();
+        app.init_resource::<crate::units::Selected>();
+        app.init_resource::<crate::civs::Civilizations>();
+        app.init_resource::<MessageBoard>();
+        app.insert_resource(crate::units::UnitArt::blank());
+        app.insert_resource(crate::research::Research::new());
+        app.insert_resource(crate::units::Turn(7));
+        app.add_message::<UnitCommand>();
+        app.add_systems(Update, commands);
+        app.world_mut().spawn(City::new(0, "Kyoto", 3, 3));
+        let mut u = Unit::new(0, UnitType::Leader, 3, 3);
+        let e = app.world_mut().spawn(u.clone()).id();
+        app.world_mut().resource_mut::<crate::units::Selected>().0 = Some(e);
+        app.world_mut().write_message(UnitCommand::ScienceAge);
+        app.update();
+        assert!(app.world().get::<Unit>(e).is_some(), "military leader is not consumed");
+        u.scientific_leader = true;
+        u.moves = 0; // The native availability gate does not test movement.
+        app.world_mut().entity_mut(e).insert(u);
+        app.world_mut().write_message(UnitCommand::BuildArmy);
+        app.update();
+        assert!(app.world().get::<Unit>(e).is_some());
+        app.world_mut().write_message(UnitCommand::ScienceAge);
+        app.update();
+        assert!(app.world().get::<Unit>(e).is_none());
+        let research = app.world().resource::<crate::research::Research>();
+        assert!(research.science_age(0, 27));
+        assert!(!research.science_age(0, 28));
+        // A second scientific leader remains available for later use.
+        let mut u = Unit::new(0, UnitType::Leader, 3, 3);
+        u.scientific_leader = true;
+        let other = app.world_mut().spawn(u).id();
+        app.world_mut().resource_mut::<crate::units::Selected>().0 = Some(other);
+        app.world_mut().write_message(UnitCommand::ScienceAge);
+        app.update();
+        assert!(app.world().get::<Unit>(other).is_some());
+        app.world_mut().resource_mut::<crate::units::Turn>().0 = 28;
+        app.world_mut().write_message(UnitCommand::LeaderHurry);
+        app.update();
+        assert!(app.world().get::<Unit>(other).is_none());
+        let city = app.world_mut().query::<&City>().single(app.world()).unwrap();
+        assert_eq!(city.shields, city.price(city.production));
+    }
+
+    #[test]
+    fn computer_scientists_finish_a_wonder_then_start_an_age() {
+        crate::civs::set_controllers();
+        let mut app = App::new();
+        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.init_resource::<crate::civs::Civilizations>();
+        app.world_mut().resource_mut::<crate::civs::Civilizations>().active = 1;
+        app.insert_resource(crate::research::Research::new());
+        app.insert_resource(crate::units::Turn(7));
+        app.add_systems(Update, ai_science_leaders);
+        let mut city = City::new(1, "Rome", 3, 3);
+        city.production = crate::cities::Production::ThePyramids;
+        app.world_mut().spawn(city);
+        let mut scientist = Unit::new(1, UnitType::Leader, 3, 3);
+        scientist.scientific_leader = true;
+        let first = app.world_mut().spawn(scientist.clone()).id();
+        app.update();
+        assert!(app.world().get::<Unit>(first).is_none());
+        let city = app.world_mut().query::<&City>().single(app.world()).unwrap();
+        assert_eq!(city.shields, city.price(city.production));
+        let second = app.world_mut().spawn(scientist.clone()).id();
+        app.update();
+        assert!(app.world().get::<Unit>(second).is_none());
+        assert!(app.world().resource::<crate::research::Research>().science_age(1, 27));
+        let third = app.world_mut().spawn(scientist).id();
+        app.update();
+        assert!(app.world().get::<Unit>(third).is_some(), "another leader waits until the age expires");
+    }
 }
 
 use bevy::prelude::*;
@@ -156,6 +231,8 @@ pub fn commands(
     mut units: Query<(Entity, &mut Unit)>,
     mut cities: Query<&mut City>,
     mut board: ResMut<MessageBoard>,
+    mut research: ResMut<crate::research::Research>,
+    turn: Res<crate::units::Turn>,
 ) {
     for cmd in cmds.read().copied() {
         let Some(e) = selected.0 else { continue };
@@ -165,10 +242,21 @@ pub fn commands(
         }
         let u = u.clone();
         match cmd {
+            UnitCommand::ScienceAge => {
+                if u.scientific_leader && cities.iter().any(|c| (c.x, c.y) == (u.x, u.y))
+                    && !research.science_age(u.civ, turn.0 as i32)
+                {
+                    research.start_science_age(u.civ, turn.0 as i32);
+                    commands.entity(e).despawn();
+                    selected.0 = None;
+                    post(&mut board, "Our civilization has entered a Science Age!");
+                }
+            }
             UnitCommand::BuildArmy | UnitCommand::LeaderHurry if !in_city(&u, cities.iter()) => {
                 post(&mut board, "A Leader must be in one of our cities to do that.");
             }
             UnitCommand::BuildArmy => {
+                if u.scientific_leader { continue; }
                 commands.entity(e).despawn();
                 let a = crate::units::spawn_unit(&mut commands, &art, UnitType::Army, u.x, u.y, u.civ);
                 commands.entity(a).entry::<Unit>().and_modify(|mut a| a.moves = 0);
@@ -196,5 +284,28 @@ pub fn commands(
             }
             _ => {}
         }
+    }
+}
+
+/// HYPOTHESIS: computer policy prefers finishing a great wonder; otherwise
+/// it uses a Scientific Leader for the native Science Age in its city.
+pub fn ai_science_leaders(
+    mut commands: Commands,
+    civs: Res<crate::civs::Civilizations>,
+    turn: Res<crate::units::Turn>,
+    units: Query<(Entity, &Unit)>,
+    mut cities: Query<&mut City>,
+    mut research: ResMut<crate::research::Research>,
+) {
+    let civ = civs.active;
+    if !crate::civs::is_ai(civ) || civs.outcome.is_some() { return; }
+    for (e, u) in units.iter().filter(|(_, u)| u.civ == civ && u.scientific_leader && u.carrier.is_none()) {
+        let Some(mut city) = cities.iter_mut().find(|c| c.civ == civ && (c.x, c.y) == (u.x, u.y)) else { continue };
+        if city.production.bldg().is_some_and(|b| b.is_great_wonder()) && city.shields < city.price(city.production) {
+            hurry(&mut city);
+        } else if !research.science_age(civ, turn.0 as i32) {
+            research.start_science_age(civ, turn.0 as i32);
+        } else { continue; }
+        commands.entity(e).despawn();
     }
 }

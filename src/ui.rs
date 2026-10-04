@@ -137,10 +137,9 @@ pub fn update_hover_label(
                         Some(p) => {
                             let extra = units::path_turns(
                                 &map,
-                                (u.x, u.y),
-                                u.moves,
-                                crate::naval::moves(u.utype, u.civ),
+                                u,
                                 &p,
+                                &ports,
                             );
                             parts.push(format!(
                                 "path {} steps, {}",
@@ -198,6 +197,14 @@ pub fn update_game_over(
         ),
         Some(Outcome::Victory(c)) => (
             format!("The {} have conquered the world.", CIVS[c].name),
+            Visibility::Visible,
+        ),
+        Some(Outcome::Domination(c)) if !crate::civs::is_ai(c) => (
+            format!("Victory! The {} dominate the world.", CIVS[c].name),
+            Visibility::Visible,
+        ),
+        Some(Outcome::Domination(c)) => (
+            format!("The {} dominate the world.", CIVS[c].name),
             Visibility::Visible,
         ),
         Some(Outcome::Defeat) => (

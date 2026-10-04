@@ -8,7 +8,7 @@ pub const MAP_SEED: u64 = 20260928;
 pub const TILE_W: f32 = 128.0;
 pub const TILE_H: f32 = 64.0;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Base {
     Ocean,
     Sea,
@@ -20,14 +20,14 @@ pub enum Base {
     Tundra,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Relief {
     Flat,
     Hill,
     Mountain,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Cover {
     Bare,
     Forest,
@@ -35,7 +35,7 @@ pub enum Cover {
     Pine,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Tile {
     pub base: Base,
     pub relief: Relief,
@@ -49,7 +49,20 @@ pub struct Tile {
     pub resource: Option<u8>,
     pub road: bool,
     pub irrigation: bool,
+    /// Native Cell +4 river mask, indexed by the native ring-1 directions.
+    pub river: u8,
     pub mine: bool,
+    /// Colony object on the tile (`sites.rs`).
+    pub site: Option<crate::sites::Site>,
+    /// Native overlay bits 4 and 28, independent of colony objects.
+    pub fortress: bool,
+    pub barricade: bool,
+    /// Native feature bit 0x10000000: this tile has already paid for a forest chop.
+    pub forest_harvested: bool,
+    /// Civ whose cultural border holds the tile (the cell's owner byte),
+    /// written only by `cities::recompute_borders`.
+    #[serde(default)]
+    pub owner: Option<u8>,
 }
 
 impl Tile {
@@ -111,7 +124,16 @@ impl GameMap {
     /// A* path with movement costs, or None when unreachable.
     /// Returns the steps excluding the start tile.
     pub fn find_path(&self, start: (i32, i32), goal: (i32, i32)) -> Option<Vec<(i32, i32)>> {
-        self.find_path_by(start, goal, |from, to| step_cost(self.get(from.0, from.1)?, self.get(to.0, to.1)?))
+        self.find_path_by(start, goal, |from, to| self.land_cost(from, to, false))
+    }
+
+    /// Normal terrain/road cost; bridge technology preserves the road
+    /// discount across a river. Unit legality is checked by `entry_cost`.
+    pub fn land_cost(&self, from: (i32, i32), to: (i32, i32), bridges: bool) -> Option<u8> {
+        let origin = self.get(from.0, from.1)?;
+        let destination = self.get(to.0, to.1)?;
+        Some(civ3mapgen::movement::land_step_cost(move_cost(destination)?,
+            origin.road, destination.road, crate::rivers::crossed(self, from, to), bridges))
     }
 
     /// The same path search with domain-specific entry costs.
@@ -172,25 +194,43 @@ impl GameMap {
         )
     }
 
-    /// Shipyards need an adjacent water body larger than 20 tiles (0x4C05BB).
-    pub fn coastal_site(&self, x: i32, y: i32) -> bool {
+    /// Native water regions join through shared edges (0x5EB92D), which
+    /// are orthogonal neighbors in this square-grid representation. Stop
+    /// above the lake threshold; the callers only need small versus large.
+    pub fn water_body_size(&self, start: (i32, i32)) -> usize {
         use std::collections::{HashSet, VecDeque};
         let water = |p: (i32, i32)| self.get(p.0, p.1).is_some_and(|t|
             matches!(t.base, Base::Coast | Base::Sea | Base::Ocean));
-        let mut seen = HashSet::new();
-        for start in self.neighbors(x, y).into_iter().filter(|&p| water(p)) {
-            if !seen.insert(start) { continue; }
-            let mut queue = VecDeque::from([start]);
-            let mut size = 0;
-            while let Some(p) = queue.pop_front() {
-                size += 1;
-                if size > 20 { return true; }
-                for nb in self.neighbors(p.0, p.1).into_iter().filter(|&p| water(p)) {
-                    if seen.insert(nb) { queue.push_back(nb); }
+        if !water(start) { return 0; }
+        let start = (self.wrap_x(start.0), start.1);
+        let mut seen = HashSet::from([start]);
+        let mut queue = VecDeque::from([start]);
+        while let Some((x, y)) = queue.pop_front() {
+            for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+                let nb = (self.wrap_x(x + dx), y + dy);
+                if water(nb) && seen.insert(nb) {
+                    if seen.len() > civ3mapgen::lakes::LAKE_MAX { return seen.len(); }
+                    queue.push_back(nb);
                 }
             }
         }
-        false
+        seen.len()
+    }
+
+    /// 0x5F38C0: water bodies of at most 20 tiles supply fresh water in
+    /// the center-inclusive 3x3 neighborhood; a river on this tile also supplies water.
+    pub fn fresh_water(&self, x: i32, y: i32) -> bool {
+        self.get(x, y).is_some_and(|t| t.river != 0)
+            || std::iter::once((x, y)).chain(self.neighbors(x, y)).any(|p| {
+            let size = self.water_body_size(p);
+            size > 0 && size <= civ3mapgen::lakes::LAKE_MAX
+        })
+    }
+
+    /// Shipyards need an adjacent water body larger than 20 tiles (0x4C05BB).
+    pub fn coastal_site(&self, x: i32, y: i32) -> bool {
+        self.neighbors(x, y).into_iter().any(|p|
+            self.water_body_size(p) > civ3mapgen::lakes::LAKE_MAX)
     }
 
     pub fn generate() -> Self {
@@ -277,7 +317,13 @@ impl GameMap {
                     resource: None,
                     road: false,
                     irrigation: false,
+            river: 0,
                     mine: false,
+                    site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+                    owner: None,
                 });
             }
         }
@@ -289,6 +335,7 @@ impl GameMap {
             seed,
         };
         map.coast_shores();
+        crate::rivers::generate(&mut map);
         map.start = map.pick_start();
         // RE stages 10-12: resources, goody huts, barbarian camps. Stage
         // seeds derive from the water level (0..100 Oceans-slider semantics)
@@ -349,76 +396,43 @@ impl GameMap {
     }
 }
 
-/// Food and shields for a worked tile. Civ3 values, except coast is 2 food
-/// (no commerce exists in the MVP, so 1 food coasts would starve) and jungle
-/// is 1/1 for the same reason. Bonus resources add their GOOD yield delta.
-pub fn yields(t: &Tile) -> (u8, u8) {
-    let (f, s) = if t.relief == Relief::Mountain {
-        (0, 1)
-    } else if t.relief == Relief::Hill {
-        (1, 1)
-    } else {
-        match t.cover {
-            Cover::Forest => (1, 2),
-            Cover::Jungle => (1, 1),
-            Cover::Pine => (1, 1),
-            Cover::Bare => match t.base {
-                Base::Grassland => (2, 0),
-                Base::Plains => (1, 1),
-                Base::Desert => (0, 1),
-                Base::Tundra => (1, 1),
-                Base::Coast => (2, 0),
-                Base::Sea => (1, 0),
-                Base::Ocean => (1, 0),
-                Base::Ice => (0, 0),
-            },
-        }
-    };
-    let (mut f, s) = match t
-        .resource
-        .map(|id| crate::features::GOODS[id as usize].bonus)
-    {
-        Some((df, ds)) => (f + df, s + ds),
-        None => (f, s),
-    };
-    if t.irrigation {
-        f += 1;
+/// TERR row of the tile's effective terrain, with relief taking precedence.
+pub(crate) fn terrain_row(t: &Tile) -> usize {
+    match (t.relief, t.cover, t.base) {
+        (Relief::Mountain, _, _) => 6,
+        (Relief::Hill, _, _) => 5,
+        (_, Cover::Forest | Cover::Pine, _) => 7,
+        (_, Cover::Jungle, _) => 8,
+        (_, _, Base::Desert) if t.river != 0 => 4,
+        (_, _, Base::Desert) => 0,
+        (_, _, Base::Plains) => 1,
+        (_, _, Base::Grassland) => 2,
+        (_, _, Base::Tundra | Base::Ice) => 3,
+        (_, _, Base::Coast) => 11,
+        (_, _, Base::Sea) => 12,
+        (_, _, Base::Ocean) => 13,
     }
-    // Mines: +2 shields on hills/mountains, +1 on desert.
-    let s = if t.mine {
-        s + if t.relief == Relief::Flat { 1 } else { 2 }
-    } else {
-        s
-    };
-    (f, s)
+}
+
+/// Food and shields from shipped TERR values, improvements and GOOD bonuses.
+pub fn yields(t: &Tile) -> (u8, u8) {
+    if t.base == Base::Ice { return (0, 0); }
+    let terrain = &crate::rules_data::TERRAINS[terrain_row(t)];
+    let (df, ds) = t.resource.map_or((0, 0), |id| crate::features::GOODS[id as usize].bonus);
+    (terrain.food + df + if t.irrigation { terrain.irrigation } else { 0 },
+     terrain.shields + ds + if t.mine { terrain.mining } else { 0 })
 }
 
 /// Movement points are counted in thirds so roads can cost 1/3 MP.
 pub const MP: u8 = 3;
 
 /// Terrain cost to enter in whole MP, or None when impassable. Roads are
-/// handled by `step_cost`, which needs both ends of the step.
+/// handled by `GameMap::land_cost`, which needs both ends of the step.
 pub fn move_cost(t: &Tile) -> Option<u8> {
     match t.base {
         Base::Ocean | Base::Sea | Base::Coast | Base::Ice => None,
-        _ => {
-            if t.relief == Relief::Mountain {
-                None
-            } else if t.relief == Relief::Hill || t.cover != Cover::Bare {
-                Some(2)
-            } else {
-                Some(1)
-            }
-        }
+        _ => Some(crate::rules_data::TERRAINS[terrain_row(t)].movement),
     }
-}
-
-/// Cost in thirds of an MP to step between neighbors, or None when the
-/// destination is impassable. Road to road (city tiles carry a road) is
-/// 1/3 MP whatever the terrain, as in Civ3.
-pub fn step_cost(from: &Tile, to: &Tile) -> Option<u8> {
-    let terrain = move_cost(to)?;
-    Some(if from.road && to.road { 1 } else { terrain * MP })
 }
 
 pub fn tile_to_world(x: i32, y: i32) -> Vec2 {
@@ -511,7 +525,13 @@ mod tests {
             resource: None,
             road: false,
             irrigation: false,
+            river: 0,
             mine: false,
+            site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+            owner: None,
         }
     }
 
@@ -522,8 +542,11 @@ mod tests {
         assert_eq!(yields(&tile(Base::Grassland, flat, bare)), (2, 0));
         assert_eq!(yields(&tile(Base::Plains, flat, bare)), (1, 1));
         assert_eq!(yields(&tile(Base::Desert, flat, bare)), (0, 1));
-        assert_eq!(yields(&tile(Base::Tundra, flat, bare)), (1, 1));
-        assert_eq!(yields(&tile(Base::Coast, flat, bare)), (2, 0));
+        assert_eq!(yields(&tile(Base::Tundra, flat, bare)), (1, 0));
+        assert_eq!(yields(&tile(Base::Coast, flat, bare)), (1, 0));
+        assert_eq!(yields(&tile(Base::Ocean, flat, bare)), (0, 0));
+        assert_eq!(yields(&tile(Base::Grassland, flat, Cover::Jungle)), (1, 0));
+        assert_eq!(yields(&tile(Base::Tundra, flat, Cover::Pine)), (1, 2));
         assert_eq!(
             yields(&tile(Base::Grassland, flat, Cover::Forest)),
             (1, 2)
@@ -552,20 +575,11 @@ mod tests {
     }
 
     #[test]
-    fn irrigation_adds_one_food_roads_flatten_move_cost() {
+    fn irrigation_adds_one_food() {
         let mut t = tile(Base::Plains, Relief::Flat, Cover::Bare);
         assert_eq!(yields(&t), (1, 1));
         t.irrigation = true;
         assert_eq!(yields(&t), (2, 1));
-        let mut h = tile(Base::Grassland, Relief::Hill, Cover::Bare);
-        let mut g = tile(Base::Grassland, Relief::Flat, Cover::Bare);
-        assert_eq!(step_cost(&g, &h), Some(2 * MP));
-        h.road = true;
-        // road only at the destination: full terrain cost
-        assert_eq!(step_cost(&g, &h), Some(2 * MP));
-        g.road = true;
-        assert_eq!(step_cost(&g, &h), Some(1));
-        assert_eq!(step_cost(&h, &tile(Base::Ocean, Relief::Flat, Cover::Bare)), None);
     }
 
     #[test]
@@ -577,7 +591,7 @@ mod tests {
         assert_eq!(move_cost(&tile(Base::Ice, flat, bare)), None);
         assert_eq!(
             move_cost(&tile(Base::Grassland, Relief::Mountain, bare)),
-            None
+            Some(3)
         );
         assert_eq!(
             move_cost(&tile(Base::Grassland, Relief::Hill, bare)),

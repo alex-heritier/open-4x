@@ -64,6 +64,12 @@ impl Rng {
         Rng { state: seed }
     }
 
+    /// The generator's whole state (a saved game keeps it; `new` restores it).
+    #[inline]
+    pub fn state(&self) -> u32 {
+        self.state
+    }
+
     /// `rand01()` — returns a double in `[0, 1)`.
     #[inline]
     pub fn next_f64(&mut self) -> f64 {

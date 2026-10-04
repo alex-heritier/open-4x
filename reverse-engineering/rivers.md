@@ -1,3 +1,12 @@
+> Current correction: `rust/src/rivergen.rs` recovers the river generator at
+> `0x5F07D0`. Its actual mask is Cell +4; the historical owner-byte trace below
+> was withdrawn. The playable square map now adapts this generator through
+> `src/rivers.rs`, with native growth logic but custom topology and density.
+> The mask supplies freshwater, commerce and directional defense. The 4x4
+> art is addressed at blended tile corners (NW/NE/SW/SE branches); source
+> inspection and rendered continuous rivers verify this art interpretation,
+> not the old renderer addresses below.
+
 # Rivers — placement system and art path
 
 **Headline: no `generateMap` stage places rivers.** All twelve stages are
@@ -188,3 +197,33 @@ null-checked `call *0xC4(%eax)` (slot 49), `ret 0x1C`.
 `rust/src/rivers.rs`: `RiverMask` 4-edge nibble type, segment continuity
 rule, delta/mountain variant selector, city-view background filename
 builder. Marked `HYPOTHESIS` where it goes beyond the verified art path.
+
+## Playable-map integration and setter verification (2026-10-04)
+
+A fresh static read verifies the mark path, independent of the old owner-byte
+trace: `0x5F0370` resolves the two edge tiles through map vtable +0x30, then
+calls their vtable +0xF4 at `0x5F03E1` and `0x5F0444`. The target `0x5EACC0`
+ORs the supplied mask into **Cell +4** (`0x5EACCA..0x5EACCC`), tests effective
+terrain through +0xC8, and changes terrain 0 (Desert) to 4 (Flood Plain) at
+`0x5EACD7..0x5EACE1`. This contradicts the historical hills-only reading.
+
+The game rotates its square grid into a temporary native grid, using 24-tile
+wrapped copies at each horizontal edge, numbers native continents, and calls
+the recovered generator. It then folds the masks back, makes shared edges
+reciprocal at the seam, and rebuilds diagonal continuity bits. The adapter
+changes topology and source density; it is not exact native map generation.
+Terrain generation otherwise remains the game's existing noise generator.
+
+The shipped mtnRivers and deltaRivers 4x4 sheets now draw at blended tile
+corners with NW, NE, SW, SE branch bits. Coastal corners select delta art.
+Native sprite selection has not been decoded, so this selection is a clone
+rendering choice verified visually for continuity. Asset preparation clears
+the green exterior as well as magenta. Loading a save rebuilds these terrain
+entities along with the ground.
+
+Tile masks supply freshwater, the verified +1 commerce (`yields.md` 4.3),
+Flood Plain food/mining rules, city river eligibility, and +25 directional
+combat defense (`combat.md` 4.1), including diagonal and wrapped directions.
+Save format 8 records the byte. River-crossing movement costs, disease and
+special floodplain decoration still need integration. Agricultural freshwater
+food rules also remain incomplete.

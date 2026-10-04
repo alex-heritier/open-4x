@@ -27,7 +27,7 @@ pub fn capable(t: UnitType) -> bool {
 }
 
 pub fn improved(t: &Tile) -> bool {
-    t.road || t.mine || t.irrigation
+    t.road || t.mine || t.irrigation || t.fortress || t.barricade
 }
 
 fn terrain_pct(map: &GameMap, at: (i32, i32)) -> i32 {
@@ -38,7 +38,7 @@ fn terrain_pct(map: &GameMap, at: (i32, i32)) -> i32 {
 
 fn tile_pct(city: Option<&City>) -> i32 {
     city.map_or(0, |c| exe::tile_term(exe::Structure::City {
-        size: i32::from(c.size), resisters: 0,
+        size: i32::from(c.size()), resisters: 0,
         building_pct: crate::combat::Hold::of(c).building_pct,
     }, false, &exe::Rules::CONQUESTS))
 }
@@ -120,10 +120,7 @@ pub fn resolve(
             continue;
         }
         let city = cities.iter().find(|(_, c)| (c.x, c.y) == at).map(|(e, c)| (e, c.clone()));
-        let owner = {
-            let refs: Vec<_> = cities.iter().map(|(_, c)| c).collect();
-            crate::cities::territory(&map, &refs).get(&at).map(|&i| refs[i].civ)
-        };
+        let owner = map.get(at.0, at.1).and_then(|t| t.owner).map(usize::from);
         let stack: Vec<_> = units.iter().filter(|(_, u)| u.carrier.is_none() && (u.x, u.y) == at)
             .map(|(e, u)| (e, u.clone())).collect();
         if city.as_ref().is_some_and(|(_, c)| !diplomacy.at_war(att.civ, c.civ))
@@ -173,7 +170,7 @@ pub fn resolve(
             let wall = exe::walls_step(rng.0.reference(), &exe::WallsAttack {
                 domain: exe::Domain::Land, bombard: d.bombard, rate_of_fire: d.rof,
                 terrain_pct: terrain, tile_pct: tile,
-            }, &exe::CityWalls { pop: i32::from(c.size), facilities: &facilities, wonder_count: 0 }, &exe::Rules::CONQUESTS);
+            }, &exe::CityWalls { pop: i32::from(c.size()), facilities: &facilities, wonder_count: 0 }, &exe::Rules::CONQUESTS);
             shoot_units = wall.attacks_units();
             if let exe::WallsStep::Hit(hit) = wall {
                 let row = match hit { exe::FacilityHit::Destroyed(row) | exe::FacilityHit::Reported(row) => Some(row), _ => None };
@@ -203,16 +200,19 @@ pub fn resolve(
                     u.rested = false;
                     result = format!("Bombardment hit {} for {} damage.", def(u.utype).name, volley.hits);
                     diplomacy.note_attack(att.civ, 1 << u.civ);
+                    // A target left at exactly one point books an incident.
+                    if u.max_hp() - u.damage == 1 {
+                        diplomacy.incident(att.civ, u.civ, 1);
+                    }
                 }
             } else if let Some((e, c)) = &city {
                 let mode = exe::StrikeMode::from_mode(rng.0.below(exe::NO_TARGET_CITY_MODE_DIE)).unwrap();
-                if mode != exe::StrikeMode::Population || c.size > 1 {
+                if mode != exe::StrikeMode::Population || c.size() > 1 {
                     let odds = exe::strike_odds(mode.base(&exe::Rules::CONQUESTS), terrain, tile, d.bombard).unwrap();
                     if exe::strike_hit(rng.0.reference(), odds, d.rof) {
                         let mut c = cities.get_mut(*e).unwrap().1;
                         if mode == exe::StrikeMode::Population {
-                            c.size -= 1;
-                            c.worked.clear();
+                            c.lose_population(1, None, &mut rng.0);
                             result = format!("Bombardment killed a citizen in {}.", c.name);
                         } else {
                             let buildings: Vec<_> = c.buildings.iter().copied().filter(|p| p.bldg().is_some_and(|b| !b.is_great_wonder() && !b.is_small_wonder())).collect();
@@ -223,6 +223,9 @@ pub fn resolve(
                             }
                         }
                         diplomacy.note_attack(att.civ, 1 << c.civ);
+                        if mode == exe::StrikeMode::Population {
+                            diplomacy.incident(att.civ, c.civ, 1);
+                        }
                     }
                 }
             } else if terrain_target {
@@ -232,9 +235,7 @@ pub fn resolve(
                     let i = map.idx(at.0, at.1);
                     let t = &mut map.tiles[i];
                     // 0x5B4DC0 clears all four low overlay bits together.
-                    t.road = false;
-                    t.mine = false;
-                    t.irrigation = false;
+                    if let Some(l) = crate::actions::loot(t) { crate::actions::strip(t, l); }
                     result = "Bombardment destroyed the tile's improvements.".to_string();
                     if let Some(civ) = owner { diplomacy.note_attack(att.civ, 1 << civ); }
                 }
@@ -258,6 +259,7 @@ mod tests {
             t.base = Base::Grassland;
             t.relief = Relief::Flat;
             t.cover = Cover::Bare;
+            t.river = 0;
             t.visible = true;
         }
         let mut diplomacy = Diplomacy::new();
@@ -270,7 +272,8 @@ mod tests {
         app.init_resource::<crate::civs::Civilizations>();
         app.init_resource::<MessageBoard>();
         app.add_message::<Order>();
-        app.add_systems(Update, resolve);
+        app.init_resource::<crate::cities::BorderKey>();
+        app.add_systems(Update, (crate::cities::update_borders, resolve).chain());
         let a = app.world_mut().spawn(Unit::new(0, UnitType::Catapult, 10, 10)).id();
         let d = app.world_mut().spawn(Unit::new(1, UnitType::Spearman, 11, 10)).id();
         (app, a, d)
@@ -412,13 +415,13 @@ mod tests {
             let (mut app, a, d) = arena(seed, true);
             app.world_mut().despawn(d);
             let mut city = City::new(1, "Rome", 11, 10);
-            city.size = 3;
+            city.set_size(3);
             city.buildings.extend([Production::Temple, Production::ThePyramids]);
             let c = app.world_mut().spawn(city).id();
             fire(&mut app, a, (11, 10));
             let c = app.world().get::<City>(c).unwrap();
             assert!(c.has(Production::ThePyramids));
-            citizens += i32::from(c.size == 2);
+            citizens += i32::from(c.size() == 2);
             buildings += i32::from(!c.has(Production::Temple));
         }
         assert!(citizens > 0 && buildings > 0);

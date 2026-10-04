@@ -621,3 +621,803 @@ A rendered seed-1 run chose Unload all, landed both Settler and Worker at
 then founded Kyoto. Frames 200, 270 and 340 in
 `/tmp/open4x-shore-dialog{}.png` were inspected against
 `/tmp/open4x-shore-dialog-render.log`.
+
+### Full civilization and unit roster (landed)
+
+The match is still four chairs, but they are now drawn from all 31
+civilizations of `conquests.biq` instead of the four hard-coded ones.
+`biq/examples/gen_game_rules.rs` emits `CIV_ROSTER`, `LEADER_ROSTER` and
+`RACE_ROSTER` (names, adjective, noun, ruler, ruler title, `diplomacy.txt`
+text set, team color, badge color and the per-civ city list) alongside the
+unit and building tables. `src/civs.rs` keeps `CIV_COUNT = 4` so every
+`[_; CIV_COUNT]` array is unchanged, and exposes `CIVS`/`RACES`/`LEADERS`
+as index tables over the roster, so `CIVS[slot]`, `RACES[slot]` and
+`LEADERS[slot]` read as before. `CIV3_CIVS=Japan,Rome,Egypt,China` (or
+`CIV3_PLAYER=Greece`) picks the chairs; the first name is the human. Above
+the default four, selecting a civ changes its free advances, traits,
+unique unit, city names, adjective and leader speech.
+
+The unit roster now marks every `PRTO` row with art playable, not only the
+land units and Galley: 87 units in 85 `Art/Units` folders, including the
+Play the World unique units (their art lives in `civ3PTW/Art/Units`, now a
+`prep_assets.py` source root) and the Conquests units. `Numidian Mercenary`
+is the one unit with no art anywhere in the install and borrows the
+Hoplite's. `tools/prep_assets.py units` converted the 85 folders for the 13
+team ramps the roster uses. Abilities with no clone implementation (stealth,
+nuclear strikes, air missions, army loading) are inert.
+
+Verified: 417 game tests and a release build. Rendered runs of the default
+match and of `CIV3_CIVS=Greece,Mongols,Carthage,Inca` (free advances and
+`RACES` traits change), an autoplay run of 900 frames with `CIV3_AI_FAST`,
+and a Greece-vs-Mongols contact showing "Genghis Khan Temujin of the
+Mongols" with the Mongol `diplomacy.txt` greeting. The animated leaderheads
+are still converted for the default four only; a civ chosen beyond them
+greets without a portrait.
+
+### Ancient Age continuation: culture, weariness, domination, ZOC, sites, transport choice (landed)
+
+- Culture flip of cities (`src/flip.rs`) and war weariness (`src/weariness.rs`)
+  run in the end-turn chain.
+- Domination victory (`civs::check_domination`, `victory.md` section 16).
+- Zones of control (`src/zoc.rs`, `movement.md` section 11; the rule is a
+  HYPOTHESIS, the executable reader was not decoded).
+- Fortress and colony worker jobs (`src/sites.rs`, Construction gate, era art
+  via `tools/prep_assets.py improvements`; hotkeys Ctrl+F and B).
+- Select-transport dialog for several carriers (`Diplomacy.board_ask`,
+  `Screen::Transport`, `movement.md` section 12).
+
+- Wonder audit: the Statue of Zeus and Knights Templar (improvement flag 30,
+  `BLDG.unit_produced` / `unit_frequency`) hand out a Crusader or Ancient
+  Cavalry every `frequency` turns (`citycalc::produced_units`, `happiness.md`
+  section 10; the period is a HYPOTHESIS). The other Ancient wonders were
+  already data-driven (`grant_*`, `doubles`, `wonder_flags`, `happy*`).
+  `gen_game_rules` now emits `produces`/`frequency` and marks the produced
+  units playable (their `races` are empty, so nobody can build them).
+
+- Era art (`tools/prep_assets.py cities|units`): city sprites come from all
+  five culture sheets by size (town, city, metro) and the owner's era, walls
+  replace the whole sprite (`cities::CityArt`); Leaders and Armies show the
+  Middle Ages, Industrial and Modern variants the install has
+  (`units::UnitArt::set_era`, `sync_art_eras`). Other units have one art set in
+  the install. Crusader and Ancient Cavalry now carry art for the wonders.
+- Unit-producing wonders: `City.unit_clocks` and `citycalc::produced_units`.
+- Computer sea war (`ai/naval.rs`): with a coastal city, an enemy city across
+  the water and two spare soldiers, it builds a Galley, loads soldiers at a
+  port and lands them on a beach beside the enemy city (land units cannot
+  attack from ships, only Marines can).
+- Save/load (`src/save.rs`): F5 writes `saves/quicksave.json` (or
+  `CIV3_SAVE`), F8 reads it back; scripts use `key F5`/`key F8`. A save holds
+  the tiles, cities, units (carriers by index), treasury, capital, flip
+  ratings, research and diplomacy (word streams from `civ3mapgen::words`,
+  `World::to_words`, `Relations::to_words`), realms, wonders, barbarian camps
+  and both dice. A load replaces every city and unit with its sprites and is
+  refused, changing nothing, when the file is for another map or does not fit.
+  Not saved: trades on offer, questions waiting, what the computer planned
+  this turn, other civs' explored map; terrain sprites a worker cleared stay
+  cleared if an older save is loaded into the same session.
+
+Not done: AI use of fortresses and colonies, Barricade and Outpost, era art
+for units other than Leaders and Armies (not in the install).
+
+Verified: 423 game tests and 595 reference tests; an autoplay run saved
+at turn 6 and loaded at turn 17 replays the eleven turns identically (90
+logged AI lines equal), so the dice and the books come back whole. A rendered load shows the city, units
+and the "Game loaded" notice.
+
+### Ancient Age continuation: reliable save restoration
+
+Exploration history now lives in a saved resource rather than system-local
+memory. Loading restores every viewer's discoveries, rolls back later
+exploration, and rebuilds terrain sprites so previously cleared forests
+reappear. Saves record the civilization roster and reject a different roster
+or malformed exploration history. Research and diplomacy decode before any
+world mutation; a rejected diplomatic stream leaves research unchanged.
+Loading also refreshes research build locks and closes stale unit pickers.
+
+Save format is now version 2; version 1 saves are unsupported. Verified:
+427 game tests and a build. A rendered seed-1 run founded Kyoto, saved,
+cleared forest at `(52,38)`, and loaded the earlier game. The forest, turn 1
+and city returned; screenshots `/tmp/open4x-forest-verified-190.png` and
+`/tmp/open4x-forest-verified-280.png` were inspected with the runtime log.
+
+The overall Ancient Age goal remains open: a complete era playthrough and
+the remaining combat, AI and feature fidelity audits still need evidence.
+
+### Ancient Age continuation: scientific leaders and Science Ages
+
+The reference acquisition step now rolls for scientific leaders before era
+and target selection, including Philosophy's nested free advance, gated by
+the native game flag and first-discoverer checks (`research.md` 10.2).
+Gameplay enables the flag and spawns successful rewards at the current capital.
+No capital means no unit, but still consumes the die. Scientific leaders carry
+the native flag marker, cannot form an Army, can hurry production, and can be
+consumed in a city by the Science Age command (A or native flask art, cell 19).
+
+The age is active through start turn +20, changes the estimate/cost-clamp
+research rate by the native truncated 1.25 multiplier, and leaves raw beaker
+income unchanged (`research.md` 3.2, 3.3, 11). It expires after research at the
+turn boundary. The computer prefers finishing an unfinished great wonder,
+otherwise starts an age; this choice is HYPOTHESIS policy. Leader markers,
+active ages and pending rewards are saved in format 3. Older saves are unsupported.
+Loading closes old advisor panels and order modes, fixing a stale startup
+Science Advisor that blocked commands after an otherwise successful load.
+
+Verified: 431 game tests, 596 reference tests and a build. Regressions cover
+roll chances/gates and Philosophy order, capital spawning, marker persistence,
+Science Age availability, repeat-use refusal, expiry, unboosted income,
+computer use and save restoration. A rendered save fixture showed the named
+Scientific Leader and flask button, then consumed the leader with A; captures
+`/tmp/open4x-science-final-95.png`, `135.png` and `200.png` were inspected. This fixture
+checks presentation and command execution; the discovery/spawn path is covered
+by the integrated regression, not the rendered fixture.
+
+An unmodified seed-1 autoplay baseline reached turn 121, with seven Japanese
+cities and discoveries through Mathematics (`/tmp/open4x-era-run.log`,
+`/tmp/open4x-era-run.json`). This is early-game evidence, not a full era
+playthrough. The full Ancient Age objective remains active.
+
+### Ancient Age continuation: citizen specialists
+
+Idle citizens can now cycle Entertainer, Tax Collector, Scientist by clicking
+their city-screen portrait, in the shipped CTZN table order. Their native
+outputs are 1 luxury, 2 taxes and 3 research, added outside commerce
+multipliers and corruption (`yields.md` 5.5). Specialists remain productive
+during Anarchy and disorder and do not count as ordinary unhappy citizens.
+The Domestic Advisor shows each job's native portrait, cropped from
+`popHeads.pcx` rows 16, 17 and 18.
+
+Explicit jobs survive growth, population loss and save/load; assigning a
+tile returns a specialist to work, and Governor resets assignments. The
+computer uses spare entertainers for research or taxes while retaining those
+needed for order; this selection is HYPOTHESIS policy. Jobs are saved in
+format 4; older saves are unsupported.
+
+Verified: 435 game tests and a build. Regressions cover job cycling,
+population changes, returning to work, independent outputs under multipliers,
+Anarchy and disorder, computer happiness protection, and save restoration.
+A rendered seed-1 run cycled both jobs, saved a scientist, changed it back
+to an entertainer and loaded. Inspected captures
+`/tmp/open4x-specialists-155.png` and `360.png` show the tax collector's
+2 extra gold and the restored scientist's 3 extra science, with native heads.
+The full Ancient Age playthrough and remaining fidelity audit are outstanding.
+
+### Ancient Age continuation: sustained play and era boundary
+
+Civilian pathfinding now avoids foreign units and cities while searching,
+instead of choosing a terrain-only path and stopping at its first blocker.
+Settlers and Workers reselect a destination when its route becomes sealed;
+Workers also search beyond the first three blocked job candidates. Artillery
+can still approach an occupied target without stepping onto it. This fixes
+China's repeated wait at `(27,38)` behind Roman units in the seed-1 match.
+
+The second-civilization era uprising now runs at research acquisition,
+independent of announcements. Previously computer research skipped it, and
+hut rewards discarded the event. Both research and external acquisition now
+request the native uprising even when their caller displays no message.
+
+Verified: 439 game tests and a build. The movement regression runs the
+computer and shared mover through a peaceful-unit detour to a city-founding
+order; sealed-route cases cover replacement settlement and worker targets.
+The era regression uses the native last-required-technology acquisition and
+the game's uprising system: computer research and external awards each spawn
+32 Horsemen from four camps (eight per camp), without an announcement.
+
+A rendered, unboosted seed-1 autoplay match reached turn 140, then resumed
+from that save with the routing fix. China grew from one city to three by
+turn 167; Rome also expanded. Japan acquired Currency at turn 320, Feudalism
+at 329 and Engineering at 340. The turn-344 save has era 1, all required
+Ancient advances known, and Invention under research, with 27 Japanese cities
+and 205 citizens (`/tmp/open4x-era-routing.json`, `.log`). Inspected captures
+`/tmp/open4x-era-routing-3005.png` and `12000.png` show ongoing play. The
+latest build loaded the turn-344 save and continued, with Invention visible
+in `/tmp/open4x-era-boundary.png`. The long run used the routing build;
+the subsequent uprising fix is verified by the integrated regression and build.
+
+Era progression is now demonstrated, but full Ancient feature parity remains
+open. Confirmed remaining worker actions include Outpost (Masonry) and
+Barricade (Construction), `worker-jobs.md` section 1. Retreat placement and
+Army combat still have documented deviations that need resolving.
+
+### Ancient Age continuation: Outposts and Barricades
+
+Workers can build Outposts after Masonry (Ctrl+O) and Barricades on Fortresses
+after Construction (Ctrl+F). The action bar uses native cells 35 and 36.
+Outpost completion consumes one Worker, releases the others, and keeps
+structure sight after units leave: 3x3 flat, 5x5 hill, 7x7 mountain, following
+the native creation footprints. Foreign entry or ownership removes it while
+preserving explored history. Plain Colonies also provide structure sight.
+
+Fortress / Barricade overlay bits are now independent of colony objects.
+Their completion removes Outposts while preserving plain Colonies; Colony
+founding can share a Fortress tile. Barricade construction retains the
+Fortress bit, as the native job does. The defense routine tests Fortress
+first (`combat.md` 4.2), so both bits yield its 50-point bonus; a lone
+Barricade bit yields 100. Art is cropped from the Conquests terrain sheet.
+
+Pillage and terrain bombardment now share the recovered destruction order
+(`colonies.md` 8): downgrade Barricade to Fortress, then remove low terrain
+improvements together, then remove Fortress / Outpost. Plain Colonies survive
+these strikes. Save format 5 records the independent bits and new object;
+older formats are unsupported. Scripted key combinations now support Ctrl
+and Shift so captures exercise the actual hotkey dispatch.
+
+Verified: 447 game tests and a build. Regressions cover construction gates,
+pooled Worker consumption, persistent sight and destruction, native overlay
+precedence, destruction classes and save restoration. Rendered hotseat Egypt
+(whose native start grants Masonry) built an Outpost with Ctrl+O and saved /
+loaded it; inspected `/tmp/open4x-outpost-180.png` and its save confirm the
+native art, sight and consumed Worker. A fixture granted Construction and
+placed the prerequisite Fortress, then Ctrl+F and end turns completed the
+Barricade; `/tmp/open4x-barricade-185.png` and its restored save confirm both
+bits, retained Worker and removed Outpost. This fixture checks execution and
+presentation, not discovery of Construction.
+
+The Ancient Age goal remains active. Worker labor timing and AI use of these
+jobs, retreat placement and Army combat still need fidelity work; construction
+times in this slice retain the clone's shortened scale.
+
+
+### Ancient Age continuation: native worker labor
+
+Replaced the shared shortened countdown with per-unit accumulated work
+(`worker-jobs.md` 6). Generated TFRM labor costs and PRTO worker strength
+come from `conquests.biq`. Required labor includes terrain movement cost,
+independent of roads. Jungle clearing uses Clear Wetlands rather than Clear
+Forest. The rate follows the native single-precision order: government,
+Industrious, doubling advance, foreign nationality, PRTO strength, then
+truncation with a minimum of one.
+
+Only the outgoing owner's workers add labor. All matching work already on
+the tile counts, including foreign workers; completion releases all of them.
+Outpost consumes the actor whose contribution completes it. Founding a city
+cancels a worker job without spending labor. Automation stays enabled when a
+job finishes so the worker can choose its next task. The unit readout derives
+remaining turns from the current pooled progress and owner's combined rate.
+Captured Workers and both Workers produced from a captured Settler retain
+their original nationality. Save format 6 preserves nationality and individual
+progress; previous save formats are unsupported.
+
+Verified: 449 automated tests pass and the game builds. Regressions cover
+pooled foreign labor, terrain costs, Industrious and captured-worker rates,
+Outpost's completing actor, city cancellation, capture nationality and
+mid-job save roundtrip. In the rendered seed-1 hotseat run, an Egyptian Worker
+builds a road at (52,38), a forest tile: after three owner turns the turn-4
+save has progress 9 and no road (`/tmp/open4x-worker-progress.json`). Loading
+that save and ending one owner turn completes the road; the resulting
+turn-5 save and inspected `/tmp/open4x-worker-resume.png` retain it after
+another load. The script uses actual R/F5/F8 dispatch with debug placement.
+
+The Ancient Age goal remains active. Remaining worker deviations include
+terrain eligibility, mountain access, forest-chop shields and AI use of
+structure jobs. Retreat placement and Army combat also need the final
+fidelity audit. This slice replaces the shortened timings noted above.
+
+
+### Ancient Age continuation: terrain rules and forest harvesting
+
+Normal TERR values now come from `conquests.biq`: yields, improvement
+bonuses, labor movement costs and clearing jobs. Mines are available on bare
+grassland, plains and tundra as well as desert, hills and mountains; forests
+and jungles reject them. Tundra rejects irrigation. Roads accept mountains
+at the terrain gate, though mountain path access still needs fixing. Clearing
+requires the effective terrain's Clear Forest / Wetlands job and unowned or
+own territory. All manual worker jobs reject city tiles. The AI now mines
+bare inland land when irrigation is unavailable.
+
+Removed the old MVP yield deviations: coast food 1, ocean food 0, tundra
+shields 0, jungle shields 0, and pine uses Forest's 1 food / 2 shields.
+Bonuses come from the effective terrain too, so a forced road on water adds
+no commerce. Jungle's native movement cost is 3, including labor duration;
+clearing jungle therefore needs 48 labor rather than 32. Terrain row lookup
+is shared by tile yields, combat and worker gates.
+
+Forest clearing pays the shipped RULE value of 10 shields once per tile.
+The recipient is the first own city in native spiral indices 1..20 whose
+current production can receive shields (`hurry::ordinary`); wonders, Palace
+and Wealth are skipped. The box is capped at that city's current price.
+Pine is Forest for this purpose; jungle gives no bonus. The pay-once bit is
+spent even if no city receives shields and persists through save/load.
+Worker completion runs before research and city production so the harvest
+can finish a build in that turn. Save format 7 records the harvest bit;
+previous formats are unsupported.
+
+Verified: 456 full game tests pass and the game builds. New system-level
+regressions cover recipient ordering, foreign/wonder exclusion, wrapping,
+cost caps, re-clearing, no eligible city, jungle and terrain eligibility.
+A seed-1 Egyptian hotseat fixture founded Thebes at (52,37), selected
+Barracks, placed a Worker on the forest at (52,38), and issued C. After
+three owner turns the tile is bare, its harvest bit is true and Thebes has
+13 shields (10 harvested plus three normal production). Actual F5/F8
+dispatch preserves it in `/tmp/open4x-forest-chop.json` (format 7, turn 4).
+Inspected `/tmp/open4x-forest-chop-100.png` and `185.png` show the cleared
+map, harvest notice and city production after restoration. Placement is a
+debug fixture; clearing, turn processing and saves use the actual systems.
+
+Remaining worker fidelity work: mountain movement and wheeled gates,
+fresh-water irrigation and city propagation, AI clearing / structure job
+choices. The broader Ancient Age completion audit remains outstanding.
+
+### Mountain access and wheeled terrain gates
+
+Land movement no longer treats all mountains as impassable. Mountains and
+jungle use the shipped TERR cost of 3 MP. The generated table now includes
+native impassable and impassable-to-wheeled bytes. The decoded land arm of
+`0x5CCBB0` permits a restricted step only with roads at both ends; a
+homogeneous Army inherits its shared member prototype's Wheeled ability,
+while mixed Armies do not (`0x5BC6D0`). See movement.md section 13 and the
+new address-annotated Rust reference module.
+
+Player routes, AI military routes, movement, attack refusal and retreats
+share this gate. Movement rechecks before issuing an attack so pillaging a
+road invalidates a previously planned wheeled entry. Settler/Worker civilian
+routes now reach mountains using the raw terrain cost; city founding still
+rejects mountains.
+
+Verified: 460 game tests pass, game build succeeds, native reference tests
+pass (597 library, 22 integration and 2 doctests). Native release clippy
+succeeds with existing warnings outside the new module. Regressions cover
+mountain/jungle Worker access, Chariot/Catapult road exceptions, road removal,
+Army composition, AI artillery detours, and both stale-route and direct
+attack rejection.
+
+Rendered seed-1 Egyptian hotseat fixture: Worker is debug-placed at (77,14)
+and ordered to walk normally to mountain (78,14). Arrival spends its remaining
+movement. After one full hotseat round, R starts the road; six owner job turns
+complete it. `/tmp/open4x-mountain-road.json` is turn 8, terrain Mountain,
+road true, worker at (78,14), job None. Inspected captures at frames 210 and
+290 show the mountain worker, building notice and saved result. No fixture
+code entered the game. Mountain mine eligibility was already covered by
+the worker terrain tests; this rendered run exercised road completion.
+
+Remaining: fresh-water irrigation and city propagation, AI clearing and
+structure choices, full step costs (rivers and prototype abilities), native
+ZOC verification, and the broader Ancient Age completion audit. Marsh and
+Volcano terrain are not represented by the current map model.
+
+### Freshwater lakes and irrigation through cities
+
+Worker commands and AI job selection now use `worker-jobs.md` section 3.2:
+water bodies of at most 20 tiles supply freshwater, existing farms supply
+adjacent tiles, and one neighboring city can relay either source. Consecutive
+city relays do not chain. This fixes the previous ocean-adjacency shortcut.
+Native water continents use four edge neighbors, mapped to the game's square
+grid orthogonal offsets. The same bounded flood fill now classifies shipyard
+coastal eligibility, so corner-touching water bodies remain separate. No new
+map state or save format is needed.
+
+Regressions cover 20 versus 21 connected water tiles, horizontal wrap,
+diagonal contacts, one-city relay, farm relay, two-city rejection, and matching
+worker-command/AI choices. All 463 game tests pass, including 20 targeted worker tests; the game
+build succeeds. Logs: `/tmp/open4x-freshwater-verified-tests.log` and
+`/tmp/open4x-freshwater-build.log`.
+
+Rendered seed-1 Egyptian hotseat fixture: a naturally generated lake lies at
+(14,22); Thebes is founded at (15,22), and a Worker at (16,22) receives I.
+The worker tile is outside the lake's direct freshwater neighborhood and
+requires the city relay. Three owner turns complete irrigation. Actual F5/F8
+saves and restores `/tmp/open4x-city-irrigation.json` (format 7, turn 4), with
+Thebes at (15,22) and irrigation true at (16,22). The inspected frame-145
+capture shows the restored farm beyond the city and lake. Only placement is
+a debug fixture; founding, worker orders, turns and persistence use normal
+systems.
+
+Remaining freshwater work: river generation/rendering, river commerce and
+movement effects, freshwater exemption from Aqueduct growth limits, and the
+post-Ancient technology override. The recovered worker-progress validation
+query is still undecoded, so source removal does not acquire a speculative
+cancellation rule. AI clearing/structure choices and the broader Ancient Age
+completion audit remain outstanding.
+
+### Freshwater city growth and population joining
+
+Decoded the complete growth gate `0x4B1DC0..0x4B1F8A`: freshwater exempts
+the size-six Aqueduct requirement, but never the size-twelve Hospital-class
+requirement. `rust/src/economy.rs::growth_limit` now captures both stock RULE
+gates. Natural growth and Join City use the same rule with the map's
+freshwater classification. Existing farms and city irrigation relays do not
+qualify as freshwater for growth. The AI receives freshwater in its city
+needs and chooses the level-2 or level-3 improvement matching its actual
+blocked limit, avoiding an unnecessary Aqueduct at a lakeside town.
+
+Verified: all 465 game tests pass; native release tests pass (598 library,
+22 integration, 2 doctests); native release clippy succeeds with the existing
+10 warnings outside this change; game build and diff whitespace checks pass.
+New regressions exercise actual city turns from 6 to 7 beside a lake, blocked
+12 without Hospital and growth to 13 with Hospital, population-join limits,
+and AI Aqueduct/Hospital choice. Golden reference vectors include a dry city
+with only a Hospital (still limited to six) and freshwater with Hospital.
+Logs are `/tmp/open4x-lake-growth-{tests,native,clippy,build}.log`.
+
+Rendered seed-1 Egyptian hotseat fixture founded Thebes at (15,22), adjacent
+to the natural small lake at (14,22). Debug `size 6` sets the starting limit;
+the normal J command joins a Worker, grows the city to seven and consumes the
+worker. Actual F5/F8 saves and restores `/tmp/open4x-lake-growth.json` (v7),
+which records size 7, no built improvements, and no civ-0 Worker. Inspected
+frame 135 shows the restored city screen at POP 7 with Palace only. The
+fixture's civil disorder is expected for seven citizens without happiness
+support and was not changed by this growth-gate work.
+
+Remaining: rivers and their freshwater, commerce, movement and combat effects;
+Agricultural freshwater food behavior; AI clearing/structure decisions;
+remaining native movement/ZOC audit; and the full Ancient Age completion
+audit. This is verified progress, not a claim of complete Ancient Age parity.
+
+### Playable rivers, freshwater, yields and combat
+
+`src/rivers.rs` now adapts the recovered `rivergen` stage to the existing
+square cylinder via a rotated native temporary grid and wrapped copies.
+Native continent numbering and river-growth logic are reused; folding and
+seam repair are explicit clone choices, so topology and density do not claim
+exact native mapgen parity. Masks have reciprocal shared edges and native
+diagonal continuity bits. A fresh disassembly of `0x5F0370` and `0x5EACC0`
+confirms Cell +4 writes and Desert-to-Flood-Plain conversion, resolving the
+contradictory old hills-only notes.
+
+Rivers supply freshwater to irrigation and the Aqueduct exemption, +1 tile
+commerce, native Flood Plain yields and mine eligibility, actual city river
+eligibility (replacing an adjacent-mountain placeholder), and the native
++25 directional combat defense. Corner sprites use shipped mtnRivers and
+coastal deltaRivers sheets; this art selection is a visually verified clone
+choice rather than a decoded native selection rule. Prep clears green
+exteriors. Save version 8 includes the river byte; earlier formats unsupported.
+
+Verified: 467 full game tests pass. The additional combat-odds assertion
+passes with the two targeted river tests. Shared edges, deterministic masks,
+freshwater, floodplain food, commerce, wrapped river direction and persistence
+are covered. Native release test/clippy results and game build are logged in
+`/tmp/open4x-rivers-{native,clippy,final-build}.log`; clippy retains preexisting
+warnings. Existing flat test fixtures explicitly clear rivers, preserving the
+meaning of their dry-map cases.
+
+Inspected `/tmp/open4x-rivers.png`: seed 1 shows continuous rivers across
+terrain and into a coast. The generated v8 save has 587 river-marked tiles.
+A normal seed-1 Egyptian game founds Thebes at the start (39,30), with river
+eligibility true, and debug-places its Worker at (39,29). I starts irrigation
+using the river on the tile. Three owner turns complete it. Actual F5/F8
+saves and restores `/tmp/open4x-river-irrigation.json` (v8, turn 4), recording
+mask 135 and irrigation true on (39,29). Inspected frame 145 shows the farm
+and continuous river after load.
+
+Remaining: river-crossing movement costs/Engineering bridges, Agricultural
+freshwater food, floodplain/jungle disease and floodplain decoration, AI
+clearing/structures, remaining native movement/ZOC work, and the complete
+Ancient Age requirements audit. This is progress toward the full objective.
+
+
+### River road crossings and Engineering bridges
+
+Decoded the normal road branch in `0x580070`: both ends need roads, and
+crossing the source river mask removes the discount until the moving civ
+knows a TECH with Enables Bridges (stock Engineering). The fallback costs
+destination terrain movement; it does not universally consume all movement.
+Implemented the native subset in `civ3mapgen::movement::land_step_cost` and
+shared it across movement, unit/AI routes, undefended city capture and route
+previews. Removed the obsolete raw step-cost helper. Previews now use the
+actual unit, domain, allowance and owner technology. Generated BRIDGES uses
+TECH flags rather than a named-tech shortcut.
+
+Verified 468 game tests, game build, 599 native library tests, 22 native
+integration tests and 2 doctests. Release clippy retains 10 existing warnings.
+Logs: `/tmp/open4x-bridges-{final-tests,final-build,native,clippy}.log`.
+Regression covers detours, previews, actual ECS movement, civilization-specific
+bridges and roaded mountain crossings. ECS regression runs on one thread
+because test realms are thread-local.
+
+Rendered Chariot crosses the same roaded river before/after Engineering:
+remaining movement 3/5 thirds respectively, confirmed in v8 F5/F8 save/load
+and inspected `/tmp/open4x-bridge-{before,after}-map.png`. After fixture grants
+Engineering to native research slot 1, the Egyptian player; an initial fixture
+incorrectly granted barbarian slot 0 and was corrected before acceptance.
+
+Remaining toward the full goal: Agricultural freshwater food, floodplain and
+jungle disease, floodplain decoration, AI clearing/structure choices, remaining
+native movement and ZOC/treaty rules, and a complete Ancient Age requirements
+and playthrough audit. The objective remains active.
+
+
+### Agricultural freshwater and irrigation food
+
+`citycalc::Rules` now keeps Agricultural city-center food at three under
+Despotism/Anarchy when local freshwater exists. Other center yields remain
+capped. Agricultural irrigated effective TERR Desert gains one food before
+the cap; Flood Plain and covered/raised Desert do not get that bonus. These
+are existing native `yields.rs` rules, rechecked against raw
+`0x5D737A..0x5D73D0` and `0x5D7564..0x5D75AE` this turn. Corrected stale
+center-exemption/growth claims in economy.md and the trim documentation.
+
+Verified 469 game tests and build, 599 native library tests, 22 integration
+tests and two doctests. Native release clippy retains ten existing warnings.
+Logs `/tmp/open4x-agricultural-{tests,build,native,clippy}.log`. Regression
+covers the owner trait, fresh/dry centers, lake 20/21 boundary, non-penalty
+government, irrigated Desert versus Flood Plain and real city-turn storage.
+
+Rendered Amsterdam at (39,30) under Despotism, identical worked tile
+(38,29), with river masks present versus cleared. After an owner turn from
+an empty food box, v8 saves hold two versus one food at turn 3. F5/F8 loads
+both. Inspected `/tmp/open4x-agricultural-{fresh,dry}-city.png`: total food
+four versus three, with three versus two center food icons. Debug fixtures
+only alter the saved food box and river masks; the normal city-turn system
+calculates production. Initial input fixture used mismatched civilizations
+and was rejected by the loader; comparison was rerun from matching Dutch
+saves. Actual research popup uses case-sensitive `adv Ok` in scripts.
+
+Still pending: floodplain/jungle disease and floodplain decoration, AI
+clearing/structures, remaining movement/treaties/ZOC, food-box difficulty
+and accelerated-production rules, starvation destruction, and a complete
+Ancient Age requirements/playthrough audit. The full objective is active.
+
+
+### Lake yields, Seafaring commerce and the Colossus
+
+Native `0x5D7470..0x5D748E` gives +1 food to water bodies of at most 20
+tiles, independently of Harbors; larger bodies use Harbor food instead.
+The clone now uses its existing bounded water-body traversal for worked
+tile yields as well as freshwater/construction. Government caps follow the
+bonus. Native `0x5D7EF4..0x5D7F55` adds Seafaring center commerce beside a
+large water body after the capital floor, before other bonuses and the cap.
+Native `0x5D7F82..0x5D7F9C` gives Colossus commerce to every producing tile,
+including the center. Removed the previous Sea/Ocean-only restriction and
+added the missing center effect. No commerce is created on zero-yield tiles.
+
+Verified 471 game tests and game build; 599 native library tests, 22 native
+integration tests and two doctests. Release clippy retains ten existing
+warnings. Logs `/tmp/open4x-water-yields-{tests,build,native,clippy}.log`.
+Regression checks lakes with/without Harbors, 20/21 threshold, Seafaring
+ownership/capital/government order, land/Coast/center Colossus commerce,
+zero-commerce tiles, and the following cap.
+
+Rendered debug Monarchy Dutch city at (39,30) works Coast (39,31). A
+20-tile body gives five total food, storing three from an empty box; a
+21-tile body gives four food, storing two. Harbor on the larger body gives
+five, storing three. Commerce is six beside the lake and seven beside the
+larger body, showing the Seafaring bonus. Actual F5/F8 saves restore each.
+Inspected `/tmp/open4x-water-{lake,ocean,harbor}.png` and corresponding v8
+JSON saves, turn 4. Fixture terrain/topology and policy were supplied through
+saves; production and storage came from the actual owner-turn system.
+
+Colossus initially triggers the clone's existing Golden Age rule: eleven
+commerce includes two extra Golden Age commerce, one on the center and one
+on Coast. To isolate the wonder, a second fixture marks that age ended;
+inspected `/tmp/open4x-water-colossus-no-age.png` shows nine commerce versus
+seven without the wonder, with both center and Coast bonuses visible.
+`/tmp/open4x-water-colossus-no-age.json` preserves the ended age and wonder.
+
+Next fidelity work: city and unit terrain disease (`disease.md` / unit-turn
+3.3, decoded but not integrated), Golden Age wonder trait coverage (current
+one-matching-trait rule is explicitly a hypothesis), remaining AI clearing
+and structures, movement/treaties/ZOC, food-box difficulty/acceleration and
+starvation destruction, then the complete Ancient Age requirements audit
+and playthrough. The full objective remains active.
+
+
+### Terrain disease roll reference and population boundary
+
+Added `civ3mapgen::disease` for the healthy infection loop and diseased-city
+recovery roll, with native TERR order, strength arithmetic, low-word RNG
+semantics, inclusive size comparisons, size-one early return and literal
+Writing row 8 cure behavior. Raw disassembly checked at `0x4B45A0`,
+`0x4B4640`, `0x4B4797` and the strength/roll tail. Five golden tests cover
+D1-D8 and zero/negative strength-bound semantics. The caller owns citizen
+removal and flag/cause/notification updates, matching the native calls.
+
+Population integration needs `0x4BA230` cyclic occupied/free-slot selection,
+its gameplay draw before recovery, nationality/work/specialist removal and
+food reset on size-class change. Existing City aggregate size/foreign/work
+state cannot reproduce those slots. This is the next implementation task,
+not an external blocker. Gameplay disease, persistence and rendered evidence
+remain unverified and unimplemented; no claim of completion is made.
+
+
+Verification for this reference stage: 604 native library tests, 22
+integration tests and two doctests pass; native release clippy returns to
+ten preexisting warnings, with no disease-module warnings. Game cargo check
+passes. Logs `/tmp/open4x-disease-{native-final,clippy-final,game-check}.log`.
+The previously verified 471 game tests are not presented as disease gameplay
+coverage. The full Ancient Age objective remains active.
+
+
+### Citizen slots and population-loss food retention
+
+Added native `population::Pool`: stable slots with holes, cyclic selection
+from one gameplay draw per attempt, optional race filter, LIFO free-slot
+reuse and no compaction of last. Citizen record fields retain race, work
+index, job and resistance for caller effects. Rechecked raw selection
+`0x4BA230`, release `0x4BA3F3..0x4BA411`, allocation call `0x4B9F98` and
+free-head/last branches `0x4C2114..0x4C213E`. Five new reference tests cover
+race/hole bias, failed and empty attempts, reuse order, class-change food,
+and removal-before-disease-recovery draw state (seed 1 -> 2524885223).
+
+`City::lose_population` now shares native class-change food retention across
+current population-loss callers: forced labor, Settler completion, capture,
+barbarian raids, bombardment and starvation. Same-class loss preserves even
+a full store; class change empties it without an active Granary and caps it
+at half the new box with one. Removed hurry's unconditional smaller-box cap
+and Settler's incorrect clamp. Capture loss now precedes building/owner
+transfer (native `0x5642F1` before takeCity), so retention sees the old
+owner's Granary. X remains ten; AI/difficulty/acceleration remains pending.
+
+Verified 472 full game tests, build, 609 native library tests, 22 integration
+tests and two doctests. Native clippy retains ten preexisting warnings.
+Logs `/tmp/open4x-population-game-{tests,build}-verified.log` and
+`/tmp/open4x-population-{native,clippy}-final.log`. Regression exercises real
+Settler completion across town/city class, Granary/no-Granary behavior and
+same-class full-store retention. Updated the older Settler test's expectation
+from the discarded clamp to native empty-store behavior.
+
+Rendered identical debug Dutch size-seven Monarchy cities complete a
+Settler and reach size five. Turn-5 v8 saves hold ten food with a Granary
+and zero without. New player Settler exists in both; F5/F8 restores each.
+Inspected `/tmp/open4x-population-{granary,no-granary}.png` and JSON saves.
+Fixtures supply starting population/builds/food/policy, while actual city
+turns perform completion, loss and storage.
+
+Pending disease integration: migrate aggregate game nationality/work/job
+population to persisted stable citizen slots, route growth/join/capture/
+job assignment and all loss callers through that authority, then persist
+disease state and run it at the native owner-turn position with generated
+terrain inputs and notifications. The native pool is not yet used for game
+victim selection. Native nationality-loss/resistance effects, unit jungle
+disease, Golden Age trait hypothesis and the remaining Ancient Age audit
+also remain. The full goal is active.
+
+
+### Citizen pool snapshot validation before game migration
+
+Current-state mutation audit finds 154 city-size references and 11 foreign
+population references, plus separate worked/specialist assignment. Integrating
+native slots requires replacing these aggregates rather than silently
+rebuilding slot identity from their current totals. Before that migration,
+added native Pool clone-stream snapshots that preserve holes, all citizen
+fields and exact free-list reuse history. Atomic restore validates presence,
+integer widths, free-list completeness/uniqueness/occupancy/bounds and exact
+stream length; invalid data leaves the original pool untouched.
+
+Three new regressions cover roundtrip victim choice and future births,
+malformed snapshots, and save between removal and disease recovery with
+matching RNG state and subsequent slot choices. An independent Python codec
+agrees with Rust's golden 16-word vector (checksum 15) and rejection cases.
+This is a clone stream, not native SAV decoding. No dependency was added.
+
+Verified 612 native library tests, 22 integration tests and two doctests;
+release clippy retains ten preexisting warnings, none in population. Game
+cargo check passes. Logs `/tmp/open4x-population-snapshot-{native,clippy,
+game-check,python}.log`. Game tests/rendered checks from the previous turn
+are not presented as citizen-slot gameplay coverage.
+
+Next: replace City size/foreign/work/job aggregates with persisted citizen
+records; adapt founding/growth/join, capture and UI/governor assignment,
+then use the native slot victim for all population-loss callers and integrate
+owner-turn terrain disease. This turn supplies the validated persistence
+boundary; City saves and gameplay still use their existing aggregate state.
+The Ancient Age objective remains active and incomplete.
+
+### Unit jungle disease gameplay (2026-10-04)
+
+Integrated the verified `Unit::turn` jungle branch: a fortified unit with
+zero PRTO population cost on effective Jungle terrain rolls rand(1000)
+once at its owner's turn boundary and dies on zero. Carried units skip
+both sea and jungle hazards. Native helper and gameplay use the shared
+combat RNG; immunity consumes no draw. Deferred deaths cannot draw again
+when scripted input sends multiple boundaries in one frame.
+
+Verified 473 game tests, game build, 613 native library tests, 22 integration
+tests and two doctests. Release clippy adds no disease warnings. The
+updated targeted regression also passes after adding the multiple-boundary
+case. Actual game F8/end/F5/F8 checks match independent seed-0 death and
+seed-1 survival calculations, including exact saved RNG states and surviving
+Settler/Worker/foreign Warrior. Evidence and limits are in `unit-turn.md` 10.
+
+Next: the persistent citizen migration described above and city terrain
+disease; Golden Age trait coverage and the full Ancient Age audit remain
+pending. This completes unit jungle disease, not the whole Ancient Age
+objective or every native unit-turn/death side effect.
+
+### Persistent city citizens and native population victims (2026-10-04)
+
+Replaced City's size/foreign/worked/specialist aggregates with the native
+citizen pool as source of truth. Births and joins preserve race and LIFO
+slot reuse; ownership changes preserve identity. Governor and UI edit
+individual assignments. Every population-loss caller now draws a native
+cyclic-slot victim and releases that citizen's job or tile. Barbarian raids
+use owner-national count and race filtering. Food retention remains native.
+
+Unit production now pays population cost for Workers as well as Settlers,
+prefers owner nationals, then other players in slot order, and transfers the
+last consumed foreign nationality to the unit. Growing cities wait while
+size <= population cost. Native ABANDONBASE for a nongrowing city remains
+pending; the clone currently holds production rather than consuming its
+last citizen. The existing shield-overflow behavior is also still nonnative.
+
+Save version 9 stores citizen slots/holes/free-list order instead of the
+removed aggregates. Old saves remain unsupported. Verified 477 game tests,
+game build, 613 native library tests, 22 integration tests and two doctests.
+Clippy has the ten existing native library warnings. Actual F8/end/F5/F8
+evidence selects a foreign scientist on starvation, preserves both workers
+and the foreign entertainer, and restores the exact hole/RNG state. Golden
+continuation also verifies later victims and birth ids. `hurry.md` 13 records
+the evidence and limits; captures `/tmp/open4x-citizens-{90,270}.png`.
+
+Next: City terrain disease can now use persistent victims. Nationality-loss
+attitude counters, resistance lifecycle/foreign-at-war moods, abandonment
+UI, production overflow, Golden Age trait coverage and the full Ancient Age
+audit remain pending. The full objective remains active and incomplete.
+
+### City terrain disease (2026-10-04)
+
+Generated TERR disease flags/strength now drive healthy-city infection from
+actual worked tiles and the center. Cities persist disease in save version
+10. Owner turns remove a native random citizen before food/growth/production;
+continuing disease removes before recovery, and population one survives.
+Literal Writing row 8 suppresses new Flood Plain infections, matching the
+executable. The city screen and turn notices expose losses and disease.
+
+Verified 481 game tests and game build. Actual rendered F8/end/F5/F8 checks
+match infection victim/RNG, persisted disease, following-turn scientist loss
+and recovery, and Writing immunity with no draw. `disease.md` 12 records
+evidence and limits. The native disease/population helpers were unchanged;
+this stage's full regression run covers gameplay integration.
+
+Next: nationality-loss attitude counters, resistance lifecycle/foreign-at-war
+moods, native city abandonment, production overflow, Golden Age trait
+coverage and the full Ancient Age audit remain pending. The objective
+remains active and incomplete.
+
+### Native shield completion and production switches (2026-10-04)
+
+Corrected production stock: positive income clamps at current cost,
+completion empties the box, and excess never funds the next queued/repeated
+item. Wealth clears stored shields and advances its queue without building
+the next item in the same turn. Removed the incorrect half-shield penalty
+for changing unit/building classes; the shared UI setter keeps stock up to
+the new item's price, matching the executable.
+
+Verified 483 game tests and game build. Actual rendered/save-load checks
+confirm a newly produced Warrior and queued Barracks at box 0, Wealth box
+30 becoming queued Barracks box 0, and Change/Pick from Barracks box 30 to
+Warrior box 10. `city-turn.md` 13 contains addresses, evidence and limits.
+
+Next: abandonment and city removal, CONFIRMSWITCH warning/cancel, native AI
+production reselection, nationality-loss attitudes, resistance lifecycle,
+Golden Age trait coverage and full Ancient Age audit. The goal remains
+active and incomplete.
+
+### Confirm shield loss before changing production (2026-10-04)
+
+City-screen and production-advisor picks now share CONFIRMSWITCH behavior.
+Lossless changes happen immediately. A cheaper item warns with the exact
+shield loss before committing; cancel/Escape preserves the city, Enter or
+accept applies the native cost clamp. Ordinary city/turn input is blocked
+while the question is open. Stale/foreign choices cannot commit, and loading
+another game discards the old unanswered choice and modal.
+
+Verified 487 game tests, game build, and the extended save round-trip test.
+Actual rendered Change/Pick shows a 20-shield warning, ignores underlying
+Governor/Space input, preserves the entire city/turn/RNG on cancel, and keeps
+Warrior box 10 on accept and reload. `city-turn.md` 14 records evidence.
+
+Next: ABANDONBASE and native city removal, AI production reselection,
+nationality-loss attitudes, resistance lifecycle, Golden Age trait coverage
+and the complete Ancient Age audit. The objective remains active.
+
+### Replacement capital prerequisite for abandonment (2026-10-04)
+
+Traced `0x4AECC0` city removal and decoded its replacement-capital helper
+`0x4482B0`. Added native scoring and game replacement for a missing or
+no-longer-owned capital: population + twice owner nationals + military
+presence + town/city/metropolis weights across spiral indices 1..288.
+Strict comparisons retain the first tie. A valid capital stays put;
+replacement installs a Palace. Culture/display now avoid duplicating the
+clone's implicit Palace when an actual Palace row is installed.
+
+Verified 490 game tests, game build, 615 native library tests, 22 integration
+tests and two doctests. Release clippy retains ten existing warnings. Actual
+F8/F5/F8 evidence selects the three-person owner-national/garrison city over
+a ten-person foreign-population city, persists the capital and Palace, and
+renders one Palace with culture 1. `city-removal.md` records decoded sites,
+opened removal observations and explicit gaps.
+
+Next: finish removal's terrain/visual/wonder cleanup and wire ABANDONBASE
+cancel/zoom/accept before population production destroys a city. Persisted
+native city-pool tie ordering, AI reselection, nationality-loss attitudes,
+resistance and Golden Age coverage remain in the broader Ancient Age audit.
+The full objective remains active and incomplete.

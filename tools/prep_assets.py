@@ -38,15 +38,31 @@ def roster_units():
     for m in re.finditer(r'UnitRow \{ name: "[^"]*", art: "([^"]+)"', text):
         if m.group(1) not in seen:
             seen.append(m.group(1))
+    # Leaders and Armies change their look with the owner's era; the roster
+    # names the Ancient Times folder.
+    for name in list(seen):
+        if name.endswith(" Ancient Times"):
+            for era in ["Middle Ages", "Industrial Ages", "Modern Times"]:
+                seen.append(name.replace("Ancient Times", era))
     return seen
 
 
 UNITS = roster_units()
+
+
+def roster_team_colors():
+    """Every `ntpNN.pcx` team-color index any roster civilization uses, plus
+    the barbarians' 0, read off `src/rules_data.rs`. The unit tint files are
+    named by this index, so any selectable civ's color is converted."""
+    with open(os.path.join(os.path.dirname(__file__), "..", "src", "rules_data.rs")) as f:
+        text = f.read()
+    return sorted({int(m.group(1)) for m in re.finditer(r"team_color: (\d+)", text)} | {0})
+
+
 # Team colors (`Art/Units/Palettes/ntpNN.pcx`, RACE `default_color` in
-# conquests.biq) of the clone's unit owners: Japan 4, Rome 1, Egypt 3,
-# China 5, the barbarians 0. Palette entries 0-63 of every unit FLC are the
-# team-color ramp the game swaps in.
-TEAM_COLORS = [4, 1, 3, 5, 0]
+# conquests.biq). Palette entries 0-63 of every unit FLC are the team-color
+# ramp the game swaps in.
+TEAM_COLORS = roster_team_colors()
 UNIT_SLOTS = ["DEFAULT", "RUN", "FORTIFY", "FIDGET", "BUILD", "ROAD",
               "MINE", "IRRIGATE", "FORTRESS", "JUNGLE", "FOREST", "PLANT",
               "ATTACK1", "ATTACK2", "ATTACK3", "DEFEND", "DEATH", "VICTORY",
@@ -120,6 +136,8 @@ def stage_terrain():
     for f in files:
         stem = os.path.splitext(os.path.basename(f))[0]
         size = convert_pcx(f, os.path.join(d, stem + ".png"))
+        if stem in ("deltaRivers", "mtnRivers"):
+            to_rgba(Image.open(f), green_clear=True).save(os.path.join(d, stem + ".png"))
         print(f"  terrain/{stem}: {size}")
     print(f"terrain: {len(files)} sheets")
     crop_terrain()
@@ -469,8 +487,10 @@ def slot_sounds(cfg, locate, slot):
 
 def unit_dirs(unit):
     """The unit's art folders, Conquests first: it often holds only the INI
-    and sounds of a unit whose animations live in the base game's folder."""
+    and sounds of a unit whose animations live in the base game's folder.
+    Play the World adds the unique units that shipped with it."""
     return [d for d in (os.path.join(GOG, "Conquests", "Art", "Units", unit),
+                        os.path.join(GOG, "civ3PTW", "Art", "Units", unit),
                         os.path.join(GOG, "Art", "Units", unit))
             if os.path.isdir(d)]
 
@@ -573,7 +593,9 @@ def stage_units():
 def stage_cities():
     d = os.path.join(OUT, "cities", "sheets")
     os.makedirs(d, exist_ok=True)
-    for name in ["rASIAN", "ASIANWALL", "city icons"]:
+    for name in ["rAMER", "rEURO", "rROMAN", "rMIDEAST", "rASIAN",
+                 "AMERWALL", "EUROWALL", "ROMANWALL", "MIDEASTWALL", "ASIANWALL",
+                 "city icons"]:
         src = os.path.join(GOG, "Art", "Cities", name + ".PCX")
         if not os.path.exists(src):
             src = os.path.join(GOG, "Art", "Cities", name + ".pcx")
@@ -585,17 +607,30 @@ def stage_cities():
 def crop_cities():
     outdir = os.path.join(OUT, "cities")
     sheets = os.path.join(OUT, "cities", "sheets")
-    # ancient Asian column of rASIAN: rows 1-3 are town/city/metro
+    # Each culture sheet is 3 x 4 cells of 167 x 95: a column per size class
+    # (town, city, metropolis) and a row per era (ancient, medieval,
+    # industrial, modern). RACE.culture_group 0..4 picks the sheet.
     manifest = {}
-    sheet = Image.open(os.path.join(sheets, "rASIAN.png"))
-    for name, row in [("town", 1), ("city", 2), ("metro", 3)]:
-        crop = sheet.crop((0, row * 95, 167, (row + 1) * 95))
-        crop.save(os.path.join(outdir, name + ".png"))
-        # The town's footprint is centered in the 167x95 cell, so the cell
-        # center sits on the tile center (a bottom anchor drew cities one
-        # tile north of their square).
-        manifest[name] = {"file": name + ".png", "size": [167, 95],
-                          "anchor": [83, 47]}
+    for group, sheet_name in enumerate(["rAMER", "rEURO", "rROMAN", "rMIDEAST", "rASIAN"]):
+        sheet = Image.open(os.path.join(sheets, sheet_name + ".png"))
+        for era in range(4):
+            for size, kind in enumerate(["town", "city", "metro"]):
+                crop = sheet.crop((size * 167, era * 95, (size + 1) * 167, (era + 1) * 95))
+                key = f"{kind}_{group}_{era}"
+                crop.save(os.path.join(outdir, key + ".png"))
+                # The footprint is centered in the cell, so the cell center
+                # sits on the tile center (a bottom anchor drew cities one
+                # tile north of their square).
+                manifest[key] = {"file": key + ".png", "size": [167, 95],
+                                 "anchor": [83, 47]}
+        # The walls sheet is one 167 x 95 cell per era, whatever the size.
+        wall = Image.open(os.path.join(sheets, sheet_name[1:] + "WALL.png"))
+        for era in range(4):
+            key = f"wall_{group}_{era}"
+            wall.crop((0, era * 95, 167, (era + 1) * 95)).save(
+                os.path.join(outdir, key + ".png"))
+            manifest[key] = {"file": key + ".png", "size": [167, 95],
+                             "anchor": [83, 47]}
     with open(os.path.join(outdir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
     # X close buttons: three states in the top-left of XandView
@@ -634,6 +669,10 @@ def crop_cities():
     # entertainer (jester, row 16 col 1): idle citizens on the city screen
     to_rgba(heads.crop((51, 801, 100, 850))).save(
         os.path.join(uid, "entertainer.png"))
+    to_rgba(heads.crop((51, 851, 100, 900))).save(
+        os.path.join(uid, "tax_collector.png"))
+    to_rgba(heads.crop((51, 901, 100, 950))).save(
+        os.path.join(uid, "scientist.png"))
     # City-panel top bar buttons: previous/next city, close, in
     # normal/hover/pressed states. `cityMgmtButtons.pcx` is a 4x3 grid of
     # cells (prev, next, eye, X) split by 1-px magenta lines at x = 0, 43,
@@ -667,7 +706,7 @@ def crop_cities():
         faded = art.convert("RGBA")
         faded.putalpha(mask)
         faded.save(os.path.join(uid, name + ".png"))
-    print("cities cropped: sprites + buttons + icons + citizen + entertainer")
+    print("cities cropped: sprites + buttons + icons + citizen + specialists")
 
 
 def stage_cityscreen():
@@ -816,7 +855,7 @@ def stage_features():
                                     "size": [128, 64], "anchor": [64, 32]}
             n += 1
     # barbarian camp: palisade hut at col 2, row 0 of TerrainBuildings
-    tb = Image.open(os.path.join(GOG, "Art", "Terrain", "TerrainBuildings.PCX"))
+    tb = Image.open(os.path.join(GOG, "Conquests", "Art", "Terrain", "TerrainBuildings.PCX"))
     tb.load()
     camp = to_rgba(tb, green_clear=True).crop((256, 0, 384, 64))
     camp.save(os.path.join(outdir, "camp.png"))
@@ -875,14 +914,25 @@ def stage_improvements():
                 "size": [128, 64], "anchor": [64, 32]}
     # mine: shaft mound at col 2, row 1 of TerrainBuildings (128x64 cells;
     # the barbarian camp in stage_features is col 2, row 0 of the same sheet)
-    tb = Image.open(os.path.join(GOG, "Art", "Terrain", "TerrainBuildings.PCX"))
+    tb = Image.open(os.path.join(GOG, "Conquests", "Art", "Terrain", "TerrainBuildings.PCX"))
     tb.load()
     mine = to_rgba(tb, green_clear=True).crop((256, 64, 384, 128))
     mine.save(os.path.join(outdir, "mine.png"))
     manifest["mine"] = {"file": "mine.png", "size": [128, 64], "anchor": [64, 32]}
+    # fortress (column 0) and colony (column 1): one cell per era,
+    # ancient to modern down the sheet.
+    sheet = to_rgba(tb, green_clear=True)
+    for era in range(4):
+        for name, col in (("fortress", 0), ("colony", 1), ("barricade", 3)):
+            cell = sheet.crop((col * 128, era * 64, (col + 1) * 128, (era + 1) * 64))
+            cell.save(os.path.join(outdir, f"{name}_{era}.png"))
+            manifest[f"{name}_{era}"] = {"file": f"{name}_{era}.png",
+                                         "size": [128, 64], "anchor": [64, 32]}
+    sheet.crop((256, 0, 384, 64)).save(os.path.join(outdir, "outpost.png"))
+    manifest["outpost"] = {"file": "outpost.png", "size": [128, 64], "anchor": [64, 32]}
     with open(os.path.join(outdir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
-    print(f"improvements: 256 roads + {16 * len(IRRIGATION_SHEETS)} irrigation + mine")
+    print(f"improvements: 256 roads + {16 * len(IRRIGATION_SHEETS)} irrigation + mine + 4 fortresses + 4 colonies + 4 barricades + outpost")
 
 
 def stage_fog():
@@ -1350,6 +1400,28 @@ def stage_advisors():
     ex = load("Art/Advisors/advisor_EXIT.pcx")
     for i in range(3):
         ex.crop((26 * i, 0, 26 * i + 26, 30)).save(os.path.join(d, f"exit_{i}.png"))
+    # The boxed close X of the advisors' bottom-right corner (72x48, three
+    # states), drawn where a screen's background has no box of its own.
+    xb = load("Art/exitBox-backgroundStates.pcx")
+    for i in range(3):
+        xb.crop((72 * i, 0, 72 * i + 72, 48)).save(os.path.join(d, f"exitbox_{i}.png"))
+    # The advisor popups ("our Sages need direction"): the parchment panel
+    # of `popupborders.pcx` (187x136, a dark green rule, stretched as nine
+    # slices), the round bullets of the answers (the O cells of the X/O
+    # sprite: idle, rollover, chosen) and the pull-down arrow.
+    pop = load("Art/popupborders.pcx")
+    pop = pop.crop((250, 0, 437, 136))
+    # The sheet's slice guides run through the parchment: paint each over
+    # with its neighbour.
+    for x in (62, 124):
+        pop.paste(pop.crop((x - 1, 0, x, pop.height)), (x, 0))
+    for y in (45, 90):
+        pop.paste(pop.crop((0, y - 1, pop.width, y)), (0, y))
+    pop.save(os.path.join(d, "popup.png"))
+    xo = clear_color(load("Art/X-o_ALLstates-sprite.pcx"), (0, 255, 0))
+    for i in range(3):
+        xo.crop((36 * i + 1, 1, 36 * i + 20, 21)).save(os.path.join(d, f"bullet_{i}.png"))
+    load("Art/pulldownArrows.pcx").crop((1, 22, 22, 43)).save(os.path.join(d, "pulldown.png"))
     gb = load("Art/Advisors/domesticBUTTON.pcx")
     for i in range(3):
         gb.crop((0, 26 * i, 146, 26 * i + 26)).save(os.path.join(d, f"govt_{i}.png"))

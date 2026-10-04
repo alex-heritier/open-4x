@@ -65,7 +65,8 @@ An Army therefore moves at the speed of its **slowest member plus one full move*
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | move cost | 1 | 1 | 1 | 1 | 1 | 2 | 3 | 2 | 3 | 2 | 3 | 1 | 1 | 1 |
 
-How the step evaluator turns this value into movement points (roads, railroads, rivers, and so on) is **O** (section 9, item 1).
+Normal road and river costs are decoded in section 14. Railroad and special
+prototype costs remain outside the implemented subset (section 9, item 1).
 The only consumer documented so far is the worker's job length (`worker-jobs.md` 7).
 
 ## 5. `Unit::setPosition(U; x, y)` `0x5BD220` (`ret 8`) **V** (the whole routine was read; the blocks that other documents specify are cross-referenced)
@@ -318,9 +319,88 @@ this is not the general attack-refusal gate.
 
 ## 10. Open items (what a port still has to read)
 
-1. The body of `0x57F360` after section 8 item 5: terrain legality per domain, the cost computation (roads, railroads, rivers, `PRTO` flags), border and treaty restrictions, the ZOC test (`0x449810`, `PRTO.zone_of_control`) and `0x5CCBB0`.
+1. The body of `0x57F360` after section 8 item 5: remaining domain legality, railroad and special `PRTO` costs, border and treaty restrictions, and the ZOC test. The land-terrain arm of `0x5CCBB0` is specified in section 13 and normal road/river costs in section 14; `0x449810` remains the foreign-tile query described in section 11.
 2. The interior of `0x5B8FC0` stage 5, and the remaining clauses of `0x5B5CD0` and `0x5C5420`, plus `0x5BAE60` and `0x5BCC90`. Section 9 specifies carrier selection and same-tile Load/Unload.
 3. The path finder `0x580540` (3 568 bytes) and its callers; the order executors `0x461F90`, `0x4620D0`, `0x4622D0`, `0x462670` (go-to-and-build orders) and the AI worker automation, whose chooser was not located.
 4. The city method `vt+0x38(0)` called from `setPosition` (H: refresh of the city's tile assignment).
 5. The unit fields `+0x1D0`, `+0x22C`, `+0x280`, `+0x38D`, `+0x68`.
 6. The readers of the teleport marks (`city.+0x30 & 4`, airfield `+0x30`).
+
+## 11. Zone of control as implemented in the clone (HYPOTHESIS)
+
+The executable's ZOC reader was not decoded: `0x449810` is a "find a foreign tile within a radius on the same continent" query called from the step evaluator `0x57F360`, and is not confirmed to be ZOC. `PRTO.zone_of_control` is the first body dword (memory row `+4`, stride `0x138`) and is true on 16 shipped rows. `src/zoc.rs` implements the manual's rule:
+
+- A unit exerts a zone when its prototype has the flag, it is a land unit (class 0), and it is not carried.
+- A land unit may not step from a tile to a tile when both lie within distance 1 of a zone unit of a civ it is at war with, unless the destination holds a friendly unit or city, or the step boards a ship.
+- A refused step clears the path and any exploring order.
+
+Verify against the executable before treating any of this as exact.
+
+## 12. Transport choice (select-transport dialog)
+
+When a human unit boards or loads and several friendly carriers with room share the tile, the game asks which (dialog `SELECT_TRANSPORT`, called from `0x5C5F70`). One candidate loads without asking; the computer takes the first. The clone lists carriers in entity order as "Name (aboard/capacity)" and stores the question as `Diplomacy.board_ask`; the Transport screen in `advisors.rs` answers it. The executable's candidate ordering was not read.
+
+## 13. Land terrain legality and wheeled road exception (**V**)
+
+`Unit::canEnter` at `0x5CCBB0` handles domains and embarkation before its
+land-terrain arm at `0x5CCE9E`. The destination effective TERR row is resolved
+through cell vtable +0xC8, with native TERR stride 0xF0.
+
+- `0x5CCF2B` reads TERR +0x7A (impassable). If true, check the road exception.
+- `0x5CCF35..0x5CCF87` checks prototype ability 0 (Wheeled) and TERR +0x7B
+  (impassable to wheeled units). An unrestricted unit/tile pair returns 0,
+  meaning entry allowed.
+- A restricted pair calls the destination road predicate at `0x5CCFB1` and
+  origin road predicate at `0x5CCFE4`. **Both tiles require roads**. If either
+  lacks one, return 1 (blocked). This exception also overrides the generic
+  impassable byte, although all stock Conquests rows have that byte clear.
+
+The ability check uses the unit's own prototype first, then the shared Army
+prototype from `0x5BC6D0`. That helper returns -1 for non-Armies, empty Armies,
+or mixed prototype members (`0x5BC7D3`, mismatch return `0x5BC81A`); homogeneous
+Armies return the common member row (`0x5BC810`). Consequently a homogeneous
+Chariot Army inherits Wheeled, but a mixed Chariot/Warrior Army does not.
+Experience levels do not affect prototype equality.
+
+Stock TERR restricts Mountains, Jungle, Marsh and Volcano to wheeled units;
+Mountains and Jungle cost 3 whole MP, Forest and Hills 2. The game's map
+currently represents Mountains and Jungle, but not Marsh or Volcano. Artificial
+Ice remains outside the native land table and is impassable in the clone.
+
+`rust/src/movement.rs` implements the terrain-only gate, with golden vectors
+for road combinations and both restriction bytes. `src/units.rs` uses this
+before costs for route planning and actual movement; combat orders, retreats
+and AI military routes use the same gate. This does not claim the full native
+step evaluator, pathfinder, retreat direction choice or treaty gates are decoded.
+
+
+## 14. Normal road costs, river crossings and bridges (**V**)
+
+`0x57F360` reaches the cost evaluator `0x580070` after successful entry
+legality (`0x57F889`). Its normal land-road arm checks roads at both ends
+through cell vtable +0x64 (`0x5801BB..0x5801D9`). The source cell's river
+mask, vtable +0x94, is tested in the step direction (`0x5801DF..0x580201`).
+A crossing calls `Player::hasTechFlag(4)` at `0x58021D` through `0x561480`.
+Stock TECH flag 4 is Enables Bridges; Engineering (row 23) is its sole row.
+
+Both roads and either no crossing or known bridges return cost 1 at
+`0x580286`, one third of a movement point. An unbridged crossing falls
+through `0x580290` to the normal terrain branch: `Cell::movementCost`
+`0x5DBF60` at `0x580381`, multiplied by RULE movement thirds at `0x580388`.
+Thus it costs destination terrain movement, rather than universally using
+all remaining movement. Bridges belong to the moving civilization.
+
+`rust/src/movement.rs::land_step_cost` implements this subset with golden
+vectors. Game movement, unit routes, AI civilian/land approach routes,
+undefended city capture and route turn previews share it. Previews now use
+the actual unit allowance, domain and owner technology. Generated
+`rules_data::BRIDGES` comes from TECH flags. Railroad, special prototype
+movement, foreign-road/treaty gates and ZOC remain outside this subset.
+
+Rendered seed-1 Egyptian Chariot fixtures cross from (39,29) to (39,28),
+with roads on both tiles and source river mask 135. Before Engineering,
+remaining movement is 3 thirds; afterward it is 5 thirds. The latter fixture
+grants row 23 to native research slot 1 (game civ 0), not slot 0, which is
+reserved for barbarians. F5/F8 preserves technology and remaining moves.
+Inspected `/tmp/open4x-bridge-{before,after}-map.png` shows the road, river,
+Chariot and corresponding 1 / 1 2/3 movement readouts after load.

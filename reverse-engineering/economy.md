@@ -248,13 +248,13 @@ population:
 * **Growth gate** `0x4B1DC0(city)` returns -1 (may grow) or the BLDG index
   it lacks. Population >= `[0x9C72E4]` (6) needs an active improvement
   with BLDG `+0xEC & 0x800`, the Aqueduct, unless `0x5F39E0(0x9C736C, x,
-  y)` passes (HYPOTHESIS: fresh water at the city's tile; Civilopedia
-  `BLDG_Aqueduct`: "A city with an Aqueduct can grow beyond population
-  six. Note that a city adjacent to fresh water never requires an
-  aqueduct."). Population >= `[0x9C72E8]` (12) needs one with `+0xEC &
-  0x1000`: Civilopedia names the Hospital and Shakespeare's Theater, "can
-  grow beyond population 12"; whether this half has the fresh-water
-  exemption is unread. Blocked: `[city+0x40] = box` (the store stays
+  y)` passes (freshwater: `worker-jobs.md` 3.2 and `rust/src/lakes.rs`).
+  The exact call is at `0x4B1E7F`, the successful branch `0x4B1E86`.
+  Population >= `[0x9C72E8]` (12) needs one with `+0xEC & 0x1000`, the
+  Hospital or Shakespeare's Theater. This second scan starts at `0x4B1EBF`,
+  counts active, nonobsolete level-3 effects at `0x4B1F3A`, and returns
+  the first missing requirement at `0x4B1F6E..0x4B1F84`. **No freshwater
+  exemption applies to level 3** (read through the return `0x4B1F8A`). Blocked: `[city+0x40] = box` (the store stays
   full; `0x4B2234`), and for the human at the keyboard (`[0x9FD4BC]`,
   `[0xA526AC] & 0x1F == 0`, `[0xA52678] & 0x400000 == 0`) the "needs a
   building" notice `0x4DD530(0x9F8700, city, bldg)`.
@@ -269,15 +269,15 @@ population:
   commerce in a despotic government instead produces one less"; the
   manual's tutorial says the same of "any terrain square producing three or
   more of any resource type".
-* **Clone** (`src/economy.rs`, `cities::process_city_turn`): box, class
-  and Granary keep as above with X fixed at 10 (the `0x200` flag is not
-  modelled); the Despotism cap is on worked tiles only and the city
-  square is exempt, which **differs from the binary** (it caps the centre
-  too, `yields.md` section 4); a city never starves below size 1 (the binary removes a city whose
-  population reaches 0); **no Aqueduct / Hospital gate**, because the
-  clone has neither building nor fresh water (no rivers or lakes), so
-  cities grow past 6 and 12 freely. Adding the gate is the follow-up once
-  those exist.
+* **Clone** (`src/economy.rs`, `cities::process_city_turn`): food box,
+  size class and Granary retention follow the rules above. The Despotism cap
+  applies to worked tiles and the city center. Agricultural city-center food
+  is exempt when the map reports freshwater (`yields.md` 4.1); irrigated
+  effective Desert also gets the trait's +1 food before the cap. Growth uses
+  freshwater / active Aqueduct-class effects at six, and active Hospital-class
+  effects at twelve (`rust/src/economy.rs::growth_limit`). Still different:
+  accelerated-production food boxes and difficulty-dependent AI box size are
+  unimplemented; a city never starves below size one instead of being removed.
 
 ## Gold: unit support and upkeep (verified: r2 + game script text)
 
@@ -462,7 +462,18 @@ per-turn gold in diplomatic deals; not modelled). Then the two bills,
   `+0x34`; `0x4ACDF0` and the flag argument of `0x4ACB50`; the first per-civ payment loop at `0x560B04`
   (the bit `0x200` of `[0xA5267C]` is Accelerated Production, resolved, see above);
   the AI half of `0x55D2A0`; `0x4BA230` and `0x4AECC0` as citizen removal and
-  city destruction; the Sewer half of `0x4B1DC0`. Resolved on 2026-10-01 and
+  city destruction. The level-3 half of `0x4B1DC0` is now resolved above. Resolved on 2026-10-01 and
   removed from this list: the `[0x9C7268]` divisor (4), the RULE copy into
   the `0x9C72xx` globals (the reader stores them directly), the Despotism cap
   site and whether it covers the city square (it does).
+
+### Clone growth-gate integration (2026-10-04)
+
+`rust/src/economy.rs::growth_limit` models stock RULE limits, freshwater and
+active level-2/3 improvement effects, with golden vectors for the two gates.
+`src/citycalc.rs` uses it for natural city growth and unit population joining.
+The AI's city-build inputs include local freshwater, and a blocked town seeks
+an active level-2 effect while a blocked city seeks level 3. Lake classification
+uses the threshold and water-connectivity rules in `worker-jobs.md` 3.2;
+river generation remains absent in the playable map. The old clone overview
+in section 9 is historical and does not describe these current growth gates.

@@ -515,3 +515,69 @@ So it returns the **cheapest buildable (non-obsolete) unit tagged Defense or Off
   disease step.
 * `ai.md` hurry rows call `0x4B9270` a "bombard/riot effect chain" in one place: the `0x61C5A0` calls
   there are message-argument setters (`0x4B98FA`, `0x4B990F`), not effects.
+
+## 13. Gameplay production corrections (2026-10-04)
+
+`src/cities.rs::process_city_turn` now clamps positive shield income to the
+current price (`0x4B99CF..0x4B9A81`) and empties the box on unit/building
+completion (`0x4B8CDF..0x4B8D08`, `0x4B9648..0x4B9662`). A full box still
+completes with zero net shields. No excess reaches a queued or repeated item.
+Wealth clears stored shields and advances an existing queue without producing
+the newly selected item that turn (`0x4B9957..0x4B9981`). A human's empty
+Wealth queue keeps Wealth.
+
+`City::change_build`, shared by the city screen and production advisor, now
+keeps shields up to the new price (`0x4AFB50..0x4AFC95`). The former
+unit/building class switch penalty was incorrect and has been removed.
+Same-item selections remain a no-op. Raw production/Wealth, completion and
+switch-clamp instructions were reopened for these changes.
+
+Verified 483 game tests and game build. Regressions cover surplus discarded
+on unit and building completion, the following queued turn, Wealth's stored
+box/queue, and cross-class switches with cheaper-item clamping. Actual
+rendered F8/end/F5/F8 checks complete a Warrior from box 9 with income 3,
+produce the additional unit and select queued Barracks at box 0. A following
+Wealth fixture with box 30 advances to Barracks at box 0. Actual city-screen
+Change/Pick switches Barracks box 30 to Warrior box 10; screenshots and saves
+are `/tmp/open4x-production-{render,wealth,switch}.{png,json}`.
+
+ABANDONBASE for local humans and empty-city removal are integrated; see
+`city-removal.md` for verified behavior and remaining destructor gaps. Native
+AI/governor production reselection remains pending.
+CONFIRMSWITCH is integrated in section 14. The clone's AI still has
+its prior conservative class-switch policy. Construction specialists,
+rally points and the remaining non-Ancient production branches require the
+broader audit. These corrections do not claim full native city-turn parity.
+
+## 14. Shield-loss confirmation (2026-10-04)
+
+`src/build_switch.rs` implements the Ancient Age CONFIRMSWITCH boundary:
+validate the requested build, compare stored shields with the new cost, and
+ask before committing a loss. A same-item selection does nothing; a switch
+with no loss is immediate. Accept calls the shared native cost-clamping
+setter. Cancel or Escape leaves production and shields untouched. Enter
+accepts. Both the city screen and production advisor use the same request.
+The native dialog call/first-answer acceptance at `0x4AF7A9..0x4AF7C8` was
+reopened. Current Ancient specialists have no construction bonus pool.
+
+The modal reports the item and exact shields lost, blocks ordinary city and
+turn input, and rejects choices invalidated by a changed city, stock or owner.
+Load discards the unanswered choice and its UI along with the old game's
+other modal state; there is no save-format change. The production advisor's
+original completion decision remains pending after either answer.
+
+Verified 487 game tests and game build. Four behavior regressions cover
+cancel/accept, immediate no-loss changes, Escape, stale/foreign choices and
+production-advisor entry. The save round-trip regression additionally
+loads over an unanswered switch and verifies that its choice/root are gone.
+Rendered city-screen Change/Pick asks about exactly 20 lost shields when
+switching Amsterdam's Barracks box 30 to Warrior cost 10. Cancel preserves
+all City fields, turn and RNG even with Governor/Space input attempted
+underneath. Accept keeps box 10, and F5/F8 preserves the result. Captures
+`/tmp/open4x-switch-cancel-{90,190}.png` and
+`/tmp/open4x-switch-accept.png` were inspected.
+
+Local-human ABANDONBASE is integrated in `city-removal.md`. Complete native
+city removal and AI production reselection remain pending. This does not
+implement later-era Civil Engineer construction
+bonuses or network multiplayer dialog suppression.

@@ -12,7 +12,7 @@ use crate::civs::{CIVS, Civilizations};
 use crate::economy;
 use crate::features::{MessageBoard, post};
 use crate::improvements::{
-    WorkAction, action_slot, can_clear, can_irrigate, can_mine, can_road, work_turns,
+    WorkAction, action_slot, can_clear, can_irrigate, can_mine, can_road,
 };
 use crate::map::{Cover, GameMap};
 use crate::units::{self, Selected, Unit, UnitAnim, UnitType};
@@ -30,6 +30,8 @@ pub enum UnitCommand {
     Explore,
     Disband,
     FoundCity,
+    /// A Worker settles a colony on a resource outside every border (`B`).
+    FoundColony,
     Work(WorkAction),
     /// Gold upgrade of this unit (`U`).
     Upgrade,
@@ -45,6 +47,8 @@ pub enum UnitCommand {
     BuildArmy,
     /// A Great Leader in a city completes its build (`H`).
     LeaderHurry,
+    /// Consume a Scientific Leader to start the research bonus (`A`).
+    ScienceAge,
 }
 
 /// Next left click on the map sends the selected unit there.
@@ -65,6 +69,10 @@ impl UnitCommand {
             UnitCommand::Explore => "Explore (E)",
             UnitCommand::Disband => "Disband (Del)",
             UnitCommand::FoundCity => "Found City (B)",
+            UnitCommand::FoundColony => "Build Colony (B)",
+            UnitCommand::Work(WorkAction::Fortress) => "Fortress (Ctrl+F)",
+            UnitCommand::Work(WorkAction::Barricade) => "Barricade (Ctrl+F)",
+            UnitCommand::Work(WorkAction::Outpost) => "Outpost (Ctrl+O)",
             UnitCommand::Work(WorkAction::Road) => "Road (R)",
             UnitCommand::Work(WorkAction::Irrigate) => "Irrigate (I)",
             UnitCommand::Work(WorkAction::Mine) => "Mine (M)",
@@ -76,6 +84,7 @@ impl UnitCommand {
             UnitCommand::Automate => "Automate (Z)",
             UnitCommand::BuildArmy => "Build army (B)",
             UnitCommand::LeaderHurry => "Hurry city production (H)",
+            UnitCommand::ScienceAge => "Science Age (A)",
         }
     }
 
@@ -83,10 +92,11 @@ impl UnitCommand {
     pub fn relevant(self, t: UnitType) -> bool {
         match self {
             UnitCommand::Load => units::def(t).class == 0 && units::def(t).special & 1 != 0,
-            UnitCommand::BuildArmy | UnitCommand::LeaderHurry => t == UnitType::Leader,
+            UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => t == UnitType::Leader,
             UnitCommand::Unload => units::def(t).capacity > 0 && units::def(t).special & 2 != 0,
             UnitCommand::Bombard => crate::bombard::capable(t),
             UnitCommand::FoundCity => t == UnitType::Settler,
+            UnitCommand::FoundColony => t == UnitType::Worker,
             UnitCommand::Work(_) => t == UnitType::Worker,
             UnitCommand::Fortify => t != UnitType::Scout,
             // Only a type with a successor and the ability has the button.
@@ -123,16 +133,34 @@ impl UnitCommand {
             // The city and the tile decide: `actions::check`.
             UnitCommand::JoinCity | UnitCommand::Pillage => u.moves > 0,
             UnitCommand::Automate => u.auto || u.moves > 0,
-            UnitCommand::BuildArmy | UnitCommand::LeaderHurry => u.moves > 0,
+            UnitCommand::BuildArmy => u.moves > 0 && !u.scientific_leader,
+            UnitCommand::LeaderHurry => u.moves > 0,
+            UnitCommand::ScienceAge => u.scientific_leader && cities.contains(&(u.x, u.y)),
             UnitCommand::FoundCity => can_found(map, cities, u.x, u.y),
+            // The border check needs every city: `run_commands` says why not.
+            UnitCommand::FoundColony => {
+                u.moves > 0
+                    && idle
+                    && map.get(u.x, u.y).is_some_and(|t| t.resource.is_some() && t.site.is_none())
+                    && !cities.contains(&(u.x, u.y))
+            }
             UnitCommand::Work(a) => {
                 u.moves > 0
                     && idle
+                    && !cities.contains(&(u.x, u.y))
                     && match a {
                         WorkAction::Road => can_road(map, u.x, u.y),
-                        WorkAction::Irrigate => can_irrigate(map, u.x, u.y),
+                        WorkAction::Irrigate => can_irrigate(map, cities, u.x, u.y),
                         WorkAction::Mine => can_mine(map, u.x, u.y),
-                        WorkAction::Clear => can_clear(map, u.x, u.y),
+                        WorkAction::Clear => can_clear(map, u.civ, u.x, u.y),
+                        WorkAction::Barricade => crate::realm::read(u.civ, |r| r.knows(crate::sites::CONSTRUCTION))
+                            && crate::sites::can_barricade(map, cities.contains(&(u.x, u.y)), u.x, u.y),
+                        WorkAction::Outpost => crate::realm::read(u.civ, |r| r.knows(crate::sites::MASONRY))
+                            && crate::sites::can_outpost(map, u.civ, cities.contains(&(u.x, u.y)), u.x, u.y),
+                        WorkAction::Fortress => {
+                            crate::realm::read(u.civ, |r| r.knows(crate::sites::CONSTRUCTION))
+                                && crate::sites::can_fortress(map, cities.contains(&(u.x, u.y)), u.x, u.y)
+                        }
                     }
             }
         }
@@ -142,33 +170,46 @@ impl UnitCommand {
 /// Bar order, left to right within each row: Civ3's own order for these
 /// actions, which is the order of its action list (`action_cell`) and the
 /// order its panel draws them in. `bar_rows_follow_civ3_action_order` pins
-/// that. Civ3 stacks two rows: unit-specific actions (found, worker jobs) a
-/// row up, shared orders below. Wake has no button (in Civ3 it is a
-/// right-click entry), so it stays key-only.
-pub const BAR_ROW_MAIN: [UnitCommand; 10] = [
+/// that. Civ3 stacks three rows by cell of `#UNIT_ACTIONS`: the standard
+/// orders (cells 0-6 and 42) at the bottom, the unit's own actions (7-41:
+/// load, pillage, worker jobs, found, join) above them, and the long
+/// orders (43 on: "Road to", the automation variants, "Go to City",
+/// "Rename") on top. Wake has no button (in Civ3 it is a right-click
+/// entry), so it stays key-only.
+pub const BAR_ROW_MAIN: [UnitCommand; 6] = [
     UnitCommand::Skip,
     UnitCommand::Fortify,
     UnitCommand::Disband,
     UnitCommand::Goto,
     UnitCommand::Explore,
     UnitCommand::Sentry,
+];
+pub const BAR_ROW_UNIT: [UnitCommand; 19] = [
     UnitCommand::Load,
     UnitCommand::Unload,
     UnitCommand::Pillage,
     UnitCommand::Bombard,
-];
-pub const BAR_ROW_UNIT: [UnitCommand; 10] = [
     UnitCommand::BuildArmy,
     UnitCommand::LeaderHurry,
     UnitCommand::Upgrade,
+    UnitCommand::ScienceAge,
+    UnitCommand::FoundColony,
     UnitCommand::FoundCity,
     UnitCommand::Work(WorkAction::Road),
+    UnitCommand::Work(WorkAction::Fortress),
     UnitCommand::Work(WorkAction::Mine),
     UnitCommand::Work(WorkAction::Irrigate),
     UnitCommand::Work(WorkAction::Clear),
     UnitCommand::Automate,
     UnitCommand::JoinCity,
+    UnitCommand::Work(WorkAction::Outpost),
+    UnitCommand::Work(WorkAction::Barricade),
 ];
+/// The top row's long orders (cells 43 on); the clone has none of them yet.
+pub const BAR_ROW_EXTRA: [UnitCommand; 0] = [];
+
+/// The bar's rows, top to bottom.
+pub const BAR_ROWS: [&[UnitCommand]; 3] = [&BAR_ROW_EXTRA, &BAR_ROW_UNIT, &BAR_ROW_MAIN];
 
 /// Key bindings shared with the bar labels.
 pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
@@ -184,9 +225,14 @@ pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
         (KeyCode::Delete, UnitCommand::Disband),
         (KeyCode::Backspace, UnitCommand::Disband),
         (KeyCode::KeyB, UnitCommand::FoundCity),
+        (KeyCode::KeyB, UnitCommand::FoundColony),
+        (KeyCode::KeyF, UnitCommand::Work(WorkAction::Fortress)),
+        (KeyCode::KeyF, UnitCommand::Work(WorkAction::Barricade)),
+        (KeyCode::KeyO, UnitCommand::Work(WorkAction::Outpost)),
         (KeyCode::KeyB, UnitCommand::Bombard),
         (KeyCode::KeyB, UnitCommand::BuildArmy),
         (KeyCode::KeyH, UnitCommand::LeaderHurry),
+        (KeyCode::KeyA, UnitCommand::ScienceAge),
         (KeyCode::KeyU, UnitCommand::Upgrade),
         (KeyCode::KeyJ, UnitCommand::JoinCity),
         (KeyCode::KeyP, UnitCommand::Pillage),
@@ -197,9 +243,16 @@ pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
         (KeyCode::KeyC, UnitCommand::Work(WorkAction::Clear)),
     ];
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     table
         .iter()
         .filter(|(k, c)| keys.just_pressed(*k) && (*c != UnitCommand::Pillage || shift))
+        // Ctrl+F builds the fortress; plain F fortifies.
+        .filter(|(_, c)| match c {
+            UnitCommand::Work(WorkAction::Fortress | WorkAction::Barricade | WorkAction::Outpost) => ctrl,
+            UnitCommand::Fortify => !ctrl,
+            _ => true,
+        })
         // Shift+U is Upgrade All, not Upgrade.
         .map(|(_, c)| match c {
             UnitCommand::Upgrade if shift => UnitCommand::UpgradeAll,
@@ -215,7 +268,7 @@ pub fn run_commands(
     mut units: Query<(Entity, &mut Unit)>,
     civs: Res<Civilizations>,
     cities: Query<&City>,
-    map: Res<GameMap>,
+    mut map: ResMut<GameMap>,
     audio: Res<GameAudio>,
     mut goto: ResMut<GotoMode>,
     mut board: ResMut<MessageBoard>,
@@ -226,6 +279,13 @@ pub fn run_commands(
         let Some(s) = selected.0 else {
             continue;
         };
+        // Ctrl+F is one native action: upgrade a fort when present.
+        // The hotkey emits both candidates; only the applicable job runs.
+        if matches!(cmd, UnitCommand::Work(WorkAction::Fortress | WorkAction::Barricade)) {
+            let Some((_, u)) = units.get(s).ok() else { continue };
+            let fort = map.get(u.x, u.y).is_some_and(|t| t.fortress);
+            if (cmd == UnitCommand::Work(WorkAction::Fortress)) == fort { continue; }
+        }
         // Upgrades need the cities and the treasury as well as the unit.
         if matches!(cmd, UnitCommand::Upgrade | UnitCommand::UpgradeAll) {
             let mine = units
@@ -259,6 +319,34 @@ pub fn run_commands(
         if cmd != UnitCommand::Goto {
             goto.0 = false;
         }
+        // A Worker founds a colony on the spot and is used up by it
+        // (`colonies.md` 3); the tile's borders decide, so the cities are asked.
+        if cmd == UnitCommand::FoundColony {
+            if u.moves == 0 || u.work.is_some() || u.carrier.is_some() {
+                continue;
+            }
+            let owners = crate::cities::territory(&map);
+            let civ = u.civ;
+            let here = (u.x, u.y);
+            let refusal = crate::sites::colony_refusal(
+                &map,
+                |tech| crate::realm::read(civ, |r| r.knows(tech)),
+                spots.contains(&here),
+                owners.contains_key(&here),
+                here.0,
+                here.1,
+            );
+            match refusal {
+                Some(why) => post(&mut board, why),
+                None => {
+                    let i = map.idx(here.0, here.1);
+                    crate::sites::found_colony(&mut map.tiles[i], civ);
+                    commands.entity(e).despawn();
+                    post(&mut board, "Colony founded.");
+                }
+            }
+            continue;
+        }
         if !cmd.enabled(&map, &spots, &u) {
             if let UnitCommand::Work(a) = cmd {
                 post(
@@ -268,6 +356,9 @@ pub fn run_commands(
                         WorkAction::Irrigate => "Irrigation needs fresh water or a chain.",
                         WorkAction::Mine => "Mines need hills, mountains or desert.",
                         WorkAction::Clear => "Nothing to clear here.",
+                        WorkAction::Fortress => "A fortress needs Construction and open land.",
+                        WorkAction::Barricade => "A barricade needs Construction and an existing fortress.",
+                        WorkAction::Outpost => "An outpost needs Masonry and unowned or friendly land.",
                     },
                 );
             } else if cmd == UnitCommand::FoundCity {
@@ -280,7 +371,7 @@ pub fn run_commands(
         }
         match cmd {
             UnitCommand::Load | UnitCommand::Unload => {} // `naval::cargo_commands`, `army`
-            UnitCommand::BuildArmy | UnitCommand::LeaderHurry => {} // `army::commands`
+            UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => {} // `army::commands`
             UnitCommand::Bombard => {} // `bombard::arm`
             UnitCommand::Fortify => {
                 let warrior = u.utype == UnitType::Warrior;
@@ -345,12 +436,13 @@ pub fn run_commands(
                 post(&mut board, "Unit disbanded.");
             }
             UnitCommand::FoundCity => {} // handled in cities::found_city
+            UnitCommand::FoundColony => {} // above
             UnitCommand::Upgrade | UnitCommand::UpgradeAll => {} // `upgrades`, above
             UnitCommand::JoinCity | UnitCommand::Pillage | UnitCommand::Automate => {} // `actions::run`
             UnitCommand::Work(action) => {
                 u.work = Some(crate::improvements::Work {
                     action,
-                    turns_left: work_turns(action),
+                    progress: 0,
                 });
                 u.moves = 0;
                 u.path.clear();
@@ -369,6 +461,9 @@ pub fn run_commands(
                         WorkAction::Irrigate => "Building irrigation...",
                         WorkAction::Mine => "Digging mine...",
                         WorkAction::Clear => "Clearing land...",
+                        WorkAction::Fortress => "Building fortress...",
+                        WorkAction::Barricade => "Building barricade...",
+                        WorkAction::Outpost => "Building outpost...",
                     },
                 );
             }
@@ -414,7 +509,12 @@ fn action_cell(cmd: UnitCommand, cover: Cover) -> u32 {
         // "(B)uild army" and "(H)urry city production", the 14th and 15th.
         UnitCommand::BuildArmy => 13,
         UnitCommand::LeaderHurry => 14,
+        UnitCommand::ScienceAge => 19,
+        UnitCommand::FoundColony => 20,
         UnitCommand::FoundCity => 21,
+        UnitCommand::Work(WorkAction::Fortress) => 24,
+        UnitCommand::Work(WorkAction::Barricade) => 36,
+        UnitCommand::Work(WorkAction::Outpost) => 35,
         UnitCommand::Work(WorkAction::Road) => 22,
         UnitCommand::Work(WorkAction::Mine) => 25,
         UnitCommand::Work(WorkAction::Irrigate) => 26,
@@ -527,7 +627,17 @@ pub fn spawn_bar(
                 },
                 BarInfo,
             ));
-            b.spawn((
+            // One unwrapped line, centered by its row rather than by
+            // the text layout, which cannot center a line it never wraps.
+            b.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(40.0),
+                top: Val::Px(76.0),
+                width: Val::Px(220.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_child((
                 Text::new(""),
                 TextFont {
                     font: font.clone(),
@@ -535,17 +645,20 @@ pub fn spawn_bar(
                     ..default()
                 },
                 TextColor(ink),
-                TextLayout::new_with_justify(Justify::Center),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(40.0),
-                    top: Val::Px(80.0),
-                    width: Val::Px(220.0),
-                    ..default()
-                },
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
                 BoxGold,
             ));
-            b.spawn((
+            // One unwrapped line, centered by its row rather than by
+            // the text layout, which cannot center a line it never wraps.
+            b.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(40.0),
+                top: Val::Px(94.0),
+                width: Val::Px(220.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_child((
                 Text::new(""),
                 TextFont {
                     font: font.clone(),
@@ -553,17 +666,20 @@ pub fn spawn_bar(
                     ..default()
                 },
                 TextColor(ink),
-                TextLayout::new_with_justify(Justify::Center),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(40.0),
-                    top: Val::Px(100.0),
-                    width: Val::Px(220.0),
-                    ..default()
-                },
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
                 BoxStatus,
             ));
-            b.spawn((
+            // One unwrapped line, centered by its row rather than by
+            // the text layout, which cannot center a line it never wraps.
+            b.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(40.0),
+                top: Val::Px(111.0),
+                width: Val::Px(220.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_child((
                 Text::new(""),
                 TextFont {
                     font: font.clone(),
@@ -571,14 +687,7 @@ pub fn spawn_bar(
                     ..default()
                 },
                 TextColor(ink),
-                TextLayout::new_with_justify(Justify::Center),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(40.0),
-                    top: Val::Px(116.0),
-                    width: Val::Px(220.0),
-                    ..default()
-                },
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
                 BoxScience,
             ));
             b.spawn((
@@ -596,8 +705,8 @@ pub fn spawn_bar(
             ));
         });
     // Civ3 has no bar: the discs float over the bottom of the map, packed
-    // edge to edge and centered in two rows, unit-specific actions a row
-    // up. Only the discs themselves block map clicks; an empty row holds
+    // edge to edge and centered in three rows (`BAR_ROWS`). Only the
+    // discs themselves block map clicks; an empty row holds
     // no space.
     commands
         .spawn((
@@ -615,7 +724,7 @@ pub fn spawn_bar(
             GlobalZIndex(5),
         ))
         .with_children(|col| {
-            for cmds in [BAR_ROW_UNIT.as_slice(), BAR_ROW_MAIN.as_slice()] {
+            for cmds in BAR_ROWS {
                 col.spawn((Node {
                     flex_direction: FlexDirection::Row,
                     column_gap: Val::Px(0.0),
@@ -690,6 +799,7 @@ pub fn update_bar(
     time: Res<Time>,
     turn: Res<units::Turn>,
     civs: Res<Civilizations>,
+    research: Res<crate::research::Research>,
 ) {
     let spots: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
     // The bar belongs to the chair in play: another civilization's unit
@@ -709,13 +819,18 @@ pub fn update_bar(
             node.display = Display::None;
             continue;
         };
-        node.display = if b.0.relevant(u.utype) && (b.0 != UnitCommand::Upgrade || plan.is_some()) {
+        node.display = if b.0.relevant(u.utype) && (b.0 != UnitCommand::Upgrade || plan.is_some())
+            && (b.0 != UnitCommand::BuildArmy || !u.scientific_leader)
+            && (b.0 != UnitCommand::ScienceAge || u.scientific_leader)
+        {
             Display::Flex
         } else {
             Display::None
         };
         let ok = if b.0 == UnitCommand::Upgrade {
             offer.is_some()
+        } else if b.0 == UnitCommand::ScienceAge {
+            b.0.enabled(&map, &spots, u) && !research.science_age(u.civ, turn.0 as i32)
         } else {
             crate::actions::check(b.0, &map, u, here).unwrap_or_else(|| b.0.enabled(&map, &spots, u))
         };
@@ -758,8 +873,9 @@ pub fn update_bar(
         t.0 = hint.unwrap_or_else(|| match unit {
             Some(u) => {
                 let d = units::def(u.utype);
-                let state = if let Some(w) = u.work {
-                    format!("working ({} left)", w.turns_left)
+                let state = if u.work.is_some() {
+                    let left = crate::improvements::work_turns_left(u, map.get(u.x, u.y).unwrap(), units.iter());
+                    format!("working ({left} {} left)", if left == 1 { "turn" } else { "turns" })
                 } else if u.sentry {
                     "sentry".to_string()
                 } else if u.fortified {
@@ -783,9 +899,9 @@ pub fn update_bar(
                 };
                 // Soldiers show their rank and hit points, as in Civ3.
                 let title = if d.attack > 0 {
-                    format!("{} ({})  HP {}/{}", d.name, u.level.name(), u.hp(), u.max_hp())
+                    format!("{} ({})  HP {}/{}", if u.scientific_leader { "Scientific Leader" } else { d.name }, u.level.name(), u.hp(), u.max_hp())
                 } else {
-                    d.name.to_string()
+                    if u.scientific_leader { "Scientific Leader" } else { d.name }.to_string()
                 };
                 format!(
                     "{}\nMoves {}/{}  -  {}\n{terrain}",
@@ -805,8 +921,10 @@ pub fn update_bar(
         t.0 = if civs.active == civs.viewer() {
             format!("{}  -  {}", CIVS[civs.active].adjective, crate::calendar::label(turn.0))
         } else {
+            // The line above already says who is moving; naming them here
+            // too would overflow the box's single status row.
             format!(
-                "{}  -  {}  -  {} moving",
+                "{}  -  {}  -  {}",
                 CIVS[civs.viewer()].adjective,
                 crate::calendar::label(turn.0),
                 CIVS[civs.active].name
@@ -866,7 +984,7 @@ mod tests {
     #[test]
     fn bar_buttons_map_to_distinct_cells() {
         let mut seen = HashSet::new();
-        for cmd in BAR_ROW_MAIN.iter().chain(BAR_ROW_UNIT.iter()) {
+        for cmd in BAR_ROWS.iter().flat_map(|r| r.iter()) {
             for cover in [Cover::Bare, Cover::Forest, Cover::Jungle, Cover::Pine] {
                 let cell = action_cell(*cmd, cover);
                 assert!(cell < BTN_COLS * BTN_ROWS, "{cmd:?} cell {cell} off sheet");
@@ -876,14 +994,14 @@ mod tests {
                 "{cmd:?} reuses a cell"
             );
         }
-        assert_eq!(seen.len(), BAR_ROW_MAIN.len() + BAR_ROW_UNIT.len());
+        assert_eq!(seen.len(), BAR_ROWS.iter().map(|r| r.len()).sum::<usize>());
     }
 
     /// Each row lays its buttons out in Civ3's action order, so the rows read
     /// left to right the way a Civ3 unit panel does.
     #[test]
     fn bar_rows_follow_civ3_action_order() {
-        for row in [BAR_ROW_MAIN.as_slice(), BAR_ROW_UNIT.as_slice()] {
+        for row in BAR_ROWS {
             let cells: Vec<u32> = row.iter().map(|c| action_cell(*c, Cover::Forest)).collect();
             assert!(
                 cells.windows(2).all(|w| w[0] < w[1]),
@@ -897,41 +1015,29 @@ mod tests {
     #[test]
     fn explore_takes_cell_five_and_wake_has_no_button() {
         assert_eq!(action_cell(UnitCommand::Explore, Cover::Bare), 5);
-        for cmd in BAR_ROW_MAIN.iter().chain(BAR_ROW_UNIT.iter()) {
+        for cmd in BAR_ROWS.iter().flat_map(|r| r.iter()) {
             assert_ne!(*cmd, UnitCommand::Wake, "Wake must stay off the bar");
         }
     }
 
-    /// Unit-specific actions sit a row up; shared orders stay below.
+    /// Civ3's rows are bands of `#UNIT_ACTIONS` cells: the standard orders
+    /// (0-6, 42) at the bottom, the unit's own actions (7-41) above, the
+    /// long orders (43 on) on top. A worker in a city shows Automate and
+    /// Join City a row over Hold ... Sentry, as on Conquests' screen.
     #[test]
-    fn specific_actions_go_a_row_up() {
-        for cmd in BAR_ROW_UNIT {
-            assert!(
-                matches!(
-                    cmd,
-                    UnitCommand::Upgrade
-                        | UnitCommand::BuildArmy
-                        | UnitCommand::LeaderHurry
-                        | UnitCommand::FoundCity
-                        | UnitCommand::Work(_)
-                        | UnitCommand::Automate
-                        | UnitCommand::JoinCity
-                ),
-                "{cmd:?} is not unit-specific"
-            );
+    fn rows_are_bands_of_civ3_action_cells() {
+        let band = |c: u32| match c {
+            0..=6 | 42 => 2,
+            7..=41 => 1,
+            _ => 0,
+        };
+        for (row, cmds) in BAR_ROWS.iter().enumerate() {
+            for cmd in cmds.iter() {
+                assert_eq!(band(action_cell(*cmd, Cover::Bare)), row, "{cmd:?} is in the wrong row");
+            }
         }
-        for cmd in BAR_ROW_MAIN {
-            assert!(
-                !matches!(
-                    cmd,
-                    UnitCommand::Upgrade
-                        | UnitCommand::FoundCity
-                        | UnitCommand::Work(_)
-                        | UnitCommand::Automate
-                        | UnitCommand::JoinCity
-                ),
-                "{cmd:?} belongs a row up"
-            );
+        for cmd in [UnitCommand::Automate, UnitCommand::JoinCity, UnitCommand::Pillage, UnitCommand::Load] {
+            assert!(BAR_ROW_UNIT.contains(&cmd), "{cmd:?} sits over the standard orders");
         }
     }
 
@@ -967,6 +1073,7 @@ mod tests {
             t.base = crate::map::Base::Grassland;
             t.relief = crate::map::Relief::Flat;
             t.cover = Cover::Bare;
+            t.river = 0;
             t.resource = None;
             t.road = false;
             t.seen = true;
@@ -978,23 +1085,26 @@ mod tests {
             river: false,
             unrest: 0,
             hurry_timer: 0,
+            stakes: Default::default(),
+            cooldown: 0,
+            unit_clocks: Vec::new(),
             civ: 0,
             name: "Kyoto".to_string(),
             x,
             y,
-            size: 1,
+            diseased: false,
+            citizens: crate::citizens::new_pool(0, 1),
             food: 0,
             shields: 0,
             production: Production::Warrior,
             queue: vec![],
             buildings: vec![],
-            worked: Default::default(),
             culture: 0,
             founded: 1,
         };
         crate::cities::governor_assign(&map, &mut city, &Default::default());
         // A road under the worked tile: two commerce, one gold of tax.
-        for &(wx, wy) in &city.worked {
+        for &(wx, wy) in &city.worked(&map) {
             let i = map.idx(wx, wy);
             map.tiles[i].road = true;
         }

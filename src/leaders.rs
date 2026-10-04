@@ -15,28 +15,29 @@ use serde::Deserialize;
 
 use crate::civs::{CIV_COUNT, CIVS, is_ai};
 use crate::research::{Research, slot};
-use crate::rules_data::RACES;
 
 const MANIFEST: &str = "assets/gen/leaders/manifest.json";
 const DIR: &str = "gen/leaders";
 
-/// A ruler as the diplomacy screens name them (`RACE.leader_name` and
-/// `title`).
-pub struct Leader {
-    pub name: &'static str,
-    pub title: &'static str,
-    /// Which of the 32 text sets of `diplomacy.txt` the leader speaks. The
-    /// `RACE` rows of our four civs all store -1 for `diplomacy_text_index`,
-    /// which means the row minus one (`0x515557`).
-    pub text_set: usize,
+pub use crate::rules_data::Leader;
+
+/// The rulers of this match, by game slot (like `CIVS`).
+pub struct LeaderTable;
+pub const LEADERS: LeaderTable = LeaderTable;
+
+impl LeaderTable {
+    #[allow(dead_code)] // used by the tests
+    pub fn iter(&self) -> impl Iterator<Item = &'static Leader> {
+        (0..CIV_COUNT).map(|i| &crate::rules_data::LEADER_ROSTER[crate::civs::players()[i]])
+    }
 }
 
-pub const LEADERS: [Leader; CIV_COUNT] = [
-    Leader { name: "Tokugawa", title: "Shogun", text_set: RACES[0].race as usize - 1 },
-    Leader { name: "Caesar", title: "Emperor", text_set: RACES[1].race as usize - 1 },
-    Leader { name: "Cleopatra", title: "Queen", text_set: RACES[2].race as usize - 1 },
-    Leader { name: "Mao", title: "Chairman", text_set: RACES[3].race as usize - 1 },
-];
+impl std::ops::Index<usize> for LeaderTable {
+    type Output = Leader;
+    fn index(&self, i: usize) -> &Leader {
+        &crate::rules_data::LEADER_ROSTER[crate::civs::roster_index(i)]
+    }
+}
 
 /// One clip of the manifest.
 #[derive(Clone, Debug, Deserialize)]

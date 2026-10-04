@@ -32,7 +32,7 @@ use crate::units::{Unit, UnitAnim, UnitArt, UnitType, def, spawn_unit, step_to};
 // ---------------------------------------------------------------------------
 
 /// Experience level, the row of `EXPR` in `conquests.biq`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Level {
     /// The lowest `EXPR` row; nothing demotes a unit yet.
     #[allow(dead_code)]
@@ -119,21 +119,7 @@ pub fn heal(damage: i32, rest: Rest) -> i32 {
 /// mountains and hills override forest and jungle, which override the base.
 /// HYPOTHESIS for the precedence (the clone layers relief and cover over a
 /// base where Civ3 has one terrain type per tile).
-pub(crate) fn terrain_row(t: &Tile) -> usize {
-    match (t.relief, t.cover, t.base) {
-        (Relief::Mountain, _, _) => 6,
-        (Relief::Hill, _, _) => 5,
-        (_, Cover::Forest | Cover::Pine, _) => 7,
-        (_, Cover::Jungle, _) => 8,
-        (_, _, Base::Desert) => 0,
-        (_, _, Base::Plains) => 1,
-        (_, _, Base::Grassland) => 2,
-        (_, _, Base::Tundra | Base::Ice) => 3,
-        (_, _, Base::Coast) => 11,
-        (_, _, Base::Sea) => 12,
-        (_, _, Base::Ocean) => 13,
-    }
-}
+pub(crate) use crate::map::terrain_row;
 
 /// What a defending city adds to the odds: its size class and the best
 /// defensive improvement in it.
@@ -165,8 +151,8 @@ impl Hold {
             })
             .collect();
         Hold {
-            size: city.size,
-            building_pct: exe::city_building_bonus(i32::from(city.size), false, &list, &exe::Rules::CONQUESTS),
+            size: city.size(),
+            building_pct: exe::city_building_bonus(i32::from(city.size()), false, &list, &exe::Rules::CONQUESTS),
         }
     }
 }
@@ -186,7 +172,7 @@ pub fn defense_pct(map: &GameMap, d: &Unit, hold: Option<Hold>) -> i32 {
             resisters: 0,
             building_pct: h.building_pct,
         },
-        None => exe::Structure::None,
+        None => exe::Structure::from_overlay(tile.fortress, tile.barricade),
     };
     exe::terrain_term(exe::TERRAIN_DEFENSE_PCT[terrain_row(tile)], false, &rules)
         + exe::tile_term(structure, false, &rules)
@@ -223,7 +209,8 @@ pub fn round_odds(map: &GameMap, att: &Unit, dfn: &Unit, hold: Option<Hold>) -> 
         }) + barb_att,
         def_strength: exe::defense_strength(&[], dfn.defense(), false),
         def_army_bonus: dfn.army_bonus(true),
-        def_pct: defense_pct(map, dfn, hold) + barb_def,
+        def_pct: defense_pct(map, dfn, hold) + barb_def
+            + if crate::rivers::crossed(map, (dfn.x, dfn.y), (att.x, att.y)) { exe::Rules::CONQUESTS.river_pct } else { 0 },
     })
     .expect("an attacker has attack above 0")
 }
@@ -298,7 +285,7 @@ fn retreat_tile<'a>(
     let mut dx = (dfn.x - att.x).rem_euclid(map.w);
     if dx > map.w / 2 { dx -= map.w; }
     let to = (map.wrap_x(dfn.x + dx.signum()), dfn.y + (dfn.y - att.y).signum());
-    if map.get(to.0, to.1).and_then(move_cost).is_none()
+    if crate::units::entry_cost(map, dfn, (dfn.x, dfn.y), to, &[]).is_none()
         || units.any(|u| (u.x, u.y) == to && u.civ != dfn.civ)
         || cities.any(|c| (c.x, c.y) == to && c.civ != dfn.civ)
     {
@@ -581,24 +568,33 @@ impl Realm<'_, '_> {
     /// citizens die; none of that was read from the exe. The clone keeps the
     /// city, loses one citizen (down to a minimum of 1), loses the build
     /// queue and the Palace, and does not plunder or raze.
-    fn conquer(&mut self, e: Entity, by: usize) {
+    fn conquer(&mut self, e: Entity, by: usize, rng: &mut MapRng) {
         if crate::civs::is_barbarian(by) {
-            self.raid(e);
+            self.raid(e, rng);
             return;
         }
         let Ok((_, mut city)) = self.cities.get_mut(e) else {
             return;
         };
         let old = city.civ;
-        city.civ = by;
+        // The victim books 16 incident points per capture (`capture.md` 4
+        // step 5): they weigh on both sides' war weariness every turn.
+        self.diplomacy.incident(by, old, 16);
         // The human hears of captures that concern them; the computer's
         // wars with itself go unannounced.
         let viewer = self.civs.viewer();
-        let shrank = city.size > 1;
+        // A city with a citizen of the taker's race or a stake of its own
+        // loses nobody (`capture.md` 4); otherwise one citizen dies.
+        let kin = crate::flip::nationals(&city, by) > 0 || city.stakes[by] > 0;
+        let shrank = !kin && city.size() > 1;
+        let was_capital = self.capital.0[old] == Some(e);
         if shrank {
-            city.size -= 1;
-            city.worked.clear();
+            // `0x5642F1` removes population before the building/owner
+            // transfer, so food retention sees the old owner's Granary.
+            city.lose_population(1, None, rng);
         }
+        let lost = crate::flip::transfer(&mut city, by, was_capital, true, false, || rng.below(4) == 0);
+        let _ = lost;
         if by == viewer {
             post(
                 &mut self.board,
@@ -634,15 +630,14 @@ impl Realm<'_, '_> {
     /// A barbarian "capture" is a plunder (`combat.md` 14.2, `0x563410`):
     /// the city keeps its owner and suffers the first loss that applies.
     /// The caller removes the raider.
-    fn raid(&mut self, e: Entity) {
+    fn raid(&mut self, e: Entity, rng: &mut MapRng) {
         use civ3mapgen::capture::{RaidLoss, raid_loot, raid_loss};
         let cities_owned = |civ: usize, q: &Query<(Entity, &mut City)>| q.iter().filter(|(_, c)| c.civ == civ).count() as i32;
         let Ok((_, city)) = self.cities.get(e) else { return };
         let owner = city.civ;
         let n = cities_owned(owner, &self.cities).max(1);
-        let walls = crate::economy::size_class(city.size) == 0 && walls_row(city).is_some();
-        // The clone's citizens all share the owner's race.
-        let loss = raid_loss(walls, i32::from(city.shields), i32::from(city.size), self.treasury.0[owner] as i32);
+        let walls = crate::economy::size_class(city.size()) == 0 && walls_row(city).is_some();
+        let loss = raid_loss(walls, i32::from(city.shields), i32::from(city.nationals(owner)), self.treasury.0[owner] as i32);
         let Ok((_, mut city)) = self.cities.get_mut(e) else { return };
         let text = match loss {
             RaidLoss::Walls => {
@@ -656,10 +651,8 @@ impl Realm<'_, '_> {
                 format!("Barbarians raid {}! Our work on {} has been destroyed!", city.name, city.production.name())
             }
             RaidLoss::Citizen => {
-                // `0x4BA230(B, 1, race, 0)` draws once to pick the victim;
-                // the clone's citizens are interchangeable, so no draw.
-                city.size -= 1;
-                city.worked.clear();
+                // `0x4BA230(B, 1, race, 0)`: only an owner's national dies.
+                city.lose_population(1, Some(crate::civs::roster_index(owner) as i32), rng);
                 format!("Barbarians raid {}! Citizens have been killed.", city.name)
             }
             RaidLoss::Gold => {
@@ -873,6 +866,9 @@ pub fn start_attacks(
         } else {
             "Non-combat units may not attack."
         })
+    } else if def(att.utype).class == 0 && map.get(at.0, at.1).is_some_and(|t| !crate::improvements::is_water_base(t.base))
+        && crate::units::entry_cost(&map, &att, from, at, &[]).is_none() {
+        Some("This unit cannot enter that terrain.")
     } else if !crate::naval::can_attack_from(&map, &att) {
         Some("This unit cannot attack from water.")
     } else if att.attacked && def(att.utype).abilities & crate::roster::ability::BLITZ == 0 {
@@ -894,13 +890,10 @@ pub fn start_attacks(
     // An undefended city is entered like any tile and falls.
     if stack.is_empty() {
         let (city, _) = city.expect("an empty tile with no city returned above");
-        let cost = match (map.get(from.0, from.1), map.get(at.0, at.1)) {
-            (Some(f), Some(t)) => step_cost(f, t).unwrap_or(MP),
-            _ => MP,
-        };
+        let cost = crate::units::entry_cost(&map, &att, from, at, &[]).unwrap_or(MP);
         if crate::civs::is_barbarian(att.civ) {
             // The raider plunders and is removed (`0x5638D2`).
-            realm.conquer(city, att.civ);
+            realm.conquer(city, att.civ, &mut rng.0);
             commands.entity(order.attacker).despawn();
             return;
         }
@@ -909,7 +902,7 @@ pub fn start_attacks(
             u.rested = false;
             advance_attacker(&map, &mut u, at);
         }
-        realm.conquer(city, att.civ);
+        realm.conquer(city, att.civ, &mut rng.0);
         return;
     }
 
@@ -1073,6 +1066,7 @@ pub fn run_combat(
                     if let Some(shooter_civ) = shooter_civ {
                         if shot.result.left_at_one_hp {
                             realm.diplomacy.note_attack(shooter_civ, 1 << u.civ);
+                            realm.diplomacy.incident(shooter_civ, u.civ, 1);
                         }
                         if u.civ == realm.civs.viewer() || shooter_civ == realm.civs.viewer() {
                             post(&mut realm.board, if shot.result.hit {
@@ -1257,13 +1251,14 @@ fn resolve(
                 if u.utype == UnitType::Settler {
                     // "A captured Settler becomes two Workers" (`MANUAL`).
                     let (x, y) = (u.x, u.y);
+                    let nationality = u.nationality;
                     commands.entity(v).despawn();
                     for _ in 0..2 {
                         let w = spawn_unit(commands, art, UnitType::Worker, x, y, att_civ);
                         commands
                             .entity(w)
                             .entry::<Unit>()
-                            .and_modify(|mut u| u.moves = 0);
+                            .and_modify(move |mut u| { u.moves = 0; u.nationality = nationality; });
                     }
                     continue;
                 }
@@ -1301,7 +1296,7 @@ fn resolve(
                 }
             }
             if let Some(city) = city {
-                realm.conquer(city, att_civ);
+                realm.conquer(city, att_civ, rng);
             }
             if raid {
                 commands.entity(seq.attacker).despawn();
@@ -1341,7 +1336,13 @@ mod tests {
             resource: None,
             road: false,
             irrigation: false,
+            river: 0,
             mine: false,
+            site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+            owner: None,
         }
     }
 
@@ -1445,6 +1446,13 @@ mod tests {
         assert_eq!(defense_pct(&map, &d, Some(Hold::bare(6))), 10);
         assert_eq!(defense_pct(&map, &d, Some(Hold::bare(7))), 60);
         assert_eq!(defense_pct(&map, &d, Some(Hold::bare(13))), 110);
+        // A fortress adds 50 outside a city, and a city's own bonus replaces it.
+        let mut fort_tile = tile(Base::Grassland, Relief::Flat, Cover::Bare);
+        fort_tile.fortress = true;
+        let fort = map_of(fort_tile);
+        // Grassland's own 10 plus the fortress's 50.
+        assert_eq!(defense_pct(&fort, &d, None), 60);
+        assert_eq!(defense_pct(&fort, &d, Some(Hold::bare(6))), 10);
     }
 
     #[test]
@@ -1581,17 +1589,20 @@ mod tests {
             river: false,
             unrest: 0,
             hurry_timer: 0,
+            stakes: Default::default(),
+            cooldown: 0,
+            unit_clocks: Vec::new(),
             civ,
             name: "Thebes".to_string(),
             x,
             y,
-            size,
+            diseased: false,
+            citizens: crate::citizens::new_pool(civ, size),
             food: 3,
             shields: 4,
             production: Production::Warrior,
             queue: vec![Production::Temple],
             buildings: vec![],
-            worked: HashSet::from([(x, y + 1)]),
             culture: 0,
             founded: 1,
         }
@@ -2208,11 +2219,13 @@ mod tests {
         assert!(unit(&app, settler).is_none(), "the Settler is replaced");
         let w = unit(&app, worker).unwrap();
         assert_eq!((w.civ, w.moves), (0, 0));
+        assert_eq!(w.nationality, crate::civs::roster_index(1));
         let workers = app
             .world_mut()
             .query::<&Unit>()
             .iter(app.world())
             .filter(|u| u.civ == 0 && u.utype == UnitType::Worker)
+            .inspect(|u| assert_eq!(u.nationality, crate::civs::roster_index(1), "settler captives retain their nationality too"))
             .count();
         assert_eq!(workers, 3); // the captured Worker plus two from the Settler
         let u = unit(&app, a).unwrap();
@@ -2268,7 +2281,7 @@ mod tests {
         attack(&mut app, a, (2, 1));
         app.update();
         let c = app.world().get::<City>(capital).unwrap();
-        assert_eq!((c.civ, c.size, c.queue.len(), c.shields), (0, 3, 0, 0));
+        assert_eq!((c.civ, c.size(), c.queue.len(), c.shields), (0, 3, 0, 0));
         assert_eq!(app.world().resource::<Capital>().0[1], None);
         // No fight: the soldier simply walked in, spending the tile's cost.
         assert!(app.world().resource::<ActiveCombat>().0.is_none());
@@ -2288,15 +2301,15 @@ mod tests {
         attack(&mut app, a, (2, 1));
         app.update();
         let c = app.world().get::<City>(city).unwrap();
-        assert_eq!((c.civ, c.size, c.shields), (1, 4, 0));
+        assert_eq!((c.civ, c.size(), c.shields), (1, 4, 0));
         assert!(unit(&app, a).is_none());
         // Next: no stock, so a citizen dies.
         let a = app.world_mut().spawn(warrior(crate::civs::BARBARIANS, 1, 1)).id();
         attack(&mut app, a, (2, 1));
         app.update();
-        assert_eq!(app.world().get::<City>(city).unwrap().size, 3);
+        assert_eq!(app.world().get::<City>(city).unwrap().size(), 3);
         // A size-1 city with gold loses its treasury share.
-        app.world_mut().get_mut::<City>(city).unwrap().size = 1;
+        app.world_mut().get_mut::<City>(city).unwrap().set_size(1);
         app.world_mut().resource_mut::<crate::cities::Treasury>().0[1] = 30;
         let a = app.world_mut().spawn(warrior(crate::civs::BARBARIANS, 1, 1)).id();
         attack(&mut app, a, (2, 1));
@@ -2394,6 +2407,34 @@ mod tests {
         let mut board = crate::features::MessageBoard::default();
         d.declare(&crate::diplomacy::Facts::even(), 0, 1, 0, &mut board);
         d
+    }
+
+    #[test]
+    fn a_pillaged_road_blocks_a_wheeled_attack_before_dispatch() {
+        let mut app = arena(1);
+        app.insert_resource(at_war());
+        app.init_resource::<crate::unit_picker::UnitPicker>();
+        app.add_systems(Update, crate::units::drive_movement.before(start_attacks));
+        let mut chariot = Unit::new(0, UnitType::Chariot, 1, 1);
+        chariot.path = [(2, 1)].into();
+        let attacker = app.world_mut().spawn(chariot).id();
+        let defender = app.world_mut().spawn(warrior(1, 2, 1)).id();
+        {
+            let mut map = app.world_mut().resource_mut::<GameMap>();
+            let i = map.idx(2, 1);
+            map.tiles[i].relief = Relief::Mountain;
+            map.tiles[i].road = false;
+        }
+        app.update();
+        assert_eq!(app.world().resource::<Messages<AttackOrder>>().len(), 0);
+        assert!(unit(&app, attacker).unwrap().path.is_empty());
+        assert_eq!(unit(&app, attacker).unwrap().moves, 2 * MP);
+        // Direct orders also pass through the terrain refusal gate.
+        attack(&mut app, attacker, (2, 1));
+        app.update();
+        assert!(app.world().resource::<ActiveCombat>().0.is_none());
+        assert_eq!(unit(&app, defender).unwrap().damage, 0);
+        assert_eq!(unit(&app, attacker).unwrap().moves, 2 * MP);
     }
 
     #[test]

@@ -336,7 +336,7 @@ writes use the sub-object base, not the absolute offset `+0x183C`.
 
 * The Player vtable slots `+0x1C..+0xA8` other than the four read here; the connection test
   `0x57F0A0` on `0xB72888`; the table `Player +0x1614` (its writers).
-* Helpers read only by their call sites: `0x563220` (capital lost), `0x4482B0`, `0x4AFAB0`,
+* Helpers read only by their call sites: `0x563220` (capital lost counter), `0x4AFAB0`,
   `0x4AECC0` (remove city), `0x4ACF40` (remove / add building), `0x5BEB10`, `0x4BCDE0` /
   `0x4BCEA0`, `0x4B0B70`, `0x4B0C60`, `0x4BB090`, `0x4B0E80`, `0x55CB20`, `0x55CD00`, `0x55CF10`,
   `0x55A560`, `0x568950`, `0x4484C0`, `0x5694D0` (unit factory), the cell slots `0xE0`.
@@ -345,3 +345,9 @@ writes use the sub-object base, not the absolute offset `+0x183C`.
   `victory.md` section 1.4), `+0x15CC`, `+0x15EC` (`+0x15F0` is the per-PRTO live-unit array, `world-events.md`; the per-continent arrays at `+0x1600..+0x1610` are described in the table above) (`+0x11CC`, `+0x15C4` and the words
   `[0xA5267C]`, `[0xA529B8]` are identified in `victory.md`); the words `[0xA52998]`, `[0x9C5D6C]`.
 * The remaining mid-function ranges of `0x564800` that only write UI state.
+
+
+Replacement capital selection `0x4482B0` is now decoded and integrated in
+[`city-removal.md`](city-removal.md). This resolves the previously unread
+capital-choice helper. Complete `0x4AECC0` removal and ABANDONBASE remain
+pending; the new document records the opened removal sites and gaps.

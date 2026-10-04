@@ -9,7 +9,6 @@ use std::collections::HashSet;
 use civ3mapgen::government::hurry as method;
 
 use crate::cities::{City, Production};
-use crate::economy::{food_box, size_class};
 use crate::map::GameMap;
 use crate::roster::{imp, oth};
 
@@ -173,7 +172,7 @@ pub fn quote(city: &City, how: i32, gold: u32, buyer: Buyer) -> Result<Offer, Re
             let n = discount(people(rem, s), 1);
             if rem < 1 || n == 0 {
                 Err(Refusal::NotNecessary)
-            } else if n > i32::from(city.size) / 2 {
+            } else if n > i32::from(city.size()) / 2 {
                 Err(Refusal::NotEnoughPeople(n as u8))
             } else {
                 Ok(Offer::People(n as u8))
@@ -186,37 +185,26 @@ pub fn quote(city: &City, how: i32, gold: u32, buyer: Buyer) -> Result<Offer, Re
 /// `0x4B5CA0`: the box fills to the cost, then the gold leaves the
 /// treasury (never below zero) or the citizens die and the city remembers
 /// the whip for twenty turns each.
-pub fn apply(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>, offer: Offer, gold: &mut u32) {
+pub fn apply(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>, offer: Offer, gold: &mut u32, rng: &mut crate::rng::MapRng) {
     city.shields = city.price(city.production);
     match offer {
         Offer::Gold(price) => *gold = gold.saturating_sub(price),
         Offer::People(n) => {
             city.hurry_timer = city.hurry_timer.saturating_add(SACRIFICE_TURNS * u16::from(n));
-            remove_citizens(map, city, taken, n);
+            remove_citizens(map, city, taken, n, rng);
         }
     }
 }
 
-/// `0x4BA230` for the clone's citizens, who carry no race: the city loses
-/// `n` people (never the last), the worst tiles go idle, and a city that
-/// shrinks across a size limit keeps its food only up to half the new box
-/// with a Granary, none without (`hurry.md` 8.4).
-pub fn remove_citizens(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>, n: u8) {
+/// Native cyclic-slot victims release their own tiles/jobs. A size-class
+/// change caps food at half the new box with a Granary, zero without it.
+pub fn remove_citizens(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>, n: u8, rng: &mut crate::rng::MapRng) {
     for _ in 0..n {
-        if city.size <= 1 {
+        if city.size() <= 1 {
             break;
         }
-        let before = size_class(city.size);
-        city.size -= 1;
-        if size_class(city.size) != before {
-            city.food = if crate::citycalc::has_flag(city, imp::KEEPS_FOOD) {
-                city.food.min(food_box(city.size) / 2)
-            } else {
-                0
-            };
-        }
+        city.lose_population(1, None, rng);
     }
-    city.food = city.food.min(food_box(city.size).saturating_sub(1));
     crate::cities::governor_fill(map, city, taken);
 }
 
@@ -258,7 +246,7 @@ mod tests {
 
     fn city(size: u8, shields: u16, p: Production) -> City {
         let mut c = City::new(0, "Kyoto", 5, 5);
-        c.size = size;
+        c.set_size(size);
         c.shields = shields;
         c.production = p;
         c
@@ -298,14 +286,14 @@ mod tests {
         let map = GameMap::generate();
         let mut c = city(4, 1, Production::Warrior);
         let mut gold = 0;
-        apply(&map, &mut c, &HashSet::new(), Offer::People(1), &mut gold);
-        assert_eq!(c.size, 3);
+        apply(&map, &mut c, &HashSet::new(), Offer::People(1), &mut gold, &mut crate::rng::MapRng::new(1));
+        assert_eq!(c.size(), 3);
         assert_eq!(c.shields, c.price(Production::Warrior));
         assert_eq!(c.hurry_timer, 20);
         let mut c = city(4, 1, Production::Warrior);
         let mut gold = 100;
-        apply(&map, &mut c, &HashSet::new(), Offer::Gold(36), &mut gold);
-        assert_eq!((c.size, gold), (4, 64));
+        apply(&map, &mut c, &HashSet::new(), Offer::Gold(36), &mut gold, &mut crate::rng::MapRng::new(1));
+        assert_eq!((c.size(), gold), (4, 64));
     }
 
     #[test]
@@ -314,12 +302,12 @@ mod tests {
         let map = GameMap::generate();
         let mut c = city(7, 0, Production::Warrior);
         c.food = 25;
-        remove_citizens(&map, &mut c, &HashSet::new(), 1);
-        assert_eq!((c.size, c.food), (6, 0));
-        // S4: 5 -> 4 keeps the store (clamped to the smaller box).
+        remove_citizens(&map, &mut c, &HashSet::new(), 1, &mut crate::rng::MapRng::new(1));
+        assert_eq!((c.size(), c.food), (6, 0));
+        // S4: 5 -> 4 keeps the store unchanged, even when the box is full.
         let mut c = city(5, 0, Production::Warrior);
-        c.food = 10;
-        remove_citizens(&map, &mut c, &HashSet::new(), 1);
-        assert_eq!((c.size, c.food), (4, 10));
+        c.food = 20;
+        remove_citizens(&map, &mut c, &HashSet::new(), 1, &mut crate::rng::MapRng::new(1));
+        assert_eq!((c.size(), c.food), (4, 20));
     }
 }

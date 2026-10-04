@@ -46,6 +46,19 @@ pub const TOWN_MAX: i32 = 6;
 /// (shipped 12). Same provenance as [`TOWN_MAX`].
 pub const CITY_MAX: i32 = 12;
 
+/// `0x4B1DC0`: freshwater (`0x4B1E7F`) or an active size-level-2
+/// improvement bypasses the town gate. The level-3 gate at `0x4B1EBF`
+/// never tests freshwater. Stock RULE limits are six and twelve.
+pub fn growth_limit(fresh_water: bool, level_2: bool, level_3: bool) -> i32 {
+    if !fresh_water && !level_2 {
+        TOWN_MAX
+    } else if !level_3 {
+        CITY_MAX
+    } else {
+        i32::MAX
+    }
+}
+
 /// City size class (`0x427540`): 0 town, 1 city, 2 metropolis.
 /// `pop > city_max` is 2, else `pop > town_max` is 1 (`setg`), else 0.
 pub fn size_class(population: i32, town_max: i32, city_max: i32) -> i32 {
@@ -368,6 +381,16 @@ pub fn optimal_city_number(i: &OcnInputs) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn freshwater_bypasses_only_the_aqueduct_gate() {
+        assert_eq!(super::growth_limit(false, false, false), 6);
+        assert_eq!(super::growth_limit(false, false, true), 6);
+        assert_eq!(super::growth_limit(true, false, false), 12);
+        assert_eq!(super::growth_limit(false, true, false), 12);
+        assert_eq!(super::growth_limit(true, false, true), i32::MAX);
+        assert_eq!(super::growth_limit(false, true, true), i32::MAX);
+    }
+
     use super::*;
 
     #[test]

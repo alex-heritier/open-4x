@@ -85,11 +85,7 @@ pub struct Board {
 
 impl Board {
     pub fn new(cities: Vec<City>, units: Vec<(Entity, Unit)>, map: &GameMap) -> Self {
-        let refs: Vec<&City> = cities.iter().collect();
-        let owner = cities::territory(map, &refs)
-            .into_iter()
-            .map(|(tile, i)| (tile, cities[i].civ))
-            .collect();
+        let owner = cities::territory(map);
         let mut at: HashMap<(i32, i32), Vec<(Entity, Unit)>> = HashMap::new();
         for (e, u) in units {
             at.entry((u.x, u.y)).or_default().push((e, u));
@@ -140,6 +136,15 @@ impl Board {
                 .at
                 .get(&tile)
                 .is_some_and(|v| v.iter().any(|(_, u)| u.civ != civ))
+    }
+
+    /// Civilian routes obey the mover's foreign-occupancy gate, including
+    /// peaceful units. Search around blockers instead of stopping before them.
+    fn civilian_path(&self, map: &GameMap, civ: usize, from: (i32, i32), to: (i32, i32)) -> Option<Vec<(i32, i32)>> {
+        map.find_path_by(from, to, |a, b| {
+            if self.held_by_other(b, civ) { return None; }
+            map.land_cost(a, b, crate::units::bridges(civ))
+        })
     }
 
     fn mine(&self, civ: usize) -> impl Iterator<Item = &City> {
@@ -222,7 +227,7 @@ pub fn best_site(
     // A higher-scoring island must not hide a reachable mainland site.
     scored
         .into_iter()
-        .find(|&(_, t)| map.find_path(from, t).is_some())
+        .find(|&(_, t)| board.civilian_path(map, civ, from, t).is_some())
         .map(|(_, t)| t)
 }
 
@@ -243,6 +248,8 @@ pub struct Needs {
     pub settlers: usize,
     pub transports: usize,
     pub overseas_room: bool,
+    /// Enemy cities lie across the water, out of a land army's reach.
+    pub overseas_war: bool,
     /// Workers alive or being built in the civ's other cities.
     pub workers: usize,
     /// Soldiers alive.
@@ -261,6 +268,8 @@ pub struct Needs {
     pub rich: bool,
     /// The city's food surplus.
     pub net_food: i16,
+    /// Freshwater at the city tile replaces its Aqueduct requirement.
+    pub fresh_water: bool,
     /// The city's shields per turn.
     pub shield_rate: u8,
     /// An enemy soldier is near.
@@ -325,6 +334,11 @@ pub fn choose_build(city: &City, n: &Needs) -> Production {
         && n.can(Production::Galley) && city.can_build_here(Production::Galley) {
         return Production::Galley;
     }
+    // A war across the water needs a ferry and a band to fill it.
+    if n.overseas_war && n.transports == 0 && n.soldiers >= n.soldiers_wanted.saturating_sub(2)
+        && n.can(Production::Galley) && city.can_build_here(Production::Galley) {
+        return Production::Galley;
+    }
     // 2. Expansion, while there is room and the city can spare the people.
     if (n.room || (n.overseas_room && n.transports > 0))
         && n.cities < MAX_CITIES
@@ -375,7 +389,7 @@ pub fn choose_build(city: &City, n: &Needs) -> Production {
 /// A city can finish a Settler soon: it has the people, or is about to
 /// (a Settler held for size 3 would idle the shield box).
 fn settler_ready(city: &City, n: &Needs) -> bool {
-    if city.size >= cities::SETTLER_MIN_SIZE {
+    if city.size() >= cities::SETTLER_MIN_SIZE {
         return true;
     }
     // Otherwise start it when the shield box will fill about as the city
@@ -383,8 +397,8 @@ fn settler_ready(city: &City, n: &Needs) -> bool {
     if n.net_food <= 0 {
         return false;
     }
-    let mut food_needed = economy::food_box(city.size) as i32 - city.food as i32;
-    for size in city.size + 1..cities::SETTLER_MIN_SIZE {
+    let mut food_needed = economy::food_box(city.size()) as i32 - city.food as i32;
+    for size in city.size() + 1..cities::SETTLER_MIN_SIZE {
         food_needed += economy::food_box(size) as i32;
     }
     let growth = (food_needed + n.net_food as i32 - 1) / n.net_food as i32;
@@ -407,24 +421,25 @@ fn attacker(city: &City, n: &Needs) -> Production {
 /// civ going to war, and walls under threat.
 fn building(city: &City, n: &Needs) -> Option<Production> {
     let want = |p: Production| n.can(p) && !city.has(p) && city.can_build_here(p);
-    if citycalc::growth_blocked(city) {
-        let lifts = Production::all().find(|&p| {
-            p.bldg().is_some_and(|b| b.flags & (roster::imp::ALLOWS_SIZE_LEVEL_2 | roster::imp::ALLOWS_SIZE_LEVEL_3) != 0)
-                && want(p)
-        });
+    if citycalc::growth_blocked(city, n.fresh_water) {
+        let flag = if citycalc::size_limit(city, n.fresh_water) == civ3mapgen::economy::TOWN_MAX {
+            roster::imp::ALLOWS_SIZE_LEVEL_2
+        } else { roster::imp::ALLOWS_SIZE_LEVEL_3 };
+        let lifts = Production::all().find(|&p|
+            p.bldg().is_some_and(|b| b.flags & flag != 0) && want(p));
         if lifts.is_some() {
             return lifts;
         }
     }
     let wants = [
-        (Production::Temple, city.size >= 3),
-        (Production::Granary, city.size >= 4),
+        (Production::Temple, city.size() >= 3),
+        (Production::Granary, city.size() >= 4),
         (Production::Barracks, n.turn >= AGGRESSION_TURN),
-        (Production::Walls, n.threatened && city.size >= 3),
-        (Production::Library, city.size >= 4),
-        (Production::Marketplace, city.size >= 5),
-        (Production::Harbor, city.coastal && city.size >= 3 && n.net_food <= 2),
-        (Production::Courthouse, city.size >= 6),
+        (Production::Walls, n.threatened && city.size() >= 3),
+        (Production::Library, city.size() >= 4),
+        (Production::Marketplace, city.size() >= 5),
+        (Production::Harbor, city.coastal && city.size() >= 3 && n.net_food <= 2),
+        (Production::Courthouse, city.size() >= 6),
     ];
     wants.into_iter().find(|&(p, ok)| ok && want(p)).map(|(p, _)| p)
 }
@@ -434,13 +449,18 @@ pub fn army_cap(garrisons: usize, cities: usize) -> usize {
     garrisons + 4 * cities + 4
 }
 
+/// A soldier riding a ship, ready to land.
+fn land_soldier_aboard(u: &Unit) -> bool {
+    u.carrier.is_some() && def(u.utype).class == 0 && def(u.utype).attack > 0
+}
+
 fn land_soldier(u: &Unit) -> bool {
     u.carrier.is_none() && def(u.utype).class == 0 && def(u.utype).attack > 0
 }
 
 /// Soldiers a city wants for its own defense.
 pub fn garrison_need(city: &City, threatened: bool) -> usize {
-    1 + usize::from(city.size >= 4) + usize::from(threatened)
+    1 + usize::from(city.size() >= 4) + usize::from(threatened)
 }
 
 /// An enemy soldier within `THREAT_RANGE` of `tile`.
@@ -506,17 +526,16 @@ fn safe_walk(board: &Board, civ: usize, path: &[(i32, i32)]) -> Vec<(i32, i32)> 
         .collect()
 }
 
-/// The job a worker should do on a tile, if any: irrigation for farmland,
-/// a mine on hills and mountains, otherwise a road.
+/// The job a worker should do: irrigate farmland, otherwise mine eligible
+/// terrain, then build roads. Existing irrigation and mines are preserved.
 pub fn job_at(map: &GameMap, cities: &[(i32, i32)], tile: (i32, i32)) -> Option<WorkAction> {
     let t = map.get(tile.0, tile.1)?;
     if cities.contains(&tile) || t.hut || t.camp {
         return None;
     }
-    if improvements::can_irrigate(map, tile.0, tile.1) && !t.mine {
+    if improvements::can_irrigate(map, cities, tile.0, tile.1) && !t.mine {
         Some(WorkAction::Irrigate)
     } else if improvements::can_mine(map, tile.0, tile.1)
-        && t.relief != Relief::Flat
         && !t.irrigation
     {
         Some(WorkAction::Mine)
@@ -599,7 +618,12 @@ impl Brain<'_> {
 
     /// Walk to a tile, stopping short of enemies; stay if there is no way.
     fn walk_to(&self, u: &Unit, goal: (i32, i32)) -> Act {
-        match self.map.find_path((u.x, u.y), goal) {
+        // Artillery also uses this to approach an occupied target; safe_walk
+        // stops it before the final tile. Intermediate blockers need a detour.
+        match self.map.find_path_by((u.x, u.y), goal, |a, b| {
+            if b != goal && self.board.held_by_other(b, self.civ) { return None; }
+            crate::units::entry_cost(self.map, u, a, b, &[])
+        }) {
             Some(p) => {
                 let walk = safe_walk(self.board, self.civ, &p);
                 if walk.is_empty() { Act::Stay } else { Act::Go(walk) }
@@ -662,7 +686,8 @@ impl Brain<'_> {
             Some(here)
         } else {
             target
-                .filter(|&t| site_ok(self.map, self.board, self.civ, &others, t))
+                .filter(|&t| site_ok(self.map, self.board, self.civ, &others, t)
+                    && self.board.civilian_path(self.map, self.civ, here, t).is_some())
                 .or_else(|| best_site(self.map, self.board, self.civ, here, &others))
         };
         match site {
@@ -679,7 +704,8 @@ impl Brain<'_> {
         let spots = self.board.city_spots();
         let here = (u.x, u.y);
         let job = |t: (i32, i32)| job_at(self.map, &spots, t);
-        let keep = target.filter(|&t| job(t).is_some() && !self.claimed.contains(&t));
+        let keep = target.filter(|&t| job(t).is_some() && !self.claimed.contains(&t)
+            && self.board.civilian_path(self.map, self.civ, here, t).is_some());
         let tile = keep.or_else(|| {
             // Worked ground first, then anything else in the radius.
             let mut options: Vec<(i32, (i32, i32))> = vec![];
@@ -691,16 +717,15 @@ impl Brain<'_> {
                     if self.board.owner.get(&t).is_some_and(|&o| o != self.civ) {
                         continue;
                     }
-                    let penalty = if c.worked.contains(&t) { 0 } else { 6 };
+                    let penalty = if c.worked(self.map).contains(&t) { 0 } else { 6 };
                     options.push((self.map.distance(here, t) + penalty, t));
                 }
             }
             options.sort();
             options
                 .into_iter()
-                .take(3)
                 .map(|(_, t)| t)
-                .find(|&t| t == here || self.map.find_path(here, t).is_some())
+                .find(|&t| self.board.civilian_path(self.map, self.civ, here, t).is_some())
         });
         let Some(tile) = tile else {
             return (Act::Stay, None);
@@ -793,7 +818,7 @@ impl Brain<'_> {
             // only by a city and no units is empty and falls.
             let chance = attack_chance(self.map, u, &stack, city.map(combat::Hold::of));
             let value = match (city, stack.iter().any(|(_, s)| def(s.utype).defense > 0)) {
-                (Some(c), _) => 4.0 + 0.3 * c.size as f64,
+                (Some(c), _) => 4.0 + 0.3 * c.size() as f64,
                 (None, false) => 2.5,
                 (None, true) => 1.0 + 0.2 * stack.len() as f64,
             };
@@ -811,7 +836,7 @@ impl Brain<'_> {
         }
         prey.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         for &(_, t) in prey.iter().take(4) {
-            let Some(path) = self.map.find_path(here, t) else {
+            let Some(path) = crate::units::route(self.map, u, t, &[]) else {
                 continue;
             };
             if path.len() == 1 {
@@ -834,7 +859,7 @@ impl Brain<'_> {
                 .iter()
                 .filter(|c| self.board.at_war(self.civ, c.civ))
                 .min_by_key(|c| self.map.distance(here, (c.x, c.y)))?;
-            let path = self.map.find_path(here, (goal.x, goal.y))?;
+            let path = crate::units::route(self.map, u, (goal.x, goal.y), &[])?;
             let walk = safe_walk(self.board, self.civ, &path[..path.len().saturating_sub(1)]);
             if !walk.is_empty() {
                 return Some(Act::Go(walk));
@@ -877,6 +902,11 @@ fn refresh_known(state: &mut AiState, map: &GameMap, board: &Board) {
         for c in board.mine(civ) {
             light(c.x, c.y, 2);
         }
+        for (i, t) in map.tiles.iter().enumerate() {
+            if t.site.is_some_and(|site| crate::sites::owner(site) == civ) {
+                light(i as i32 % map.w, i as i32 / map.w, crate::sites::sight(t));
+            }
+        }
     }
 }
 
@@ -889,6 +919,7 @@ fn manage_cities(
     gold: &mut u32,
     room: bool,
     cities_q: &mut Query<(Entity, &mut City)>,
+    rng: &mut crate::rng::MapRng,
 ) {
     let reserve = 50 + 10 * board.mine(civ).count() as u32;
     let mine: Vec<&City> = board.mine(civ).collect();
@@ -929,6 +960,7 @@ fn manage_cities(
             settlers: count(UnitType::Settler) + building(Production::Settler, tile),
             transports,
             overseas_room: city.coastal && naval::room(map, board, civ, tile),
+            overseas_war: city.coastal && turn >= AGGRESSION_TURN && naval::sea_war(map, board, civ, tile),
             workers: count(UnitType::Worker) + building(Production::Worker, tile),
             soldiers,
             artillery: board.units_of(civ).filter(|u| crate::bombard::capable(u.utype)).count()
@@ -940,6 +972,7 @@ fn manage_cities(
             turn,
             rich,
             net_food: cities::city_income(map, &city).0,
+            fresh_water: map.fresh_water(city.x, city.y),
             shield_rate: cities::city_income(map, &city).1,
             threatened: danger,
             locked: crate::research::locked(civ),
@@ -956,7 +989,7 @@ fn manage_cities(
         if pick != city.production && (pick.is_building() == city.production.is_building() || city.shields <= 5) {
             city.change_build(pick);
         }
-        ai_hurry(map, &mut city, &taken, danger, needs.defenders_here < needs.garrison, reserve, gold);
+        ai_hurry(map, &mut city, &taken, danger, needs.defenders_here < needs.garrison, reserve, gold, rng);
     }
 }
 
@@ -974,6 +1007,7 @@ pub fn ai_hurry(
     short: bool,
     reserve: u32,
     gold: &mut u32,
+    rng: &mut crate::rng::MapRng,
 ) {
     use crate::hurry::{self, Buyer, Offer};
     let how = crate::realm::govt(city.civ).hurry;
@@ -985,10 +1019,10 @@ pub fn ai_hurry(
     };
     let want = match offer {
         Offer::Gold(price) => urgent || (*gold >= reserve + price && city.production.unit().is_none_or(|u| u == UnitType::Settler)),
-        Offer::People(n) => urgent || (city.size >= 6 && n == 1 && city.production.is_building()),
+        Offer::People(n) => urgent || (city.size() >= 6 && n == 1 && city.production.is_building()),
     };
     if want {
-        hurry::apply(map, city, taken, offer, gold);
+        hurry::apply(map, city, taken, offer, gold, rng);
     }
 }
 
@@ -1009,6 +1043,7 @@ pub fn play_turn(
     mut end: MessageWriter<TurnEnded>,
     mut bombard: MessageWriter<crate::bombard::Order>,
     mut commands: Commands,
+    mut rng: ResMut<crate::combat::CombatRng>,
 ) {
     let civ = civs.active;
     if !is_ai(civ) || civs.outcome.is_some() || splash.0 {
@@ -1032,7 +1067,7 @@ pub fn play_turn(
     )
     .with_war(diplomacy.war_matrix());
     refresh_known(&mut state, &map, &board);
-    for (e, path) in naval::orders(&map, &board, civ, &state.targets) {
+    for (e, path) in naval::orders(&map, &board, civ, turn.0, &state.targets) {
         if let Ok((_, mut u)) = units.get_mut(e) {
             u.path = path.into();
             u.fortified = false;
@@ -1049,7 +1084,7 @@ pub fn play_turn(
             .or_else(|| board.units_of(civ).next().map(|u| (u.x, u.y)))
             .and_then(|from| best_site(&map, &board, civ, from, &HashSet::new()))
             .is_some();
-        manage_cities(civ, turn.0, &map, &board, &mut treasury.0[civ], room, &mut cities_q);
+        manage_cities(civ, turn.0, &map, &board, &mut treasury.0[civ], room, &mut cities_q, &mut rng.0);
         if std::env::var("CIV3_AI_LOG").is_ok() {
             let count = |t: UnitType| board.units_of(civ).filter(|u| u.utype == t).count();
             println!(
@@ -1057,7 +1092,7 @@ pub fn play_turn(
                 turn.0,
                 crate::civs::CIVS[civ].name,
                 board.mine(civ).count(),
-                board.mine(civ).map(|c| c.size as u32).sum::<u32>(),
+                board.mine(civ).map(|c| c.size() as u32).sum::<u32>(),
                 treasury.0[civ],
                 count(UnitType::Settler),
                 count(UnitType::Worker),
@@ -1070,15 +1105,15 @@ pub fn play_turn(
                 println!(
                     "ai:   {} size {} food {}/{} ({:+}) shields {}/{} (+{}) building {:?} worked {}",
                     c.name,
-                    c.size,
+                    c.size(),
                     c.food,
-                    economy::food_box(c.size),
+                    economy::food_box(c.size()),
                     f,
                     c.shields,
                     c.price(c.production),
                     sh,
                     c.production,
-                    c.worked.len()
+                    c.worked(&map).len()
                 );
             }
         }
@@ -1229,7 +1264,7 @@ pub fn play_turn(
                 state.done.insert(e);
             }
             Act::Work(action) => {
-                u.work = Some(Work { action, turns_left: improvements::work_turns(action) });
+                u.work = Some(Work { action, progress: 0 });
                 u.moves = 0;
                 u.path.clear();
                 u.fortified = false;
@@ -1267,17 +1302,20 @@ mod tests {
             river: false,
             unrest: 0,
             hurry_timer: 0,
+            stakes: Default::default(),
+            cooldown: 0,
+            unit_clocks: Vec::new(),
             civ,
             name: format!("C{x},{y}"),
             x,
             y,
-            size,
+            diseased: false,
+            citizens: crate::citizens::new_pool(civ, size),
             food: 0,
             shields: 0,
             production: Production::Warrior,
             queue: vec![],
             buildings: vec![],
-            worked: HashSet::new(),
             culture: 0,
             founded: 1,
         }
@@ -1291,6 +1329,7 @@ mod tests {
             settlers: 0,
             transports: 0,
             overseas_room: false,
+            overseas_war: false,
             workers: 2,
             soldiers: 3,
             artillery: 0,
@@ -1301,6 +1340,7 @@ mod tests {
             turn: 5,
             rich: false,
             net_food: 2,
+            fresh_water: false,
             shield_rate: 2,
             threatened: false,
             locked: bronze_age(),
@@ -1387,6 +1427,12 @@ mod tests {
         assert_eq!(choose_build(&city, &n), Production::Aqueduct);
         city.buildings.push(Production::Aqueduct);
         assert_ne!(choose_build(&city, &n), Production::Aqueduct);
+        city.buildings.clear();
+        n.fresh_water = true;
+        assert_ne!(choose_build(&city, &n), Production::Aqueduct);
+        city.set_size(12);
+        n.locked.clear();
+        assert_eq!(choose_build(&city, &n), Production::Hospital);
     }
 
     #[test]
@@ -1463,6 +1509,7 @@ mod tests {
             t.base = Base::Desert;
             t.relief = Relief::Flat;
             t.cover = Cover::Bare;
+            t.river = 0;
             t.resource = None;
             t.irrigation = false;
             t.mine = false;
@@ -1498,7 +1545,7 @@ mod tests {
     }
 
     #[test]
-    fn workers_irrigate_farmland_mine_hills_and_road_the_rest() {
+    fn workers_irrigate_farmland_and_mine_bare_land() {
         let mut map = GameMap::generate();
         let (x, y) = (10, 10);
         let i = map.idx(x, y);
@@ -1507,18 +1554,24 @@ mod tests {
         map.tiles[i].cover = Cover::Bare;
         map.tiles[i].irrigation = false;
         map.tiles[i].road = false;
-        // Water beside it makes irrigation possible.
+        // Isolate a one-tile lake: ocean adjacency does not allow irrigation.
+        for nx in x-1..=x+3 {
+            for ny in y-2..=y+2 {
+                let n = map.idx(nx, ny);
+                map.tiles[n].base = Base::Grassland;
+            }
+        }
         let water = map.idx(x + 1, y);
         map.tiles[water].base = Base::Coast;
         assert_eq!(job_at(&map, &[], (x, y)), Some(WorkAction::Irrigate));
-        // No water: a road instead.
+        // No water: mining is available on bare grassland.
         map.tiles[water].base = Base::Grassland;
         for (nx, ny) in map.neighbors(x, y) {
             let n = map.idx(nx, ny);
             map.tiles[n].base = Base::Grassland;
             map.tiles[n].irrigation = false;
         }
-        assert_eq!(job_at(&map, &[], (x, y)), Some(WorkAction::Road));
+        assert_eq!(job_at(&map, &[], (x, y)), Some(WorkAction::Mine));
         map.tiles[i].relief = Relief::Hill;
         assert_eq!(job_at(&map, &[], (x, y)), Some(WorkAction::Mine));
         // A city center is left alone.
@@ -1612,6 +1665,27 @@ mod tests {
     }
 
     #[test]
+    fn ai_artillery_routes_detour_around_unroaded_mountains() {
+        let mut map = GameMap::generate();
+        for t in &mut map.tiles {
+            t.base = Base::Grassland;
+            t.relief = Relief::Flat;
+            t.cover = Cover::Bare;
+            t.river = 0;
+            t.road = false;
+        }
+        let i = map.idx(11, 10);
+        map.tiles[i].relief = Relief::Mountain;
+        let artillery = Unit::new(1, UnitType::Catapult, 10, 10);
+        let board = Board::new(vec![], vec![], &map);
+        let known = vec![true; map.tiles.len()];
+        let b = brain(&map, &board, &known, 1, 30);
+        let Act::Go(path) = b.walk_to(&artillery, (12, 10)) else { panic!("a detour is available") };
+        assert_eq!(path.last(), Some(&(12, 10)));
+        assert!(!path.contains(&(11, 10)));
+    }
+
+    #[test]
     fn ai_artillery_bombards_hostile_units_but_never_peaceful_units() {
         let map = GameMap::generate();
         let a = Unit::new(1, UnitType::Catapult, 10, 10);
@@ -1639,7 +1713,9 @@ mod tests {
         let mut war = [[false; CIV_COUNT]; CIV_COUNT];
         war[1][0] = true;
         war[0][1] = true;
-        let board = Board::new(vec![city_at(0, 12, 10, 1)], vec![], &map).with_war(war);
+        let town = city_at(0, 12, 10, 1);
+        crate::cities::recompute_borders(&mut map, &[&town], &[0; CIV_COUNT]);
+        let board = Board::new(vec![town], vec![], &map).with_war(war);
         let mut b = brain(&map, &board, &known, 1, 30);
         assert_eq!(b.think(Entity::from_bits(1), &a, None).0, Act::Bombard((11, 10)));
         known[i] = false;
@@ -1660,6 +1736,109 @@ mod tests {
         let settler = Unit::new(0, UnitType::Settler, at.0, at.1);
         let mut b = brain(&map, &board, &known, 0, 1);
         assert_eq!(b.think(Entity::from_bits(1), &settler, None).0, Act::Found);
+    }
+
+    fn blocked_settlement(detour: bool) -> (GameMap, City, Unit) {
+        let mut map = GameMap::generate_with_seed(1);
+        for t in &mut map.tiles { t.base = Base::Ocean; t.hut = false; t.camp = false; }
+        for x in 1..=12 {
+            let i = map.idx(x, 10);
+            map.tiles[i].base = Base::Grassland;
+            map.tiles[i].cover = Cover::Bare;
+            map.tiles[i].relief = Relief::Flat;
+        }
+        if detour {
+            for x in 5..=7 {
+                let i = map.idx(x, 9);
+                map.tiles[i].base = Base::Grassland;
+                map.tiles[i].cover = Cover::Bare;
+                map.tiles[i].relief = Relief::Flat;
+            }
+        }
+        (map, City::new(1, "Home", 1, 10), Unit::new(2, UnitType::Warrior, 6, 10))
+    }
+
+    #[test]
+    fn a_settler_detours_around_a_peaceful_unit_and_reaches_its_city_site() {
+        crate::realm::reset();
+        crate::civs::set_controllers();
+        let (map, city, blocker) = blocked_settlement(true);
+        let mut app = App::new();
+        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(map);
+        app.insert_resource(SplashUp(false));
+        app.init_resource::<Civilizations>();
+        app.world_mut().resource_mut::<Civilizations>().active = 1;
+        app.insert_resource(Turn(1));
+        app.init_resource::<AiState>();
+        app.insert_resource(crate::combat::CombatRng(crate::rng::MapRng::new(1)));
+        app.init_resource::<cities::Treasury>();
+        app.init_resource::<crate::unit_picker::UnitPicker>();
+        app.insert_resource(crate::diplomacy::Diplomacy::new());
+        app.add_message::<FoundCityOrder>();
+        app.add_message::<TurnEnded>();
+        app.add_message::<crate::bombard::Order>();
+        app.add_message::<crate::combat::AttackOrder>();
+        app.add_systems(Update, (play_turn, crate::units::drive_movement).chain());
+        app.world_mut().spawn(city);
+        app.world_mut().spawn(blocker);
+        let settler = app.world_mut().spawn(Unit::new(1, UnitType::Settler, 4, 10)).id();
+        app.world_mut().resource_mut::<AiState>().targets.insert(settler, (10, 10));
+        let mut detoured = false;
+        let mut founded = false;
+        for _ in 0..120 {
+            app.update();
+            let u = app.world().get::<Unit>(settler).unwrap();
+            assert_ne!((u.x, u.y), (6, 10));
+            detoured |= u.y == 9;
+            if app.world().resource::<Messages<FoundCityOrder>>().iter_current_update_messages().any(|o| o.0 == settler) {
+                assert_eq!((u.x, u.y), (10, 10));
+                founded = true;
+                break;
+            }
+            if !app.world().resource::<Messages<TurnEnded>>().is_empty() {
+                app.world_mut().resource_mut::<Messages<TurnEnded>>().clear();
+                app.world_mut().resource_mut::<Turn>().0 += 1;
+                for mut u in app.world_mut().query::<&mut Unit>().iter_mut(app.world_mut()) {
+                    u.moves = crate::naval::moves(u.utype, u.civ);
+                }
+            }
+            for mut u in app.world_mut().query::<&mut Unit>().iter_mut(app.world_mut()) {
+                u.anim = UnitAnim::Idle { t: 0.0 };
+            }
+        }
+        assert!(detoured && founded, "detoured={detoured}, founded={founded}");
+        assert!(app.world().resource::<Messages<crate::combat::AttackOrder>>().is_empty());
+    }
+
+    #[test]
+    fn a_blocked_settler_replaces_its_old_site_with_a_reachable_one() {
+        let (map, city, blocker) = blocked_settlement(false);
+        let board = Board::new(vec![city], vec![(Entity::from_bits(2), blocker)], &map);
+        let known = vec![true; map.tiles.len()];
+        let settler = Unit::new(1, UnitType::Settler, 4, 10);
+        let mut b = brain(&map, &board, &known, 1, 5);
+        b.claimed.insert((10, 10));
+        let (act, target) = b.think(Entity::from_bits(1), &settler, Some((10, 10)));
+        assert_ne!(act, Act::Stay);
+        assert_ne!(target, Some((10, 10)));
+        if let Some(t) = target { assert!(t.0 < 6); }
+        assert!(best_site(&map, &board, 1, (4, 10), &HashSet::new()).unwrap().0 < 6);
+    }
+
+    #[test]
+    fn a_worker_replaces_a_blocked_job_with_reachable_work() {
+        let (map, city, blocker) = blocked_settlement(false);
+        let board = Board::new(vec![city], vec![(Entity::from_bits(2), blocker)], &map);
+        let known = vec![true; map.tiles.len()];
+        let worker = Unit::new(1, UnitType::Worker, 4, 10);
+        let mut b = brain(&map, &board, &known, 1, 5);
+        b.claimed.insert((10, 10));
+        let (act, target) = b.think(Entity::from_bits(1), &worker, Some((10, 10)));
+        assert_ne!(act, Act::Stay);
+        assert!(target.is_some_and(|t| t.0 < 6));
+        if let Act::Go(path) = act { assert!(path.iter().all(|t| t.0 < 6)); }
     }
 
     #[test]

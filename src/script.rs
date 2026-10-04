@@ -4,7 +4,8 @@
 //! when the frame counter reaches `<frame>`. Actions:
 //!
 //! - `key <K>`: press a key for one frame (`B`, `V`, `R`, `Enter`, `Esc`,
-//!   `Tab`, `Space`, `Up`/`Down`/`Left`/`Right`, any letter).
+//!   `Tab`, `Space`, `Up`/`Down`/`Left`/`Right`, any letter); modifiers can
+//!   be combined, for example `key Ctrl+O`.
 //! - `end <n>`: end `n` turns at once.
 //! - `sel <Settler|Worker|Warrior|Scout>`: select the first unit of a type.
 //! - `tp <x>,<y>`: teleport the selected unit (debug placement).
@@ -14,14 +15,14 @@
 //!   enemy holds the last tile).
 //! - `report`: print nearby units; `report all` prints every unit.
 //! - `pick <unit name|All>`: press a unit-picker or disembark row.
-//! - `imp <x>,<y> <road|irr|mine>`: put an improvement on a tile.
+//! - `imp <x>,<y> <road|irr|mine|fort|colony>`: put an improvement on a tile.
 //!
 //! Coordinates written `@dx,dy` are relative to the first city.
 //! - `city`: open the first city's screen.
 //! - `btn <name>`: press a city-screen button: `Change`, `Close`,
 //!   `Governor`, `CloseMenu`, `PageNext`, `PagePrev`, `Prev`, `Next`, `Pick:<item>`,
 //!   `Queue:<item>` (a shift-click on the item), `Unqueue:<i>`, `Hurry`,
-//!   `HurryYes`, `HurryNo`.
+//!   `HurryYes`, `HurryNo`, `Specialist:<i>` (zero-based idle citizen index).
 //! - `adv <name>`: press an advisor button: `Science`, `Foreign`, `Close`,
 //!   `Pick:<advance>`, `Talk:<civ>`, `Treaty:<clause>`, `Give:<advance>`,
 //!   `Get:<advance>`, `GiveGold:<delta>`, `GetGold:<delta>`, `Propose`,
@@ -83,9 +84,13 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Right" => KeyCode::ArrowRight,
         "F1" => KeyCode::F1,
         "F4" => KeyCode::F4,
+        "F5" => KeyCode::F5,
+        "F8" => KeyCode::F8,
         "F6" => KeyCode::F6,
         "F7" => KeyCode::F7,
         "F9" => KeyCode::F9,
+        "Ctrl" => KeyCode::ControlLeft,
+        "Shift" => KeyCode::ShiftLeft,
         _ => {
             let c = name.chars().next()?;
             if name.len() != 1 || !c.is_ascii_alphabetic() {
@@ -141,6 +146,7 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
         ScreenButton::Close => kind == "Close",
         ScreenButton::Change => kind == "Change",
         ScreenButton::Governor => kind == "Governor",
+        ScreenButton::Specialist(i) => kind == "Specialist" && arg.parse() == Ok(*i),
         ScreenButton::CloseMenu => kind == "CloseMenu",
         ScreenButton::MenuPage(d) => kind == if *d > 0 { "PageNext" } else { "PagePrev" },
         ScreenButton::Pick(p) => (kind == "Pick" || kind == "Queue") && p.name() == arg,
@@ -150,6 +156,11 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
         ScreenButton::Hurry => kind == "Hurry",
         ScreenButton::HurryYes => kind == "HurryYes",
         ScreenButton::HurryNo => kind == "HurryNo",
+        ScreenButton::SwitchYes => kind == "SwitchYes",
+        ScreenButton::SwitchNo => kind == "SwitchNo",
+        ScreenButton::AbandonYes => kind == "AbandonYes",
+        ScreenButton::AbandonNo => kind == "AbandonNo",
+        ScreenButton::AbandonZoom => kind == "AbandonZoom",
     }
 }
 
@@ -227,12 +238,12 @@ pub fn drive_script(
         let (verb, arg) = action.split_once(' ').unwrap_or((&action, ""));
         let arg = arg.trim();
         match verb {
-            "key" => match key_code(arg) {
-                Some(k) => {
+            "key" => {
+                for part in arg.split('+') {
+                    let Some(k) = key_code(part) else { eprintln!("script: unknown key {part}"); continue; };
                     keys.press(k);
                     script.held.push(k);
                 }
-                None => eprintln!("script: unknown key {arg}"),
             },
             "end" => {
                 for _ in 0..arg.parse().unwrap_or(1) {
@@ -314,6 +325,10 @@ pub fn drive_script(
                         "road" => t.road = true,
                         "irr" => t.irrigation = true,
                         "mine" => t.mine = true,
+                        "fort" => t.fortress = true,
+                        "barricade" => { t.fortress = true; t.barricade = true; },
+                        "outpost" => t.site = Some(crate::sites::Site::Outpost(0)),
+                        "colony" => t.site = Some(crate::sites::Site::Colony(0)),
                         _ => eprintln!("script: unknown improvement {kind}"),
                     }
                 }
@@ -322,7 +337,7 @@ pub fn drive_script(
             "size" => {
                 let mut it = arg.split_whitespace().map(|v| v.parse::<u16>().ok());
                 if let Some(c) = cities.iter_mut().find(|c| c.civ == civs.active).as_mut() {
-                    if let Some(Some(n)) = it.next() { c.size = n as u8; }
+                    if let Some(Some(n)) = it.next() { c.set_size(n as u8); }
                     if let Some(Some(sh)) = it.next() { c.shields = sh; }
                 }
             }

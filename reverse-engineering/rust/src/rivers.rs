@@ -1,6 +1,7 @@
 //! Rivers: art path (verified) + render-path storage (traced live).
 //!
-//! Map generation places no rivers (`NOTES.md` §14). This module models the
+//! The old claim that generation places no rivers is withdrawn: `rivergen`
+//! implements the native stage at `0x5F07D0`. This module models the
 //! verified art side — the `deltaRivers`/`RiverFore` sprite selection — and
 //! the per-tile overlay gate traced live under Wine/winedbg (`0x5EAA80`
 //! mask getter, gate table `0xA53BC8`, `[cell+0x2C]` nibble extractors).

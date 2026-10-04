@@ -726,3 +726,7 @@ Open (**O**) and hypotheses (**H**), none of which changes a rule above unless n
   **10** (`0x440B06`, `0x440B2B`). The Rust module and its test must be fixed or marked non-authoritative.
 * The kill / wonder / advance / capture VP counters are `+0x15BC`, `+0x15B8`, `+0x15C0`, `+0x15C4` (section
   1.4); `capture.md` (section 3 step 2) calls `+0x15C4` and `+0x11CC` "unnamed".
+
+## 16. Domination as implemented in the clone
+
+`civs::check_domination` runs once per round after the last live civ's turn (section 11). A civ wins when its tiles are strictly more than 66% of all land and coast tiles and its people are strictly more than 66% of all people. Totals include unowned ground and barbarian cities. The ratios are section 7.5; the strict comparison and the once-per-round timing follow it.

@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn a_wonder_of_ones_own_trait_starts_the_age() {
         // Japan is Militaristic and Religious (0x11).
-        let japan = crate::rules_data::RACES[0].traits;
+        let japan = crate::civs::RACES[0].traits;
         let temple = row("The Temple of Artemis");
         let lighthouse = row("The Great Lighthouse");
         assert!(roster::bldg(temple).other & oth::RELIGIOUS != 0);

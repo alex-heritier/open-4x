@@ -1,10 +1,15 @@
-//! Local hotseat civilizations. Every slot is controlled by the player.
+//! The civilizations of the game: a fixed four-chair match drawn from the
+//! full Civ3 roster of 31.
 use bevy::prelude::*;
 
 use std::collections::VecDeque;
 
 use crate::map::{GameMap, move_cost};
 
+pub use crate::rules_data::CivDefinition;
+
+/// The number of civilizations in a match (the exe's 32 slots hold the
+/// barbarians plus up to 31 players).
 pub const CIV_COUNT: usize = 4;
 
 /// The owner of barbarian units (the executable's player slot 0). Not a
@@ -17,82 +22,154 @@ pub fn is_barbarian(civ: usize) -> bool {
     civ == BARBARIANS
 }
 
+/// The roster indices of the default match: Japan, Rome, Egypt, China. The
+/// roster is in `RACE` row order (row 1 at index 0), so Japan is index 8.
+const DEFAULT_PLAYERS: [usize; CIV_COUNT] = [8, 0, 1, 6];
+
+/// Pack the four slot indices into one word for the process-wide setting.
+const fn pack(p: &[usize; CIV_COUNT]) -> u32 {
+    (p[0] as u32) | (p[1] as u32) << 8 | (p[2] as u32) << 16 | (p[3] as u32) << 24
+}
+
+#[cfg(not(test))]
+static PLAYERS: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(pack(&DEFAULT_PLAYERS));
+
+// Tests run in parallel threads and some choose their own roster, so under
+// test each thread has a selection of its own (like `AI_MASK`).
+#[cfg(test)]
+thread_local! {
+    static PLAYERS: std::cell::Cell<u32> = const { std::cell::Cell::new(pack(&DEFAULT_PLAYERS)) };
+}
+
+fn player_bits() -> u32 {
+    #[cfg(not(test))]
+    return PLAYERS.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    return PLAYERS.get();
+}
+
+fn set_player_bits(bits: u32) {
+    #[cfg(not(test))]
+    PLAYERS.store(bits, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    PLAYERS.set(bits);
+}
+
+/// The roster index each game slot plays.
+pub fn players() -> [usize; CIV_COUNT] {
+    let b = player_bits();
+    [b as u8 as usize, (b >> 8) as u8 as usize, (b >> 16) as u8 as usize, (b >> 24) as u8 as usize]
+}
+
+/// The roster index of the civilization in `slot`.
+pub fn roster_index(slot: usize) -> usize {
+    assert!(slot < CIV_COUNT, "slot {slot} is not a civilization");
+    players()[slot]
+}
+
+/// The roster index of a civilization by name, case-insensitively.
+pub fn roster_index_named(name: &str) -> Option<usize> {
+    crate::rules_data::CIV_ROSTER
+        .iter()
+        .position(|c| c.name.eq_ignore_ascii_case(name))
+}
+
+/// Choose which civilization each chair plays, from `CIV3_CIVS` (a comma
+/// separated list, the first name is the human) and `CIV3_PLAYER` (the human
+/// alone). Unknown names keep the default.
+fn set_players() {
+    let mut picks = DEFAULT_PLAYERS;
+    if let Ok(list) = std::env::var("CIV3_CIVS") {
+        for (slot, name) in list.split(',').map(str::trim).filter(|s| !s.is_empty()).take(CIV_COUNT).enumerate() {
+            match roster_index_named(name) {
+                Some(i) => picks[slot] = i,
+                None => warn!("CIV3_CIVS: no civilization called {name}"),
+            }
+        }
+    }
+    if let Ok(name) = std::env::var("CIV3_PLAYER") {
+        match roster_index_named(&name) {
+            Some(i) => picks[0] = i,
+            None => warn!("CIV3_PLAYER: no civilization called {name}"),
+        }
+    }
+    // Keep the chairs distinct: a repeated pick takes the first free roster row.
+    let picks = distinct(picks);
+    set_player_bits(pack(&picks));
+}
+
+/// Make the four picks distinct, left to right: a repeat takes the first
+/// unused roster row.
+fn distinct(mut picks: [usize; CIV_COUNT]) -> [usize; CIV_COUNT] {
+    let mut used = [false; 31];
+    for slot in 0..CIV_COUNT {
+        if used[picks[slot]] {
+            picks[slot] = (0..31).find(|&i| !used[i]).unwrap_or(picks[slot]);
+        }
+        used[picks[slot]] = true;
+    }
+    picks
+}
+
+/// Switch the match's roster in a test (the env vars are process-wide).
+#[cfg(test)]
+pub fn set_players_for_test(picks: [usize; CIV_COUNT]) {
+    set_player_bits(pack(&picks));
+}
+
+/// The civilizations of this match, addressable by game slot. `CIVS[i]` is
+/// the civ in chair `i`; `CIVS.get(i)` is `None` for the barbarians.
+pub struct CivTable;
+pub const CIVS: CivTable = CivTable;
+
+impl CivTable {
+    pub fn get(&self, i: usize) -> Option<&'static CivDefinition> {
+        (i < CIV_COUNT).then(|| &crate::rules_data::CIV_ROSTER[players()[i]])
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &'static CivDefinition> {
+        (0..CIV_COUNT).map(|i| &crate::rules_data::CIV_ROSTER[players()[i]])
+    }
+}
+
+impl std::ops::Index<usize> for CivTable {
+    type Output = CivDefinition;
+    fn index(&self, i: usize) -> &CivDefinition {
+        &crate::rules_data::CIV_ROSTER[roster_index(i)]
+    }
+}
+
+/// The `RACE` facts of this match, by game slot, like `CIVS`.
+pub struct RaceTable;
+pub const RACES: RaceTable = RaceTable;
+
+impl RaceTable {
+    pub fn get(&self, i: usize) -> Option<&'static crate::rules_data::RaceFacts> {
+        (i < CIV_COUNT).then(|| &crate::rules_data::RACE_ROSTER[players()[i]])
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &'static crate::rules_data::RaceFacts> {
+        (0..CIV_COUNT).map(|i| &crate::rules_data::RACE_ROSTER[players()[i]])
+    }
+}
+
+impl std::ops::Index<usize> for RaceTable {
+    type Output = crate::rules_data::RaceFacts;
+    fn index(&self, i: usize) -> &crate::rules_data::RaceFacts {
+        &crate::rules_data::RACE_ROSTER[roster_index(i)]
+    }
+}
+
 /// A unit owner's name, the barbarians included.
 pub fn name(civ: usize) -> &'static str {
     CIVS.get(civ).map_or("Barbarians", |c| c.name)
 }
 
-pub struct CivDefinition {
-    pub name: &'static str,
-    pub adjective: &'static str,
-    pub color: Color,
-    pub city_names: &'static [&'static str],
+/// The `ntpNN.pcx` team-color ramp of a unit owner (0 for the barbarians).
+pub fn team_color(civ: usize) -> u8 {
+    CIVS.get(civ).map_or(0, |c| c.team_color)
 }
-
-pub const CIVS: [CivDefinition; CIV_COUNT] = [
-    CivDefinition {
-        name: "Japan",
-        adjective: "Japanese",
-        color: Color::srgb_u8(25, 148, 24),
-        city_names: &[
-            "Kyoto",
-            "Osaka",
-            "Tokyo",
-            "Edo",
-            "Nagoya",
-            "Kobe",
-            "Yokohama",
-            "Hiroshima",
-            "Nagasaki",
-            "Nara",
-            "Sapporo",
-            "Sendai",
-            "Niigata",
-            "Okayama",
-            "Fukuoka",
-            "Kagoshima",
-            "Matsuyama",
-            "Kanazawa",
-            "Takamatsu",
-            "Oita",
-        ],
-    },
-    CivDefinition {
-        name: "Rome",
-        adjective: "Roman",
-        color: Color::srgb_u8(190, 48, 48),
-        city_names: &[
-            "Rome", "Veii", "Antium", "Cumae", "Neapolis", "Pompeii", "Pisae", "Ravenna",
-        ],
-    },
-    CivDefinition {
-        name: "Egypt",
-        adjective: "Egyptian",
-        color: Color::srgb_u8(220, 184, 48),
-        city_names: &[
-            "Thebes",
-            "Memphis",
-            "Heliopolis",
-            "Elephantine",
-            "Alexandria",
-            "Pi-Ramesses",
-            "Giza",
-            "Byblos",
-        ],
-    },
-    // The BIQ gives the Chinese default color 5 (cyan, `ntp05`); this is that
-    // hue toned down like Rome's and Egypt's. City list is the BIQ's, in order.
-    CivDefinition {
-        name: "China",
-        adjective: "Chinese",
-        color: Color::srgb_u8(40, 180, 190),
-        city_names: &[
-            "Beijing", "Shanghai", "Canton", "Nanking", "Tsingtao", "Xinjian", "Chengdu",
-            "Hangchow", "Tientsin", "Tatung", "Macao", "Anyang", "Shantung", "Chinan", "Kaifeng",
-            "Ningpo", "Paoting", "Yangchow",
-        ],
-    },
-];
 
 /// Which civilizations the computer plays, one bit per `CIVS` index. A
 /// process-wide setting rather than a resource because the rules code that
@@ -126,10 +203,12 @@ pub fn is_ai(civ: usize) -> bool {
     civ == BARBARIANS || ai_mask() & (1 << civ) != 0
 }
 
-/// Choose who plays whom: Japan is the human and everyone else is the
-/// computer, unless `CIV3_HOTSEAT` asks for the old four-chair sandbox or
-/// `CIV3_AUTOPLAY` for a game the computer plays alone.
+/// Choose who plays whom: the first chair is the human and everyone else is
+/// the computer, unless `CIV3_HOTSEAT` asks for the old four-chair sandbox or
+/// `CIV3_AUTOPLAY` for a game the computer plays alone. `CIV3_CIVS` and
+/// `CIV3_PLAYER` choose the roster (`set_players`).
 pub fn set_controllers() {
+    set_players();
     let mask = if std::env::var("CIV3_HOTSEAT").is_ok() {
         0
     } else if std::env::var("CIV3_AUTOPLAY").is_ok() {
@@ -153,6 +232,9 @@ pub fn ai_fast() -> bool {
 pub enum Outcome {
     /// Only this civilization is left.
     Victory(usize),
+    /// This civilization holds more than the required share of the world's
+    /// land and of its people (`victory.md` 7.5).
+    Domination(usize),
     /// Every human civilization is gone.
     Defeat,
 }
@@ -251,6 +333,80 @@ pub fn check_elimination(
     civs.outcome = outcome_of(&civs.eliminated, is_ai);
     if civs.outcome.is_some() && std::env::var("CIV3_AI_LOG").is_ok() {
         println!("ai: game over: {:?}", civs.outcome);
+    }
+}
+
+/// Share of the world's land (plus coast) tiles and of its population a
+/// civilization must hold for a domination victory (`0xA529A4`, `0xA529A8`;
+/// the setup words default to 66 when the scenario leaves them 0).
+pub const DOMINATION_TILES_PERCENT: i32 = 66;
+pub const DOMINATION_POPULATION_PERCENT: i32 = 66;
+
+/// Type 0, domination (`0x4F1B60`, `victory.md` 7.5): the first civ, in slot
+/// order, whose tiles AND citizens are both strictly above
+/// `percent * total / 100` (C truncating division). The totals include
+/// ground nobody owns and the barbarians' cities.
+pub fn domination(
+    tiles: &[i32; CIV_COUNT],
+    people: &[i32; CIV_COUNT],
+    total_tiles: i32,
+    total_people: i32,
+    in_play: &[bool; CIV_COUNT],
+) -> Option<usize> {
+    let tiles_needed = DOMINATION_TILES_PERCENT * total_tiles / 100;
+    let people_needed = DOMINATION_POPULATION_PERCENT * total_people / 100;
+    (0..CIV_COUNT).find(|&c| in_play[c] && tiles[c] > tiles_needed && people[c] > people_needed)
+}
+
+/// `CheckVictory` runs once per round, after the last civilization has
+/// finished its turn (`victory.md` 11).
+pub fn check_domination(
+    mut ended: MessageReader<CivilizationEnded>,
+    mut civs: ResMut<Civilizations>,
+    map: Res<crate::map::GameMap>,
+    cities: Query<&crate::cities::City>,
+    mut board: ResMut<crate::features::MessageBoard>,
+) {
+    for CivilizationEnded(civ) in ended.read() {
+        if civs.outcome.is_some() || (civ + 1..CIV_COUNT).any(|c| !civs.eliminated[c]) {
+            continue;
+        }
+        let all: Vec<&crate::cities::City> = cities.iter().collect();
+        let owners = crate::cities::territory(&map);
+        let mut tiles = [0; CIV_COUNT];
+        let mut total_tiles = 0;
+        for y in 0..map.h {
+            for x in 0..map.w {
+                let Some(t) = map.get(x, y) else { continue };
+                // Land and coast count; the open sea and the ice do not.
+                if !(map.is_land(x, y) || t.base == crate::map::Base::Coast) {
+                    continue;
+                }
+                total_tiles += 1;
+                if let Some(&civ) = owners.get(&(x, y))
+                    && civ < CIV_COUNT
+                {
+                    tiles[civ] += 1;
+                }
+            }
+        }
+        let mut people = [0; CIV_COUNT];
+        let mut total_people = 0;
+        for c in &all {
+            total_people += i32::from(c.size());
+            if c.civ < CIV_COUNT {
+                people[c.civ] += i32::from(c.size());
+            }
+        }
+        let in_play = std::array::from_fn(|c| !civs.eliminated[c]);
+        if let Some(winner) = domination(&tiles, &people, total_tiles, total_people, &in_play) {
+            civs.outcome = Some(Outcome::Domination(winner));
+            crate::features::post(&mut board, format!("The {} dominate the world!", CIVS[winner].name));
+            if std::env::var("CIV3_AI_LOG").is_ok() {
+                println!("ai: domination victory for the {} ({} of {} tiles, {} of {} people)",
+                    CIVS[winner].name, tiles[winner], total_tiles, people[winner], total_people);
+            }
+        }
     }
 }
 
@@ -376,15 +532,139 @@ mod tests {
     use super::*;
 
     #[test]
+    fn domination_needs_both_shares_strictly_above_sixty_six_percent() {
+        let play = [true; CIV_COUNT];
+        // 66 % of 3200 tiles is 2112: 2112 is not enough, 2113 is.
+        assert_eq!(domination(&[2112, 0, 0, 0], &[100, 0, 0, 0], 3200, 100, &play), None);
+        assert_eq!(domination(&[2113, 0, 0, 0], &[100, 0, 0, 0], 3200, 100, &play), Some(0));
+        // Land without the people (or the people without the land) is not enough.
+        assert_eq!(domination(&[2200, 0, 0, 0], &[66, 34, 0, 0], 3200, 100, &play), None);
+        assert_eq!(domination(&[0, 0, 0, 2200], &[0, 0, 0, 67], 3200, 100, &play), Some(3));
+        // Unowned ground and barbarian towns stay in the totals.
+        assert_eq!(domination(&[40, 0, 0, 0], &[40, 0, 0, 0], 100, 100, &play), None);
+        // An eliminated civ cannot win.
+        assert_eq!(domination(&[90, 0, 0, 0], &[90, 0, 0, 0], 100, 100, &[false, true, true, true]), None);
+    }
+
+    #[test]
+    fn the_round_ends_with_the_last_civ_and_the_world_can_be_dominated() {
+        use crate::map::{Base, Cover, GameMap, Relief, Tile};
+        let tile = Tile {
+            base: Base::Grassland,
+            relief: Relief::Flat,
+            cover: Cover::Bare,
+            variant: 0,
+            seen: true,
+            visible: true,
+            hut: false,
+            camp: false,
+            resource: None,
+            road: false,
+            irrigation: false,
+            river: 0,
+            mine: false,
+            site: None,
+            fortress: false,
+            barricade: false,
+            forest_harvested: false,
+            owner: None,
+        };
+        let mut app = App::new();
+        app.insert_resource(GameMap { w: 9, h: 9, tiles: vec![tile; 81], start: (4, 4), seed: 0 });
+        app.init_resource::<Civilizations>();
+        app.init_resource::<crate::features::MessageBoard>();
+        app.add_message::<CivilizationEnded>();
+        app.init_resource::<crate::cities::BorderKey>();
+        app.add_systems(Update, (crate::cities::update_borders, check_domination).chain());
+        // A level-four border covers 61 of the 81 tiles, and the only people are ours.
+        let mut city = crate::cities::City::new(0, "Edo", 4, 4);
+        city.culture = 1000;
+        city.set_size(5);
+        app.world_mut().spawn(city);
+        app.world_mut().write_message(CivilizationEnded(2));
+        app.update();
+        assert_eq!(app.world().resource::<Civilizations>().outcome, None, "mid-round");
+        app.world_mut().write_message(CivilizationEnded(3));
+        app.update();
+        assert_eq!(app.world().resource::<Civilizations>().outcome, Some(Outcome::Domination(0)));
+    }
+
+    #[test]
     fn roster_is_japan_rome_egypt_china_with_distinct_colors() {
         let names: Vec<_> = CIVS.iter().map(|c| c.name).collect();
         assert_eq!(names, ["Japan", "Rome", "Egypt", "China"]);
-        for (i, a) in CIVS.iter().enumerate() {
+        let all: Vec<_> = CIVS.iter().collect();
+        for (i, a) in all.iter().enumerate() {
             assert!(!a.city_names.is_empty(), "{} has no city names", a.name);
-            for b in &CIVS[i + 1..] {
+            for b in &all[i + 1..] {
                 assert_ne!(a.color, b.color, "{} and {} share a color", a.name, b.name);
             }
         }
+    }
+
+    #[test]
+    fn the_roster_is_every_playable_civilization_of_the_biq() {
+        let roster = &crate::rules_data::CIV_ROSTER;
+        assert_eq!(roster.len(), 31, "RACE rows 1..=31");
+        let mut names: Vec<&str> = roster.iter().map(|c| c.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), 31, "one row per civilization");
+        for (i, c) in roster.iter().enumerate() {
+            assert!(!c.name.is_empty() && !c.adjective.is_empty(), "{c:?}");
+            assert!(!c.city_names.is_empty(), "{} has no city names", c.name);
+            assert!(c.team_color <= 31, "{}: ntp{}", c.name, c.team_color);
+            let l = &crate::rules_data::LEADER_ROSTER[i];
+            assert!(!l.name.is_empty() && !l.title.is_empty(), "{} has no ruler", c.name);
+            assert!(l.text_set < crate::speech::TEXT_SETS, "{}", c.name);
+        }
+        // The barbarians are not in the roster, and the default match is the
+        // first four the game shipped with.
+        let names: Vec<&str> = CIVS.iter().map(|c| c.name).collect();
+        assert_eq!(names, ["Japan", "Rome", "Egypt", "China"]);
+    }
+
+    #[test]
+    fn a_repeated_pick_takes_a_free_chair() {
+        assert_eq!(distinct([0, 0, 1, 1]), [0, 1, 2, 3]);
+        assert_eq!(distinct([8, 0, 1, 6]), [8, 0, 1, 6], "distinct picks are kept");
+        assert_eq!(distinct([2, 2, 2, 2]), [2, 0, 1, 3]);
+    }
+
+    #[test]
+    fn choosing_a_roster_swaps_the_civs_their_traits_and_their_cities() {
+        set_controllers();
+        // Greece (roster 2), the Mongols (16), Carthage (22) and the Inca (29).
+        set_players_for_test([2, 16, 22, 29]);
+        assert_eq!(CIVS[0].name, "Greece");
+        assert_eq!(CIVS[0].city_names[0], "Athens");
+        assert_eq!(RACES[0].race, 3, "Greece is RACE row 3");
+        assert_eq!(RACES[0].traits, 0xa, "Scientific and Commercial");
+        assert_eq!(crate::leaders::LEADERS[0].name, "Alexander");
+        assert_eq!(crate::leaders::LEADERS[0].text_set, 2);
+        assert_eq!(CIVS[3].name, "Inca");
+        assert_eq!(RACES[3].race, 30);
+        assert_eq!(team_color(0), 10, "Greece's team ramp is ntp10");
+        // Unknown names leave the pick alone.
+        assert_eq!(roster_index_named("greece"), Some(2));
+        assert_eq!(roster_index_named("Atlantis"), None);
+        set_controllers();
+        assert_eq!(CIVS[0].name, "Japan", "back to the default match");
+    }
+
+    #[test]
+    fn unique_units_follow_the_chosen_civilization() {
+        set_controllers();
+        set_players_for_test([2, 0, 1, 6]);
+        // The Greek Hoplite is available to Greece and not to Rome.
+        let row = crate::roster::unit(
+            (0..crate::roster::UNIT_COUNT)
+                .find(|&i| crate::roster::unit(i).name == "Hoplite")
+                .expect("Hoplite row"),
+        );
+        assert!(row.races >> RACES[0].race & 1 != 0, "Greece may train it");
+        assert!(row.races >> RACES[1].race & 1 == 0, "Rome may not");
+        set_controllers();
     }
 
     /// Sites every start must satisfy, whatever the seed.
@@ -526,17 +806,20 @@ mod tests {
             river: false,
             unrest: 0,
             hurry_timer: 0,
+            stakes: Default::default(),
+            cooldown: 0,
+            unit_clocks: Vec::new(),
             civ: 2,
             name: "Thebes".into(),
             x: 10,
             y: 0,
-            size: 1,
+            diseased: false,
+            citizens: crate::citizens::new_pool(2, 1),
             food: 0,
             shields: 0,
             production: crate::cities::Production::Warrior,
             queue: vec![],
             buildings: vec![],
-            worked: Default::default(),
             culture: 0,
             founded: 1,
         });

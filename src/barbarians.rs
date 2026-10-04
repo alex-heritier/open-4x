@@ -89,6 +89,31 @@ impl Default for Barbarians {
     }
 }
 
+/// What a saved game keeps of the barbarians: their camps and the tribe
+/// names in use.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Saved {
+    used: Vec<bool>,
+    camps: Vec<((i32, i32), u8)>,
+}
+
+impl Barbarians {
+    pub fn snapshot(&self) -> Saved {
+        let mut camps: Vec<_> = self.camps.iter().map(|(&at, &t)| (at, t)).collect();
+        camps.sort();
+        Saved { used: self.used.to_vec(), camps }
+    }
+
+    /// Back to a quiet start with the saved camps.
+    pub fn restore(&mut self, saved: &Saved) {
+        *self = Barbarians::default();
+        for (i, &u) in saved.used.iter().enumerate().take(self.used.len()) {
+            self.used[i] = u;
+        }
+        self.camps = saved.camps.iter().copied().collect();
+    }
+}
+
 impl Barbarians {
     pub fn tribe_used(&self, t: usize) -> bool {
         self.used.get(t).copied().unwrap_or(false)
@@ -293,8 +318,7 @@ fn found_camp(
     let t = (map.w * map.h) as u32;
     let labels = crate::realm::continents(map);
     let sizes = continent_sizes(&labels);
-    let owners = crate::cities::territory(map, cities);
-    let owners: HashMap<(i32, i32), usize> = owners.into_iter().map(|(k, i)| (k, cities[i].civ)).collect();
+    let owners = crate::cities::territory(map);
     for _ in 0..t / 16 {
         let r = rng.0.below(t) as i32;
         let (x, y) = (r % map.w, r / map.w);
@@ -315,7 +339,7 @@ fn found_camp(
             .min_by_key(|c| map.distance((c.x, c.y), (x, y)))?;
         let i = map.idx(x, y);
         map.tiles[i].camp = true;
-        let group = crate::rules_data::RACES.get(near.civ).map_or(0, |r| r.culture_group as usize);
+        let group = crate::civs::RACES.get(near.civ).map_or(0, |r| r.culture_group as usize);
         let s = rng.0.below(15);
         let tribe = pick_tribe(&barb.used, group, s as u32);
         if let Some(u) = barb.used.get_mut(tribe as usize) {
