@@ -12,3 +12,4 @@ civ3/
 terrain-builder/packs/*/out/
 terrain-builder/packs/*/*.png
 saves/
+assets/cache/
