@@ -5,8 +5,8 @@ Status: **brainstorm / proposal**. Open questions at the end.
 ## Goal
 
 open-4x plays Civ3's own `.biq` and `.sav` files directly. There is no
-import step and no open-4x content format. Art is converted to PNG
-automatically on first use and cached (section 7). Everything is chosen on the
+import step and no open-4x content format. Art and sound are converted by
+`prep_assets.py`, which the game runs automatically, into a cache (section 7). Everything is chosen on the
 command line, with no main menu or setup screen:
 
 ```
@@ -56,8 +56,8 @@ What already exists:
                     ▼
           biq crate: Biq / Save  ──▶  Ruleset (in memory)  ──▶  game
                     │                     │
-                    │                     └─ art: Civ3 path → assets/cache/ (converted on
-                    │                        first use); sound and text from the install
+                    │                     └─ art and sound: Civ3 path → assets/cache/
+                    │                        (prep_assets.py, run automatically when stale)
                     └─ map / scenario / saved state ──▶ game world
 ```
 
@@ -184,114 +184,70 @@ decoded yet (AI attitude memory, flip ratings, culture, war weariness, ...).
 Until it is all mapped, the current JSON quicksave would stay as a stopgap,
 and be deleted once `.SAV` writing covers it.
 
-## 7. Art and sound: converted automatically, cached by Civ3 path
+## 7. Art and sound: `prep_assets.py`, run automatically, cached
 
-Rules, maps and saves are read straight from Civ3's files. Art is converted
-to PNG, but nobody runs a script: the game converts what it needs the first
-time it needs it and caches the result in the gitignored `assets/cache/`.
-Later runs load the cache directly.
+Rules, maps and saves are read straight from Civ3's files. Art and sound
+keep going through `tools/prep_assets.py` (PCX/FLC → PNG, MP3 → OGG, its
+crops, transparency, team colors and manifests unchanged), but nobody runs
+it by hand: the game runs it when something it needs is missing or stale.
+Output goes to the gitignored `assets/cache/` (replacing `assets/gen/`).
+Players need Python 3, PIL and ffmpeg, as developers do today; if they are
+missing, the game says so and exits.
 
-### Only two formats need converting
+### What the game asks for
 
-* **PCX** (images) → PNG.
-* **FLC** (unit and leader animations) → one PNG strip per direction, plus a
-  small JSON sidecar with what the game reads today from `prep_assets.py`'s
-  manifests: frame count, ms per frame, foot offsets.
-* **WAV** loads in Bevy as is, and so does **MP3** with Bevy's `mp3` feature.
-  Audio is read from the install directly, with no conversion and no cache.
-* **Text** (`diplomacy.txt`, `PediaIcons.txt`, unit INIs, `.amb` sound cues)
-  is parsed directly from the install.
+After reading the BIQ, the game knows what it will draw: the `PRTO.art`
+unit folders, the `RACE.era_art` leader clips of the civs in play, the
+wonder splashes (`BLDG.civilopedia_entry` via `PediaIcons.txt`), the tech
+icons, the interface. It checks each against `assets/cache/index.json`
+(below). If anything is missing or stale, it writes the list to
+`assets/cache/request.json` together with the search path, runs
+`python3 tools/prep_assets.py --request assets/cache/request.json`, streams
+the script's progress to the console, and continues when it exits. The
+first run against a new install or scenario takes a while; later runs
+start immediately.
 
-### The mapping: Civ3 path in, cache path out
+Giving the script an explicit list keeps BIQ parsing in Rust: the script
+never reads a BIQ, and the hardcoded lists in it (the unit list scraped from
+`rules_data.rs`, the four leaders, the wonder table) go away.
 
-Game code names assets the way Civ3 does, so Civ3's own references (BIQ
-fields, unit INIs, `PediaIcons.txt`) keep working unchanged:
+### Search path and case
 
-```rust
-civ3::image("Art/Units/Warrior/WarriorRun.flc")   // -> Handle<Image> (or a clip)
-civ3::image("Art/Terrain/xtgc.pcx")
-civ3::sound("Sounds/Diplomusic/DipASEarlyPeace.mp3")
+The request carries Civ3's search order: the scenario's own folder and
+`GAME.search_folders`, then `Conquests/`, `civ3PTW/`, then the base install.
+The script resolves each reference through it, **case-insensitively**
+(Civ3's references and file names disagree in case, which only Windows
+forgives). A scenario's own Warrior is found before the stock one.
+
+### The mapping: Civ3 path → cache files
+
+Assets that Civ3 data refers to are cached under their **Civ3 path**,
+lowercased, so the BIQ and INI references keep working as keys:
+
+```
+Conquests/Art/Units/Warrior/          ->  assets/cache/conquests/art/units/warrior/   (strips + manifest)
+Art/Flics/To_A01.flc                  ->  assets/cache/art/flics/to_a01.flc/          (frames)
+Scenarios/X/Art/Units/Warrior/        ->  assets/cache/scenarios/x/art/units/warrior/
 ```
 
-A lookup goes through two steps:
+The key is the *resolved* file, so a scenario's override and the stock art
+get separate entries with no scenario-specific logic.
 
-1. **Resolve** the reference to a real file, in Civ3's order: the scenario's
-   own folder and `GAME.search_folders`, then `Conquests/`, `civ3PTW/`, then
-   the base install. Matching is **case-insensitive** (Civ3's references and
-   file names disagree in case, which only Windows forgives), using an index
-   of the install's file names built once at startup.
-2. **Map** the resolved file to its cache path, by a fixed rule: the path
-   relative to the install root, lowercased, with the output extension
-   appended:
+Interface pieces the script cuts out of shared sheets (unit buttons, city
+screen cells, HUD parts) keep their current output names: nothing in Civ3's
+data refers to them, only our code.
 
-   ```
-   Conquests/Art/Units/Warrior/WarriorRun.flc
-     -> assets/cache/conquests/art/units/warrior/warriorrun.flc/<dir>.png  + clip.json
-   Art/Terrain/xtgc.pcx
-     -> assets/cache/art/terrain/xtgc.pcx.png
-   ```
-
-Because the cache key is the *resolved* file, a scenario that overrides
-the Warrior gets its own cache entry and the stock Warrior keeps its own.
-Nothing has to know about scenarios beyond the resolver.
-
-`assets/cache/index.json` records the mapping explicitly: for every
-converted source, its outputs, the source's size and modification time, and
-the converter version. It serves two purposes:
-
-* **Invalidation**: an entry whose source changed, or whose converter version
-  is older than the game's, is converted again.
-* **Debugging**: a quick answer to "which Civ3 file did this PNG come from".
+`assets/cache/index.json` records, for every Civ3 source the script
+converted: the outputs it produced, the source's size and modification
+time, and a hash of `prep_assets.py` itself. An entry is stale when its
+source changed or the script changed, so editing the script reconverts
+what it produces, with no version number to bump by hand. The game reads
+the index to check freshness; the index also answers "which Civ3 file did
+this PNG come from".
 
 Deleting `assets/cache/` is always safe: it is rebuilt on the next run.
-
-### When conversion runs
-
-At startup, once the BIQ is read, the game knows most of what it will
-draw: every unit's INI and clips, the terrain sheets, the leaders of the
-civs in play, the wonder splashes, the interface. It converts whatever of
-that is missing from the cache, in parallel, printing progress to the
-console. The first run against a new install or scenario takes a while;
-later runs skip it. Anything not predicted is converted on first use.
-
-Team colors (palette entries 0-63 swapped for the owner's ramp) are baked
-the same way, per team color actually in play, as `<dir>.team04.png` next
-to the base strip.
-
-### Moving off `prep_assets.py`
-
-The conversion lives in Rust, in the game, rather than shelling out to
-Python. "Automatic" means it runs on every player's machine, and requiring
-Python, PIL and ffmpeg there is fragile. PCX already has a Rust decoder
-(`terrain-builder/src/pcx.rs`); FLC needs a small one (a palette plus a
-handful of chunk types).
-
-`prep_assets.py` holds a lot of hard-won detail that has to come along:
-transparency (magenta and index 255 clear, pure red as shadow), facing
-order, foot offsets, `.amb` parsing, team ramps. Its crops also have to find
-a new home. The cache stores whole sheets, as Civ3 does, and the game cuts
-cells out of them with texture atlases instead of loading pre-cropped files.
-The few computed picks (the purest terrain cells, splitting canopy sprites)
-run when the sheet is first converted and go into its sidecar JSON.
-
-Feasibility: everything the script does is pixel work (crops, pastes, alpha
-masks, palette swaps, connected components) plus two calls to ffmpeg: FLC
-decoding and MP3 → OGG. The MP3 step disappears (Bevy plays MP3). The risks
-are narrow:
-
-* **FLC must decode exactly like ffmpeg**: same frame count (including the
-  trailing ring frame), same pixels, every chunk type the install uses.
-* **PCX variants**: `terrain-builder`'s reader only takes 8-bit single-plane
-  files. Any other variant in the install needs adding.
-* **The wonder thumbnails** use PIL's Lanczos resize; a Rust Lanczos will
-  differ by a few levels per pixel. Invisible, but not byte-identical.
-
-Each ported stage is checked by **diffing its output pixel by pixel against
-`prep_assets.py`'s output** over the whole install, before the Python stage
-is removed.
-
-Port stage by stage. Until a stage is ported, its `assets/gen/` files keep
-working; once all are, `prep_assets.py` and `assets/gen/` are deleted.
+`python3 tools/prep_assets.py` with no arguments still converts the stock
+install in full, for development.
 
 ## Suggested order
 
@@ -304,9 +260,9 @@ Each step leaves the game playable.
 4. **Any number of players.**
 5. **Scenario maps, players, cities and units** from the BIQ.
 6. **Load `.SAV`**, then **write `.SAV`**.
-7. **Automatic asset cache**: the resolver, PCX and FLC conversion in Rust,
-   `index.json`, then `prep_assets.py`'s stages ported one by one and the
-   script deleted.
+7. **Automatic asset cache**: `prep_assets.py` takes a request list and a
+   search path, writes `assets/cache/` and `index.json`; the game builds the
+   request from the BIQ and runs the script when something is missing.
 
 2 and 3 are the bulk and unblock the rest. 7 can run in parallel with any of
 them.
