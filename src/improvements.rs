@@ -591,6 +591,8 @@ mod tests {
         map.tiles[lake].base = Base::Grassland;
         map.tiles[lake].irrigation = true;
         assert!(can_irrigate(&map, &[relay], 12, 11));
+        let farm = map.idx(12, 11);
+        map.tiles[farm].resource = None;
         let worker = Unit::new(0, crate::units::UnitType::Worker, 12, 11);
         assert!(crate::actionbar::UnitCommand::Work(WorkAction::Irrigate).enabled(&map, &[relay], &worker));
         assert_eq!(crate::ai::job_at(&map, &[relay], (12, 11)), Some(WorkAction::Irrigate));

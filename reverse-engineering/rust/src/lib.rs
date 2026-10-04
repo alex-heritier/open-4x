@@ -108,6 +108,7 @@ pub mod crt;
 pub mod dcl;
 pub mod disease;
 pub mod population;
+pub mod resistance;
 pub mod diplomacy;
 pub mod economy;
 pub mod fractal;

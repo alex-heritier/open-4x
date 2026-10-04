@@ -425,7 +425,9 @@ Hand-derived from the text unless marked **E**.
 
 ## 11. Open items
 
-1. **O** Meaning and writers of city words `+0x358/+0x35C/+0x360/+0x364` (5.4).
+1. **O** Meaning and writers of city words `+0x358/+0x35C/+0x360/+0x364` (5.4). **E** (2026-10-04): they are not
+   zero in play; every city of the shipped `yolo.SAV` loaded in the emulator holds `+0x358 = 1`, `+0x364 = 1450`,
+   `+0x35C` 0 or 6, `+0x360 = 0`. Corruption's rank ties read the same chain (`economy.md`).
 2. **O** Name of the road-gating technology `[[0x9C7324] + 0x1A4]` in `cell.vt+0x64`; the reveal body `0x55B1A0`.
 3. **O** `0x56D040(x, y, owner, -1, -1, -1, 0)` (used for the airfield re-base; **H**: nearest city of that owner).
 4. (Resolved in `colonies.md`: the airfield/radar/outpost bodies `0x5DB0D0`, `0x5DAEC0`, `0x5DB990`, `0x5DB4E0` and the colony destroyer `0x5DAA90`.)

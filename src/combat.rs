@@ -126,6 +126,8 @@ pub(crate) use crate::map::terrain_row;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Hold {
     pub size: u8,
+    /// Resisting citizens: any cancels the size bonus (`combat.md` 5).
+    pub resisters: i32,
     /// Percent from Walls, Civil Defense, the Great Wall's gift
     /// (`exe::city_building_bonus`, the best one, not the sum).
     pub building_pct: i32,
@@ -135,7 +137,7 @@ impl Hold {
     /// A city with no defensive improvements.
     #[cfg(test)]
     pub fn bare(size: u8) -> Hold {
-        Hold { size, building_pct: 0 }
+        Hold { size, resisters: 0, building_pct: 0 }
     }
 
     pub fn of(city: &City) -> Hold {
@@ -152,6 +154,7 @@ impl Hold {
             .collect();
         Hold {
             size: city.size(),
+            resisters: crate::resistance::resisters(city),
             building_pct: exe::city_building_bonus(i32::from(city.size()), false, &list, &exe::Rules::CONQUESTS),
         }
     }
@@ -169,7 +172,7 @@ pub fn defense_pct(map: &GameMap, d: &Unit, hold: Option<Hold>) -> i32 {
     let structure = match hold {
         Some(h) => exe::Structure::City {
             size: i32::from(h.size),
-            resisters: 0,
+            resisters: h.resisters,
             building_pct: h.building_pct,
         },
         None => exe::Structure::from_overlay(tile.fortress, tile.barricade),
@@ -595,18 +598,36 @@ impl Realm<'_, '_> {
         }
         let lost = crate::flip::transfer(&mut city, by, was_capital, true, false, || rng.below(4) == 0);
         let _ = lost;
+        drop(city);
+        // `0x4BB090`: the foreigners may resist the new owner. City counts
+        // are taken after the transfer.
+        let mut nations = crate::resistance::Nations::current();
+        for civ in 0..crate::civs::CIV_COUNT {
+            nations.cities[civ] = self.cities.iter().filter(|(_, c)| c.civ == civ).count() as i32;
+        }
+        nations.war[by][old] = true;
+        let Ok((_, mut city)) = self.cities.get_mut(e) else {
+            return;
+        };
+        let resisting = crate::resistance::seed(&mut city, by, false, &nations, rng);
         if by == viewer {
-            post(
-                &mut self.board,
-                if shrank {
-                    format!(
-                        "We captured {}! Some of its citizens were killed.",
-                        city.name
-                    )
-                } else {
-                    format!("We captured {}!", city.name)
-                },
-            );
+            let mut text = if shrank {
+                format!("We captured {}! Some of its citizens were killed.", city.name)
+            } else {
+                format!("We captured {}!", city.name)
+            };
+            // `RESISTERS`
+            if resisting > 0 {
+                text += &format!(
+                    " There {} {} {} in {}. We should garrison {} with strong units to quell the resistance.",
+                    if resisting == 1 { "is" } else { "are" },
+                    resisting,
+                    if resisting == 1 { "resister" } else { "resisters" },
+                    city.name,
+                    city.name,
+                );
+            }
+            post(&mut self.board, text);
         } else if old == viewer {
             post(
                 &mut self.board,
@@ -1585,6 +1606,7 @@ mod tests {
     fn city_at(civ: usize, x: i32, y: i32, size: u8) -> City {
         City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,
@@ -1626,7 +1648,7 @@ mod tests {
         let mut town = city_at(1, 2, 1, 4);
         assert_eq!(Hold::of(&town).building_pct, 0);
         town.buildings.push(Production::Walls);
-        assert_eq!(Hold::of(&town), Hold { size: 4, building_pct: 50 });
+        assert_eq!(Hold::of(&town), Hold { size: 4, resisters: 0, building_pct: 50 });
         // Above a town they stop counting (`BLDG +0x98`), Civil Defense does not.
         let mut city = city_at(1, 2, 1, 9);
         city.buildings.push(Production::Walls);
@@ -2407,6 +2429,43 @@ mod tests {
         let mut board = crate::features::MessageBoard::default();
         d.declare(&crate::diplomacy::Facts::even(), 0, 1, 0, &mut board);
         d
+    }
+
+    #[test]
+    fn capturing_a_foreign_city_seeds_resisters_who_lose_the_size_bonus_and_eat_nothing() {
+        crate::realm::reset();
+        let mut app = arena(1);
+        app.insert_resource(at_war());
+        let mut target = city_at(1, 2, 1, 1);
+        target.set_size(10);
+        let city = app.world_mut().spawn(target).id();
+        // An empty city: the attacker walks in. Both civs keep cities, so the
+        // old nation can still rally its people.
+        app.world_mut().spawn(city_at(1, 8, 8, 1));
+        app.world_mut().spawn(city_at(0, 12, 12, 1));
+        let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
+        attack(&mut app, a, (2, 1));
+        settle(&mut app);
+        let c = app.world().get::<City>(city).unwrap().clone();
+        assert_eq!(c.civ, 0);
+        assert_eq!(c.size(), 9, "one citizen died in the capture");
+        // Equal (zero) culture falls to the smallest-ratio CULT row: 90%
+        // initial resistance, Despotism against Despotism adds nothing.
+        let n = crate::resistance::resisters(&c);
+        assert!(n >= 1, "90% each: at least one of nine resists");
+        assert!(c.citizens.slots().iter().flatten().all(|z| z.pending_race == crate::civs::roster_index(0) as i32));
+        assert!(c.citizens.slots().iter().flatten().filter(|z| z.resister).all(|z| z.work == 0 && z.job == 0));
+        assert_eq!(Hold::of(&c).resisters, n);
+        let text = &app.world().resource::<MessageBoard>().text;
+        assert!(text.contains("resister"), "{text}");
+        // A resisting city has no size bonus, an otherwise identical one does.
+        let map = app.world().resource::<GameMap>();
+        let d = warrior(0, 2, 1);
+        let calm = Hold { resisters: 0, ..Hold::of(&c) };
+        assert!(defense_pct(map, &d, Some(Hold::of(&c))) < defense_pct(map, &d, Some(calm)));
+        let t = crate::citycalc::totals(map, &c);
+        assert_eq!(t.eaten, 2 * (9 - n));
+        assert!(matches!(crate::hurry::quote(&c, civ3mapgen::government::hurry::PAY, 9999, crate::hurry::Buyer::Human), Err(crate::hurry::Refusal::Resistance)));
     }
 
     #[test]

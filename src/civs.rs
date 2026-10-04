@@ -802,6 +802,7 @@ mod tests {
         // Civ 2 holds a city and no units; civ 3 has nothing at all.
         app.world_mut().spawn(City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,

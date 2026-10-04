@@ -280,6 +280,7 @@ mod tests {
     fn city_at(map: &GameMap, civ: usize, x: i32, y: i32) -> City {
         let mut city = City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,

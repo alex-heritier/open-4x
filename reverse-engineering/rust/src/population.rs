@@ -13,6 +13,19 @@ pub struct Citizen {
     pub job: i32,
     /// Resistance byte at +0x20.
     pub resister: bool,
+    /// Turn the current race began, +0x130 (`0x4ABD90` stamps the birth turn).
+    pub since: i32,
+    /// Pending race change, +0x144 (-1 none; `resistance.rs`).
+    pub pending_race: i32,
+    /// Turn the pending change was recorded, +0x148 (-1 none).
+    pub pending_turn: i32,
+}
+
+impl Citizen {
+    /// `0x4ABD90`: a new citizen of `race`, born on `turn`, with no pending change.
+    pub fn new(race: i32, turn: i32) -> Self {
+        Citizen { race, work: 0, job: 0, resister: false, since: turn, pending_race: -1, pending_turn: -1 }
+    }
 }
 
 /// Native citizen slots through the highest index, including empty slots.
@@ -57,6 +70,9 @@ impl Pool {
                 w.put(c.work);
                 w.put(c.job);
                 w.flag(c.resister);
+                w.put(c.since);
+                w.put(c.pending_race);
+                w.put(c.pending_turn);
             }
         }
         w.put(self.free.len() as i64);
@@ -83,6 +99,9 @@ impl Pool {
                         work: u8::try_from(r.get()?).ok()?,
                         job: r.i32()?,
                         resister: match r.get()? { 0 => false, 1 => true, _ => return None },
+                        since: r.i32()?,
+                        pending_race: r.i32()?,
+                        pending_turn: r.i32()?,
                     }),
                     _ => return None,
                 });
@@ -134,7 +153,7 @@ pub fn food_after_loss(food: i32, before: i32, after: i32, granary: bool, box_un
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn citizen(race: i32) -> Citizen { Citizen { race, work: 1, job: 0, resister: false } }
+    fn citizen(race: i32) -> Citizen { Citizen { work: 1, ..Citizen::new(race, 0) } }
     fn pool() -> Pool {
         let mut p = Pool::default();
         for race in [1, 9, 2, 1] { p.add(citizen(race)); }
@@ -189,9 +208,10 @@ mod tests {
     fn restoring_keeps_victim_choice_and_future_free_slot_reuse() {
         let mut original = pool();
         original.remove(None, |_| 2).unwrap();
-        // Independently encoded with the Python scratch codec: slots A,
-        // hole, hole, C; freed order 1 then 2 (next allocation takes 2).
-        assert_eq!(original.to_words(), [4, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 2, 1, 2]);
+        // Slots A, hole, hole, C, each citizen ending with birth turn 0 and
+        // no pending race (-1, -1); freed order 1 then 2 (next allocation
+        // takes 2).
+        assert_eq!(original.to_words(), [4, 1, 1, 1, 0, 0, 0, -1, -1, 0, 0, 1, 1, 1, 0, 0, 0, -1, -1, 2, 1, 2]);
         let mut restored = Pool::default();
         assert!(restored.restore(&original.to_words()));
         assert_eq!(restored, original);
@@ -202,7 +222,7 @@ mod tests {
             assert_eq!(restored.add(citizen(race)), original.add(citizen(race)));
         }
         assert_eq!(restored, original);
-        let c = Citizen { race: 3, work: 20, job: 2, resister: true };
+        let c = Citizen { work: 20, job: 2, resister: true, since: 7, pending_race: 4, pending_turn: 9, ..Citizen::new(3, 0) };
         original.add(c);
         assert!(restored.restore(&original.to_words()));
         assert_eq!(restored, original);

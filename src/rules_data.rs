@@ -328,7 +328,19 @@ pub const FOREST_SHIELDS: u16 = 10;
 const TFRM: [i32; 13] = [-1, -1, 20, -1, 44, 23, -1, -1, -1, 58, 63, 1, 20];
 /// `GOOD.prerequisite` per `GOOD` row (strategic resources need it to be usable).
 pub const GOOD: [i32; 26] = [4, 7, 30, 44, 53, 57, 64, 65, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+/// `GOOD` row names, matched by name to the clone's placed resources.
+pub const GOOD_NAMES: [&str; 26] = ["Horses", "Iron", "Saltpeter", "Coal", "Oil", "Rubber", "Aluminum", "Uranium", "Wines", "Furs", "Dyes", "Incense", "Spices", "Ivory", "Silks", "Gems", "Whales", "Game", "Fish", "Cattle", "Wheat", "Gold", "Sugar", "Tropical Fruit", "Oasis", "Tobacco"];
 const GOVT: [i32; 8] = [-1, -1, 19, 46, 18, 34, 82, 22];
+/// `CULT` rows: `(culture_ratio_percent, resistance_initial_percent, resistance_continued_percent)`.
+pub const CULT: [(i32, i32, i32); 6] = [(300, 40, 30), (200, 50, 40), (100, 60, 50), (75, 70, 60), (50, 80, 70), (33, 90, 80)];
+/// `GOVT.assimilation_chance` (memory `+0x1A4`) per `GOVT` row.
+pub const GOVT_ASSIMILATION: [i32; 8] = [1, 1, 2, 4, 2, 4, 2, 3];
+/// `GOVT[owner].vs[other].resistance_modifier` (the `+8` dword of each 12-byte record behind `+0x19C`).
+pub const GOVT_RESISTANCE: [[i32; 8]; 8] = [[0, 5, 5, 5, 5, 5, 0, 0], [-5, 0, 5, 5, 5, 5, 0, 0], [-5, -5, 0, 5, 5, 5, 0, 0], [-5, -5, -5, 0, -5, 5, 0, 0], [-5, -5, 5, 5, 0, 5, 0, 0], [-5, -5, -5, 5, -5, 0, 0, 0], [-5, -5, 0, -10, -5, -5, 0, 0], [-5, -5, 5, 5, 0, 0, 5, 0]];
+/// `DIFF.corruption_percent` (memory `+0x74`) per difficulty (`0x4B19BC`).
+pub const DIFF_CORRUPTION: [i32; 8] = [100, 100, 100, 100, 100, 100, 100, 100];
+/// `DIFF.citizens_quelled_by_military` (memory `+0x78`) per difficulty.
+pub const DIFF_QUELLED: [i32; 8] = [1, 1, 1, 1, 1, 1, 1, 1];
 const CTZN: [i32; 6] = [-1, -1, -1, -1, 43, 57];
 /// `(required_tech, available_to_civs, ai_strategies, needs_resource)`.
 const PRTO: [(i32, u32, u32, bool); 141] = [
@@ -930,7 +942,7 @@ pub static BLDGS: [BldgDef; 83] = [
     BldgDef { name: "SETI program", cost: 100, upkeep: 0, culture: 3, tech: 66, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x84, small: 0x0, wonder: 0x10, produces: -1, frequency: 1, playable: true }, // 53
     BldgDef { name: "Heroic Epic", cost: 20, upkeep: 0, culture: 4, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x908, small: 0x401, wonder: 0x0, produces: -1, frequency: 1, playable: false }, // 54
     BldgDef { name: "Iron Works", cost: 30, upkeep: 0, culture: 2, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [1, 3], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 4, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x80000000, other: 0x8, small: 0x0, wonder: 0x0, produces: -1, frequency: 1, playable: false }, // 55
-    BldgDef { name: "Forbidden Palace", cost: 20, upkeep: 0, culture: 2, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x108, small: 0x20, wonder: 0x0, produces: -1, frequency: 1, playable: false }, // 56
+    BldgDef { name: "Forbidden Palace", cost: 20, upkeep: 0, culture: 2, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x108, small: 0x20, wonder: 0x0, produces: -1, frequency: 1, playable: true }, // 56
     BldgDef { name: "Military Academy", cost: 40, upkeep: 0, culture: 1, tech: 42, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0xa, small: 0x402, wonder: 0x10000, produces: -1, frequency: 1, playable: false }, // 57
     BldgDef { name: "The Pentagon", cost: 40, upkeep: 0, culture: 1, tech: -1, obsolete: -1, requires: -1, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0xa, small: 0x4, wonder: 0x0, produces: -1, frequency: 1, playable: false }, // 58
     BldgDef { name: "Wall Street", cost: 30, upkeep: 0, culture: 2, tech: -1, obsolete: -1, requires: 76, govt: -1, resources: [-1, -1], happy: 0, happy_all: 0, unhappy: 0, unhappy_all: 0, defense: 0, production: 0, grant_all: -1, grant_continent: -1, doubles: -1, flags: 0x0, other: 0x8, small: 0x8, wonder: 0x0, produces: -1, frequency: 1, playable: false }, // 59

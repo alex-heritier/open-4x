@@ -31,6 +31,8 @@ pub enum Offer {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal {
     Disorder,
+    /// A citizen still resists (`HURRY_RESISTANCE`).
+    Resistance,
     /// A Palace, wonder, small wonder or Wealth.
     Cannot,
     /// The government has no hurry method (Anarchy).
@@ -46,6 +48,9 @@ impl Refusal {
         match self {
             Refusal::Disorder => {
                 "We cannot hurry production while our city is in civil disorder.".into()
+            }
+            Refusal::Resistance => {
+                "We cannot hurry production while our city is in resistance.".into()
             }
             Refusal::Cannot => format!("We cannot hurry {item}."),
             Refusal::Unavailable => {
@@ -146,6 +151,9 @@ pub enum Buyer {
 pub fn quote(city: &City, how: i32, gold: u32, buyer: Buyer) -> Result<Offer, Refusal> {
     if city.unrest > 0 {
         return Err(Refusal::Disorder);
+    }
+    if crate::resistance::resisters(city) > 0 {
+        return Err(Refusal::Resistance);
     }
     if city.production.is_building() && !ordinary(city.production) {
         return Err(Refusal::Cannot);

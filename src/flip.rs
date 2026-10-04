@@ -218,7 +218,8 @@ pub fn test_city(
             .count() as i32;
         let mut s = strength(&Contender {
             nationals: nationals(city, j),
-            resisters: 0,
+            resisters: city.citizens.slots().iter().flatten()
+                .filter(|c| c.resister && c.race == crate::civs::roster_index(j) as i32).count() as i32,
             tiles,
             disorder: city.unrest > 0,
             celebrating: false,
@@ -421,6 +422,8 @@ fn convert(
         .map(|(_, c)| (c.x, c.y));
     let Ok((_, mut city)) = cities.get_mut(e) else { return };
     let lost = transfer(&mut city, to, was_capital, false, true, || rng.0.below(4) == 0);
+    // A conversion only records the pending nationality (`0x4BB090`).
+    crate::resistance::seed(&mut city, to, true, &crate::resistance::Nations::current(), &mut rng.0);
     drop(city);
     // Units of the old owner on the tile go to its capital, or are lost.
     for (ue, mut u) in units.iter_mut().filter(|(_, u)| u.civ == from && (u.x, u.y) == (x, y)) {

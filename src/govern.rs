@@ -40,7 +40,12 @@ pub fn optimal_cities(civ: usize) -> i32 {
     let class = realm::govt(civ).corruption_class;
     exe_econ::optimal_city_number(&exe_econ::OcnInputs {
         world_base: WORLD_BASE,
-        palace_like: 0,
+        // `0x55AA10(player, 0x20, 0)`: the Reduces-Corruption wonders held.
+        palace_like: realm::read(civ, |r| {
+            let mut rows: Vec<(i32, i32)> = r.palaces.clone();
+            rows.dedup();
+            rows.len() as i32
+        }),
         class,
         commercial: exe_econ::has_trait(crate::cities::traits(civ), exe_econ::trait_bit::COMMERCIAL),
         human: !is_ai(civ),

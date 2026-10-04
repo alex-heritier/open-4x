@@ -88,7 +88,7 @@ civ's border still reaches it). Tiles reached by cities of one civ are that
 civ's whichever city is nearer, so the borders of its cities merge: 29,655 of
 29,708 such tiles belong to the civ.
 
-## Corruption math (verified: sweep + parent spot-checks)
+## Corruption math (verified: the whole routine, executed; see "The whole routine")
 
 `0x4B1190(city, gross, kind)` returns the amount **lost** (`ret 8`; verified
 2026-10-01, see `yields.md` section 5): `kind` 0 is corruption of the gross
@@ -150,6 +150,62 @@ Courthouse arithmetic below:
   (`0x4BB2A0`), and `[0x9C72B4]` is RULE "Food Consumption per Citizen" (body
   `+0xEC`, 2). See `yields.md` section 5.3 and `rust/src/city.rs`
   (`food_eaten`).
+
+### The whole routine (2026-10-04, **V** + **E**)
+
+Read end to end from the raw body `0x4B1190..0x4B1A27` (jump table `0x4B1A2C`) and **executed**: the real
+routine was run in the emulator (`tools/emu/corruption.py`) over the loaded save `yolo.SAV`, with every city
+handed to one player and its government class (0..5), Courthouses, disorder/celebration flags and a
+Reduces-Corruption small wonder varied; all 3 456 results equal `rust/src/economy.rs` `corruption` (64 kept as
+golden vectors). Integer ops truncate toward zero unless said.
+
+```
+if gross <= 0:                              return 0
+if waste and city in disorder:              return gross
+if owner has no capital:                    return 0
+if GOVT[owner].class == 4:                  return gross
+C = courthouses + (10 if this is the capital)            # 0x4B1250..0x4B12C3; BLDG +0xEC bit 8, present, not obsolete
+O = OCN(owner) + B * C / 4                               # 0x5676C0; B = WSIZ +4 (shipped Standard 20)
+if waste and celebrating:  O += B / 4
+d = dist(capital, city)                                  # 0x4378D0, the game's metric (borders-culture.md 9)
+for each BLDG row with +0xF4 & 0x20 whose required government is -1 or the owner's:
+    wc = small wonder: city id Player[owner].+0x15E8[row];  great: 0x539030(row), owned by owner
+    if wc exists:  if wc == city: C += 7;   d = min(d, dist(wc, city))
+m = (mapWidth + mapHeight) / 4                            # [0x9C74D4] + [0x9C74C0]
+e = class 0: 3d/4 | 1, 2: d | 3: 3d/2 | 5: m/4 | else: m
+if not 0x57F0A0(city, capital, owner):  e = 5e/4          # not trade-connected to the capital
+e = (m < 2) ? 2 : clamp(e, 2, m)
+if waste and celebrating:  e = (e + 1) / 2
+repeat C times:            e = (e + 1) / 2
+share = e * gross
+rank  = class 5: Player.+0x194 / 2
+        else: number of the owner's other cities (the capital included) nearer the capital than this
+              city by dist; at equal distance the tie chain below
+rank' = rank >= O ? 2*rank - O : rank
+lost  = (m * ((rank' * gross + 1) / 2) + share * O + (m * O) / 2) / (m * O)
+lost  = (Σ CTZN[job].+0x78 over non-resisting citizens >= lost) ? 0 : lost - that sum      # Policeman
+lost  = lost * DIFF[owner difficulty].+0x74 / 100                                          # shipped 100 everywhere
+cap   = max(9 - C, 0) * gross / 10
+return (cap < 0 or lost < 0) ? 0 : min(lost, cap)
+```
+
+Consequences: the capital loses nothing (C ≥ 10, cap 0); a Forbidden Palace city at most 20 %; with no Courthouse
+the loss never exceeds 90 %; a Courthouse both halves the distance share and raises the rank threshold by `B/4`;
+the Forbidden Palace counts in `OCN` (`3 * N * B / 8`, see above) and replaces the capital as the distance origin
+for every city nearer to it. The connection test passes the owner as the third argument (the capital lookup
+`0x437870` is `ret 4` and leaves the owner pushed below it).
+
+**Equal-distance ties** (`0x4B16EB..0x4B18B4`): with `o` the other city and `t` this one, `z(X) = X.+0x364 || 1`,
+`s(X) = X.+0x35C + 1`, `u(X) = X.+0x360 + 1`, and the mode `m = o.+0x358`: mode 0 ranks `o` ahead when `z(o) < z(t)`,
+or `z(o) == z(t)` and `o.id < t.id`; mode 1 when `z(o) < z(t)`, or equal `z` and `s(o) < s(t)`, or both equal and
+`o.id < t.id`; mode 2 whenever `z(o) == z(t)` (first stage, `0x4B172C`; its second stage, which would compare `u`
+and the ids, is reached only with `z(o) != z(t)` and then skips); any other mode never ranks `o` ahead. **E**: the words are
+**not** zero in play: every city of `yolo.SAV` holds mode 1, `+0x364 = 1450`, `+0x35C` 0 or 6. Their writers are still
+open (`borders-culture.md` 11 item 1); the clone ranks equal distances by city order only.
+
+**Clone** (`src/citycalc.rs`): the clone's square grid is the native diamond, so a clone offset `(dx, dy)` is the
+native `(dx - dy, dx + dy)`; the map size in the clamp is the shipped Standard map, 100 by 100 (**H**);
+`src/trade.rs` supplies the connection (roads, harbors over coast, `trade-network.md`).
 
 ## Commerce split (verified 2026-10-01: all of `0x4B07C0..0x4B0AA5`)
 

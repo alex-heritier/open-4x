@@ -1421,3 +1421,38 @@ cancel/zoom/accept before population production destroys a city. Persisted
 native city-pool tie ordering, AI reselection, nationality-loss attitudes,
 resistance and Golden Age coverage remain in the broader Ancient Age audit.
 The full objective remains active and incomplete.
+
+### Resistance, executed corruption, trade network, Forbidden Palace (2026-10-04)
+
+Captured citizens now resist (`city-turn.md` 8.4): `takeCity` seeding
+`0x4BB090` marks every foreign citizen's pending nationality and rolls
+the CULT initial chance plus the government modifier (fallback row
+`[0x9C3D6C]` = the smallest-ratio row, executed in the emulator).
+Resisters work no tile, eat nothing, cancel the size defense bonus and
+block hurrying; the garrison quells them each turn with the continued
+chance, peace ends resistance, and non-resisters assimilate by
+`0x4AC140`. Citizens carry birth turn and pending race (save format 11).
+
+Corruption and waste are now the whole of `0x4B1190`, decoded and
+checked against 3 456 results of the real routine run in the emulator
+over a varied shipped save (64 kept as golden vectors). It needs the
+trade network, added in `src/trade.rs` (roads with the war rule, harbors
+over coast; `trade-network.md`). The Forbidden Palace is playable: one
+per civ, at least half the optimal city count, a second distance origin,
+seven halvings in its city and a larger optimal city number. Great
+wonders finished elsewhere switch the city's build (`WONDERCHANGE`,
+`city-turn.md` 6.1); the computer builds wonders and the Forbidden
+Palace (clone policy, the item chooser is open).
+
+Verified: 505 game tests, 623 native library tests, game build, and an
+unboosted autoplay to turn 59 without errors. Open: native city-pool
+ids and the corruption/border tie words (`+0x358..+0x364`, seen non-zero
+in saves), the birth draw `Random.next(2)` (`0x4ABD90`), police count
+by `0x5A6060` mode 4.
+
+Resources now reach cities through the road network (`trade-network.md`
+7.1 step 1, per-city masks; `0x4ADE30` gates units and buildings per city;
+luxuries count per city); AI workers road resource tiles first.
+
+Next: resource trading, Palace relocation, celebration
+(WLTKD) and the remaining Ancient Age audit.

@@ -441,7 +441,29 @@ fn building(city: &City, n: &Needs) -> Option<Production> {
         (Production::Harbor, city.coastal && city.size() >= 3 && n.net_food <= 2),
         (Production::Courthouse, city.size() >= 6),
     ];
-    wants.into_iter().find(|&(p, ok)| ok && want(p)).map(|(p, _)| p)
+    if let Some((p, _)) = wants.into_iter().find(|&(p, ok)| ok && want(p)) {
+        return Some(p);
+    }
+    // HYPOTHESIS (the item chooser `0x42C8A0` is open, `ai.md` 4): a
+    // second seat of government in a sizable city far from the capital,
+    // then great wonders in grown cities, each city on its own wonder so
+    // that the civ does not race itself.
+    let capital = crate::realm::read(city.civ, |r| r.capital);
+    let far = capital.is_some_and(|c| {
+        crate::citycalc::native_distance_on(crate::map::MAP_W, c, (city.x, city.y)) >= 8
+    });
+    if far && city.size() >= 4 && want(Production::ForbiddenPalace) {
+        return Some(Production::ForbiddenPalace);
+    }
+    if city.size() >= 5 {
+        let wonders: Vec<Production> = Production::all()
+            .filter(|&p| p.bldg().is_some_and(|b| b.is_great_wonder()) && want(p))
+            .collect();
+        if !wonders.is_empty() {
+            return Some(wonders[city.founded as usize % wonders.len()]);
+        }
+    }
+    None
 }
 
 /// The most soldiers a civ with these garrisons keeps; the rest are upkeep.
@@ -532,6 +554,13 @@ pub fn job_at(map: &GameMap, cities: &[(i32, i32)], tile: (i32, i32)) -> Option<
     let t = map.get(tile.0, tile.1)?;
     if cities.contains(&tile) || t.hut || t.camp {
         return None;
+    }
+    // A luxury or strategic resource counts only on the road network
+    // (`trade-network.md` 7): road it first.
+    if t.resource.is_some_and(|id| crate::features::GOODS[id as usize].kind != crate::features::GoodKind::Bonus)
+        && improvements::can_road(map, tile.0, tile.1)
+    {
+        return Some(WorkAction::Road);
     }
     if improvements::can_irrigate(map, cities, tile.0, tile.1) && !t.mine {
         Some(WorkAction::Irrigate)
@@ -1298,6 +1327,7 @@ mod tests {
     fn city_at(civ: usize, x: i32, y: i32, size: u8) -> City {
         City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,

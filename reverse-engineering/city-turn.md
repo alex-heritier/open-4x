@@ -372,6 +372,50 @@ The table `[0x9C40BC]` is the `CULT` table and `0x4F8C50` is the culture-ratio r
 `(int)(a * 100.0f / b + 0.5f)`, the row with the greatest `culture_ratio_percent <= ratio`, fallback `[0x9C3D6C]` else 0);
 `Player +0xD30[q]` is "at war with `q`" (`diplomacy.md` 1), not "in contact", so the gate above is **at war with `S`**.
 
+The roll is `rand(100) & 0xFFFF < GOVT[owner gov].vs[S gov].resistance_modifier + term` (`0x4ABF9C..0x4ABFD8`,
+**V**): `0x4F8C50` receives `(Player[owner].+0x183C, Player[S].+0x183C)` (pushed `S` first), `flag = 1` reads the
+CULT *initial* percent (memory `+0x54`), `flag = 0` the *continued* percent (`+0x58`), and the RNG is the gameplay
+`Random` `0xA526B4`. When either gate fails no number is drawn and the citizen stops resisting.
+
+**`[0x9C3D6C]`** (**E**): running `game_data` over a shipped save in the emulator with a write watch shows the RULE
+loader's loop `0x599570..0x599585` storing, for each CULT row in turn that has a smaller ratio than the best so far,
+its index into `[0x9C3D6C]` and its ratio into `[0x9C3D68]`. After the load they hold **5** and **33**: the fallback is
+the row with the smallest ratio (shipped: initial 90, continued 80). Ties between equal smallest ratios are not
+exercised by the shipped rows.
+
+`civSlot` `0x539D60` returns **-1** for a race no player holds; `0x4ABE90` and `0x4AC140` then index the player
+array at -1 (outside it). The clone treats that as a nation with no cities and zero culture (**H**).
+
+### 8.4 Capture seeding `0x4BB090(city; P, capture, convert, ...)` (`ret 0x10`)
+
+Called once, from `Player::takeCity` at `0x56517D` (`push ebx; push [esp+0x74]; push [esp+0x70]; push P.+0x1C`).
+For each occupied pool slot in index order (**V**, `0x4BB0B4..0x4BB166`):
+
+```
+0x4ABE10(c; P):  if c.race != Player[P].race:  c.+0x144 = Player[P].race;  c.+0x148 = turn
+                 else:                          0x4AC000(c; 0);  c.+0x144 = c.+0x148 = -1
+if capture:
+    if not convert and 0x4ABE90(c; 1):  resisting += 1
+else:                                                       # silent transfer (only `0x5034B9`)
+    if c.race == Player[P].race:  c.+0x140 = c.+0x144;  c.+0x130 = turn;  c.+0x144 = c.+0x148 = -1
+```
+
+Then, when the city's owner is the local slot and `resisting > 0`, the `RESISTERS` notice (`$NUM0` resisters in
+`$CITY1`; `0x4BB1B7..0x4BB21A`). The silent-transfer branch reads like it writes -1 into the race of the captor's
+own citizens (the pending field was just cleared); it is not reachable in the clone. A culture conversion marks
+pending races but rolls nothing, so converted cities never resist.
+
+**Birth** (`0x4ABD90`, the citizen initialiser, `ret 0xC`, **V**): `+0x130 = [0xA526AC]` (the current turn),
+`+0x138` = slot, `+0x134` = city id, `+0x140` = race, `+0x12C = Random.next(2) & 0xFFFF` (gameplay `Random`, one draw
+per birth; meaning unread), `+0x13C` = the default job `[0x9C3D64]`, `+0x20 = +0x21 = 0`, mood `+0x128 = 1`,
+`+0x144 = +0x148 = -1`. A native citizen's race therefore "began" on its birth turn. The clone does not model the
+birth draw, so its gameplay random stream diverges from the binary after any birth (open). Drift (8.1) therefore requires a captured citizen to
+wait longer than it had lived before the capture.
+
+`rust/src/resistance.rs` implements 8.1 to 8.4; `../src/resistance.rs` wires capture, the turn step (drift then
+quelling, before disease), food `(size - resisters) * 2`, the lost size defence bonus, `HURRY_RESISTANCE` and the
+flip's resister count. The police count is the clone's garrison of attacking units (**H** for `0x5A6060` mode 4).
+
 ## 9. Golden vectors (derived by hand from the algorithms above; every input is a shipped value)
 
 | # | input | result |
@@ -498,8 +542,8 @@ So it returns the **cheapest buildable (non-obsolete) unit tagged Defense or Off
 2. `0x42C8A0` (item chooser), `0x433EE0` (AI purchase); the tile-distance test inside
    `0x436D10` (`0x436E40..0x436F00`).
 3. `0x55A080` / `0x55A0E0`; `0x4DD420`; the meaning of the last-popup flags `+0x3B0`, `+0xA4`.
-4. The writers of citizen `+0x144`/`+0x148` (the pending race change). (The `CULT` table behind `0x4F8C50` and the
-   meaning of `Player +0xD30` are resolved, see 8.3.)
+4. ~~The writers of citizen `+0x144`/`+0x148`~~: `0x4ABE10` (capture seeding, 8.4), `0x4ABD90` (birth, -1), and
+   `0x4AC140` (drift completion). The writer of `[0x9C3D6C]` is the RULE loader (8.3, **E**).
 5. `0x4B45A0` (disease) is specified in `disease.md`; the culture flip `0x4B28D0` and the culture accumulation `0x4B2680` are in `borders-culture.md`.
 6. The AI/human difference in `0x4B9270` 6.2 (the double test of `canBuildImprovement`) is read exactly;
    its design intent is unknown.

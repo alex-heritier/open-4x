@@ -256,6 +256,11 @@ pub struct City {
     /// Improvements this city gets from wonders (Pyramids' Granary, ...):
     /// they work like real ones but cost no upkeep and cannot be sold.
     pub gifts: Vec<Production>,
+    /// Resources (`features::GOODS` ids) that reach the city through its
+    /// owner's road network (`City +0x9C`, `trade-network.md` 7.1), refreshed
+    /// by `realm::sync`.
+    #[serde(default)]
+    pub goods: u32,
     /// Borders a water body larger than 20 tiles (Harbor, ship production).
     pub coastal: bool,
     /// On or next to a river (Hydro Plant).
@@ -303,6 +308,7 @@ impl City {
             queue: vec![],
             buildings: vec![],
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             diseased: false,
@@ -490,7 +496,7 @@ pub fn governor_assign(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32
 /// other picks: assign unplaced laborers on growth or after a tile is lost.
 /// Population loss already removed its own citizen's tile or specialist.
 pub fn governor_fill(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>) {
-    let workers = city.size() as usize - city.specialists().len();
+    let workers = city.size() as usize - city.specialists().len() - crate::resistance::resisters(city) as usize;
     let mut free: Vec<(i32, i32)> = radius_tiles(map, city.x, city.y)
         .into_iter()
         .filter(|t| !city.worked(&map).contains(t) && can_work(map, taken, *t, city.civ))
@@ -691,9 +697,10 @@ pub fn territory(map: &GameMap) -> HashMap<(i32, i32), usize> {
 
 /// The claimant tie-break `0x5D3850` (`borders-culture.md` 5.4): the city
 /// with more culture wins. The exe's per-city words `+0x358..+0x364` are
-/// never written in ordinary play, so equal culture falls through to the
-/// empire ratings, then to the lower civ slot, and a full tie goes to the
-/// challenger `c`.
+/// not modelled (they are set in real saves, mode 1 with `+0x364 = 1450`,
+/// `economy.md` corruption ties, but their writers are open), so equal
+/// culture falls through to the empire ratings, then to the lower civ slot,
+/// and a full tie goes to the challenger `c`.
 fn border_tie_break(a: &City, c: &City, rating: &[u32; CIV_COUNT]) -> bool {
     if a.culture != c.culture {
         return a.culture > c.culture;
@@ -899,6 +906,7 @@ pub fn resources_owned(
 /// cities is still pending (`city-turn.md` 7).
 pub const SETTLER_MIN_SIZE: u8 = 3;
 
+#[derive(Debug, PartialEq)]
 pub enum CityEvent {
     Grew,
     Starved,
@@ -915,6 +923,9 @@ pub enum CityEvent {
     /// The food box is full but the city cannot grow without an Aqueduct
     /// (or a Hospital); announced once.
     Blocked,
+    /// `WONDERCHANGE`: the great wonder was finished elsewhere and the city
+    /// switched to the second item (`city-turn.md` 6.1).
+    WonderLost(Production, Production),
 }
 
 impl City {
@@ -937,6 +948,15 @@ impl City {
         if !crate::research::can_build(self.civ, p) {
             return false;
         }
+        // Every required resource must reach this city (`0x4ADE30`).
+        let rows: &[i32] = match (p.unit(), p.bldg()) {
+            (Some(t), _) => &t.row().resources,
+            (None, Some(b)) => &b.resources,
+            _ => &[],
+        };
+        if !rows.iter().all(|&g| self.resource_usable(g)) {
+            return false;
+        }
         if p.unit().is_some_and(|t| t.row().class == 1) && !self.coastal {
             return false;
         }
@@ -955,6 +975,9 @@ impl City {
         if self.has(p) || self.granted(p) {
             return false;
         }
+        if !self.civ_may_build(b) {
+            return false;
+        }
         if b.requires >= 0 && !self.has(Production::from_building_row(b.requires as usize)) {
             return false;
         }
@@ -965,6 +988,60 @@ impl City {
             return false;
         }
         true
+    }
+
+    /// `City::resourceUsable` `0x4ADE30` for a `GOOD` row: the city's own
+    /// mask (for a city joined to the capital the civ's supply records,
+    /// which equal the capital's mask while resources are not traded).
+    pub fn resource_usable(&self, row: i32) -> bool {
+        row < 0 || crate::realm::good_id(row).is_some_and(|id| self.goods >> id & 1 != 0)
+    }
+
+    /// The player-level gates of `canBuildImprovement` `0x56A2A0` the build
+    /// lists do not cover elsewhere (`buildable.md` 2): a small wonder is
+    /// built once per civilization (step 9), and a Reduces-Corruption one
+    /// needs at least half the world's optimal number of cities (step 12).
+    pub fn civ_may_build(&self, b: &roster::BldgDef) -> bool {
+        let row = roster::BLDGS.iter().position(|d| std::ptr::eq(d, b));
+        let (owned, cities) = crate::realm::read(self.civ, |r| (row.map_or(0, |i| r.owned[i]), r.cities as i32));
+        if b.is_small_wonder() && owned > 0 {
+            return false;
+        }
+        if b.small & 0x20 != 0 && cities < crate::govern::WORLD_BASE / 2 {
+            return false;
+        }
+        true
+    }
+
+    /// `0x436BB0`, the human's fallback when a great wonder is lost: the
+    /// most expensive building the city can build (not the Palace, no
+    /// Reduces-Corruption wonder, and no Courthouse in the capital), a tie
+    /// to the later row, then any unit costing at least as much.
+    pub fn most_expensive(&self) -> Option<Production> {
+        let capital = crate::realm::read(self.civ, |r| r.capital) == Some((self.x, self.y));
+        let mut best: Option<(u16, Production)> = None;
+        for p in Production::all().filter(|p| p.is_building()) {
+            let Some(b) = p.bldg() else { continue };
+            if b.flags & roster::imp::CENTER_OF_EMPIRE != 0
+                || b.small & 0x20 != 0
+                || capital && b.flags & roster::imp::REDUCES_CORRUPTION != 0
+                || b.flags & roster::imp::CAPITALIZATION != 0
+                || !self.can_build_here(p)
+            {
+                continue;
+            }
+            let cost = self.price(p);
+            if best.is_none_or(|(c, _)| cost >= c) {
+                best = Some((cost, p));
+            }
+        }
+        for p in Production::all().filter(|p| p.unit().is_some() && self.can_build_here(*p)) {
+            let cost = self.price(p);
+            if best.is_none_or(|(c, _)| cost >= c) {
+                best = Some((cost, p));
+            }
+        }
+        best.map(|(_, p)| p)
     }
 
     /// An improvement the city has without building it: the gifts of
@@ -1075,6 +1152,30 @@ pub fn process_city_turn(
     let before = city.shields;
     if shields > 0 {
         city.shields = city.shields.saturating_add(shields as u16).min(city.price(city.production));
+    }
+    // `0x4B9270` 6.1: the great wonder was finished elsewhere. HYPOTHESIS
+    // for the computer, which takes over a sibling's wonder (`0x436D10`) in
+    // the executable: here it falls back like the human.
+    if let Some(b) = city.production.bldg()
+        && b.is_great_wonder()
+        && crate::research::wonder_built(city.production)
+    {
+        let lost = city.production;
+        if let Some(next) = city.most_expensive() {
+            city.change_build(next);
+            events.push(CityEvent::WonderLost(lost, next));
+        }
+        return events;
+    }
+    // 6.2: an improvement the city already has, or the civ may no longer
+    // build, never completes; the queue (or the default) takes over.
+    if let Some(b) = city.production.bldg()
+        && city.shields >= city.price(city.production)
+        && (city.has(city.production) || !city.civ_may_build(b))
+    {
+        let done = city.production;
+        city.advance_queue(done);
+        return events;
     }
     if city.shields >= city.price(city.production) {
         let done = city.production;
@@ -1625,6 +1726,7 @@ pub fn end_turn_cities(
             .filter(|(_, c)| c.civ == civ)
             .map(|(e, _)| e)
             .collect();
+        let nations = crate::resistance::Nations::current();
         // The books close first, on the cities and units as they stand:
         // the info box showed this very `Finance` all turn, so whatever a
         // city grows or completes below is charged from the next turn on.
@@ -1707,6 +1809,25 @@ pub fn end_turn_cities(
                     post(&mut board, format!("{} produces a free {}.", city.name, units::def(unit).name));
                 }
             }
+            // Sequencer steps 5 and 6: nationality drift, then the
+            // garrison quells resisters (`city-turn.md` 8).
+            let police = crate::realm::read(civ, |r| r.garrison.get(&(city.x, city.y)).copied().unwrap_or(0)) as i32;
+            let notices = crate::resistance::city_step(&mut city, police, &nations, &mut rng.0);
+            use crate::resistance::Notice;
+            if notices.iter().any(|n| matches!(n, Notice::Quelled(_) | Notice::Ends)) {
+                // Quelled citizens go back to work.
+                governor_fill(&map, &mut city, &taken);
+            }
+            for notice in notices {
+                if crate::civs::is_ai(civ) {
+                    continue;
+                }
+                post(&mut board, match notice {
+                    Notice::Quelled(n) => format!("Our troops have quelled {n} {} in {}!", if n == 1 { "resister" } else { "resisters" }, city.name),
+                    Notice::Ends => format!("The Resistance in {} has ended!", city.name),
+                    Notice::Assimilated(n) => format!("{n} {} of {} adopted our nationality.", if n == 1 { "citizen" } else { "citizens" }, city.name),
+                });
+            }
             let mut disease_notice = None;
             for event in process_city_turn(&map, &mut city, &taken, &mut rng.0) {
                 match event {
@@ -1768,6 +1889,15 @@ pub fn end_turn_cities(
                         None => format!("Disease has killed another citizen in {}!", city.name),
                     }),
                     CityEvent::Calm => post(&mut board, format!("Order is restored in {}.", city.name)),
+                    CityEvent::WonderLost(lost, next) => post(
+                        &mut board,
+                        format!(
+                            "Because {} can no longer work on {}, production has been switched to {}.",
+                            city.name,
+                            lost.name(),
+                            next.name()
+                        ),
+                    ),
                     CityEvent::Blocked => post(
                         &mut board,
                         format!(
@@ -4088,6 +4218,7 @@ mod tests {
         let (x, y) = map.start;
         let mut city = City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,
@@ -4163,6 +4294,7 @@ mod tests {
         };
         let mut city = City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,
@@ -4399,6 +4531,39 @@ mod tests {
             assert_eq!(city.shields, city.price(Production::Worker));
             assert_eq!(rng.state(), 1);
         }
+    }
+
+    #[test]
+    fn forbidden_palace_needs_half_the_optimal_cities_and_is_built_once() {
+        crate::realm::reset();
+        let map = flat_land();
+        let city = test_city(&map);
+        let fp = Production::ForbiddenPalace;
+        let row = fp.building_row().unwrap();
+        crate::realm::write(city.civ, |r| r.cities = 9);
+        assert!(!city.can_build_here(fp), "9 of 20 optimal cities");
+        crate::realm::write(city.civ, |r| r.cities = 10);
+        assert!(city.can_build_here(fp));
+        crate::realm::write(city.civ, |r| r.owned[row] = 1);
+        assert!(!city.can_build_here(fp), "one per civilization");
+    }
+
+    #[test]
+    fn a_wonder_finished_elsewhere_switches_to_the_most_expensive_item() {
+        crate::realm::reset();
+        let map = flat_land();
+        let mut city = test_city(&map);
+        city.production = Production::ThePyramids;
+        city.shields = 30;
+        crate::research::set_wonder_built(Production::ThePyramids, true);
+        let events = process_city_turn(&map, &mut city, &none(), &mut crate::rng::MapRng::new(1));
+        crate::research::set_wonder_built(Production::ThePyramids, false);
+        let next = city.production;
+        assert_ne!(next, Production::ThePyramids);
+        assert!(events.contains(&CityEvent::WonderLost(Production::ThePyramids, next)));
+        assert!(!city.has(Production::ThePyramids));
+        assert!(city.shields >= 30 && city.shields <= city.price(next), "the box, with this turn's shields, is kept up to the new cost");
+        assert!(city.buildable().iter().all(|&p| p.is_building() && (p.bldg().unwrap().flags & roster::imp::CENTER_OF_EMPIRE != 0 || p.bldg().unwrap().small & 0x20 != 0) || city.price(p) <= city.price(next)));
     }
 
     #[test]

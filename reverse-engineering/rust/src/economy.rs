@@ -379,8 +379,224 @@ pub fn optimal_city_number(i: &OcnInputs) -> i32 {
     (i.percent.wrapping_mul(ocn) / 100).max(1)
 }
 
+/// What `City::lostToCorruption` `0x4B1190(this = city; gross, waste)`
+/// reads (`economy.md`, "Corruption math"; every step **V** from the raw
+/// body `0x4B1190..0x4B1A27`). Distances are the game's metric
+/// ([`crate::starts::distance`]).
+#[derive(Clone, Debug, Default)]
+pub struct CorruptionInputs {
+    /// Commerce (corruption) or shields (waste) before the loss.
+    pub gross: i32,
+    /// The second argument: false for commerce corruption, true for waste.
+    pub waste: bool,
+    /// City flags `+0x30` bit 0 (disorder) and bit 1 (celebration).
+    pub disorder: bool,
+    pub celebrating: bool,
+    /// The owner has a capital (`Player +0x2C` names a live city).
+    pub has_capital: bool,
+    /// GOVT `+0x18C` of the owner.
+    pub class: i32,
+    /// Present, non-obsolete buildings with BLDG `+0xEC` bit 8 (Courthouse).
+    pub courthouses: i32,
+    pub is_capital: bool,
+    /// Owned Reduces-Corruption wonders (`+0xF4 & 0x20`, government allowed)
+    /// standing in this city.
+    pub palaces_here: i32,
+    /// `0x5676C0` and the world size's optimal number `B` (`WSIZ +4`).
+    pub ocn: i32,
+    pub world_base: i32,
+    /// Distance to the capital and to the nearest such wonder city, each
+    /// from this city (`i32::MAX` when there is none).
+    pub capital_distance: i32,
+    pub palace_distance: i32,
+    /// `0x57F0A0(city, capital, -1)`: trade-connected to the capital.
+    pub connected: bool,
+    /// Map width in x units (`[0x9C74D4]`) and height (`[0x9C74C0]`).
+    pub width: i32,
+    pub height: i32,
+    /// Same-owner cities ranked ahead (`0x4B1617`), or, for the communal
+    /// class, half the owner's city count (`Player +0x194 / 2`).
+    pub rank: i32,
+    /// CTZN `+0x78` summed over non-resisting citizens' jobs.
+    pub specialists: i32,
+    /// DIFF `+0x74` of the owner's difficulty.
+    pub difficulty_percent: i32,
+}
+
+/// Toward-zero halving of `x + 1` (`lea; cdq; sub; sar 1`).
+fn half_up(x: i32) -> i32 {
+    x.wrapping_add(1) / 2
+}
+
+/// `0x4B1190`: the commerce or shields lost.
+pub fn corruption(i: &CorruptionInputs) -> i32 {
+    let gross = i.gross;
+    if gross <= 0 {
+        return 0;
+    }
+    if i.waste && i.disorder {
+        return gross;
+    }
+    if !i.has_capital {
+        return 0;
+    }
+    if i.class == 4 {
+        return gross;
+    }
+    // Courthouse count, ten for the Palace (`0x4B1250..0x4B12C3`).
+    let mut c = i.courthouses + if i.is_capital { 10 } else { 0 };
+    let b = i.world_base;
+    // The rank threshold (`0x4B12EA..0x4B1341`), before the wonder bonus.
+    let mut o = i.ocn + b.wrapping_mul(c) / 4;
+    if i.waste && i.celebrating {
+        o += b / 4;
+    }
+    // Reduces-Corruption wonders: seven more halvings at home, and the
+    // nearest one stands in for the capital (`0x4B1394..0x4B14B4`).
+    c += 7 * i.palaces_here;
+    let d = i.capital_distance.min(i.palace_distance);
+    let m = (i.width + i.height) / 4;
+    let mut e = match i.class {
+        0 => 3 * d / 4,
+        1 | 2 => d,
+        3 => 3 * d / 2,
+        5 => m / 4,
+        _ => m,
+    };
+    if !i.connected {
+        e = 5 * e / 4;
+    }
+    e = if m < 2 { 2 } else { e.clamp(2, m) };
+    if i.waste && i.celebrating {
+        e = half_up(e);
+    }
+    for _ in 0..c.max(0) {
+        e = half_up(e);
+    }
+    let share = e.wrapping_mul(gross);
+    let rank = rank_prime(i.rank, o);
+    // `0x4B18E1..0x4B1929`: the distance share plus half the rank share,
+    // rounded.
+    let half_rank = half_up(rank.wrapping_mul(gross));
+    let num = m.wrapping_mul(half_rank).wrapping_add(share.wrapping_mul(o)).wrapping_add(m.wrapping_mul(o) / 2);
+    let mut lost = num / m.wrapping_mul(o);
+    lost = if i.specialists >= lost { 0 } else { lost - i.specialists };
+    let lost = lost.wrapping_mul(i.difficulty_percent) / 100;
+    let cap = (9 - c).max(0).wrapping_mul(gross) / 10;
+    if cap < 0 || lost < 0 {
+        return 0;
+    }
+    lost.min(cap)
+}
+
 #[cfg(test)]
 mod tests {
+    fn corruption_row(v: &[i32]) -> (super::CorruptionInputs, i32) {
+        (super::CorruptionInputs {
+            gross: v[0], waste: v[1] != 0, disorder: v[2] != 0, celebrating: v[3] != 0,
+            has_capital: v[4] != 0, class: v[5], courthouses: v[6], is_capital: v[7] != 0,
+            palaces_here: v[8], ocn: v[9], world_base: v[10], capital_distance: v[11],
+            palace_distance: v[12], connected: v[13] != 0, width: v[14], height: v[15],
+            rank: v[16], specialists: v[17], difficulty_percent: v[18],
+        }, v[19])
+    }
+
+    /// Executed golden vectors (**E**): the real `0x4B1190` in the emulator
+    /// over the shipped save `yolo.SAV` with every city handed to one player,
+    /// its government class, Courthouses, a Reduces-Corruption small wonder,
+    /// disorder and celebration varied. Columns as in `corruption_row`, the
+    /// last is the executable's result.
+    #[test]
+    fn corruption_golden_vectors_from_the_executable() {
+        let rows: &[[i32; 20]] = &[
+            [60, 0, 0, 0, 1, 0, 1, 1, 0, 16, 16, 0, 2147483647, 1, 140, 132, 0, 0, 100, 0],
+            [60, 1, 0, 0, 1, 0, 1, 1, 0, 16, 16, 0, 2147483647, 1, 140, 132, 0, 0, 100, 0],
+            [60, 0, 1, 0, 1, 0, 0, 0, 0, 16, 16, 60, 2147483647, 0, 140, 132, 12, 0, 100, 54],
+            [60, 1, 1, 0, 1, 0, 0, 0, 0, 16, 16, 60, 2147483647, 0, 140, 132, 12, 0, 100, 60],
+            [60, 0, 0, 1, 1, 0, 0, 0, 0, 16, 16, 59, 2147483647, 0, 140, 132, 11, 0, 100, 54],
+            [60, 1, 0, 1, 1, 0, 0, 0, 0, 16, 16, 59, 2147483647, 0, 140, 132, 11, 0, 100, 41],
+            [60, 0, 0, 0, 1, 0, 1, 0, 0, 16, 16, 33, 2147483647, 0, 140, 132, 5, 0, 100, 21],
+            [60, 1, 0, 0, 1, 0, 1, 0, 0, 16, 16, 33, 2147483647, 0, 140, 132, 5, 0, 100, 21],
+            [60, 0, 0, 0, 1, 0, 0, 0, 0, 16, 16, 84, 2147483647, 0, 140, 132, 16, 0, 100, 54],
+            [60, 1, 0, 0, 1, 0, 0, 0, 0, 16, 16, 84, 2147483647, 0, 140, 132, 16, 0, 100, 54],
+            [60, 0, 1, 0, 1, 0, 1, 0, 0, 16, 16, 46, 2147483647, 0, 140, 132, 8, 0, 100, 31],
+            [60, 1, 1, 0, 1, 0, 1, 0, 0, 16, 16, 46, 2147483647, 0, 140, 132, 8, 0, 100, 60],
+            [60, 0, 0, 1, 1, 0, 1, 0, 0, 16, 16, 82, 2147483647, 0, 140, 132, 15, 0, 100, 48],
+            [60, 1, 0, 1, 1, 0, 1, 0, 0, 16, 16, 82, 2147483647, 0, 140, 132, 15, 0, 100, 34],
+            [60, 0, 1, 1, 1, 0, 0, 0, 0, 16, 16, 65, 2147483647, 0, 140, 132, 13, 0, 100, 54],
+            [60, 1, 1, 1, 1, 0, 0, 0, 0, 16, 16, 65, 2147483647, 0, 140, 132, 13, 0, 100, 60],
+            [60, 0, 1, 0, 1, 5, 0, 1, 0, 86, 16, 0, 90, 1, 140, 132, 9, 0, 100, 0],
+            [60, 1, 1, 0, 1, 5, 0, 1, 0, 86, 16, 0, 90, 1, 140, 132, 9, 0, 100, 60],
+            [60, 0, 0, 1, 1, 5, 0, 0, 0, 86, 16, 60, 34, 0, 140, 132, 9, 0, 100, 22],
+            [60, 1, 0, 1, 1, 5, 0, 0, 0, 86, 16, 60, 34, 0, 140, 132, 9, 0, 100, 13],
+            [60, 0, 0, 0, 1, 5, 1, 0, 0, 86, 16, 59, 43, 0, 140, 132, 9, 0, 100, 13],
+            [60, 1, 0, 0, 1, 5, 1, 0, 0, 86, 16, 59, 43, 0, 140, 132, 9, 0, 100, 13],
+            [60, 0, 0, 0, 1, 5, 0, 0, 0, 86, 16, 33, 59, 0, 140, 132, 9, 0, 100, 22],
+            [60, 1, 0, 0, 1, 5, 0, 0, 0, 86, 16, 33, 59, 0, 140, 132, 9, 0, 100, 22],
+            [60, 0, 1, 0, 1, 5, 1, 0, 1, 86, 16, 90, 0, 0, 140, 132, 9, 0, 100, 4],
+            [60, 1, 1, 0, 1, 5, 1, 0, 1, 86, 16, 90, 0, 0, 140, 132, 9, 0, 100, 60],
+            [60, 0, 0, 1, 1, 5, 1, 0, 0, 86, 16, 71, 21, 0, 140, 132, 9, 0, 100, 13],
+            [60, 1, 0, 1, 1, 5, 1, 0, 0, 86, 16, 71, 21, 0, 140, 132, 9, 0, 100, 8],
+            [60, 0, 1, 0, 1, 5, 0, 0, 0, 86, 16, 22, 74, 0, 140, 132, 9, 0, 100, 22],
+            [60, 1, 1, 0, 1, 5, 0, 0, 0, 86, 16, 22, 74, 0, 140, 132, 9, 0, 100, 60],
+            [60, 0, 1, 1, 1, 5, 0, 0, 0, 86, 16, 7, 92, 0, 140, 132, 9, 0, 100, 22],
+            [60, 1, 1, 1, 1, 5, 0, 0, 0, 86, 16, 7, 92, 0, 140, 132, 9, 0, 100, 60],
+            [60, 0, 0, 1, 1, 4, 0, 1, 0, 14, 16, 0, 2147483647, 1, 140, 132, 0, 0, 100, 60],
+            [60, 1, 0, 1, 1, 4, 0, 1, 0, 14, 16, 0, 2147483647, 1, 140, 132, 0, 0, 100, 60],
+            [60, 0, 0, 0, 1, 4, 1, 0, 0, 14, 16, 60, 2147483647, 0, 140, 132, 12, 0, 100, 60],
+            [60, 1, 0, 0, 1, 4, 1, 0, 0, 14, 16, 60, 2147483647, 0, 140, 132, 12, 0, 100, 60],
+            [60, 0, 0, 0, 1, 4, 0, 0, 0, 14, 16, 59, 2147483647, 0, 140, 132, 11, 0, 100, 60],
+            [60, 1, 0, 0, 1, 4, 0, 0, 0, 14, 16, 59, 2147483647, 0, 140, 132, 11, 0, 100, 60],
+            [60, 0, 1, 0, 1, 4, 1, 0, 0, 14, 16, 84, 2147483647, 0, 140, 132, 16, 0, 100, 60],
+            [60, 1, 1, 0, 1, 4, 1, 0, 0, 14, 16, 84, 2147483647, 0, 140, 132, 16, 0, 100, 60],
+            [60, 0, 0, 1, 1, 4, 1, 0, 0, 14, 16, 50, 2147483647, 0, 140, 132, 9, 0, 100, 60],
+            [60, 1, 0, 1, 1, 4, 1, 0, 0, 14, 16, 50, 2147483647, 0, 140, 132, 9, 0, 100, 60],
+            [60, 0, 1, 0, 1, 4, 0, 0, 0, 14, 16, 82, 2147483647, 0, 140, 132, 15, 0, 100, 60],
+            [60, 1, 1, 0, 1, 4, 0, 0, 0, 14, 16, 82, 2147483647, 0, 140, 132, 15, 0, 100, 60],
+            [60, 0, 1, 1, 1, 4, 0, 0, 0, 14, 16, 10, 2147483647, 0, 140, 132, 2, 0, 100, 60],
+            [60, 1, 1, 1, 1, 4, 0, 0, 0, 14, 16, 10, 2147483647, 0, 140, 132, 2, 0, 100, 60],
+            [60, 0, 0, 0, 1, 3, 1, 1, 0, 19, 16, 0, 7, 1, 140, 132, 0, 0, 100, 0],
+            [60, 1, 0, 0, 1, 3, 1, 1, 0, 19, 16, 0, 7, 1, 140, 132, 0, 0, 100, 0],
+            [60, 0, 0, 0, 1, 3, 0, 0, 0, 19, 16, 60, 58, 0, 140, 132, 12, 0, 100, 54],
+            [60, 1, 0, 0, 1, 3, 0, 0, 0, 19, 16, 60, 58, 0, 140, 132, 12, 0, 100, 54],
+            [60, 0, 1, 0, 1, 3, 1, 0, 0, 19, 16, 33, 33, 0, 140, 132, 5, 0, 100, 34],
+            [60, 1, 1, 0, 1, 3, 1, 0, 0, 19, 16, 33, 33, 0, 140, 132, 5, 0, 100, 60],
+            [60, 0, 0, 1, 1, 3, 1, 0, 0, 19, 16, 46, 41, 0, 140, 132, 8, 0, 100, 40],
+            [60, 1, 0, 1, 1, 3, 1, 0, 0, 19, 16, 46, 41, 0, 140, 132, 8, 0, 100, 24],
+            [60, 0, 1, 0, 1, 3, 0, 0, 0, 19, 16, 71, 71, 0, 140, 132, 14, 0, 100, 54],
+            [60, 1, 1, 0, 1, 3, 0, 0, 0, 19, 16, 71, 71, 0, 140, 132, 14, 0, 100, 60],
+            [60, 0, 0, 0, 1, 3, 1, 0, 0, 19, 16, 82, 84, 0, 140, 132, 15, 0, 100, 48],
+            [60, 1, 0, 0, 1, 3, 1, 0, 0, 19, 16, 82, 84, 0, 140, 132, 15, 0, 100, 48],
+            [60, 0, 1, 1, 1, 3, 0, 0, 0, 19, 16, 51, 47, 0, 140, 132, 10, 0, 100, 54],
+            [60, 1, 1, 1, 1, 3, 0, 0, 0, 19, 16, 51, 47, 0, 140, 132, 10, 0, 100, 60],
+            [60, 0, 0, 0, 1, 3, 1, 0, 1, 19, 16, 7, 0, 0, 140, 132, 1, 0, 100, 2],
+            [60, 1, 0, 0, 1, 3, 1, 0, 1, 19, 16, 7, 0, 0, 140, 132, 1, 0, 100, 2],
+            [60, 0, 0, 0, 1, 2, 0, 1, 0, 15, 16, 0, 2147483647, 1, 140, 132, 0, 0, 100, 0],
+            [60, 1, 0, 0, 1, 2, 0, 1, 0, 15, 16, 0, 2147483647, 1, 140, 132, 0, 0, 100, 0],
+        ];
+        for v in rows {
+            let (i, want) = corruption_row(v);
+            assert_eq!(super::corruption(&i), want, "{v:?}");
+        }
+    }
+
+    /// Vectors produced by running the real `0x4B1190` in the emulator over
+    /// a loaded save whose state was varied (`economy.md`, corruption
+    /// verification). `CIV3_CORRUPTION_VECTORS` names the full CSV.
+    #[test]
+    fn corruption_matches_the_executable() {
+        let Ok(path) = std::env::var("CIV3_CORRUPTION_VECTORS") else { return };
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut n = 0;
+        for line in text.lines() {
+            let v: Vec<i32> = line.split(',').map(|x| x.parse().unwrap()).collect();
+            let (i, want) = corruption_row(&v);
+            assert_eq!(super::corruption(&i), want, "{line}");
+            n += 1;
+        }
+        assert!(n > 0);
+    }
+
     #[test]
     fn freshwater_bypasses_only_the_aqueduct_gate() {
         assert_eq!(super::growth_limit(false, false, false), 6);

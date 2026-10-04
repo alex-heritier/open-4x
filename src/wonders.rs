@@ -406,6 +406,7 @@ mod tests {
     fn city(civ: usize, name: &str) -> City {
         City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,

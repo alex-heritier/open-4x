@@ -181,6 +181,7 @@ mod tests {
     fn city(name: &str, x: i32, y: i32, culture: u32, founded: u32) -> City {
         City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,

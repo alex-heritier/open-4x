@@ -28,7 +28,7 @@ use crate::units::{Exploration, Selected, Turn, Unit};
 use crate::wonders::{self, Wonders};
 use crate::{realm, rng};
 
-const VERSION: u32 = 10;
+const VERSION: u32 = 11;
 
 /// A request from the keyboard or a script.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]

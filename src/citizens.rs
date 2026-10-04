@@ -8,7 +8,7 @@ use crate::map::GameMap;
 
 pub fn new_pool(civ: usize, size: u8) -> Pool {
     let mut pool = Pool::default();
-    for _ in 0..size { pool.add(Citizen { race: crate::civs::roster_index(civ) as i32, work: 0, job: 0, resister: false }); }
+    for _ in 0..size { pool.add(Citizen::new(crate::civs::roster_index(civ) as i32, crate::realm::turn() as i32)); }
     pool
 }
 
@@ -26,11 +26,11 @@ mod tests {
         city.food = 21;
         city.citizens.get_mut(0).unwrap().work = 1;
         *city.citizens.get_mut(1).unwrap() = Citizen {
-            race: crate::civs::roster_index(1) as i32, work: 0, job: 3, resister: false,
+            job: 3, ..Citizen::new(crate::civs::roster_index(1) as i32, 0)
         };
         city.citizens.get_mut(2).unwrap().work = 2;
         *city.citizens.get_mut(3).unwrap() = Citizen {
-            race: crate::civs::roster_index(2) as i32, work: 0, job: 1, resister: true,
+            job: 1, resister: true, ..Citizen::new(crate::civs::roster_index(2) as i32, 0)
         };
         let mut rng = MapRng::new(1);
         let victim = city.lose_population(1, None, &mut rng).pop().unwrap();
@@ -100,7 +100,8 @@ pub(crate) mod pool_serde {
         let mut pool = Pool::default();
         if !pool.restore(&words) || pool.slots().iter().flatten().any(|c|
             !(0..31).contains(&c.race) || c.work > 20 || !(0..6).contains(&c.job)
-            || c.work != 0 && c.job != 0)
+            || c.work != 0 && c.job != 0
+            || !(-1..31).contains(&c.pending_race) || (c.pending_race == -1) != (c.pending_turn == -1))
             || pool.slots().iter().flatten().count() > u8::MAX as usize
         {
             return Err(serde::de::Error::custom("invalid city citizen pool"));
@@ -121,7 +122,7 @@ impl City {
 
     pub fn add_citizens(&mut self, n: u8, race: usize) {
         for _ in 0..n.min(u8::MAX - self.size()) {
-            self.citizens.add(Citizen { race: race as i32, work: 0, job: 0, resister: false });
+            self.citizens.add(Citizen::new(race as i32, crate::realm::turn() as i32));
         }
     }
 
@@ -202,9 +203,10 @@ impl City {
         let Some(index) = self.work_index(map, tile) else { return false };
         if self.worked(map).contains(&tile) { return false; }
         let slots = self.citizens.slots();
-        let i = slots.iter().position(|c| c.as_ref().is_some_and(|c| c.work == 0 && c.job == 0))
-            .or_else(|| slots.iter().position(|c| c.as_ref().is_some_and(|c| c.work == 0 && c.job == 1)))
-            .or_else(|| slots.iter().rposition(|c| c.as_ref().is_some_and(|c| c.work == 0)));
+        let free = |c: &Option<Citizen>, job: Option<i32>| c.as_ref().is_some_and(|c| c.work == 0 && !c.resister && job.is_none_or(|j| c.job == j));
+        let i = slots.iter().position(|c| free(c, Some(0)))
+            .or_else(|| slots.iter().position(|c| free(c, Some(1))))
+            .or_else(|| slots.iter().rposition(|c| free(c, None)));
         let Some(i) = i else { return false };
         let c = self.citizens.get_mut(i).unwrap(); c.work = index; c.job = 0;
         true
@@ -220,7 +222,7 @@ impl City {
     }
     fn idle_ids(&self) -> Vec<usize> {
         self.citizens.slots().iter().enumerate().filter_map(|(i, c)|
-            c.as_ref().filter(|c| c.work == 0).map(|_| i)).collect()
+            c.as_ref().filter(|c| c.work == 0 && !c.resister).map(|_| i)).collect()
     }
     pub fn specialist_jobs(&self) -> impl Iterator<Item = Specialist> + '_ {
         self.citizens.slots().iter().flatten().filter(|c| c.job != 0 && !c.resister).map(|c| specialist(c.job))
@@ -230,7 +232,7 @@ impl City {
     }
     pub fn entertain_unassigned(&mut self) {
         for i in 0..self.citizens.slots().len() {
-            if let Some(c) = self.citizens.get_mut(i) && c.work == 0 && c.job == 0 { c.job = 1; }
+            if let Some(c) = self.citizens.get_mut(i) && c.work == 0 && c.job == 0 && !c.resister { c.job = 1; }
         }
     }
     pub fn set_specialist(&mut self, i: usize, s: Specialist) {

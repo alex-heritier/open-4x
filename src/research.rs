@@ -145,6 +145,11 @@ pub fn locked(civ: usize) -> Vec<Production> {
     Production::all().filter(|&p| !can_build(civ, p)).collect()
 }
 
+/// Some city, anywhere, holds the great wonder (`0x538FE0`).
+pub fn wonder_built(p: Production) -> bool {
+    with_access(|a| a.built.get(p.index()))
+}
+
 /// A great wonder has been built somewhere: nobody builds it again.
 pub fn set_wonder_built(p: Production, built: bool) {
     with_access(|a| a.built.set(p.index(), built));

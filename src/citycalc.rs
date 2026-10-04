@@ -9,12 +9,8 @@
 //! and the effect of disorder (`yields.md` 5.3 to 5.5). The government and
 //! everything else about the owner comes from [`crate::realm`].
 //!
-//! **HYPOTHESIS**: corruption and waste. The executable's routine
-//! (`0x4B1190`) is decoded down to its head, the distance arms and the
-//! Courthouse count (`economy.md`, "Corruption math"), but not the tail that
-//! turns the distance into a share of the gross. Here the share is the
-//! class's base percentage plus one point per tile of effective distance,
-//! halved by a Courthouse, and nothing for the capital.
+//! Corruption and waste are the executable's `0x4B1190` (`economy.md`,
+//! "Corruption math"), checked against the binary run in the emulator.
 
 use civ3mapgen::city as exe;
 use civ3mapgen::economy as exe_econ;
@@ -259,36 +255,79 @@ pub enum Loss {
     Shields,
 }
 
-/// Base share lost by corruption class (0 minimal to 5 communal), percent.
-const BASE_PERCENT: [i32; 6] = [0, 2, 5, 8, 0, 6];
+/// The executable's distance between two tiles (`0x4378D0`). The clone's
+/// square grid is drawn as the native diamond, so a clone offset `(dx, dy)`
+/// is the native `(dx - dy, dx + dy)`; x wraps on the clone's columns.
+pub fn native_distance(map: &GameMap, a: (i32, i32), b: (i32, i32)) -> i32 {
+    native_distance_on(map.w, a, b)
+}
 
-/// Corruption or waste (`0x4B1190`, **HYPOTHESIS** for the share).
-pub fn corruption(map: &GameMap, city: &City, gross: i32, _kind: Loss) -> i32 {
-    if gross <= 0 {
-        return 0;
+/// [`native_distance`] on a map `w` columns wide.
+pub fn native_distance_on(w: i32, a: (i32, i32), b: (i32, i32)) -> i32 {
+    let mut dx = a.0.rem_euclid(w) - b.0.rem_euclid(w);
+    if dx.abs() > w / 2 {
+        dx -= w * dx.signum();
     }
-    let (govt, capital) = realm::read(city.civ, |r| (r.govt(), r.capital));
-    let Some(capital) = capital else { return 0 };
-    if govt.corruption_class == 4 {
-        return gross;
-    }
+    let dy = a.1 - b.1;
+    civ3mapgen::starts::distance((dx - dy).abs(), (dx + dy).abs())
+}
+
+/// The native map size the corruption distance clamp reads
+/// (`[0x9C74D4]`, `[0x9C74C0]`): the clone plays a Standard world
+/// (`govern::WORLD_BASE`), whose shipped map is 100 by 100 (**H**: the
+/// clone's own grid is 80 by 60 squares).
+const NATIVE_W: i32 = 100;
+const NATIVE_H: i32 = 100;
+
+/// Corruption or waste: `City::lostToCorruption` `0x4B1190`
+/// (`civ3mapgen::economy::corruption`, executed against the binary). The
+/// rank orders the owner's cities by distance from the capital, ties by city
+/// order (the native tie words `+0x358..+0x364` are not modelled).
+pub fn corruption(map: &GameMap, city: &City, gross: i32, kind: Loss) -> i32 {
     let here = (city.x, city.y);
-    if here == capital {
-        return 0;
-    }
-    let d = map.distance(here, capital);
-    let class = govt.corruption_class as usize;
-    let effective = match class {
-        0 => 3 * d / 4,
-        3 => 3 * d / 2,
-        5 => (map.w + map.h) / 16,
-        _ => d,
+    let (class, capital, order, connected, palaces, cities) = realm::read(city.civ, |r| {
+        (r.govt().corruption_class, r.capital, r.city_order.clone(), r.connected.contains(&here), r.palaces.clone(), r.cities)
+    });
+    let capital_distance = capital.map_or(i32::MAX, |c| native_distance(map, c, here));
+    let rank = if class == exe_econ::COMMUNAL_CLASS {
+        cities as i32 / 2
+    } else if let Some(cap) = capital {
+        let me = order.iter().position(|&o| o == here).unwrap_or(usize::MAX);
+        order
+            .iter()
+            .enumerate()
+            .filter(|&(j, &o)| o != here && {
+                let d = native_distance(map, cap, o);
+                d < capital_distance || d == capital_distance && j < me
+            })
+            .count() as i32
+    } else {
+        0
     };
-    let mut percent = (BASE_PERCENT[class.min(5)] + effective).min(100);
-    if count_flag(city, imp::REDUCES_CORRUPTION) > 0 {
-        percent /= 2;
-    }
-    gross * percent / 100
+    exe_econ::corruption(&exe_econ::CorruptionInputs {
+        gross,
+        waste: matches!(kind, Loss::Shields),
+        // Disorder is applied by `totals` from this turn's moods.
+        disorder: false,
+        celebrating: false,
+        has_capital: capital.is_some(),
+        class,
+        courthouses: count_flag(city, imp::REDUCES_CORRUPTION),
+        is_capital: capital == Some(here),
+        palaces_here: palaces.iter().filter(|&&p| p == here).count() as i32,
+        ocn: crate::govern::optimal_cities(city.civ),
+        world_base: crate::govern::WORLD_BASE,
+        capital_distance,
+        palace_distance: palaces.iter().map(|&p| native_distance(map, p, here)).min().unwrap_or(i32::MAX),
+        connected: connected || capital == Some(here),
+        width: NATIVE_W,
+        height: NATIVE_H,
+        rank,
+        // Only a Policeman (`CTZN +0x78`) cuts corruption; the clone's
+        // specialists are entertainers, tax collectors and scientists.
+        specialists: 0,
+        difficulty_percent: crate::rules_data::DIFF_CORRUPTION[crate::research::DIFFICULTY],
+    })
 }
 
 /// The shield multiplier of the city's buildings, in quarters
@@ -369,7 +408,10 @@ pub fn moods(city: &City, luxury: i32) -> Mood {
         police_limit: r.govt().military_police,
         luxury_points: luxury,
         citizens_per_face: hap::shipped::CITIZENS_PER_HAPPY_FACE,
-        luxury_goods: r.luxuries,
+        // Luxuries that reach this city (`City +0x9C`).
+        luxury_goods: (0..crate::features::GOODS.len())
+            .filter(|&id| city.goods >> id & 1 != 0 && crate::features::GOODS[id].kind == crate::features::GoodKind::Luxury)
+            .count(),
         luxury_trade_building: false,
         propaganda: 0,
         hurry_timer: i32::from(city.hurry_timer),
@@ -434,7 +476,7 @@ pub fn totals(map: &GameMap, city: &City) -> Totals {
     let lux = split.luxury + ent;
     let m = moods(city, lux);
     let disorder = riots(m);
-    let eaten = if disorder { food } else { FOOD_PER_CITIZEN * city.size() as i32 };
+    let eaten = if disorder { food } else { FOOD_PER_CITIZEN * (city.size() as i32 - crate::resistance::resisters(city)) };
     if disorder {
         return Totals {
             food,
@@ -846,20 +888,42 @@ mod tests {
     }
 
     #[test]
-    fn corruption_grows_with_distance_and_the_courthouse_halves_it() {
+    fn corruption_follows_the_executable_distance_rank_courthouse_and_palace_terms() {
+        // Despotism (class 3), human Japan on Regent: optimal cities
+        // 20 * 90 / 100 = 18; the distance clamp is (100 + 100) / 4 = 50.
         realm::reset();
         let map = flat();
         realm::write(0, |r| r.capital = Some((10, 10)));
-        let mut near = town(1);
-        near.x = 11;
-        let mut far = town(1);
-        far.x = 25;
-        assert_eq!(corruption(&map, &town(1), 100, Loss::Commerce), 0, "the capital loses nothing");
-        let n = corruption(&map, &near, 100, Loss::Commerce);
-        let f = corruption(&map, &far, 100, Loss::Commerce);
-        assert!(0 < n && n < f, "{n} < {f}");
+        let at = |x: i32| {
+            let mut c = town(1);
+            c.x = x;
+            c
+        };
+        assert_eq!(corruption(&map, &at(10), 100, Loss::Commerce), 0, "the capital: ten halvings and a cap of 0");
+        // One tile away: d = 1, 3d/2 = 1, unconnected 5/4 -> 1, clamped to 2:
+        // (2*100*18 + 50*18/2) / (50*18) = 4.
+        assert_eq!(corruption(&map, &at(11), 100, Loss::Commerce), 4);
+        // Fifteen tiles: 22, unconnected 27: (2700*18 + 450) / 900 = 54.
+        let mut far = at(25);
+        assert_eq!(corruption(&map, &far, 100, Loss::Commerce), 54);
+        // A trade route to the capital drops the 5/4: (2200*18 + 450) / 900.
+        realm::write(0, |r| { r.connected.insert((25, 10)); });
+        assert_eq!(corruption(&map, &far, 100, Loss::Commerce), 44);
+        realm::write(0, |r| r.connected.clear());
+        // A Courthouse: one halving (27 -> 14), threshold 18 + 20/4 = 23,
+        // (1400*23 + 575) / 1150 = 28, under its 80% cap.
         far.buildings.push(Production::Courthouse);
-        assert_eq!(corruption(&map, &far, 100, Loss::Commerce), f / 2);
+        assert_eq!(corruption(&map, &far, 100, Loss::Commerce), 28);
+        far.buildings.clear();
+        // Three cities nearer the capital, the capital itself included,
+        // rank ahead: + 50 * ((3*100 + 1)/2).
+        realm::write(0, |r| r.city_order = vec![(10, 10), (11, 10), (12, 10), (25, 10)]);
+        assert_eq!(corruption(&map, &far, 100, Loss::Commerce), (2700 * 18 + 50 * 150 + 450) / 900);
+        // A Forbidden Palace next door stands in for the capital, and its own
+        // city takes seven halvings with a 20% cap.
+        realm::write(0, |r| { r.city_order.clear(); r.palaces = vec![(24, 10)]; });
+        assert_eq!(corruption(&map, &far, 100, Loss::Commerce), 4);
+        assert_eq!(corruption(&map, &at(24), 100, Loss::Commerce), (100 * 18 + 450) / 900);
     }
 
     #[test]

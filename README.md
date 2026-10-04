@@ -167,14 +167,20 @@ the desktop-capture fallback.
   words (Civ3's `diplomacy.txt`). Completing a wonder brings up its splash.
 - P: save a window screenshot as `shot-<unix>.png`.
 - F5 / F8: quick save to `saves/quicksave.json` (or `CIV3_SAVE`) / quick load.
-  Saves use format 10; earlier formats cannot be loaded.
+  Saves use format 11; earlier formats cannot be loaded.
 - F9: reveal-all debug toggle.
 
 Quick saves retain private exploration history and restore cleared terrain art.
 Loading requires the same map seed and civilization roster. The current save
-format is version 10; earlier saves are not supported.
+format is version 11; earlier saves are not supported.
 
 ## Economy
+
+Corruption and waste follow the executable's formula (distance to the
+capital or Forbidden Palace, city rank, Courthouses, trade connection).
+Luxuries and strategic resources reach a city only through roads from the
+resource tile. Captured foreign citizens may resist until a garrison
+quells them.
 
 Losing a capital selects a replacement using population, owner nationals,
 military presence and nearby owned cities, and installs its Palace.

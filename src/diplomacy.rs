@@ -1021,6 +1021,7 @@ mod tests {
     fn city(civ: usize, x: i32, y: i32) -> City {
         City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,

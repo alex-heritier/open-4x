@@ -38,7 +38,7 @@ fn terrain_pct(map: &GameMap, at: (i32, i32)) -> i32 {
 
 fn tile_pct(city: Option<&City>) -> i32 {
     city.map_or(0, |c| exe::tile_term(exe::Structure::City {
-        size: i32::from(c.size()), resisters: 0,
+        size: i32::from(c.size()), resisters: crate::resistance::resisters(c),
         building_pct: crate::combat::Hold::of(c).building_pct,
     }, false, &exe::Rules::CONQUESTS))
 }

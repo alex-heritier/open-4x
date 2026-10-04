@@ -39,6 +39,7 @@ const BLDG_PLAYABLE: &[&str] = &[
     "Stock Exchange",
     "Civil Defense",
     "Wealth",
+    "Forbidden Palace",
 ];
 /// Great wonders with effects the game cannot honor yet.
 const BLDG_NOT_PLAYABLE: &[&str] = &["The Manhattan Project", "The United Nations"];
@@ -247,7 +248,20 @@ fn main() -> ExitCode {
     // --- valuation tables ---------------------------------------------------
     p!("const TFRM: [i32; {}] = {:?};", r.worker_jobs.len(), r.worker_jobs.iter().map(|j| j.required_tech).collect::<Vec<_>>());
     p!("/// `GOOD.prerequisite` per `GOOD` row (strategic resources need it to be usable).\npub const GOOD: [i32; {}] = {:?};", r.goods.len(), r.goods.iter().map(|j| j.prerequisite).collect::<Vec<_>>());
+    p!("/// `GOOD` row names, matched by name to the clone's placed resources.");
+    p!("pub const GOOD_NAMES: [&str; {}] = {:?};", r.goods.len(), r.goods.iter().map(|g| g.name.text().to_string()).collect::<Vec<_>>());
     p!("const GOVT: [i32; {}] = {:?};", r.governments.len(), r.governments.iter().map(|j| j.prerequisite_tech).collect::<Vec<_>>());
+    // --- resistance and assimilation (`city-turn.md` 8) ---------------------
+    p!("/// `CULT` rows: `(culture_ratio_percent, resistance_initial_percent, resistance_continued_percent)`.");
+    p!("pub const CULT: [(i32, i32, i32); {}] = {:?};", r.cultures.len(), r.cultures.iter().map(|c| (c.culture_ratio_percent, c.resistance_initial_percent, c.resistance_continued_percent)).collect::<Vec<_>>());
+    p!("/// `GOVT.assimilation_chance` (memory `+0x1A4`) per `GOVT` row.");
+    p!("pub const GOVT_ASSIMILATION: [i32; {}] = {:?};", r.governments.len(), r.governments.iter().map(|g| g.assimilation_chance).collect::<Vec<_>>());
+    p!("/// `GOVT[owner].vs[other].resistance_modifier` (the `+8` dword of each 12-byte record behind `+0x19C`).");
+    p!("pub const GOVT_RESISTANCE: [[i32; {n}]; {n}] = {:?};", r.governments.iter().map(|g| g.vs.iter().map(|v| v.resistance_modifier).collect::<Vec<_>>()).collect::<Vec<_>>(), n = r.governments.len());
+    p!("/// `DIFF.corruption_percent` (memory `+0x74`) per difficulty (`0x4B19BC`).");
+    p!("pub const DIFF_CORRUPTION: [i32; {}] = {:?};", r.difficulties.len(), r.difficulties.iter().map(|d| d.corruption_percent).collect::<Vec<_>>());
+    p!("/// `DIFF.citizens_quelled_by_military` (memory `+0x78`) per difficulty.");
+    p!("pub const DIFF_QUELLED: [i32; {}] = {:?};", r.difficulties.len(), r.difficulties.iter().map(|d| d.citizens_quelled_by_military).collect::<Vec<_>>());
     p!("const CTZN: [i32; {}] = {:?};", r.citizens.len(), r.citizens.iter().map(|j| j.prerequisite).collect::<Vec<_>>());
     p!("/// `(required_tech, available_to_civs, ai_strategies, needs_resource)`.");
     p!("const PRTO: [(i32, u32, u32, bool); {}] = [", r.unit_types.len());

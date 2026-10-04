@@ -130,6 +130,18 @@ pub struct Realm {
     /// everyone is born content, so the tests that do not study happiness
     /// stay out of it.
     pub born_content: i32,
+    /// Empire culture (`Player +0x183C`), as `flip::Flips` totals it.
+    pub rating: i32,
+    /// At war with each civ (`Player +0xD30`).
+    pub at_war: [bool; CIV_COUNT],
+    /// The civ's cities in city order (the native pool order is not kept:
+    /// **H**, the clone's query order stands in for city ids).
+    pub city_order: Vec<(i32, i32)>,
+    /// Cities trade-connected to the capital (`trade.rs`, `0x57F0A0`).
+    pub connected: std::collections::HashSet<(i32, i32)>,
+    /// Cities holding an owned Reduces-Corruption wonder the government
+    /// allows (`BLDG +0xF4 & 0x20`: the Forbidden Palace), one entry each.
+    pub palaces: Vec<(i32, i32)>,
 }
 
 /// What a saved game keeps of a realm: the standing policy. Everything
@@ -197,6 +209,11 @@ impl Realm {
             golden_end: None,
             golden: false,
             golden_due: false,
+            rating: 0,
+            at_war: [false; CIV_COUNT],
+            city_order: Vec::new(),
+            connected: std::collections::HashSet::new(),
+            palaces: Vec::new(),
             born_content: if cfg!(test) {
                 99
             } else {
@@ -321,6 +338,28 @@ pub fn reset() {
     REALMS.with(|r| *r.borrow_mut() = fresh());
 }
 
+#[cfg(not(test))]
+static TURN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+#[cfg(test)]
+thread_local! {
+    static TURN: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The game turn (`[0xA526AC]`), refreshed by [`sync`].
+pub fn turn() -> u32 {
+    #[cfg(not(test))]
+    return TURN.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    return TURN.with(|t| t.get());
+}
+
+pub fn set_turn(turn: u32) {
+    #[cfg(not(test))]
+    TURN.store(turn, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    TURN.with(|t| t.set(turn));
+}
+
 pub fn govt(civ: usize) -> &'static Govt {
     read(civ, |r| r.govt())
 }
@@ -363,6 +402,18 @@ pub fn strategic_row(id: u8) -> Option<usize> {
         "Uranium" => 7,
         _ => return None,
     })
+}
+
+/// The placed resource (`features::GOODS` id) of a `GOOD` row, matched by
+/// name; the clone calls two of them by their Civilopedia names.
+pub fn good_id(row: i32) -> Option<u8> {
+    let name = *crate::rules_data::GOOD_NAMES.get(usize::try_from(row).ok()?)?;
+    let name = match name {
+        "Wines" => "Wine",
+        "Gems" => "Diamonds",
+        n => n,
+    };
+    crate::features::GOODS.iter().position(|g| g.name == name).map(|i| i as u8)
 }
 
 /// Land connected to `at` by king moves, wrapping in x (a continent).
@@ -408,8 +459,13 @@ pub fn sync(
     mut cities: Query<(Entity, &mut City)>,
     units: Query<&Unit>,
     diplomacy: Option<Res<crate::diplomacy::Diplomacy>>,
+    extra: (Option<Res<crate::flip::Flips>>, Option<Res<crate::units::Turn>>),
     mut labels: Local<Vec<u16>>,
 ) {
+    let (flips, turn) = extra;
+    if let Some(turn) = turn {
+        set_turn(turn.0);
+    }
     if labels.is_empty() {
         *labels = continents(&map);
     }
@@ -418,6 +474,23 @@ pub fn sync(
     let tech_count = crate::rules_data::TECH_NAMES.len() as i32;
 
     let mut built = [false; BLDG_COUNT];
+    // The trade network of every civ, over every city (`trade.rs`).
+    let war = |a: usize, b: usize| a < CIV_COUNT && b < CIV_COUNT && a != b && diplomacy.as_ref().is_some_and(|d| d.at_war(a, b));
+    let trade_flag = |c: &City, flag: u32| {
+        c.buildings.iter().filter_map(|b| b.building_row()).any(|row| {
+            let b = roster::bldg(row);
+            b.flags & flag != 0 && !(b.obsolete >= 0 && research_state.knows(c.civ, b.obsolete))
+        })
+    };
+    let nodes: Vec<crate::trade::Node> = all
+        .iter()
+        .map(|(_, c)| crate::trade::Node {
+            at: (c.x, c.y),
+            owner: c.civ,
+            water: trade_flag(c, crate::trade::WATER_TRADE),
+            air: trade_flag(c, crate::trade::AIR_TRADE),
+        })
+        .collect();
     for civ in 0..CIV_COUNT {
         let mut known = 0u128;
         for t in 0..tech_count {
@@ -429,6 +502,34 @@ pub fn sync(
         let mut on_continent: HashMap<(u16, u16), u16> = HashMap::new();
         let mut continent = HashMap::new();
         let mine: Vec<&(Entity, City)> = all.iter().filter(|(_, c)| c.civ == civ).collect();
+        let view = crate::trade::View {
+            p: civ,
+            at_war: &war,
+            sea: research_state.knows_flag(civ, crate::trade::TRADE_OVER_SEA),
+            ocean: research_state.knows_flag(civ, crate::trade::TRADE_OVER_OCEAN),
+            seen: &|_, _| true,
+        };
+        let network = crate::trade::components(&map, &nodes, &view);
+        let component = &network.comp;
+        let capital_pos = capital.0[civ].and_then(|e| all.iter().find(|(id, _)| *id == e)).map(|(_, c)| (c.x, c.y));
+        let capital_component = capital_pos.and_then(|p| nodes.iter().position(|n| n.at == p)).map(|i| component[i]);
+        let connected: std::collections::HashSet<(i32, i32)> = nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, n)| n.owner == civ && Some(component[*i]) == capital_component)
+            .map(|(_, n)| n.at)
+            .collect();
+        let govt_now = read(civ, |r| r.govt);
+        let palaces: Vec<(i32, i32)> = mine
+            .iter()
+            .flat_map(|(_, c)| {
+                c.buildings.iter().filter_map(|b| b.building_row()).filter(move |&row| {
+                    let b = roster::bldg(row);
+                    b.small & 0x20 != 0 && (b.govt < 0 || b.govt as usize == govt_now)
+                }).map(move |_| (c.x, c.y))
+            })
+            .collect();
+        let city_order: Vec<(i32, i32)> = mine.iter().map(|(_, c)| (c.x, c.y)).collect();
         for (_, c) in &mine {
             let land = labels[map.idx(c.x, c.y)];
             continent.insert((c.x, c.y), land);
@@ -487,45 +588,62 @@ pub fn sync(
                 c.gifts = want;
             }
         }
-        // Strategic resources inside the borders, once their advance is known.
+        // Resources reach a city through its owner's road network
+        // (`trade-network.md` 7: `0x57E450` pass 2, `0x57EDD0` step 1): a
+        // tile the civ owns (or its colony), carrying a luxury or a
+        // strategic resource whose advance is known, labelled in the civ's
+        // road network, serves every city of the civ joined to that label.
+        let border = |x: i32, y: i32| owners.get(&(x, y)).copied();
+        let colonies: std::collections::HashSet<(i32, i32)> = (0..map.h)
+            .flat_map(|y| (0..map.w).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                map.get(x, y).is_some_and(|t| t.site == Some(crate::sites::Site::Colony(civ as u8)))
+                    && border(x, y).is_none_or(|o| o == civ)
+            })
+            .collect();
+        let mut masks: HashMap<(i32, i32), u32> = mine.iter().map(|(_, c)| ((c.x, c.y), 0u32)).collect();
+        for y in 0..map.h {
+            for x in 0..map.w {
+                let Some(id) = map.tiles[map.idx(x, y)].resource else { continue };
+                if border(x, y) != Some(civ) && !colonies.contains(&(x, y)) {
+                    continue;
+                }
+                let usable = match crate::features::GOODS[id as usize].kind {
+                    crate::features::GoodKind::Strategic => strategic_row(id).is_some_and(|row| {
+                        let need = crate::rules_data::GOOD[row];
+                        need < 0 || known >> need & 1 != 0
+                    }),
+                    crate::features::GoodKind::Luxury => true,
+                    crate::features::GoodKind::Bonus => false,
+                };
+                let Some(reach) = usable.then(|| network.reaches((x, y))).flatten() else { continue };
+                for (i, n) in nodes.iter().enumerate() {
+                    if n.owner == civ && component[i] == reach {
+                        *masks.entry(n.at).or_insert(0) |= 1 << id;
+                    }
+                }
+            }
+        }
+        let all_goods = masks.values().fold(0u32, |a, m| a | m);
         let mut goods = 0u32;
         let mut luxuries = std::collections::BTreeSet::new();
-        for ((x, y), owner) in &owners {
-            if *owner != civ {
-                continue;
-            }
-            let Some(id) = map.tiles[map.idx(*x, *y)].resource else { continue };
-            match crate::features::GOODS[id as usize].kind {
+        for id in (0..crate::features::GOODS.len()).filter(|&id| all_goods >> id & 1 != 0) {
+            match crate::features::GOODS[id].kind {
                 crate::features::GoodKind::Strategic => {
-                    if let Some(row) = strategic_row(id) {
-                        let need = crate::rules_data::GOOD[row];
-                        if need < 0 || known >> need & 1 != 0 {
-                            goods |= 1 << row;
-                        }
+                    if let Some(row) = strategic_row(id as u8) {
+                        goods |= 1 << row;
                     }
                 }
                 crate::features::GoodKind::Luxury => {
-                    luxuries.insert(id);
+                    luxuries.insert(id as u8);
                 }
                 crate::features::GoodKind::Bonus => {}
             }
         }
-        // Colonies tie their resource to the network wherever they stand.
-        let border = |x: i32, y: i32| owners.get(&(x, y)).copied();
-        for id in crate::sites::colony_goods(&map, civ, &border) {
-            match crate::features::GOODS[id as usize].kind {
-                crate::features::GoodKind::Strategic => {
-                    if let Some(row) = strategic_row(id) {
-                        let need = crate::rules_data::GOOD[row];
-                        if need < 0 || known >> need & 1 != 0 {
-                            goods |= 1 << row;
-                        }
-                    }
-                }
-                crate::features::GoodKind::Luxury => {
-                    luxuries.insert(id);
-                }
-                crate::features::GoodKind::Bonus => {}
+        for (_, mut c) in cities.iter_mut().filter(|(_, c)| c.civ == civ) {
+            let m = masks.get(&(c.x, c.y)).copied().unwrap_or(0);
+            if c.goods != m {
+                c.goods = m;
             }
         }
         let changed = research::set_goods(civ, goods);
@@ -564,6 +682,11 @@ pub fn sync(
             r.suffrage = suffrage;
             r.war_counters = war_counters;
             r.average_weariness = average_weariness;
+            r.rating = flips.as_ref().map_or(0, |f| f.empire[civ] as i32);
+            r.city_order = city_order;
+            r.connected = connected;
+            r.palaces = palaces;
+            r.at_war = std::array::from_fn(|q| diplomacy.as_ref().is_some_and(|d| q != civ && d.at_war(civ, q)));
         });
         if changed {
             research_state.goods_changed();

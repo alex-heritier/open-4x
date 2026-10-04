@@ -1081,6 +1081,7 @@ mod tests {
         let (x, y) = map.start;
         let mut city = City {
             gifts: vec![],
+            goods: 0,
             coastal: false,
             river: false,
             unrest: 0,
