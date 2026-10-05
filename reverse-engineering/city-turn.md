@@ -50,7 +50,7 @@ currently producing unit `u`; `+0x15E4[b]` and `+0x15F8[u]` are the advisor's "r
 step 2). A byte array `+0x15EC[b]` marks "small wonder `b` already announced as available".
 
 Globals: BLDG `[0x9C40AC]` stride `0x110` (cost `+0x94`, improvement flags `+0xEC`, other
-characteristics `+0xF0`, small-wonder flags `+0xF4`, spaceship part `+0xD8`; `biq/src/sections/bldg.rs`
+characteristics `+0xF0`, small-wonder flags `+0xF4`, spaceship part `+0xD8`; `civ3_utils/biq/src/sections/bldg.rs`
 bit names), PRTO `[0x9C71E0]` stride `0x138` (cost `+0x54`, population cost `+0x68`, name `+0x08`, class
 `+0x9C`), CTZN `[0x9C40B0]` stride `0x80` (construction `+0x7C`), DIFF `[0x9C40C0]` stride `0x7C`
 (cost factor `+0x68`), GOVT `[0x9C71D8]` stride `0x1E8` (`+0x1A4` assimilation percent), human mask

@@ -230,7 +230,7 @@ sections 6 and 9 are the clone's).
 * `space_race`: false. `wonder_built`: false (the game has no wonders).
 * `RACE.flavors`, `build_often` and the Militaristic trait come from the BIQ rows of the four
   civilizations; the `FLAV` matrix, `PRTO`, `BLDG`, `GOVT`, `CTZN`, `TFRM`, `GOOD` rows are the shipped
-  rules reduced to what the valuation reads (`biq/examples/gen_game_rules.rs`).
+  rules reduced to what the valuation reads (`civ3_utils/biq/examples/gen_game_rules.rs`).
 
 ## 10. Open items
 

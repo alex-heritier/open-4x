@@ -30,11 +30,11 @@ result is its section 7.
 pip install pefile unicorn capstone
 
 # the decoded stream of the save (DCL removed) and of the default rules
-cd biq
-cargo run --release --example sav  -- ../civ3/civ3-complete/Conquests/Saves/yolo.SAV --stream /tmp/yolo.raw
-cargo run --release --example dump -- ../civ3/civ3-gog/app/Conquests/conquests.biq --stream /tmp/conq.raw
+cd civ3_utils/biq
+cargo run --release --example sav  -- ../../civ3/civ3-complete/Conquests/Saves/yolo.SAV --stream /tmp/yolo.raw
+cargo run --release --example dump -- ../../civ3/civ3-gog/app/Conquests/conquests.biq --stream /tmp/conq.raw
 
-cd ../reverse-engineering/tools/emu
+cd ../../reverse-engineering/tools/emu
 export CIV3_DEFAULT_BIQ=/tmp/conq.raw
 python trace.py /tmp/yolo.raw /tmp/yolo.pkl      # ~3 s for a 5 000-tile map
 python savespec.py /tmp/yolo.raw /tmp/yolo.pkl   # chunks OK ... EOF OK
@@ -49,7 +49,7 @@ To test a sub-version gate, lay a real save out for another sub-version and
 run the same pair of commands on it:
 
 ```sh
-cargo run --release --example sav -- yolo.SAV --sub 5 /tmp/yolo5.raw   # in biq/
+cargo run --release --example sav -- yolo.SAV --sub 5 /tmp/yolo5.raw   # in civ3_utils/biq/
 ```
 
 Environment: `CIV3_EXE` overrides the exe (default

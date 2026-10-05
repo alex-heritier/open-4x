@@ -1,7 +1,7 @@
 # Saved games (`.SAV`): the `CIV3` stream
 
 Findings for `Civ3Conquests.exe` (PE32, image base `0x400000`; every address
-below is a static VA). Rust reference: [`../biq/src/sav/`](../biq/src/sav/)
+below is a static VA). Rust reference: [`../civ3_utils/biq/src/sav/`](../civ3_utils/biq/src/sav/)
 (`civ3_biq::Save`, standalone crate, no dependencies). Tools that run the
 game's own loader: [`tools/emu/`](tools/emu/).
 
@@ -537,10 +537,10 @@ Reproducing (`pefile`, `unicorn` and `capstone` for Python; the GOG install
 under `civ3/`):
 
 ```sh
-cd biq
+cd civ3_utils/biq
 cargo run --release --example sav  -- SAVE.SAV --stream /tmp/s.raw
-cargo run --release --example dump -- ../civ3/civ3-gog/app/Conquests/conquests.biq --stream /tmp/conq.raw
-cd ../reverse-engineering/tools/emu
+cargo run --release --example dump -- ../../civ3/civ3-gog/app/Conquests/conquests.biq --stream /tmp/conq.raw
+cd ../../reverse-engineering/tools/emu
 CIV3_DEFAULT_BIQ=/tmp/conq.raw python trace.py /tmp/s.raw /tmp/s.pkl   # runs the exe's loader
 python savespec.py /tmp/s.raw /tmp/s.pkl   # "chunks OK ... EOF OK"
 ```
@@ -609,7 +609,7 @@ let bytes = save.to_bytes()?;                     // identical to the file
 
 `cargo run --release --example sav -- FILE [--check | --cities | --biq OUT |
 --stream OUT | --sub N OUT]` prints an overview (map, counts, one line per
-player slot) or exports the pieces. Tests: `cargo test --release` in `biq/`
+player slot) or exports the pieces. Tests: `cargo test --release` in `civ3_utils/biq/`
 (they skip when the corpus is absent).
 
 ## 11. Address index

@@ -1601,7 +1601,7 @@ A second, unrelated codec also lives in the binary at `0x648920` / `0x648AC0` wi
 tables at `0x73A088`, `0x73A188`, `0x73A058`, `0x73A068`, `0x73A078`, `0x739FD8`
 and `0x73A018`. That one is the **compressor** for save-game writing, not the
 `.biq` reader, and it should not be confused with the above. (It is ported in
-`biq/src/implode.rs` and reproduces every shipped compressed file byte for
+`civ3_utils/biq/src/implode.rs` and reproduces every shipped compressed file byte for
 byte; see `biq.md`, "The compressor". Its `0x73A088`/`0x73A188` literal tables
 are byte-identical to the explode copies at `0x73A520`/`0x73A620`.)
 
@@ -1849,7 +1849,7 @@ with the file's own seed (the fractal moves with the draw, the painting pass doe
   bit 2); `WCHR` gives the resolved sliders (`landform_actual`, `ocean_coverage_actual`,
   `world_size_index`).
 * **Saved games hold the same data in another layout** (decoded by hand with
-  `biq/examples/unpack` and a tag scan; the `biq` crate does not read saves). A
+  `civ3_utils/biq/examples/unpack` and a tag scan; the `biq` crate does not read saves). A
   `WRLD` chunk of 164 bytes is the `WMAP` row without its resource count and rolls
   (41 dwords: land continents, height, radius, players, isqrt, 0, width, 32 start seeds,
   seed, wrap flags) and a `WRLD` chunk of 52 bytes is `WCHR` (13 dwords). Each cell is a

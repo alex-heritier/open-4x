@@ -26,7 +26,7 @@ victory-point rule and `[0xA529AC]`), `buildable.md` (what may be built), `resea
   the free-advance acquire (add step 11). Nothing else reads it. There is **no presence guard**: the
   routine never tests whether the city already has (or lacks) `id`; callers must (section 3).
 * All table offsets below are **in-memory** (the file body shifted by 4); `BLDG` = `[0x9C40AC]`,
-  stride `0x110`. Flag names are those of `biq/src/sections/bldg.rs`.
+  stride `0x110`. Flag names are those of `civ3_utils/biq/src/sections/bldg.rs`.
 
 | field | meaning | evidence |
 |---|---|---|

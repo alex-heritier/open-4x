@@ -7,11 +7,11 @@ after reading it. The PKWARE DCL transport codec is documented in
 [`biq.md`](biq.md) (the crate implements it, compressor included); the editor's
 dialogs that name the fields are in [`editor.md`](editor.md).
 
-Reference implementation: the standalone crate [`../biq/`](../biq)
+Reference implementation: the standalone crate [`../civ3_utils/biq/`](../civ3_utils/biq)
 (`civ3-biq`, no dependencies, its own `[workspace]`). It is deliberately **not**
 wired into the game (`src/`) or into [`rust/`](rust/): most `.biq`
 functionality is not implemented in the game yet. The rustdoc of each module
-under `biq/src/sections/` carries the field-level tables with exe addresses and
+under `civ3_utils/biq/src/sections/` carries the field-level tables with exe addresses and
 evidence tags, so the code and its documentation cannot drift; this file is the
 map that ties them together and records what is not in any one module.
 
@@ -226,7 +226,7 @@ length decides what is read); they are useful as a version history:
 
 Stock rows are those of `conquests.biq`. "arm" is the dispatcher case in
 `0x594290`, "reader"/"writer" the row functions. Field tables are in the module
-named in the last column (`biq/src/sections/<module>.rs`).
+named in the last column (`civ3_utils/biq/src/sections/<module>.rs`).
 
 | tag | layer | stock rows | arm | reader / writer | module |
 |---|---|--:|---|---|---|
@@ -298,7 +298,7 @@ every index against its target table (`corpus_fields_index_their_tables`,
 ### 3.3 Ownership pairs
 
 `UNIT`, `CITY`, `SLOC` and `CLNY` rows carry an `(owner_type, owner)` dword pair
-(`biq/src/owner.rs`):
+(`civ3_utils/biq/src/owner.rs`):
 
 | `owner_type` | meaning | `owner` |
 |--:|---|---|
@@ -350,7 +350,7 @@ units use type 1 with owners `0..=75`, `Rise_of_Rome` type 2 (C).
   leaders, then `leader_name[32]`, `title[24]`, `civilopedia_entry[32]`, and the
   three 40-byte strings in the order **adjective, singular name, plural noun**,
   then `0`, `4` or `8` era-art paths of 260 bytes, then the tail of dwords
-  (table in `biq/src/sections/race.rs`; `t` = offset inside the tail, memory
+  (table in `civ3_utils/biq/src/sections/race.rs`; `t` = offset inside the tail, memory
   offset in brackets):
   culture group `0x00`, leader gender, civ gender, aggression, civ index (the
   row's own number; 0 marks the Barbarians), shunned and favorite government,
@@ -605,7 +605,7 @@ overview (row counts per section, rules and map summary), re-checks each
 section's round trip, dumps the model, or draws the terrain; the `unpack`
 example decompresses every scenario and save under the given roots into
 `/tmp/biq/` for ad-hoc analysis. Tests: `CIV3_DIR=…/civ3 cargo test --release`
-inside `biq/`. The codec is usable on its own: `civ3_biq::dcl::decompress`,
+inside `civ3_utils/biq/`. The codec is usable on its own: `civ3_biq::dcl::decompress`,
 `civ3_biq::implode::compress(bytes, dcl::Mode::Binary, 6)` and
 `compress_like_the_game`.
 
@@ -623,7 +623,7 @@ disagreed, the exe and the corpus decided:
 | community `ESPN` layouts end with a performed-by dword | the reader ends at `base_cost` |
 | Zone of Control is an ability bit (`editor.md`, `workers.md`) | the first `PRTO` body dword |
 | the `RULE` offset of the road multiplier is unknown (`workers.md`) | body `+0x100` (`movement_rate_along_roads`) |
-| the DCL compressor is "unused by scenario load", so a file cannot be written back compressed (`biq.md`, earlier crate docs) | unused by *load*, but the game uses it for saved games and it is ported (`biq/src/implode.rs`); it reproduces every shipped compressed file exactly |
+| the DCL compressor is "unused by scenario load", so a file cannot be written back compressed (`biq.md`, earlier crate docs) | unused by *load*, but the game uses it for saved games and it is ported (`civ3_utils/biq/src/implode.rs`); it reproduces every shipped compressed file exactly |
 | mode-1 (ASCII-literal) DCL streams are unsupported (`Mode1Unsupported`; `rust/src/dcl.rs` still `Mode1Unverified`) | decoded and encoded; the literal tables are checked against both copies in the exe and form a complete prefix code. No shipped file uses mode 1, so the mode has round-trip tests only |
 | `FLAV` is "not count/row framed, so the walk ends there" (`biq.md`) | own framing (section 1); not necessarily the last section |
 | `GAME` split into separate scenario, alliance and victory-point tables (early crate draft) | one 56-field walk with two layouts split at version 11.19; the `use_default_*` flags decide whose rules apply (3.7) |

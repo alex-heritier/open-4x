@@ -28,7 +28,7 @@ What happens with a `.biq` depends on what it holds:
 
 | What | Where it lives now | Problem |
 |---|---|---|
-| Units, buildings, techs, civs, leaders, governments, terrain facts | `src/rules_data.rs` (now `src/ruleset.rs`, built from the BIQ at startup), generated from `conquests.biq` by `biq/examples/gen_game_rules.rs` and compiled in | One rule set per build |
+| Units, buildings, techs, civs, leaders, governments, terrain facts | `src/rules_data.rs` (now `src/ruleset.rs`, built from the BIQ at startup), generated from `conquests.biq` by `civ3_utils/biq/examples/gen_game_rules.rs` and compiled in | One rule set per build |
 | Game logic tied to specific rows | ~640 uses of named constants: `UnitType::Warrior` (104), `UnitType::Worker` (59), `Production::Temple` (37), `Production::ThePyramids` (17), ... | A mod that changes or drops those rows breaks the game |
 | Player count | `civs::CIV_COUNT = 4`, `[T; CIV_COUNT]` arrays everywhere | Scenarios have 2 to 31 players |
 | Map | `GameMap::generate` from `MAP_SEED` | No way to play a scenario's map |
@@ -37,10 +37,10 @@ What happens with a `.biq` depends on what it holds:
 
 What already exists:
 
-* `biq/` reads every `.biq`/`.bix`/`.bic` into typed rows (`Biq::read_file`,
+* `civ3_utils/biq/` reads every `.biq`/`.bix`/`.bic` into typed rows (`Biq::read_file`,
   `Rules`, `MapData`, `Scenario`), including a scenario's art override folders
   (`GAME.search_folders`).
-* `biq/src/sav` reads **and writes** Civ3 `.SAV` byte for byte. Units, cities,
+* `civ3_utils/biq/src/sav` reads **and writes** Civ3 `.SAV` byte for byte. Units, cities,
   tiles, players, the turn and the embedded BIQ are decoded. Most of the big
   runtime blocks (`LEAD`, `CITY`, `CTZN`, `UNIT` bodies) are only partly
   decoded (`reverse-engineering/savegame.md` section 9).
@@ -111,7 +111,7 @@ leak is once, by design.
 
 Before deleting `rules_data.rs`: a test that builds the `Ruleset` from
 `conquests.biq` and compares it field by field with the generated tables.
-Then delete `rules_data.rs` and `biq/examples/gen_game_rules.rs`.
+Then delete `rules_data.rs` and `civ3_utils/biq/examples/gen_game_rules.rs`.
 
 `UnitType(pub u8)` probably becomes `u16`: mods with more than 255 units exist.
 

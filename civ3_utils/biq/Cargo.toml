@@ -5,8 +5,8 @@ edition = "2024"
 description = "Parser and writer for Civilization III scenario files (.biq/.bic/.bix)"
 publish = false
 
-# Its own workspace root, so `cargo` in `biq/` works on its own; the game
-# depends on it by path (`reverse-engineering/biq.md` owns the format notes).
+# Its own workspace root, so `cargo` in `civ3_utils/biq/` works on its own; the
+# game depends on it by path (`reverse-engineering/biq.md` owns the format notes).
 [workspace]
 
 [dependencies]

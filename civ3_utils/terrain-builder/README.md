@@ -23,12 +23,12 @@ Run from the repo root (`cargo build --release` in this directory first,
 or use `cargo run --release --`):
 
 ```bash
-B=terrain-builder/target/release/terrain-builder
-$B init terrain-builder/packs/meiji --style "early-Meiji Japanese landscape painting, ink and soft watercolor"
+B=civ3_utils/terrain-builder/target/release/terrain-builder
+$B init civ3_utils/terrain-builder/packs/meiji --style "early-Meiji Japanese landscape painting, ink and soft watercolor"
 export FAL_KEY=...                       # https://fal.ai/dashboard/keys
-$B generate terrain-builder/packs/meiji  # 8 materials: 7 terrains + beach sand
-$B build terrain-builder/packs/meiji     # -> packs/meiji/out/
-$B build terrain-builder/packs/meiji --install   # also copy into assets/cache/terrain
+$B generate civ3_utils/terrain-builder/packs/meiji  # 8 materials: 7 terrains + beach sand
+$B build civ3_utils/terrain-builder/packs/meiji     # -> packs/meiji/out/
+$B build civ3_utils/terrain-builder/packs/meiji --install   # also copy into assets/cache/terrain
 cargo run                                 # play on it
 $B restore                                # put the Civ3 art back
 ```

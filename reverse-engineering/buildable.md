@@ -7,7 +7,7 @@ Owns: the two player-level eligibility predicates, `Player::canBuildImprovement`
 supplies the facts). Neighbours: `economy.md` (the cost `0x569FE0` and the
 wonder counters `0x55AA10`, `0x55A8D0`), `government.md` (mobilization),
 `yields.md` (what a built improvement then does), `biq-format.md` and
-`biq/src/sections/bldg.rs` (the BLDG field table).
+`civ3_utils/biq/src/sections/bldg.rs` (the BLDG field table).
 
 What is **not** here: whatever a *city* adds on top for an **improvement** (the
 required improvement in that city, a coastal site, the resources in its trade

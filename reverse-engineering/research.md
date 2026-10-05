@@ -42,7 +42,7 @@ valuation (`src/diplomacy.rs`).
 
 ### 1.1 The TECH row (`[0x9C7320]`, stride `0x74`, count `T`)
 
-Memory offsets (file body offset plus 4; `biq/src/sections/tech.rs` lists both).
+Memory offsets (file body offset plus 4; `civ3_utils/biq/src/sections/tech.rs` lists both).
 
 | offset | field | used here |
 |---|---|---|

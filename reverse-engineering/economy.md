@@ -60,7 +60,7 @@ words). Pre-calls: `0x53AA50(this=0xA9590C)` + `0x61C5A0` twice.
 A city's border level is `[city+0x5C]`, the culture level of `0x4B0C60` (1 up to
 culture 9, one more per power of `RULE.border_factor`, 10 in the shipped rules,
 capped at 6). The tile owner is `Cell+0x05` of each save's map. Measured over
-the shipped and sample saves (2,856 cities; `biq/examples/border_stats.rs`),
+the shipped and sample saves (2,856 cities; `civ3_utils/biq/examples/border_stats.rs`),
 counting only tiles where no other city is as close:
 
 | level | tiles claimed | squared tile distance |
@@ -80,7 +80,7 @@ twice these, in doubled-grid units; tile counts 9, 21, 37, 61, 89, 137; `borders
 The shape is not `level² + 1` and the claiming procedure (cities in order, tie-break, ocean and bracket rules) is
 specified in `borders-culture.md` 5.
 
-Where the shapes of two civs overlap (`biq/examples/border_contest.rs`, 1,671
+Where the shapes of two civs overlap (`civ3_utils/biq/examples/border_contest.rs`, 1,671
 tiles, 263 of them equally near), the nearer city's civ owns the tile in 89% of the 1,408
 others, ties go to the city with more culture in 84%, and the oldest city wins only 53%. The rest is
 sticky ownership the clone does not model (a tile keeps its owner while that

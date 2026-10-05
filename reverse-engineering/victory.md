@@ -123,7 +123,7 @@ A stored value of 0 is replaced by the default shown. All are signed 32-bit.
 | `0x9903B8` | seed | `0xA526B4` | copied |
 
 Evidence: V for the copy and the zero replacements of the first eight rows; the stock numbers in the
-parentheses are the `conquests.biq` values (`biq/src/sections/game.rs` defaults), not code defaults.
+parentheses are the `conquests.biq` values (`civ3_utils/biq/src/sections/game.rs` defaults), not code defaults.
 
 ### 1.3 Other global objects used
 

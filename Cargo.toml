@@ -10,4 +10,4 @@ serde_json = "1.0.151"
 # The reverse-engineered Civ3 combat model (odds, terms, tables).
 civ3mapgen = { path = "reverse-engineering/rust" }
 # Civ3's own files: .biq rules, maps and scenarios, and .SAV saved games.
-civ3-biq = { path = "biq" }
+civ3-biq = { path = "civ3_utils/biq" }

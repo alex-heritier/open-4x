@@ -16,8 +16,8 @@ cargo test --release
 The renderer is faithful to the binary by default. Pass `--bugs none` for the
 intended behaviour, or a subset like `--bugs sea-level-split,swapped-wrap-flags`.
 
-The library has no dependencies. `tests/ground_truth.rs` uses the sibling `biq`
-crate (a dev-dependency) to run the land/sea stage on shipped scenarios that are
+The library has no dependencies. `tests/ground_truth.rs` uses the
+`civ3_utils/biq` crate (a dev-dependency) to run the land/sea stage on shipped scenarios that are
 the generator's own output and compare the result with their tiles; it returns
 early when the git-ignored `civ3/` corpus (or `CIV3_DIR`) is absent.
 

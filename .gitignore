@@ -8,7 +8,7 @@ __pycache__/
 civ3/
 
 # terrain-builder outputs and generated materials
-terrain-builder/packs/*/out/
-terrain-builder/packs/*/*.png
+civ3_utils/terrain-builder/packs/*/out/
+civ3_utils/terrain-builder/packs/*/*.png
 saves/
 assets/cache/

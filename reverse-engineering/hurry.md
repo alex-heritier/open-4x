@@ -41,7 +41,7 @@ so *the executor repeats none of the validator's checks*; it only clamps, sectio
 
 ## 2. Inputs
 
-**Rules constants** (the RULE object at `0x9C71E4`; memory order, field order of `biq/src/sections/rule.rs`):
+**Rules constants** (the RULE object at `0x9C71E4`; memory order, field order of `civ3_utils/biq/src/sections/rule.rs`):
 
 | address | RULE field | stock value | used for |
 |---|---|---|---|

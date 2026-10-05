@@ -5,7 +5,7 @@ header framing open (§15.4). The framing is now solved and both shipped
 scenario files decode end to end. Reference implementation: `rust/src/dcl.rs`
 (mode-0 decoder and the section walker the game code uses).
 
-The **complete codec** lives in the standalone crate [`../biq/`](../biq):
+The **complete codec** lives in the standalone crate [`../civ3_utils/biq/`](../civ3_utils/biq):
 `src/dcl.rs` decodes both literal modes, `src/implode.rs` is the compressor
 (see "The compressor" below), and `Biq::to_bytes` writes a file back in the
 form it was read in. The section-level format is in [`biq-format.md`](biq-format.md).
@@ -142,7 +142,7 @@ bases and distance tables end exactly at `0x3134` (`0x5F7746`).
 ## The compressor (`implode`): ported and verified (2026-10-02)
 
 `0x648920` is PKWARE DCL 1.11 `implode` (the library banner at `0x73A388`).
-Reference port: [`../biq/src/implode.rs`](../biq/src/implode.rs), every routine
+Reference port: [`../civ3_utils/biq/src/implode.rs`](../civ3_utils/biq/src/implode.rs), every routine
 annotated with its address; `compress(input, mode, dict_bits)`.
 
 | exe | what | notes |

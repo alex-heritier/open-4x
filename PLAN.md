@@ -626,7 +626,7 @@ then founded Kyoto. Frames 200, 270 and 340 in
 
 The match is still four chairs, but they are now drawn from all 31
 civilizations of `conquests.biq` instead of the four hard-coded ones.
-`biq/examples/gen_game_rules.rs` emits `CIV_ROSTER`, `LEADER_ROSTER` and
+`civ3_utils/biq/examples/gen_game_rules.rs` emits `CIV_ROSTER`, `LEADER_ROSTER` and
 `RACE_ROSTER` (names, adjective, noun, ruler, ruler title, `diplomacy.txt`
 text set, team color, badge color and the per-civ city list) alongside the
 unit and building tables. `src/civs.rs` keeps `CIV_COUNT = 4` so every

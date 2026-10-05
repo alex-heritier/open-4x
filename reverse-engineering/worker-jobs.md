@@ -20,7 +20,7 @@ row, `+0x50` movement used this turn, `+0x64` order id. This document adds `+0x5
 ### 1.1 `TFRM` rows (the job table) **V**
 
 Memory table `[0x9C7324]`, stride `0x74` (116 bytes: the 4-byte length word, then the 112-byte BIQ body, so memory offset =
-body offset + 4). The BIQ layout is in `biq/src/sections/tfrm.rs`; the offsets the game reads:
+body offset + 4). The BIQ layout is in `civ3_utils/biq/src/sections/tfrm.rs`; the offsets the game reads:
 
 | memory | field | reader |
 |---|---|---|
@@ -107,10 +107,10 @@ colony 0, airfield 0, fort 0, **outpost 1**, radar 0; 0/0/1; 2. 10 Volcano: -1; 
 | `[0x9C727C]` | `RULE` row `+0x98` (`0x9C71E4 + 0x98`), `forest_value_in_shields` | shields granted by clearing a forest (section 9) |
 | `[0x9C71D8]` GOVT, stride `0x1E8` | `+0x1C0` | **worker rate** (shipped: Anarchy 1, Despotism 2, Monarchy 2, Communism 2, Republic 2, Democracy 3, Fascism 4, Feudalism 2) |
 | `[0x9C71E0]` PRTO, stride `0x138` | `+0x12C` (float) | **worker strength** (shipped: Worker 1.0, Crusader 1.0, the two TOW Infantry rows 1.0, all others 0.0 or absent) |
-| `[0x9C71D0]` RACE, stride `0x974` | `vtable[0]` `0x53A080(trait)` | trait test; **5 = Industrious** (`biq/src/sections/race.rs` `trait_id`) |
+| `[0x9C71D0]` RACE, stride `0x974` | `vtable[0]` `0x53A080(trait)` | trait test; **5 = Industrious** (`civ3_utils/biq/src/sections/race.rs` `trait_id`) |
 | `Player +0xA0` | government index | |
 | `Player +0x20` | race (civilization) index | |
-| `hasTechFlag(mask)` `0x561480` | TECH flag word | mask `0x40000` = *Doubles Work Rate of Workers* (stock Replaceable Parts, `biq/src/sections/tech.rs`) |
+| `hasTechFlag(mask)` `0x561480` | TECH flag word | mask `0x40000` = *Doubles Work Rate of Workers* (stock Replaceable Parts, `civ3_utils/biq/src/sections/tech.rs`) |
 | `[0xA526BC]`, `[0xA526C0]` | per-slot bit masks | `0xA526BC`: the civs for which `workOnTile` skips the order re-validation (section 6, step 2; **H**: the AI civs); `0xA526C0`: civs whose UI is refreshed (**H**) |
 | `[0x9FD4BC]` | local human slot | |
 | `[0xA281C4]` | redraw-dirty byte | |

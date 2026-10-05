@@ -54,7 +54,7 @@ of scope.
 
 Memory offsets (record base = `[0x9C71D8] + 0x1E8 * index`). The `conquests.biq` body offset of the
 leading fields is the memory offset minus `0x0C` up to the ruler titles, the rest follow the row
-reader `0x5E3E80`; `biq/src/sections/govt.rs` has the full file layout (the relation table of
+reader `0x5E3E80`; `civ3_utils/biq/src/sections/govt.rs` has the full file layout (the relation table of
 `n * 12` bytes sits at body `+0x18C`, so a body offset `V + k` is `0x18C + 12 * n + k`, `n = 8` in
 the shipped file). Every number below was read through the reader and matched to the Civilopedia
 page of the government.

@@ -9,7 +9,7 @@ description = "Reference reimplementation of the Civilization III Conquests rand
 [dev-dependencies]
 # Ground-truth tests read shipped scenarios (tests/ground_truth.rs). Dev-only: the
 # library itself stays dependency-free.
-civ3-biq = { path = "../../biq" }
+civ3-biq = { path = "../../civ3_utils/biq" }
 
 [profile.release]
 opt-level = 3

@@ -45,7 +45,7 @@ pub fn install_root() -> PathBuf {
     if let Ok(p) = std::env::var("CIV3_DIR") {
         return PathBuf::from(p);
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../civ3")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../civ3")
 }
 
 /// Whether the install holds any scenario file at all. Tests that assert on
