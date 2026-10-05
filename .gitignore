@@ -12,3 +12,6 @@ civ3_utils/terrain-builder/packs/*/out/
 civ3_utils/terrain-builder/packs/*/*.png
 saves/
 assets/cache/
+
+# community-art fixture root (tools/fetch_community_assets.py); fan content, never committed
+/test-assets-community/

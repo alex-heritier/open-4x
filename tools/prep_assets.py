@@ -194,13 +194,24 @@ def snapshot(scope):
 
 
 def find_in_dirs(dirs, name):
-    """`name` in the first of `dirs` that has it, any case."""
+    """`name` in the first of `dirs` that has it, any case. INI files write
+    sibling-folder paths with backslashes (`..\\Legionary\\LegionaryRun.amb`),
+    which are followed from each dir."""
+    parts = name.replace("\\", "/").split("/")
     for d in dirs:
-        if not os.path.isdir(d):
-            continue
-        hit = next((e for e in os.listdir(d) if e.lower() == name.lower()), None)
-        if hit:
-            return os.path.join(d, hit)
+        cur = d
+        for part in parts:
+            if part == "..":
+                cur = os.path.dirname(cur)
+                continue
+            names = os.listdir(cur) if os.path.isdir(cur) else []
+            hit = next((e for e in names if e.lower() == part.lower()), None)
+            if hit is None:
+                cur = None
+                break
+            cur = os.path.join(cur, hit)
+        if cur is not None and os.path.exists(cur):
+            return cur
     return None
 
 
@@ -239,8 +250,8 @@ _le60 = [255] * 61 + [0] * 195
 def to_rgba(im, unit=False, green_clear=False):
     """Apply Civ3 transparency rules, return RGBA image.
 
-    Magenta is transparent everywhere. Shadows are exact red, plus vivid
-    green for units (the scout's shadow palette is green, not red).
+    Magenta is transparent everywhere (for units, also palette index 255).
+    Shadows are exact red, plus vivid green for units (the scout's shadow palette is green, not red).
     Feature sheets (goody huts, terrain buildings) fill outside the tile
     diamond with green ((0,255,0) or (12,252,12)), cleared fuzzily when
     green_clear is set. Verified: no art pixel in those sheets matches.
@@ -252,6 +263,10 @@ def to_rgba(im, unit=False, green_clear=False):
     is_red = ImageChops.multiply(r.point(_is255),
                                  ImageChops.multiply(g.point(_is0), b.point(_is0)))
     if unit:
+        if im.mode == "P":
+            # The engine keys sprites on palette index 255, whatever colour a
+            # pack gave it (the 6-inch Howitzer's is (238, 0, 237)).
+            is_mag = ImageChops.lighter(is_mag, Image.frombytes("L", im.size, im.tobytes()).point(_is255))
         is_green = ImageChops.multiply(g.point(_ge201), ImageChops.multiply(
             r.point(_le99), b.point(_le99)))
         is_red = ImageChops.add(is_red, is_green)
@@ -631,9 +646,13 @@ def slot_sounds(cfg, locate, slot):
     name = cfg["Sound Effects"].get(slot, "").strip()
     if not name:
         return []
+    path = locate(name)
+    if not os.path.exists(path):
+        print(f"  no sound {name}, silent")
+        return []
     if name.lower().endswith(".amb"):
-        return parse_amb(locate(name))
-    return [(0.0, name)]
+        return parse_amb(path)
+    return [(0.0, os.path.basename(path))]
 
 
 def team_palettes(colors):
@@ -731,6 +750,12 @@ def convert_unit(item):
     for d in reversed(dirs):
         for wav in glob.glob(os.path.join(d, "*.[wW][aA][vV]")):
             shutil.copy(wav, outdir)
+    # A sound the INI takes from another folder (`..\\Legionary\\Death.wav`).
+    for name in (cfg["Sound Effects"].values() if "Sound Effects" in cfg else ()):
+        if name.strip().lower().endswith(".wav"):
+            path = find_in_dirs(dirs, name.strip())
+            if path:
+                shutil.copy(track(path), outdir)
 
 
 def stage_cities():

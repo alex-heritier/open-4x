@@ -65,11 +65,12 @@ Prereqs: Rust, Python 3 with PIL, ffmpeg.
    exits. `python3 tools/prep_assets.py` with no arguments converts the stock
    install in full.
 
-For install-free testing, use a rules-bearing BIQ with `--assets test-assets`.
-The checked-in tree contains synthetic colours and silence; see
-`docs/civ3-files.md` section 7 for regeneration and current fixture coverage.
-Back up an existing `assets/cache/` before switching roots: conversions replace
-the shared cached art.
+For install-free testing, run a BIQ or SAV with `--assets test-assets`, a full
+set of original generated art (CC0, drawn by `tools/make_stub_assets.py`). Add
+`python3 tools/fetch_community_assets.py` and `--assets test-assets-community`
+to try the same game on hand-made community terrain, cities and units (git-ignored,
+fan content; see `docs/civ3-files.md` section 7). Back up an existing
+`assets/cache/` before switching roots: conversions replace the shared cached art.
 
 See `docs/civ3-files.md` for the file formats the game plays.
 

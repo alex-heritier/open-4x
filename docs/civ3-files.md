@@ -258,45 +258,78 @@ Deleting `assets/cache/` is always safe: it is rebuilt on the next run.
 `python3 tools/prep_assets.py` with no arguments still converts the stock
 install in full, for development.
 
-### Synthetic assets without an install
+### Assets without an install
 
-`test-assets/` contains original flat colours, rectangle sheets, silent WAVs,
-small indexed FLCs, and an original rectangle-only ASCII test font. No pixels,
-frames, samples, glyphs, or files came from a Civ3 installation. It has the
-base and Conquests layout needed by every fixed conversion stage; unit slot
-names all refer to a shared tiny animation and sound. Leader files and the
-advance/wonder categories likewise reuse placeholders. These are test inputs,
-not playable replacement artwork: text appears as blocks, and UI sheets have
-no meaningful labels or icons.
+`test-assets/` is a complete asset root drawn by `tools/make_stub_assets.py`
+(drawing code in `tools/openart/`): ground sheets with blended shorelines and
+overlays, resources, a folder of INI and 8-direction FLC clips per unit, cities,
+the city, advisor, diplomacy and wonder screens, an icon per advance and wonder,
+leader clips, sound and the vendored Arimo font (OFL). No pixel, frame or sample comes
+from a Civ3 install; an install is read only for file formats and sheet
+geometry. It has the base and Conquests layout every conversion stage reads, in
+the case-blind layout the engine resolves (`src/install.rs`).
 
-Run a rules-bearing scenario with:
+Run a scenario or a save with it, with no install present:
 
 ```sh
 CIV3_DIR=/nonexistent CIV3_GOG=/nonexistent CIV3_NO_SPLASH=1 CIV3_REVEAL=1 \
-  cargo run --release -- path/to/Scenario.biq --assets test-assets
+  cargo run --release -- "civ3_utils/biq/tests/data/TEST.SAV" --assets test-assets
 ```
 
-Checkout needs no imaging library to create the source tree. Conversion still
-needs Python/Pillow and ffmpeg, just as real art does. To regenerate:
+`civ3_utils/biq/tests/data/` holds two fixtures (`TEST.SAV`, `Intro3 New
+Alliances.biq`); both load and render with it.
+
+Regenerate and verify (Pillow only; conversion later needs ffmpeg as with real art):
 
 ```sh
-python3 tools/make_stub_assets.py
-# Refresh metadata from a particular BIQ, without reading any install art:
-python3 tools/make_stub_assets.py --biq path/to/Scenario.biq
+python3 tools/make_stub_assets.py --clean \
+  --biq "civ3_utils/biq/tests/data/Intro3 New Alliances.biq"
+python3 tools/check_stub_assets.py test-assets --civ3 civ3/civ3-gog/app
 ```
 
-The generator uses `tools/stub_asset_refs.json` (reference names only). `--biq`
-refreshes that manifest through the existing Rust parser's `asset_refs` example,
-then creates synthetic PediaIcons mappings, unit folders, all declared leader
-paths, and tech/wonder references. The checked-in manifest currently covers
-common stock names and the four default leaders. **The referenced Intro3 BIQ
-and TEST.SAV fixtures are absent in this checkout, so their exact reference
-coverage and scenario captures could not be verified.** Refresh the manifest
-from that BIQ when it is available and review/regenerate the output tree.
+`tools/smoke_assets.sh [ROOT]` then boots both fixtures on a root with no install
+and fails on a crash or a blank frame (it converts into the shared cache first).
+
+`tools/stub_asset_refs.json` lists the names to draw art for (units, leaders,
+advances, wonders, buildings) and every sheet's pixel size. `--biq` (repeatable)
+merges a scenario's names into it through the Rust parser's `asset_refs`
+example; a name the manifest lacks gets no art, so a scenario's units would
+render blank. `--clean` removes files the run did not write. The checker
+asserts every sheet's size, every unit's INI and clips, the leader clips and,
+with `--civ3`, that no file is byte-identical to an install file and no PCX
+shares pixels with one. Leader clips come in two spellings, stock
+(`Bs_B01.flc` and its `02` twin) and Conquests (`x_name diplo ancient fwrd.flc`
+and `bwrd`); both are written, the civs share 16 archetypes by era.
+
+#### Community-art fixture
+
+`python3 tools/fetch_community_assets.py` builds `test-assets-community/`
+(git-ignored): a copy of `test-assets/` with a curated slice of the King Arthur
+Civ3 Mods Collection (archive.org `king-arthur-civ3-mods-collection`, 5.9 GiB,
+fetched once into `~/.cache/open-4x-community`) laid over it. A community file
+replaces a generated one only when the pixel size matches. It covers the ARES
+terrain pack (ground, hills, mountains, forests, roads, rivers, irrigation,
+fog, huts), city and wall sheets, 27 advance icons, the advisor popups the engine reads and 11
+unit folders (64x78 to 200x200 frames, INI files as modders write them). It
+exists to run real hand-made art through `prep_assets.py` and the renderer. The
+archive is fan content that may carry Firaxis-derived pixels, so only the
+script is committed; `PROVENANCE.md` in the output lists every file and its
+archive path. Run it the same way: `--assets test-assets-community`.
+
+Some of those units carry a magenta anti-aliasing fringe in palette entries
+224-253; only index 255 is transparent, so the fringe shows as drawn.
+
+What community art taught the pipeline: INI sound paths such as
+`..\Archer\ArcherAttack.amb` resolve against sibling folders (and a missing
+sound is silent, not fatal), and a unit sprite's transparent colour is palette
+index 255 whatever its RGB (`(238, 0, 237)` in one pack).
 
 Before changing source roots, preserve any valuable `assets/cache/` elsewhere:
 switching roots intentionally invalidates and overwrites the shared converted
-art. This implementation retains the fixed Rust cache location; do not set the
+art. Three `cargo test` checks (leader clips of 100-130 frames, the real
+`diplomacy.txt` speech blocks) read that cache and expect stock art, so they fail
+while a generated root's conversion is in it; restore the cache (or run the game
+once on the install) before testing. This implementation retains the fixed Rust cache location; do not set the
 Python script's standalone `CIV3_CACHE` override when launching the game.
 
 ## Suggested order

@@ -1,4 +1,5 @@
 """Cache provenance tests; run: python3 -m unittest discover -s tools -p 'test_*.py'."""
+import configparser
 import os
 from pathlib import Path
 import tempfile
@@ -39,6 +40,26 @@ class CacheRoots(unittest.TestCase):
                  patch.object(prep, '_GENERATED_SOURCES', {str(cache/'picture'): ['source']}):
                 prep.track(cache/'picture')
                 self.assertEqual(prep._READ, {'source'})
+
+
+class UnitFilePaths(unittest.TestCase):
+    def test_an_ini_path_into_a_sibling_folder_resolves_in_any_case(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            units = Path(tmp)/'Art'/'Units'
+            (units/'Archer').mkdir(parents=True)
+            (units/'Custom Bowman').mkdir()
+            (units/'Archer'/'ArcherAttack.amb').write_bytes(b'bank')
+            found = prep.find_in_dirs([str(units/'Custom Bowman')], '..\\archer\\ARCHERATTACK.AMB')
+            self.assertEqual(found, str(units/'Archer'/'ArcherAttack.amb'))
+            self.assertIsNone(prep.find_in_dirs([str(units/'Custom Bowman')], '..\\Missing\\x.wav'))
+            self.assertIsNone(prep.find_in_dirs([str(units/'Nowhere')], 'x.wav'))
+
+    def test_a_sound_that_is_not_on_disk_is_silent_not_fatal(self):
+        cfg = configparser.ConfigParser()
+        cfg.read_dict({'Sound Effects': {'ATTACK1': '..\\Gone\\Gone.amb', 'DEATH': 'Gone.wav'}})
+        locate = lambda name: os.path.join('/nonexistent', name)
+        self.assertEqual(prep.slot_sounds(cfg, locate, 'ATTACK1'), [])
+        self.assertEqual(prep.slot_sounds(cfg, locate, 'DEATH'), [])
 
 
 if __name__ == '__main__':

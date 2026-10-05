@@ -11,12 +11,23 @@ fn main() {
         .unwrap_or_else(|_| manifest.join("target"));
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".into());
     let link = target.join(profile).join("assets");
-    if link.exists() {
-        return;
+    let want = manifest.join("assets");
+    // An existing link is only trusted when it points at this checkout. A
+    // checkout that was moved or re-cloned leaves a dangling or foreign link
+    // behind (`exists()` follows it, so it reads as absent), and with every
+    // converted PNG out of reach the game draws nothing but placeholders.
+    match std::fs::read_link(&link) {
+        Ok(current) if current == want => return,
+        Ok(_) => {
+            let _ = std::fs::remove_file(&link);
+        }
+        // Not a symlink: a real directory someone put there stays theirs.
+        Err(_) if link.exists() => return,
+        Err(_) => {}
     }
     if let Some(parent) = link.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     #[cfg(unix)]
-    let _ = std::os::unix::fs::symlink(manifest.join("assets"), &link);
+    let _ = std::os::unix::fs::symlink(&want, &link);
 }

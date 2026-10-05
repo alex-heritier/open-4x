@@ -331,6 +331,230 @@
     [
       "PRTO_Civil_Engineer",
       "Civil Engineer"
+    ],
+    [
+      "PRTO_Paratrooper",
+      "Modern Paratrooper"
+    ],
+    [
+      "PRTO_Radar_Artillery",
+      "Radar Artillery"
+    ],
+    [
+      "PRTO_NUKE",
+      "Tactical Nuke"
+    ],
+    [
+      "PRTO_Immortals",
+      "Immortals"
+    ],
+    [
+      "PRTO_Mounted_Warrior",
+      "Mounted Warrior"
+    ],
+    [
+      "PRTO_Sipahi",
+      "Sipahi"
+    ],
+    [
+      "PRTO_Gallic_Swordsman",
+      "Gallic Swordsman"
+    ],
+    [
+      "PRTO_Libyan_Mercenary",
+      "Numidian Mercenary"
+    ],
+    [
+      "PRTO_Hwacha",
+      "Hwach'a"
+    ],
+    [
+      "PRTO_Guerilla",
+      "Guerilla"
+    ],
+    [
+      "PRTO_Princess",
+      "Princess"
+    ],
+    [
+      "PRTO_Lincoln",
+      "Lincoln"
+    ],
+    [
+      "PRTO_Hammurabi",
+      "Hammurabi"
+    ],
+    [
+      "PRTO_Mao",
+      "Mao"
+    ],
+    [
+      "PRTO_Bismarck",
+      "Bismarck"
+    ],
+    [
+      "PRTO_Alexander",
+      "Alexander"
+    ],
+    [
+      "PRTO_Caesar",
+      "Caesar"
+    ],
+    [
+      "PRTO_Xerxes",
+      "Xerxes"
+    ],
+    [
+      "PRTO_Hiawatha",
+      "Hiawatha"
+    ],
+    [
+      "PRTO_Shaka",
+      "Shaka"
+    ],
+    [
+      "PRTO_Montezuma",
+      "Montezuma"
+    ],
+    [
+      "PRTO_Cleopatra",
+      "Cleopatra"
+    ],
+    [
+      "PRTO_Elizabeth",
+      "Elizabeth"
+    ],
+    [
+      "PRTO_Catherine",
+      "Catherine"
+    ],
+    [
+      "PRTO_Abu",
+      "Abu"
+    ],
+    [
+      "PRTO_Hannibal",
+      "Hannibal"
+    ],
+    [
+      "PRTO_Osman",
+      "Osman"
+    ],
+    [
+      "PRTO_Temujin",
+      "Temujin"
+    ],
+    [
+      "PRTO_Gandhi",
+      "Gandhi"
+    ],
+    [
+      "PRTO_Ragnar",
+      "Ragnar"
+    ],
+    [
+      "PRTO_Brennus",
+      "Brennus"
+    ],
+    [
+      "PRTO_Tokugawa",
+      "Tokugawa"
+    ],
+    [
+      "PRTO_Joan",
+      "Joan d'Arc"
+    ],
+    [
+      "PRTO_Wang",
+      "Wang Kon"
+    ],
+    [
+      "PRTO_Isabella",
+      "Isabella"
+    ],
+    [
+      "PRTO_Three_Man_Chariot",
+      "Three-Man Chariot"
+    ],
+    [
+      "PRTO_Mursilis",
+      "Mursilis"
+    ],
+    [
+      "PRTO_Gilgamesh",
+      "Gilgamesh"
+    ],
+    [
+      "PRTO_Henry",
+      "Henry"
+    ],
+    [
+      "PRTO_Carrack",
+      "Carrack"
+    ],
+    [
+      "PRTO_William_of_Orange",
+      "William of Orange"
+    ],
+    [
+      "PRTO_Pachacuti",
+      "Pachacuti"
+    ],
+    [
+      "PRTO_Smoke-Jaguar",
+      "Smoke-Jaguar"
+    ],
+    [
+      "PRTO_Theodora",
+      "Theodora"
+    ],
+    [
+      "PRTO_Chasquis_Scout",
+      "Chasqui Scout"
+    ],
+    [
+      "PRTO_Curragh",
+      "Curragh"
+    ],
+    [
+      "PRTO_WWII_Paratrooper",
+      "Paratrooper"
+    ],
+    [
+      "PRTO_TOW_Infantry",
+      "TOW Infantry"
+    ],
+    [
+      "PRTO_Flak",
+      "Flak"
+    ],
+    [
+      "PRTO_Mobile_SAM",
+      "Mobile SAM"
+    ],
+    [
+      "PRTO_Rider",
+      "Teutonic Knight"
+    ],
+    [
+      "PRTO_Libyan_Mercenary",
+      "Numidian Mercenary"
+    ],
+    [
+      "PRTO_Guerilla",
+      "Guerilla"
+    ],
+    [
+      "PRTO_Carrack",
+      "Carrack"
+    ],
+    [
+      "PRTO_Chasquis_Scout",
+      "Chasqui Scout"
+    ],
+    [
+      "PRTO_TOW_Infantry",
+      "TOW Infantry"
     ]
   ],
   "leader": [
@@ -373,7 +597,255 @@
     "Art/Flics/Mo_C01.flc",
     "Art/Flics/Mo_C02.flc",
     "Art/Flics/Mo_D01.flc",
-    "Art/Flics/Mo_D02.flc"
+    "Art/Flics/Mo_D02.flc",
+    "Art\\Flics\\Ce_01.flc",
+    "Art\\Flics\\Ce_B01.flc",
+    "Art\\Flics\\Ce_C01.flc",
+    "Art\\Flics\\Ce_D01.flc",
+    "Art\\Flics\\Ce_02.flc",
+    "Art\\Flics\\Ce_B02.flc",
+    "Art\\Flics\\Ce_C02.flc",
+    "Art\\Flics\\Ce_D02.flc",
+    "Art\\Flics\\Cl_01.flc",
+    "Art\\Flics\\Cl_B01.flc",
+    "Art\\Flics\\Cl_C01.flc",
+    "Art\\Flics\\Cl_D01.flc",
+    "Art\\Flics\\Cl_02.flc",
+    "Art\\Flics\\Cl_B02.flc",
+    "Art\\Flics\\Cl_C02.flc",
+    "Art\\Flics\\Cl_D02.flc",
+    "Art\\Flics\\Al_01.flc",
+    "Art\\Flics\\Al_B01.flc",
+    "Art\\Flics\\Al_C01.flc",
+    "Art\\Flics\\Al_D01.flc",
+    "Art\\Flics\\Al_02.flc",
+    "Art\\Flics\\Al_B02.flc",
+    "Art\\Flics\\Al_C02.flc",
+    "Art\\Flics\\Al_D02.flc",
+    "Art\\Flics\\Ha_01.flc",
+    "Art\\Flics\\Ha_B01.flc",
+    "Art\\Flics\\Ha_C01.flc",
+    "Art\\Flics\\Ha_D01.flc",
+    "Art\\Flics\\Ha_02.flc",
+    "Art\\Flics\\Ha_B02.flc",
+    "Art\\Flics\\Ha_C02.flc",
+    "Art\\Flics\\Ha_D02.flc",
+    "Art\\Flics\\Bs_A01.flc",
+    "Art\\Flics\\Bs_B01.flc",
+    "Art\\Flics\\Bs_01.flc",
+    "Art\\Flics\\Bs_D01.flc",
+    "Art\\Flics\\Bs_A02.flc",
+    "Art\\Flics\\Bs_B02.flc",
+    "Art\\Flics\\Bs_02.flc",
+    "Art\\Flics\\Bs_D02.flc",
+    "Art\\Flics\\Ca_A01.flc",
+    "Art\\Flics\\Ca_B01.flc",
+    "Art\\Flics\\Ca_01.flc",
+    "Art\\Flics\\Ca_D01.flc",
+    "Art\\Flics\\Ca_A02.flc",
+    "Art\\Flics\\Ca_B02.flc",
+    "Art\\Flics\\Ca_02.flc",
+    "Art\\Flics\\Ca_D02.flc",
+    "Art\\Flics\\Mo_A01.flc",
+    "Art\\Flics\\Mo_B01.flc",
+    "Art\\Flics\\Mo_C01.flc",
+    "Art\\Flics\\Mo_01.flc",
+    "Art\\Flics\\Mo_A02.flc",
+    "Art\\Flics\\Mo_B02.flc",
+    "Art\\Flics\\Mo_C02.flc",
+    "Art\\Flics\\Mo_02.flc",
+    "Art\\Flics\\Ab_A01.flc",
+    "Art\\Flics\\Ab_B01.flc",
+    "Art\\Flics\\Ab_01.flc",
+    "Art\\Flics\\Ab_D01.flc",
+    "Art\\Flics\\Ab_A02.flc",
+    "Art\\Flics\\Ab_B02.flc",
+    "Art\\Flics\\Ab_02.flc",
+    "Art\\Flics\\Ab_D02.flc",
+    "Art\\Flics\\To_A01.flc",
+    "Art\\Flics\\To_01.flc",
+    "Art\\Flics\\To_C01.flc",
+    "Art\\Flics\\To_D01.flc",
+    "Art\\Flics\\To_A02.flc",
+    "Art\\Flics\\To_02.flc",
+    "Art\\Flics\\To_C02.flc",
+    "Art\\Flics\\To_D02.flc",
+    "Art\\Flics\\Jo_A01.flc",
+    "Art\\Flics\\Jo_01.flc",
+    "Art\\Flics\\Jo_C01.flc",
+    "Art\\Flics\\Jo_D01.flc",
+    "Art\\Flics\\Jo_A02.flc",
+    "Art\\Flics\\Jo_02.flc",
+    "Art\\Flics\\Jo_C02.flc",
+    "Art\\Flics\\Jo_D02.flc",
+    "Art\\Flics\\Gh_A01.flc",
+    "Art\\Flics\\Gh_B01.flc",
+    "Art\\Flics\\Gh_C01.flc",
+    "Art\\Flics\\Gh_D01.flc",
+    "Art\\Flics\\Gh_A02.flc",
+    "Art\\Flics\\Gh_B02.flc",
+    "Art\\Flics\\Gh_C02.flc",
+    "Art\\Flics\\Gh_D02.flc",
+    "Art\\Flics\\Xe_01.flc",
+    "Art\\Flics\\Xe_B01.flc",
+    "Art\\Flics\\Xe_C01.flc",
+    "Art\\Flics\\Xe_D01.flc",
+    "Art\\Flics\\Xe_02.flc",
+    "Art\\Flics\\Xe_B02.flc",
+    "Art\\Flics\\Xe_C02.flc",
+    "Art\\Flics\\Xe_D02.flc",
+    "Art\\Flics\\Mn_A01.flc",
+    "Art\\Flics\\Mn_01.flc",
+    "Art\\Flics\\Mn_C01.flc",
+    "Art\\Flics\\Mn_D01.flc",
+    "Art\\Flics\\Mn_A02.flc",
+    "Art\\Flics\\Mn_02.flc",
+    "Art\\Flics\\Mn_C02.flc",
+    "Art\\Flics\\Mn_D02.flc",
+    "Art\\Flics\\Zu_01.flc",
+    "Art\\Flics\\Zu_B01.flc",
+    "Art\\Flics\\Zu_C01.flc",
+    "Art\\Flics\\Zu_D01.flc",
+    "Art\\Flics\\Zu_02.flc",
+    "Art\\Flics\\Zu_B02.flc",
+    "Art\\Flics\\Zu_C02.flc",
+    "Art\\Flics\\Zu_D02.flc",
+    "Art\\Flics\\HI_01.flc",
+    "Art\\Flics\\HI_B01.flc",
+    "Art\\Flics\\HI_C01.flc",
+    "Art\\Flics\\HI_D01.flc",
+    "Art\\Flics\\HI_02.flc",
+    "Art\\Flics\\HI_B02.flc",
+    "Art\\Flics\\HI_C02.flc",
+    "Art\\Flics\\HI_D02.flc",
+    "Art\\Flics\\Lz_A01.flc",
+    "Art\\Flics\\Lz_01.flc",
+    "Art\\Flics\\Lz_C01.flc",
+    "Art\\Flics\\Lz_D01.flc",
+    "Art\\Flics\\Lz_A02.flc",
+    "Art\\Flics\\Lz_02.flc",
+    "Art\\Flics\\Lz_C02.flc",
+    "Art\\Flics\\Lz_D02.flc",
+    "Art\\Flics\\x_temujin diplo ancient fwrd.flc",
+    "Art\\Flics\\x_temujin diplo mid fwrd.flc",
+    "Art\\Flics\\x_temujin diplo indust fwrd.flc",
+    "Art\\Flics\\x_temujin diplo mod fwrd.flc",
+    "Art\\Flics\\x_temujin diplo ancient bwrd.flc",
+    "Art\\Flics\\x_temujin diplo mid bwrd.flc",
+    "Art\\Flics\\x_temujin diplo indust bwrd.flc",
+    "Art\\Flics\\x_temujin diplo mod bwrd.flc",
+    "Art\\Flics\\x_isabell diplo ancient fwrd.flc",
+    "Art\\Flics\\x_isabell diplo mid fwrd.flc",
+    "Art\\Flics\\x_isabell diplo indust fwrd.flc",
+    "Art\\Flics\\x_isabell diplo mod fwrd.flc",
+    "Art\\Flics\\x_isabell diplo ancient bwrd.flc",
+    "Art\\Flics\\x_isabell diplo mid bwrd.flc",
+    "Art\\Flics\\x_isabell diplo indust bwrd.flc",
+    "Art\\Flics\\x_isabell diplo mod bwrd.flc",
+    "Art\\Flics\\x_ragnar diplo ancient fwrd.flc",
+    "Art\\Flics\\x_ragnar diplo mid fwrd.flc",
+    "Art\\Flics\\x_ragnar diplo indust fwrd.flc",
+    "Art\\Flics\\x_ragnar diplo mod fwrd.flc",
+    "Art\\Flics\\x_ragnar diplo ancient bwrd.flc",
+    "Art\\Flics\\x_ragnar diplo mid bwrd.flc",
+    "Art\\Flics\\x_ragnar diplo indust bwrd.flc",
+    "Art\\Flics\\x_ragnar diplo mod bwrd.flc",
+    "Art\\Flics\\x_osman diplo ancient fwrd.flc",
+    "Art\\Flics\\x_osman diplo mid fwrd.flc",
+    "Art\\Flics\\x_osman diplo indust fwrd.flc",
+    "Art\\Flics\\x_osman diplo mod fwrd.flc",
+    "Art\\Flics\\x_osman diplo ancient bwrd.flc",
+    "Art\\Flics\\x_osman diplo mid bwrd.flc",
+    "Art\\Flics\\x_osman diplo indust bwrd.flc",
+    "Art\\Flics\\x_osman diplo mod bwrd.flc",
+    "Art\\Flics\\x_brennus diplo ancient fwrd.flc",
+    "Art\\Flics\\x_brennus diplo mid fwrd.flc",
+    "Art\\Flics\\x_brennus diplo indust fwrd.flc",
+    "Art\\Flics\\x_brennus diplo mod fwrd.flc",
+    "Art\\Flics\\x_brennus diplo ancient bwrd.flc",
+    "Art\\Flics\\x_brennus diplo mid bwrd.flc",
+    "Art\\Flics\\x_brennus diplo indust bwrd.flc",
+    "Art\\Flics\\x_brennus diplo mod bwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo ancient fwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo mid fwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo indust fwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo mod fwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo ancient bwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo mid bwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo indust bwrd.flc",
+    "Art\\Flics\\x_abu bakr diplo mod bwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo ancient fwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo mid fwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo indust fwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo mod fwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo ancient bwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo mid bwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo indust bwrd.flc",
+    "Art\\Flics\\x_Hannibal diplo mod bwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo ancient fwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo mid fwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo indust fwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo mod fwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo ancient bwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo mid bwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo indust bwrd.flc",
+    "Art\\Flics\\x_Wang Kon diplo mod bwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_Ancient_fwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_Mid_fwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_indust_fwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_mod_fwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_Ancient_bwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_Mid_bwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_indust_bwrd.flc",
+    "Art\\Flics\\X2_Gilgamesh_mod_bwrd.flc",
+    "Art\\Flics\\X2_Mursilis_ancient_fwrd.flc",
+    "Art\\Flics\\X2_mursilis_mid_fwrd.flc",
+    "Art\\Flics\\X2_Mursilis_indust_fwrd.flc",
+    "Art\\Flics\\X2_Mursilis_mod_fwrd.flc",
+    "Art\\Flics\\X2_Mursilis_ancient_bwrd.flc",
+    "Art\\Flics\\X2_mursilis_mid_bwrd.flc",
+    "Art\\Flics\\X2_Mursilis_indust_bwrd.flc",
+    "Art\\Flics\\X2_mursilis_mod_bwrd.flc",
+    "Art\\Flics\\X2_William_ancient_fwrd.flc",
+    "Art\\Flics\\X2_William_Mid_fwrd.flc",
+    "Art\\Flics\\X2_William_Indust_fwrd.flc",
+    "Art\\Flics\\X2_William_Mod_fwrd.flc",
+    "Art\\Flics\\X2_William_ancient_bwrd.flc",
+    "Art\\Flics\\X2_William_Mid_bwrd.flc",
+    "Art\\Flics\\X2_William_Indust_bwrd.flc",
+    "Art\\Flics\\X2_William_Mod_bwrd.flc",
+    "Art\\Flics\\X2_Henry_ancient_fwrd.flc",
+    "Art\\Flics\\X2_Henry_mid_fwrd.flc",
+    "Art\\Flics\\X2_Henry_indust_fwrd.flc",
+    "Art\\Flics\\X2_Henry_mod_fwrd.flc",
+    "Art\\Flics\\X2_Henry_ancient_bwrd.flc",
+    "Art\\Flics\\X2_Henry_mid_bwrd.flc",
+    "Art\\Flics\\X2_Henry_indust_bwrd.flc",
+    "Art\\Flics\\X2_Henry_mod_bwrd.flc",
+    "Art\\Flics\\X2_Theodora_ancient_fwrd.flc",
+    "Art\\Flics\\X2_Theodora_mid_fwrd.flc",
+    "Art\\Flics\\X2_Theodora_indust_fwrd.flc",
+    "Art\\Flics\\X2_Theodora_mod_fwrd.flc",
+    "Art\\Flics\\X2_Theodora_ancient_bwrd.flc",
+    "Art\\Flics\\X2_Theodora_mid_bwrd.flc",
+    "Art\\Flics\\X2_Theodora_indust_bwrd.flc",
+    "Art\\Flics\\X2_Theodora_mod_bwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_ancient_fwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_mid_fwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_indust_fwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_mod_fwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_ancient_bwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_mid_bwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_indust_bwrd.flc",
+    "Art\\Flics\\X2_Pachacuti_mod_bwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_ancient_fwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_mid_fwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_indust_fwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_mod_fwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_ancient_bwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_mid_bwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_indust_bwrd.flc",
+    "Art\\Flics\\X2_Smoke-Jaguar_mod_bwrd.flc"
   ],
   "tech": [
     "TECH_Bronze_Working",
@@ -455,7 +927,16 @@
     "TECH_Robotics",
     "TECH_Recycling",
     "TECH_Integrated_Defense",
-    "TECH_Future_Tech"
+    "TECH_Future_Tech",
+    "TECH_Music_Theory",
+    "TECH_Free_Artistry",
+    "TECH_Espionage",
+    "TECH_Amphibious_Warfare",
+    "TECH_The_Laser",
+    "TECH_Genetics",
+    "TECH_Smart_Weapons",
+    "TECH_Ironclads",
+    "TECH_Fascism"
   ],
   "wonder": [
     "BLDG_Palace",
@@ -526,6 +1007,614 @@
     "BLDG_Apollo_Program",
     "BLDG_Wall_Street",
     "BLDG_Iron_Works",
-    "BLDG_Strategic_Missile_Defense"
+    "BLDG_Strategic_Missile_Defense",
+    "BLDG_Walls",
+    "BLDG_Lab",
+    "BLDG_Mass_Transit_System",
+    "BLDG_SAM_Missile_Battery",
+    "BLDG_Coastal_Fortress",
+    "BLDG_Offshore_Platform",
+    "BLDG_Wealth",
+    "BLDG_Lighthouse",
+    "BLDG_Great_Wall",
+    "BLDG_Art_of_War",
+    "BLDG_Circumnavigation",
+    "BLDG_Solar_System",
+    "BLDG_Great_Playhouse",
+    "BLDG_Inventor's_Workshop",
+    "BLDG_Grand_Cathedral",
+    "BLDG_Great_University",
+    "BLDG_Trading_Company",
+    "BLDG_Cure_for_Cancer",
+    "BLDG_Longevity",
+    "BLDG_Epic",
+    "BLDG_Great_Ironworks",
+    "BLDG_Pentagon",
+    "BLDG_Apollo_Project",
+    "BLDG_SDI",
+    "BLDG_Intelligence_Center",
+    "BLDG_Battlefield_Medicine",
+    "BLDG_SS_Thrusters",
+    "BLDG_SS_Engine",
+    "BLDG_SS_Landing_Docking_Bay",
+    "BLDG_SS_Cockpit",
+    "BLDG_SS_Fuel_Cells",
+    "BLDG_SS_Life_Support_System",
+    "BLDG_SS_Stasis_Chamber",
+    "BLDG_SS_Storage_Supply",
+    "BLDG_SS_Planetary_Party_Lounge",
+    "BLDG_SS_Exterior_Casing",
+    "BLDG_Stock_Exchange",
+    "BLDG_Artemis",
+    "BLDG_Zeus",
+    "BLDG_Mausoleum",
+    "BLDG_Secret_Police_HQ"
+  ],
+  "sheets": {
+    "pcx": {
+      "art/terrain/xggc.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/xdgc.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/xdgp.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/xdpc.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/xpgc.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/xtgc.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/wcso.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/wooo.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/wsss.pcx": [
+        1152,
+        576
+      ],
+      "art/terrain/polaricecaps-final.pcx": [
+        1024,
+        256
+      ],
+      "art/terrain/xhills.pcx": [
+        512,
+        288
+      ],
+      "art/terrain/mountains.pcx": [
+        512,
+        352
+      ],
+      "art/terrain/mountains-snow.pcx": [
+        512,
+        352
+      ],
+      "art/terrain/grassland forests.pcx": [
+        1000,
+        884
+      ],
+      "art/terrain/plains forests.pcx": [
+        1000,
+        884
+      ],
+      "art/terrain/tundra forests.pcx": [
+        1000,
+        884
+      ],
+      "art/terrain/hill forests.pcx": [
+        512,
+        288
+      ],
+      "art/terrain/hill jungle.pcx": [
+        512,
+        288
+      ],
+      "art/terrain/mountain forests.pcx": [
+        512,
+        352
+      ],
+      "art/terrain/mountain jungles.pcx": [
+        512,
+        352
+      ],
+      "art/terrain/roads.pcx": [
+        2048,
+        1024
+      ],
+      "art/terrain/irrigation.pcx": [
+        512,
+        256
+      ],
+      "art/terrain/irrigation plains.pcx": [
+        512,
+        256
+      ],
+      "art/terrain/irrigation desett.pcx": [
+        512,
+        256
+      ],
+      "art/terrain/irrigation tundra.pcx": [
+        512,
+        256
+      ],
+      "art/terrain/deltarivers.pcx": [
+        512,
+        256
+      ],
+      "art/terrain/mtnrivers.pcx": [
+        512,
+        256
+      ],
+      "art/terrain/goodyhuts.pcx": [
+        384,
+        192
+      ],
+      "art/terrain/territory.pcx": [
+        256,
+        288
+      ],
+      "art/terrain/fogofwar.pcx": [
+        1152,
+        576
+      ],
+      "conquests/art/terrain/terrainbuildings.pcx": [
+        512,
+        256
+      ],
+      "art/cities/ramer.pcx": [
+        501,
+        380
+      ],
+      "art/cities/reuro.pcx": [
+        501,
+        380
+      ],
+      "art/cities/rroman.pcx": [
+        501,
+        380
+      ],
+      "art/cities/rmideast.pcx": [
+        501,
+        380
+      ],
+      "art/cities/rasian.pcx": [
+        501,
+        380
+      ],
+      "art/cities/amerwall.pcx": [
+        167,
+        380
+      ],
+      "art/cities/eurowall.pcx": [
+        167,
+        380
+      ],
+      "art/cities/romanwall.pcx": [
+        167,
+        380
+      ],
+      "art/cities/mideastwall.pcx": [
+        167,
+        380
+      ],
+      "art/cities/asianwall.pcx": [
+        167,
+        380
+      ],
+      "art/cities/city icons.pcx": [
+        58,
+        20
+      ],
+      "art/city screen/buildings-small.pcx": [
+        448,
+        3000
+      ],
+      "art/city screen/background.pcx": [
+        1024,
+        768
+      ],
+      "art/city screen/xandview.pcx": [
+        282,
+        280
+      ],
+      "art/city screen/prodbutton.pcx": [
+        400,
+        95
+      ],
+      "art/city screen/hurrybutton.pcx": [
+        200,
+        28
+      ],
+      "art/city screen/citymgmtbuttons.pcx": [
+        197,
+        238
+      ],
+      "art/city screen/topfadebar.pcx": [
+        1024,
+        24
+      ],
+      "art/city screen/topfadebaralpha.pcx": [
+        1024,
+        24
+      ],
+      "art/city screen/bottomfadebar.pcx": [
+        1024,
+        20
+      ],
+      "art/city screen/bottomfadebaralpha.pcx": [
+        1024,
+        20
+      ],
+      "art/city screen/productionqueuebox.pcx": [
+        203,
+        360
+      ],
+      "art/city screen/cityicons.pcx": [
+        776,
+        32
+      ],
+      "art/smallheads/popheads.pcx": [
+        500,
+        1000
+      ],
+      "art/smallheads/popupdomestic.pcx": [
+        800,
+        800
+      ],
+      "art/smallheads/popupscience.pcx": [
+        800,
+        800
+      ],
+      "art/smallheads/advisor_tab.pcx": [
+        300,
+        500
+      ],
+      "art/scroll.pcx": [
+        540,
+        455
+      ],
+      "art/resources.pcx": [
+        300,
+        300
+      ],
+      "art/leaderheads/to.pcx": [
+        200,
+        240
+      ],
+      "art/diplomacy/talk_offer.pcx": [
+        1024,
+        768
+      ],
+      "art/diplomacy/consider.pcx": [
+        1024,
+        768
+      ],
+      "art/diplomacy/counter.pcx": [
+        1024,
+        768
+      ],
+      "art/diplomacy/uparrow.pcx": [
+        26,
+        24
+      ],
+      "art/diplomacy/downarrow.pcx": [
+        26,
+        24
+      ],
+      "art/advisors/science_ancient.pcx": [
+        1024,
+        768
+      ],
+      "art/advisors/science_middle.pcx": [
+        1024,
+        768
+      ],
+      "art/advisors/science_industrial_new.pcx": [
+        1024,
+        768
+      ],
+      "art/advisors/science_modern.pcx": [
+        1024,
+        768
+      ],
+      "art/advisors/domestic.pcx": [
+        1024,
+        768
+      ],
+      "art/advisors/dialogbox.pcx": [
+        207,
+        132
+      ],
+      "art/advisors/non_required.pcx": [
+        45,
+        45
+      ],
+      "art/advisors/advisor_exit.pcx": [
+        100,
+        50
+      ],
+      "art/advisors/domesticbutton.pcx": [
+        250,
+        100
+      ],
+      "art/advisors/domestic_icons_aux.pcx": [
+        200,
+        125
+      ],
+      "art/advisors/domestic_plusminus.pcx": [
+        102,
+        50
+      ],
+      "art/advisors/domestic_icons.pcx": [
+        1024,
+        768
+      ],
+      "art/advisors/techboxes.pcx": [
+        1000,
+        1483
+      ],
+      "art/advisors/wonders_background.pcx": [
+        1024,
+        768
+      ],
+      "art/advisors/wondersbox.pcx": [
+        370,
+        200
+      ],
+      "art/advisors/wondersboxoverlay.pcx": [
+        370,
+        200
+      ],
+      "art/tech chooser/sciencenav.pcx": [
+        198,
+        200
+      ],
+      "art/exitbox-backgroundstates.pcx": [
+        216,
+        48
+      ],
+      "art/popupborders.pcx": [
+        500,
+        300
+      ],
+      "art/x-o_allstates-sprite.pcx": [
+        109,
+        21
+      ],
+      "art/pulldownarrows.pcx": [
+        22,
+        43
+      ],
+      "art/wonder splash/wonderbackground.pcx": [
+        1024,
+        768
+      ],
+      "art/interface/wonderseye.pcx": [
+        128,
+        145
+      ],
+      "art/interface/box right color.pcx": [
+        294,
+        137
+      ],
+      "art/interface/box right alpha.pcx": [
+        294,
+        137
+      ],
+      "art/interface/nextturn states color.pcx": [
+        141,
+        28
+      ],
+      "art/interface/nextturn states alpha.pcx": [
+        141,
+        28
+      ],
+      "conquests/art/interface/normbuttons.pcx": [
+        257,
+        320
+      ],
+      "conquests/art/interface/rolloverbuttons.pcx": [
+        257,
+        320
+      ],
+      "conquests/art/interface/highlightedbuttons.pcx": [
+        257,
+        320
+      ],
+      "conquests/art/interface/buttonalpha.pcx": [
+        257,
+        320
+      ],
+      "art/units/units_32.pcx": [
+        463,
+        217
+      ],
+      "conquests/art/units/units_32.pcx": [
+        463,
+        825
+      ]
+    },
+    "info": {
+      "tech_icon": [
+        32,
+        32
+      ],
+      "wonder_splash": [
+        320,
+        320
+      ],
+      "leader_flc": [
+        200,
+        240,
+        7,
+        120
+      ],
+      "cursor_flc": [
+        93,
+        46,
+        31,
+        175
+      ],
+      "team_palettes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "units_32_grid": [
+        14,
+        33
+      ],
+      "city_cell": [
+        167,
+        95
+      ],
+      "city_icon_grid": [
+        30,
+        31
+      ],
+      "building_icon_grid": [
+        32,
+        33
+      ],
+      "techbox_grid": [
+        4,
+        16,
+        189,
+        93
+      ],
+      "tile_diamond": [
+        128,
+        64
+      ]
+    }
+  },
+  "buildings": [
+    "BLDG_Palace",
+    "BLDG_Barracks",
+    "BLDG_Granary",
+    "BLDG_Temple",
+    "BLDG_Marketplace",
+    "BLDG_Library",
+    "BLDG_Courthouse",
+    "BLDG_Walls",
+    "BLDG_Aqueduct",
+    "BLDG_Bank",
+    "BLDG_Cathedral",
+    "BLDG_University",
+    "BLDG_Colosseum",
+    "BLDG_Factory",
+    "BLDG_Manufacturing_Plant",
+    "BLDG_Recycling_Center",
+    "BLDG_Coal_Plant",
+    "BLDG_Hydro_Plant",
+    "BLDG_Nuclear_Plant",
+    "BLDG_Hospital",
+    "BLDG_Lab",
+    "BLDG_Mass_Transit_System",
+    "BLDG_SAM_Missile_Battery",
+    "BLDG_Coastal_Fortress",
+    "BLDG_Solar_Plant",
+    "BLDG_Harbor",
+    "BLDG_Offshore_Platform",
+    "BLDG_Airport",
+    "BLDG_Police_Station",
+    "BLDG_Wealth",
+    "BLDG_Pyramids",
+    "BLDG_Hanging_Gardens",
+    "BLDG_Colossus",
+    "BLDG_Lighthouse",
+    "BLDG_Great_Library",
+    "BLDG_Oracle",
+    "BLDG_Great_Wall",
+    "BLDG_Art_of_War",
+    "BLDG_Sistine_Chapel",
+    "BLDG_Circumnavigation",
+    "BLDG_Solar_System",
+    "BLDG_Great_Playhouse",
+    "BLDG_Inventor's_Workshop",
+    "BLDG_Grand_Cathedral",
+    "BLDG_Great_University",
+    "BLDG_Trading_Company",
+    "BLDG_Universal_Suffrage",
+    "BLDG_Hoover_Dam",
+    "BLDG_Theory_of_Evolution",
+    "BLDG_United_Nations",
+    "BLDG_Manhattan_Project",
+    "BLDG_Cure_for_Cancer",
+    "BLDG_Longevity",
+    "BLDG_SETI_Program",
+    "BLDG_Epic",
+    "BLDG_Great_Ironworks",
+    "BLDG_Forbidden_Palace",
+    "BLDG_Military_Academy",
+    "BLDG_Pentagon",
+    "BLDG_Wall_Street",
+    "BLDG_Apollo_Project",
+    "BLDG_SDI",
+    "BLDG_Intelligence_Center",
+    "BLDG_Battlefield_Medicine",
+    "BLDG_SS_Thrusters",
+    "BLDG_SS_Engine",
+    "BLDG_SS_Landing_Docking_Bay",
+    "BLDG_SS_Cockpit",
+    "BLDG_SS_Fuel_Cells",
+    "BLDG_SS_Life_Support_System",
+    "BLDG_SS_Stasis_Chamber",
+    "BLDG_SS_Storage_Supply",
+    "BLDG_SS_Planetary_Party_Lounge",
+    "BLDG_SS_Exterior_Casing",
+    "BLDG_Internet",
+    "BLDG_Civil_Defense",
+    "BLDG_Stock_Exchange",
+    "BLDG_Commercial_Dock",
+    "BLDG_Artemis",
+    "BLDG_Zeus",
+    "BLDG_Mausoleum",
+    "BLDG_Knights_Templar",
+    "BLDG_Secret_Police_HQ"
   ]
 }
