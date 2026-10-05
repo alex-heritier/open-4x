@@ -1,7 +1,7 @@
 """Python reference spec of the CIV3 save stream (format 24, sub-versions 2..10).
 
 Mirrors the exe's loaders chunk for chunk and produces the list of segments
-(offset, kind, name, size). `biq/src/sav/` is the Rust twin; this one is what
+(offset, kind, name, size). `civ3_utils/biq/src/sav/` is the Rust twin; this one is what
 was checked against the emulator traces (`trace.py`). See
 `reverse-engineering/savegame.md`, "How the grammar was verified".
 """
