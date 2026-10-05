@@ -8,7 +8,7 @@
 //! `python3 tools/prep_assets.py --request` before the window opens.
 //!
 //! Everything Civ3's data refers to is cached under its **resolved path**,
-//! lowercased and relative to the install: the unit folder
+//! lowercased and relative to the source asset root: the unit folder
 //! `Conquests/Art/Units/Warrior` is `assets/cache/conquests/art/units/warrior/`.
 //! The key says which file won the search, so a scenario's own Warrior and the
 //! stock one are separate entries. Interface pieces nothing in Civ3's data
@@ -187,6 +187,8 @@ struct Source {
 
 #[derive(Deserialize)]
 struct Entry {
+    /// Canonical source root; old indices without it are stale.
+    root: Option<String>,
     outputs: Vec<String>,
     sources: Vec<Source>,
     params: Value,
@@ -220,6 +222,10 @@ impl Index {
     /// Is `key` converted from the files that are there now?
     fn fresh(&self, root: &Path, key: &str, params: &Value, search: Option<&[String]>) -> bool {
         let Some(e) = self.entries.get(key) else { return false };
+        let Ok(root) = root.canonicalize() else { return false };
+        if e.root.as_deref() != Some(path_str(&root).as_str()) {
+            return false;
+        }
         // A unit's team colors only grow: a copy with more colors will do.
         let same = match (params, &e.params) {
             (Value::Array(want), Value::Array(have)) => want.iter().all(|w| have.contains(w)),
@@ -393,6 +399,27 @@ mod tests {
         let install = Install { root: PathBuf::from("/civ3"), search: vec![] };
         assert_eq!(key_of(&install, Path::new("/civ3/Conquests/Art/Units/Warrior")), "conquests/art/units/warrior");
         assert_eq!(key_of(&install, Path::new("/elsewhere/Mod/Art/X")), "elsewhere/mod/art/x");
+    }
+
+    #[test]
+    fn switching_source_roots_invalidates_identical_entries() {
+        let a = std::env::temp_dir().join(format!("open4x-cache-root-{}", std::process::id()));
+        let b = a.join("other");
+        std::fs::create_dir_all(&b).unwrap();
+        for root in [&a, &b] {
+            let file = std::fs::File::create(root.join("source")).unwrap();
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000)).unwrap();
+        }
+        let entry = json!({"root": path_str(&a.canonicalize().unwrap()),
+            "outputs": [], "sources": [{"path": "source", "size": 0, "mtime": 1000}], "params": null, "search": []});
+        let index: Index = serde_json::from_value(json!({"script": "", "entries": {"stage:test": entry}})).unwrap();
+        assert!(index.fresh(&a, "stage:test", &Value::Null, Some(&[])));
+        assert!(!index.fresh(&b, "stage:test", &Value::Null, Some(&[])));
+        let legacy: Index = serde_json::from_value(json!({"script": "", "entries": {
+            "stage:test": {"outputs": [], "sources": [], "params": null}
+        }})).unwrap();
+        assert!(!legacy.fresh(&a, "stage:test", &Value::Null, None));
+        std::fs::remove_dir_all(a).unwrap();
     }
 
     #[test]

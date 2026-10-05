@@ -57,6 +57,7 @@ SEARCH = []         # Civ3's search order, nearest first (absolute folders)
 # ---- the index: what each item produced and read ---------------------------
 
 _READ = None  # sources of the item being converted
+_GENERATED_SOURCES = {}  # converted intermediate -> original sources
 
 
 def script_hash():
@@ -79,7 +80,11 @@ def rel_source(path):
 def track(path):
     """Note that the current item read `path`."""
     if _READ is not None and path and os.path.exists(path) and not re.match(r"f_\d+\.png$", os.path.basename(path)):
-        _READ.add(rel_source(path))
+        full = os.path.abspath(path)
+        if full.startswith(os.path.abspath(OUT) + os.sep):
+            _READ.update(_GENERATED_SOURCES.get(full, []))
+        else:
+            _READ.add(rel_source(path))
     return path
 
 
@@ -137,7 +142,7 @@ def stat_of(rel):
 def fresh(idx, key, params=None, search_dependent=False):
     """Is `key` converted from the files that are there now?"""
     e = idx["entries"].get(key)
-    if e is None:
+    if e is None or e.get("root") != os.path.realpath(GOG):
         return False
     have = e.get("params")
     # A unit's team colors only grow: a copy with more colors will do.
@@ -167,10 +172,12 @@ def run_item(idx, key, work, params=None, search_dependent=False, scope=""):
         reads, _READ = sorted(_READ), None
     after = snapshot(scope)
     wrote = sorted(os.path.relpath(p, OUT) for p, m in after.items() if before.get(p) != m)
-    entry = {"outputs": wrote, "sources": [stat_of(r) for r in reads], "params": params}
+    entry = {"root": os.path.realpath(GOG), "outputs": wrote, "sources": [stat_of(r) for r in reads], "params": params}
     if search_dependent:
         entry["search"] = list(SEARCH)
     idx["entries"][key] = entry
+    for output in wrote:
+        _GENERATED_SOURCES[os.path.abspath(os.path.join(OUT, output))] = reads
     save_index(idx)
     return True
 
@@ -880,7 +887,7 @@ def stage_audio():
     os.makedirs(md, exist_ok=True)
     manifest = {}
     for src_rel, stem in MUSIC:
-        src = os.path.join(GOG, "Sounds", src_rel)
+        src = track(os.path.join(GOG, "Sounds", src_rel))
         dst = os.path.join(md, stem + ".ogg")
         r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", src,
                             "-c:a", "vorbis", "-strict", "experimental",
@@ -1550,6 +1557,11 @@ def run_all(stages, items):
     """Convert what is missing or stale: the stages, then the item kinds."""
     os.makedirs(os.path.join(OUT, "ui"), exist_ok=True)
     idx = load_index()
+    _GENERATED_SOURCES.clear()
+    for entry in idx["entries"].values():
+        if entry.get("root") == os.path.realpath(GOG):
+            for output in entry["outputs"]:
+                _GENERATED_SOURCES[os.path.abspath(os.path.join(OUT, output))] = [s["path"] for s in entry["sources"]]
     save_index(idx)
     done = 0
     for name in [n for n in STAGES if n in stages]:

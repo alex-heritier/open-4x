@@ -85,12 +85,6 @@ fn read_biq(path: &Path) -> Result<Biq, String> {
 /// for the user.
 pub fn load(options: &Options) -> Result<Boot, String> {
     let root = options.civ3_dir();
-    if !root.is_dir() {
-        return Err(format!(
-            "no Civ3 install at {} (pass --civ3 <dir> or set CIV3_DIR)",
-            root.display()
-        ));
-    }
     let file = options.file.clone().unwrap_or_else(|| {
         stock_path(&root).unwrap_or_else(|| root.join("Conquests").join("conquests.biq"))
     });
@@ -98,6 +92,12 @@ pub fn load(options: &Options) -> Result<Boot, String> {
         return Err(format!("{}: no such file", file.display()));
     }
     let stock = || -> Result<Biq, String> {
+        if !root.is_dir() {
+            return Err(format!(
+                "no Civ3 install at {} (pass --civ3 <dir> or set CIV3_DIR)",
+                root.display()
+            ));
+        }
         let path = stock_path(&root).ok_or_else(|| format!("no Conquests/conquests.biq under {}", root.display()))?;
         read_biq(&path)
     };
@@ -123,7 +123,11 @@ pub fn load(options: &Options) -> Result<Boot, String> {
         }
     };
 
-    let install = Install::new(&root, folders);
+    let assets = options.assets_dir();
+    if !assets.is_dir() {
+        return Err(format!("no original assets at {} (pass --assets <dir> or set CIV3_ASSETS)", assets.display()));
+    }
+    let install = Install::new(&assets, folders);
     ruleset::install(ruleset::build(&rules_from, &install));
     Ok(Boot { options: options.clone(), install, file, world })
 }

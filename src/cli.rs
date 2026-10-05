@@ -6,6 +6,7 @@
 //!   FILE                  .biq/.bix/.bic scenario or mod, or .sav saved game
 //!                         (default: <civ3>/Conquests/conquests.biq, a new random game)
 //!   --civ3 <dir>          Civ3 install root (default: $CIV3_DIR, else civ3/civ3-gog/app)
+//!   --assets <dir>        original asset root (default: $CIV3_ASSETS, else --civ3)
 //!
 //! New games (ignored for a .sav):
 //!   --civ <name>          the human's civilization (RACE name, case-insensitive)
@@ -19,7 +20,8 @@
 //!
 //! The older environment variables fold into the same options: `CIV3_PLAYER`
 //! is `--civ`, `CIV3_CIVS` is `--civ` plus `--opponents`, `MAP_SEED` is
-//! `--seed`, `CIV3_GOG` is `--civ3`. A flag beats its variable. The dev and
+//! `--seed`, `CIV3_GOG` is `--civ3`, `CIV3_ASSETS` is `--assets`. A flag beats
+//! its variable. The dev and
 //! debug variables (`CIV3_SHOT`, `CIV3_SCRIPT`, `CIV3_AUTOPLAY`, ...) stay
 //! environment variables, so the screenshot and script tooling keeps working.
 //!
@@ -55,6 +57,8 @@ pub struct Options {
     pub file: Option<PathBuf>,
     /// `--civ3`; `None` resolves to `$CIV3_DIR`, `$CIV3_GOG`, then the default.
     pub civ3: Option<PathBuf>,
+    /// `--assets`; `None` resolves to `$CIV3_ASSETS`, then `civ3_dir()`.
+    pub assets: Option<PathBuf>,
     pub civ: Option<String>,
     pub opponents: Option<Opponents>,
     pub difficulty: Option<String>,
@@ -73,6 +77,7 @@ pub const USAGE: &str = "usage: open-4x [FILE] [options]
   FILE                  .biq/.bix/.bic scenario or mod, or .sav saved game
                         (default: <civ3>/Conquests/conquests.biq, a new random game)
   --civ3 <dir>          Civ3 install root (default: $CIV3_DIR, else civ3/civ3-gog/app)
+  --assets <dir>        original asset root (default: $CIV3_ASSETS, else --civ3)
 
 New games (ignored for a .sav):
   --civ <name>          the human's civilization (RACE name, case-insensitive)
@@ -147,6 +152,7 @@ where
         };
         match flag.as_str() {
             "--civ3" => o.civ3 = Some(value(&mut args)?.into()),
+            "--assets" => o.assets = Some(value(&mut args)?.into()),
             "--civ" => o.civ = Some(value(&mut args)?),
             "--opponents" => {
                 let v = value(&mut args)?;
@@ -187,6 +193,9 @@ impl Options {
         if self.civ3.is_none() {
             self.civ3 = env.get("CIV3_DIR").or_else(|| env.get("CIV3_GOG")).map(PathBuf::from);
         }
+        if self.assets.is_none() {
+            self.assets = env.get("CIV3_ASSETS").map(PathBuf::from);
+        }
         // `CIV3_CIVS` lists the human first; `CIV3_PLAYER` then overrides the human.
         let listed = env.get("CIV3_CIVS").map(|l| split_names(&l)).unwrap_or_default();
         if self.civ.is_none() {
@@ -200,6 +209,11 @@ impl Options {
     /// The Civ3 install root.
     pub fn civ3_dir(&self) -> PathBuf {
         self.civ3.clone().unwrap_or_else(|| DEFAULT_CIV3_DIR.into())
+    }
+
+    /// The original asset root; defaults to the Civ3 install root.
+    pub fn assets_dir(&self) -> PathBuf {
+        self.assets.clone().unwrap_or_else(|| self.civ3_dir())
     }
 
     /// The file to play: the named one, else the stock `conquests.biq`.
@@ -303,19 +317,25 @@ mod tests {
         assert_eq!(o.civ.as_deref(), Some("Rome"));
         assert_eq!(o.opponents, Some(Opponents::Names(vec!["Egypt".into(), "China".into()])));
         assert_eq!(o.civ3_dir(), PathBuf::from("/opt/civ3"));
-        let env: HashMap<&str, &str> = HashMap::from([("CIV3_PLAYER", "Japan"), ("CIV3_DIR", "/a"), ("CIV3_GOG", "/b")]);
+        assert_eq!(o.assets_dir(), o.civ3_dir());
+        let env: HashMap<&str, &str> = HashMap::from([("CIV3_PLAYER", "Japan"), ("CIV3_DIR", "/a"), ("CIV3_GOG", "/b"), ("CIV3_ASSETS", "/art")]);
         let o = parse::<_, &str>([], &env).unwrap();
         assert_eq!(o.civ.as_deref(), Some("Japan"));
         assert_eq!(o.civ3_dir(), PathBuf::from("/a"));
-        let o = parse(["--civ", "Rome", "--civ3", "/c"], &env).unwrap();
+        assert_eq!(o.assets_dir(), PathBuf::from("/art"));
+        let o = parse(["--civ", "Rome", "--civ3", "/c", "--assets=/stub"], &env).unwrap();
         assert_eq!(o.civ.as_deref(), Some("Rome"));
         assert_eq!(o.civ3_dir(), PathBuf::from("/c"));
+        assert_eq!(o.assets_dir(), PathBuf::from("/stub"));
+        assert_eq!(p(&["--civ3", "/custom"]).unwrap().assets_dir(), PathBuf::from("/custom"));
+        assert_eq!(p(&[]).unwrap().assets_dir(), p(&[]).unwrap().civ3_dir());
     }
 
     #[test]
     fn bad_command_lines() {
         assert!(p(&["--nope"]).unwrap_err().contains("unknown option --nope"));
         assert!(p(&["--seed"]).unwrap_err().contains("needs a value"));
+        assert!(p(&["--assets"]).unwrap_err().contains("needs a value"));
         assert!(p(&["--seed", "x"]).unwrap_err().contains("not a number"));
         assert!(p(&["a.biq", "b.biq"]).unwrap_err().contains("more than one file"));
         assert_eq!(p(&["--help"]).unwrap_err(), USAGE);

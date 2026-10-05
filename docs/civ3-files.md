@@ -74,7 +74,8 @@ open-4x [FILE] [options]
 
   FILE                  .biq/.bix/.bic scenario or mod, or .sav saved game
                         (default: <civ3>/Conquests/conquests.biq, a new random game)
-  --civ3 <dir>          Civ3 install root (default: $CIV3_DIR, else civ3/civ3-gog/app)
+  --civ3 <dir>          Civ3 install root (default: $CIV3_DIR, $CIV3_GOG, else civ3/civ3-gog/app)
+  --assets <dir>        original asset root (default: $CIV3_ASSETS, else --civ3)
 
 New games (ignored for a .sav):
   --civ <name>          the human's civilization (RACE name, case-insensitive)
@@ -88,7 +89,11 @@ New games (ignored for a .sav):
 
 The current env vars fold into this: `CIV3_PLAYER` → `--civ`,
 `CIV3_CIVS` → `--civ` + `--opponents`, `MAP_SEED` → `--seed`,
-`CIV3_GOG` → `--civ3`. The dev/debug ones (`CIV3_SHOT`, `CIV3_SCRIPT`,
+`CIV3_DIR` / `CIV3_GOG` → `--civ3`, `CIV3_ASSETS` → `--assets`. Flags win.
+The install root supplies stock rules (`Conquests/conquests.biq`); the asset
+root supplies original art and sound. Without an asset option, both roots
+are the install root. A supplied BIQ with rules or a SAV with embedded rules
+needs no installed stock rules. The dev/debug ones (`CIV3_SHOT`, `CIV3_SCRIPT`,
 `CIV3_AUTOPLAY`, `CIV3_HOTSEAT`, `CIV3_REVEAL`, ...) can stay env vars or
 become flags; either is fine, as long as the screenshot and script tooling
 keeps working.
@@ -214,7 +219,11 @@ never reads a BIQ, and the hardcoded lists in it (the unit list scraped from
 ### Search path and case
 
 The request carries Civ3's search order: the scenario's own folder and
-`GAME.search_folders`, then `Conquests/`, `civ3PTW/`, then the base install.
+`GAME.search_folders`, then `Conquests/`, `civ3PTW/`, then the **asset root** (`--assets`,
+else `$CIV3_ASSETS`, else the install root). Scenario folders remain relative
+to the played file, including `GAME.search_folders`; the flag does not move them.
+The asset root is also the base for cache keys. The converted cache is always
+`assets/cache/`, regardless of either root flag.
 The script resolves each reference through it, **case-insensitively**
 (Civ3's references and file names disagree in case, which only Windows
 forgives). A scenario's own Warrior is found before the stock one.
@@ -239,8 +248,8 @@ data refers to them, only our code.
 
 `assets/cache/index.json` records, for every Civ3 source the script
 converted: the outputs it produced, the source's size and modification
-time, and a hash of `prep_assets.py` itself. An entry is stale when its
-source changed or the script changed, so editing the script reconverts
+time, the canonical absolute source root, and a hash of `prep_assets.py` itself. An entry is stale when its
+source root changed, its source changed or the script changed, so editing the script reconverts
 what it produces, with no version number to bump by hand. The game reads
 the index to check freshness; the index also answers "which Civ3 file did
 this PNG come from".
@@ -248,6 +257,47 @@ this PNG come from".
 Deleting `assets/cache/` is always safe: it is rebuilt on the next run.
 `python3 tools/prep_assets.py` with no arguments still converts the stock
 install in full, for development.
+
+### Synthetic assets without an install
+
+`test-assets/` contains original flat colours, rectangle sheets, silent WAVs,
+small indexed FLCs, and an original rectangle-only ASCII test font. No pixels,
+frames, samples, glyphs, or files came from a Civ3 installation. It has the
+base and Conquests layout needed by every fixed conversion stage; unit slot
+names all refer to a shared tiny animation and sound. Leader files and the
+advance/wonder categories likewise reuse placeholders. These are test inputs,
+not playable replacement artwork: text appears as blocks, and UI sheets have
+no meaningful labels or icons.
+
+Run a rules-bearing scenario with:
+
+```sh
+CIV3_DIR=/nonexistent CIV3_GOG=/nonexistent CIV3_NO_SPLASH=1 CIV3_REVEAL=1 \
+  cargo run --release -- path/to/Scenario.biq --assets test-assets
+```
+
+Checkout needs no imaging library to create the source tree. Conversion still
+needs Python/Pillow and ffmpeg, just as real art does. To regenerate:
+
+```sh
+python3 tools/make_stub_assets.py
+# Refresh metadata from a particular BIQ, without reading any install art:
+python3 tools/make_stub_assets.py --biq path/to/Scenario.biq
+```
+
+The generator uses `tools/stub_asset_refs.json` (reference names only). `--biq`
+refreshes that manifest through the existing Rust parser's `asset_refs` example,
+then creates synthetic PediaIcons mappings, unit folders, all declared leader
+paths, and tech/wonder references. The checked-in manifest currently covers
+common stock names and the four default leaders. **The referenced Intro3 BIQ
+and TEST.SAV fixtures are absent in this checkout, so their exact reference
+coverage and scenario captures could not be verified.** Refresh the manifest
+from that BIQ when it is available and review/regenerate the output tree.
+
+Before changing source roots, preserve any valuable `assets/cache/` elsewhere:
+switching roots intentionally invalidates and overwrites the shared converted
+art. This implementation retains the fixed Rust cache location; do not set the
+Python script's standalone `CIV3_CACHE` override when launching the game.
 
 ## Suggested order
 

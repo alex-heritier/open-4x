@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// A Civ3 install root plus the folders searched before it.
 #[derive(Clone, Debug)]
 pub struct Install {
-    /// The install root (the folder holding `Art/`, `Conquests/`, ...).
+    /// The source asset root (the folder holding `Art/`, `Conquests/`, ...).
     pub root: PathBuf,
     /// Roots searched in order: the scenario's own folder and its search
     /// folders, then `Conquests/`, `civ3PTW/`, then the base install.
@@ -131,6 +131,29 @@ mod tests {
         assert!(stock.resolve("Art/Units/Warrior").unwrap().starts_with(d.join("Conquests")));
         assert_eq!(inst.resolve_all("art/units/warrior").len(), 2);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn assets_flag_moves_resolution_without_moving_rules() {
+        let d = dir("assets-flag");
+        let rules = d.join("install");
+        let assets = d.join("subset");
+        for root in [&rules, &assets] {
+            std::fs::create_dir_all(root.join("Art/Units/Warrior")).unwrap();
+        }
+        std::fs::write(rules.join("Art/Units/Warrior/Warrior.ini"), "install").unwrap();
+        std::fs::write(assets.join("Art/Units/Warrior/Warrior.ini"), "override").unwrap();
+        let options = crate::cli::parse(
+            ["--civ3", rules.to_str().unwrap(), "--assets", assets.to_str().unwrap()],
+            &std::collections::HashMap::<&str, &str>::new(),
+        ).unwrap();
+        assert_eq!(options.civ3_dir(), rules);
+        let install = Install::new(options.assets_dir(), vec![]);
+        let picked = install.resolve("art/units/warrior/warrior.INI").unwrap();
+        assert!(picked.starts_with(&assets));
+        assert_eq!(std::fs::read_to_string(&picked).unwrap(), "override");
+        println!("--assets resolution: {} -> override; rules root {}", picked.display(), options.civ3_dir().display());
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

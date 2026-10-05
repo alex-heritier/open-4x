@@ -54,13 +54,22 @@ can receive orders; production decisions wait for their owner's next turn.
 Prereqs: Rust, Python 3 with PIL, ffmpeg.
 
 1. Point the game at the Civ3 install (default `civ3/civ3-gog/app`):
-   `export CIV3_DIR=$PWD/civ3/civ3-gog/app` or `--civ3 <dir>`.
+   `export CIV3_DIR=$PWD/civ3/civ3-gog/app` or `--civ3 <dir>`. This root supplies
+   stock rules. Original art defaults to the same root; use `--assets <dir>`
+   or `CIV3_ASSETS` to choose another source tree. Both flags keep the converted
+   cache at `assets/cache/`.
 2. Run: `cargo run [-- FILE.biq|FILE.SAV]`. The first run converts the art the
    rules refer to into the gitignored `assets/cache/` by running
    `tools/prep_assets.py` (it says so and takes a few minutes); later runs
    start at once. If Python 3, PIL or ffmpeg is missing, the game says so and
    exits. `python3 tools/prep_assets.py` with no arguments converts the stock
    install in full.
+
+For install-free testing, use a rules-bearing BIQ with `--assets test-assets`.
+The checked-in tree contains synthetic colours and silence; see
+`docs/civ3-files.md` section 7 for regeneration and current fixture coverage.
+Back up an existing `assets/cache/` before switching roots: conversions replace
+the shared cached art.
 
 See `docs/civ3-files.md` for the file formats the game plays.
 
