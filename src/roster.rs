@@ -1,13 +1,12 @@
 //! The unit and building rosters of `conquests.biq`.
 //!
-//! The rows are generated (`rules_data.rs`, see
-//! `biq/examples/gen_game_rules.rs`): `UnitType(i)` is `PRTO` row `i`,
-//! `Production(UNIT_COUNT + i)` is `BLDG` row `i`, so every cross-reference
+//! The rows are built from the BIQ (`ruleset.rs`): `UnitType(i)` is `PRTO` row `i`,
+//! `Production(unit_count() + i)` is `BLDG` row `i`, so every cross-reference
 //! the file makes (upgrade chains, required improvements, wonder grants) is a
 //! plain index here too. This module holds the row types, the flag bits the
 //! game reads, and the lookups that walk those references.
 
-pub use crate::rules_data::{BLDG_COUNT, BLDGS, UNIT_COUNT, UNITS};
+pub use crate::ruleset::{BLDGS, UNITS, bldg_count, unit_count};
 
 /// One `PRTO` row, the fields the game reads.
 #[derive(Debug)]
@@ -77,6 +76,10 @@ pub struct BldgDef {
     pub grant_continent: i32,
     /// Improvement whose happiness this one doubles, -1 for none.
     pub doubles: i32,
+    /// `BLDG +0x9C` (body `+0x98`, *Bombard*): nonzero drops the building's
+    /// defense for cities above town size (Walls: 8) and makes it eligible
+    /// for the Great Wall's doubling.
+    pub bombard_defense: i32,
     pub flags: u32,
     pub other: u32,
     pub small: u32,
@@ -207,7 +210,7 @@ pub fn upgrade_chain(u: usize) -> impl Iterator<Item = usize> {
     let mut next = UNITS[u].upgrade_to;
     let mut steps = 0;
     std::iter::from_fn(move || {
-        if next < 0 || steps > UNIT_COUNT {
+        if next < 0 || steps > unit_count() {
             return None;
         }
         steps += 1;
@@ -225,50 +228,46 @@ mod tests {
 
     #[test]
     fn named_constants_point_at_their_rows() {
-        assert_eq!(unit(UnitType::Warrior.0 as usize).name, "Warrior");
-        assert_eq!(unit(UnitType::Settler.0 as usize).name, "Settler");
-        assert_eq!(unit(UnitType::ThreeManChariot.0 as usize).name, "Three-Man Chariot");
-        assert_eq!(Production::Temple.name(), "Temple");
-        assert_eq!(Production::Barracks.name(), "Barracks");
-        assert_eq!(Production::Warrior.name(), "Warrior");
-        assert_eq!(Production::SunTzusArtOfWar.name(), "Sun Tzu's Art of War");
+        assert_eq!(unit(UnitType::named("Warrior").0 as usize).name, "Warrior");
+        assert_eq!(unit(UnitType::named("Settler").0 as usize).name, "Settler");
+        assert_eq!(unit(UnitType::named("Three-Man Chariot").0 as usize).name, "Three-Man Chariot");
+        assert_eq!(Production::named("Temple").name(), "Temple");
+        assert_eq!(Production::named("Barracks").name(), "Barracks");
+        assert_eq!(Production::named("Warrior").name(), "Warrior");
+        assert_eq!(Production::named("Sun Tzu's Art of War").name(), "Sun Tzu's Art of War");
     }
 
     #[test]
     fn the_cross_references_resolve() {
         for (i, u) in UNITS.iter().enumerate() {
-            assert!(u.upgrade_to < UNIT_COUNT as i32, "{}", u.name);
+            assert!(u.upgrade_to < unit_count() as i32, "{}", u.name);
             // No upgrade chain loops back on itself.
-            assert!(upgrade_chain(i).count() < UNIT_COUNT, "{}", u.name);
+            assert!(upgrade_chain(i).count() < unit_count(), "{}", u.name);
         }
         for b in BLDGS.iter() {
             for r in [b.requires, b.grant_all, b.grant_continent, b.doubles] {
-                assert!(r < BLDG_COUNT as i32, "{}", b.name);
+                assert!(r < bldg_count() as i32, "{}", b.name);
             }
         }
     }
 
     #[test]
     fn unit_art_exists_for_every_playable_unit() {
-        // Skipped without the converted art (`tools/prep_assets.py`).
-        if !std::path::Path::new("assets/gen/units").is_dir() {
-            eprintln!("skipped: assets/gen/units is not built");
+        // Skipped without the converted art (the game converts it at startup).
+        if !crate::assets::cache_covers_plan() {
+            eprintln!("skipped: assets/cache was not built for these rules");
             return;
         }
+        let art = &crate::ruleset::get().art;
         for u in UNITS.iter().filter(|u| u.playable) {
-            let m = format!("assets/gen/units/{}/manifest.json", u.art);
-            assert!(std::path::Path::new(&m).is_file(), "{}: no {m}", u.name);
-        }
-    }
-
-    #[test]
-    fn leaders_and_armies_have_art_for_every_era() {
-        if !std::path::Path::new("assets/gen/units").is_dir() {
-            return;
-        }
-        for u in UNITS.iter().filter(|u| u.playable && u.art.ends_with("Ancient Times")) {
-            for era in ["Ancient Times", "Middle Ages", "Industrial Ages", "Modern Times"] {
-                let m = format!("assets/gen/units/{}/manifest.json", u.art.replace("Ancient Times", era));
+            let variants = if u.art.ends_with(crate::assets::ERA_NAMES[0]) {
+                crate::assets::ERA_NAMES.map(|era| u.art.replace(crate::assets::ERA_NAMES[0], era)).to_vec()
+            } else {
+                vec![u.art.to_string()]
+            };
+            for v in variants {
+                let key = art.unit_key(&v).unwrap_or_else(|| panic!("{}: no art folder {v}", u.name));
+                let m = format!("{}/{key}/manifest.json", crate::assets::CACHE);
                 assert!(std::path::Path::new(&m).is_file(), "{}: no {m}", u.name);
             }
         }
@@ -281,6 +280,6 @@ mod tests {
             assert!(playable.contains(&n), "{n}");
         }
         // The costs the exe charges: Barracks 4 is 40 shields.
-        assert_eq!(bldg(Production::Barracks.0 as usize - UNIT_COUNT).shields(), 40);
+        assert_eq!(bldg(Production::named("Barracks").0 as usize - unit_count()).shields(), 40);
     }
 }

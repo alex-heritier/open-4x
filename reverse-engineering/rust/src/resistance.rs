@@ -96,7 +96,7 @@ pub fn reroll(
     c: &mut Citizen,
     initial: bool,
     rows: &[CultRow],
-    govt_resistance: &[[i32; 8]; 8],
+    govt_resistance: &[impl AsRef<[i32]>],
     standing: impl FnOnce(i32) -> Standing,
     rand: impl FnOnce(i32) -> i32,
 ) -> bool {
@@ -107,7 +107,7 @@ pub fn reroll(
             let term = cult_row(rows, s.owner_rating, s.other_rating)
                 .map(|k| if initial { rows[k].1 } else { rows[k].2 })
                 .unwrap_or(0);
-            let modifier = govt_resistance[s.owner_govt][s.other_govt];
+            let modifier = govt_resistance[s.owner_govt].as_ref()[s.other_govt];
             result = rand(100) & 0xFFFF < modifier + term;
         }
     }

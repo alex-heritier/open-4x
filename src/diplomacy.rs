@@ -25,10 +25,10 @@ use civ3mapgen::diplomacy::{Clause, Env, Relations, Verdict, WarCall, rec, relbi
 use civ3mapgen::research::{Dice, Event};
 
 use crate::cities::{City, Treasury, territory};
-use crate::civs::{CIV_COUNT, CIVS, CivilizationEnded, Civilizations, is_ai};
+use crate::civs::{CIV_CAP, civ_count, CIVS, CivilizationEnded, Civilizations, is_ai};
 use crate::combat::CombatRng;
 use crate::features::{MessageBoard, post};
-use crate::map::{GameMap, MAP_H, MAP_W};
+use crate::map::GameMap;
 use crate::research::{Research, civ_of, slot, tech_name};
 use crate::civs::RACES;
 use crate::units::{Turn, Unit, def};
@@ -88,17 +88,17 @@ impl Deal {
 /// What the attitude and war decisions read from the board.
 #[derive(Clone, Debug)]
 pub struct Facts {
-    pub score: [i32; CIV_COUNT],
-    pub rank: [i32; CIV_COUNT],
-    pub cities: [i32; CIV_COUNT],
-    shared: [[bool; CIV_COUNT]; CIV_COUNT],
+    pub score: [i32; CIV_CAP],
+    pub rank: [i32; CIV_CAP],
+    pub cities: [i32; CIV_CAP],
+    shared: [[bool; CIV_CAP]; CIV_CAP],
 }
 
 impl Facts {
     /// Four equal civilizations sharing a continent.
     #[cfg(test)]
     pub fn even() -> Self {
-        Facts { score: [10; CIV_COUNT], rank: [1; CIV_COUNT], cities: [2; CIV_COUNT], shared: [[true; CIV_COUNT]; CIV_COUNT] }
+        Facts { score: [10; CIV_CAP], rank: [1; CIV_CAP], cities: [2; CIV_CAP], shared: [[true; CIV_CAP]; CIV_CAP] }
     }
 
     /// Score is cities, advances and soldiers; rank is one plus the civs
@@ -109,31 +109,31 @@ impl Facts {
         land: &[u16],
         cities: &[&City],
         units: &[&Unit],
-        known: [i32; CIV_COUNT],
+        known: [i32; CIV_CAP],
     ) -> Self {
-        let mut count = [0i32; CIV_COUNT];
-        let mut soldiers = [0i32; CIV_COUNT];
-        let mut on: Vec<HashSet<u16>> = vec![HashSet::new(); CIV_COUNT];
+        let mut count = [0i32; CIV_CAP];
+        let mut soldiers = [0i32; CIV_CAP];
+        let mut on: Vec<HashSet<u16>> = vec![HashSet::new(); CIV_CAP];
         for c in cities {
             count[c.civ] += 1;
             on[c.civ].insert(land[map.idx(c.x, c.y)]);
         }
         for u in units {
-            if def(u.utype).attack > 0 && u.civ < CIV_COUNT {
+            if def(u.utype).attack > 0 && u.civ < civ_count() {
                 soldiers[u.civ] += 1;
             }
         }
-        let mut score = [0i32; CIV_COUNT];
-        for i in 0..CIV_COUNT {
+        let mut score = [0i32; CIV_CAP];
+        for i in 0..civ_count() {
             score[i] = 10 * count[i] + 3 * known[i] + soldiers[i];
         }
-        let mut rank = [1i32; CIV_COUNT];
-        for i in 0..CIV_COUNT {
-            rank[i] = 1 + (0..CIV_COUNT).filter(|&j| score[j] > score[i]).count() as i32;
+        let mut rank = [1i32; CIV_CAP];
+        for i in 0..civ_count() {
+            rank[i] = 1 + (0..civ_count()).filter(|&j| score[j] > score[i]).count() as i32;
         }
-        let mut shared = [[false; CIV_COUNT]; CIV_COUNT];
-        for a in 0..CIV_COUNT {
-            for b in 0..CIV_COUNT {
+        let mut shared = [[false; CIV_CAP]; CIV_CAP];
+        for a in 0..civ_count() {
+            for b in 0..civ_count() {
                 shared[a][b] = on[a].iter().any(|c| *c != 0 && on[b].contains(c));
             }
         }
@@ -141,7 +141,7 @@ impl Facts {
     }
 
     fn civ(p: u32) -> Option<usize> {
-        (1..=CIV_COUNT as u32).contains(&p).then(|| civ_of(p))
+        (1..=civ_count() as u32).contains(&p).then(|| civ_of(p))
     }
 }
 
@@ -165,7 +165,7 @@ impl Env for Facts {
         Self::civ(p).map_or(0, |c| self.score[c])
     }
     fn rank(&self, p: u32) -> i32 {
-        Self::civ(p).map_or(CIV_COUNT as i32, |c| self.rank[c])
+        Self::civ(p).map_or(civ_count() as i32, |c| self.rank[c])
     }
     fn shares_continent(&self, p: u32, q: u32) -> bool {
         matches!((Self::civ(p), Self::civ(q)), (Some(a), Some(b)) if self.shared[a][b])
@@ -178,7 +178,7 @@ impl Env for Facts {
         civ3mapgen::government::SHIPPED.get(government as usize).map_or(0, |g| g.war_weariness)
     }
     fn map_size(&self) -> (i32, i32) {
-        (MAP_W, MAP_H)
+        crate::scenario::map_dims()
     }
     fn cities(&self, p: u32) -> i32 {
         Self::civ(p).map_or(0, |c| self.cities[c])
@@ -194,7 +194,7 @@ pub struct Diplomacy {
     /// Continent label of every tile, 0 for water.
     pub land: Vec<u16>,
     /// The last turn each civ pitched a trade.
-    pitched: [u32; CIV_COUNT],
+    pitched: [u32; CIV_CAP],
     /// A human's soldier is about to strike a civ it is at peace with: the
     /// question waits for an answer.
     pub war_ask: Option<WarAsk>,
@@ -218,7 +218,7 @@ impl Diplomacy {
 
     /// Put the books back; false, with nothing changed, if they do not fit.
     pub fn restore(&mut self, saved: &Saved) -> bool {
-        let Ok(pitched) = <[u32; CIV_COUNT]>::try_from(saved.pitched.clone()) else { return false };
+        let Ok(pitched) = <[u32; CIV_CAP]>::try_from(saved.pitched.clone()) else { return false };
         if !self.rel.restore(&saved.rel) {
             return false;
         }
@@ -272,13 +272,13 @@ impl Diplomacy {
     pub fn new() -> Self {
         let mut in_play = 0;
         let mut human = 0;
-        for civ in 0..CIV_COUNT {
+        for civ in 0..civ_count() {
             in_play |= 1 << slot(civ);
             if !is_ai(civ) {
                 human |= 1 << slot(civ);
             }
         }
-        Diplomacy { rel: Relations::new(in_play, human), proposals: VecDeque::new(), land: vec![], pitched: [0; CIV_COUNT], war_ask: None, convert_ask: None, board_ask: None }
+        Diplomacy { rel: Relations::new(in_play, human), proposals: VecDeque::new(), land: vec![], pitched: [0; CIV_CAP], war_ask: None, convert_ask: None, board_ask: None }
     }
 
     pub fn at_war(&self, a: usize, b: usize) -> bool {
@@ -289,18 +289,18 @@ impl Diplomacy {
     }
 
     pub fn contact(&self, a: usize, b: usize) -> bool {
-        a != b && a < CIV_COUNT && b < CIV_COUNT && self.rel.contact(slot(a), slot(b))
+        a != b && a < civ_count() && b < civ_count() && self.rel.contact(slot(a), slot(b))
     }
 
     /// A civ among `others` (a bit mask of civs) that `civ` is not at war
     /// with: the one it would first have to declare war on.
     pub fn first_at_peace(&self, civ: usize, others: u32) -> Option<usize> {
-        (0..CIV_COUNT).find(|&o| o != civ && others >> o & 1 != 0 && !self.at_war(civ, o))
+        (0..civ_count()).find(|&o| o != civ && others >> o & 1 != 0 && !self.at_war(civ, o))
     }
 
     /// A blow from `by` against the civs in `victims` goes into their books.
     pub fn note_attack(&mut self, by: usize, victims: u32) {
-        for v in (0..CIV_COUNT).filter(|&v| v != by && victims >> v & 1 != 0) {
+        for v in (0..civ_count()).filter(|&v| v != by && victims >> v & 1 != 0) {
             self.rel.rec_mut(slot(v), slot(by))[rec::ATTACKS] += 1;
         }
     }
@@ -310,7 +310,7 @@ impl Diplomacy {
     /// victim's book about the actor gain it; the second one feeds the war
     /// weariness of both sides every turn until peace clears it.
     pub fn incident(&mut self, actor: usize, victim: usize, amount: i32) {
-        if actor == victim || actor >= CIV_COUNT || victim >= CIV_COUNT {
+        if actor == victim || actor >= civ_count() || victim >= civ_count() {
             return;
         }
         let book = self.rel.rec_mut(slot(victim), slot(actor));
@@ -320,7 +320,7 @@ impl Diplomacy {
 
     /// War weariness `civ` carries against `other` (`Player +0xCB4`).
     pub fn weariness(&self, civ: usize, other: usize) -> i32 {
-        if civ >= CIV_COUNT || other >= CIV_COUNT {
+        if civ >= civ_count() || other >= civ_count() {
             return 0;
         }
         self.rel.war_counter(slot(civ), slot(other))
@@ -329,8 +329,8 @@ impl Diplomacy {
     /// The turn update of `civ`'s counters (`0x500AD0`, `government.md`
     /// 5.2). `abroad[c]`: a soldier of `civ` stands on land `c` owns;
     /// `at_home[c]`: a soldier of `c` stands on land `civ` owns.
-    pub fn update_weariness(&mut self, civ: usize, abroad: &[bool; CIV_COUNT], at_home: &[bool; CIV_COUNT], mobilized: bool) {
-        for c in (0..CIV_COUNT).filter(|&c| c != civ) {
+    pub fn update_weariness(&mut self, civ: usize, abroad: &[bool], at_home: &[bool], mobilized: bool) {
+        for c in (0..civ_count()).filter(|&c| c != civ) {
             let (p, q) = (slot(civ), slot(c));
             if self.rel.in_play & (1 << q) == 0 {
                 continue;
@@ -349,7 +349,7 @@ impl Diplomacy {
     /// The civs `civ` is at war with, with the weariness against each: the
     /// inputs of the happiness routine and the AI's government score.
     pub fn enemy_weariness(&self, civ: usize) -> Vec<i32> {
-        (0..CIV_COUNT)
+        (0..civ_count())
             .filter(|&c| c != civ && self.rel.in_play & (1 << slot(c)) != 0 && self.at_war(civ, c))
             .map(|c| self.weariness(civ, c))
             .collect()
@@ -357,7 +357,7 @@ impl Diplomacy {
 
     /// The average war weariness (`0x5007B0`).
     pub fn average_weariness(&self, civ: usize) -> i32 {
-        civ3mapgen::government::average_weariness((0..CIV_COUNT).filter(|&c| c != civ).map(|c| {
+        civ3mapgen::government::average_weariness((0..civ_count()).filter(|&c| c != civ).map(|c| {
             civ3mapgen::government::Relation {
                 in_play: self.rel.in_play & (1 << slot(c)) != 0,
                 met: self.contact(civ, c),
@@ -370,12 +370,12 @@ impl Diplomacy {
 
     /// Slots `civ` has met, as research counts them.
     pub fn contacts(&self, civ: usize) -> u32 {
-        (0..CIV_COUNT).filter(|&o| self.contact(civ, o)).fold(0, |m, o| m | 1 << slot(o))
+        (0..civ_count()).filter(|&o| self.contact(civ, o)).fold(0, |m, o| m | 1 << slot(o))
     }
 
     /// Who is at war with whom, by civ.
-    pub fn war_matrix(&self) -> [[bool; CIV_COUNT]; CIV_COUNT] {
-        let mut m = [[false; CIV_COUNT]; CIV_COUNT];
+    pub fn war_matrix(&self) -> [[bool; CIV_CAP]; CIV_CAP] {
+        let mut m = [[false; CIV_CAP]; CIV_CAP];
         for (a, row) in m.iter_mut().enumerate() {
             for (b, cell) in row.iter_mut().enumerate() {
                 *cell = self.at_war(a, b);
@@ -385,7 +385,7 @@ impl Diplomacy {
     }
 
     /// A civ that is gone takes no part.
-    pub fn sync_in_play(&mut self, eliminated: &[bool; CIV_COUNT]) {
+    pub fn sync_in_play(&mut self, eliminated: &[bool]) {
         for (civ, gone) in eliminated.iter().enumerate() {
             if *gone {
                 self.rel.in_play &= !(1 << slot(civ));
@@ -442,7 +442,7 @@ impl Diplomacy {
 
     /// A civ some human has met.
     fn watched(&self, civ: usize) -> bool {
-        (0..CIV_COUNT).any(|h| !is_ai(h) && (h == civ || self.contact(h, civ)))
+        (0..civ_count()).any(|h| !is_ai(h) && (h == civ || self.contact(h, civ)))
     }
 
     /// `makePeace`.
@@ -461,7 +461,7 @@ impl Diplomacy {
     // -----------------------------------------------------------------
 
     /// Whether the deal can be made at all, and if not why.
-    pub fn check(&self, research: &Research, treasury: &[u32; CIV_COUNT], deal: &Deal) -> Result<(), &'static str> {
+    pub fn check(&self, research: &Research, treasury: &[u32], deal: &Deal) -> Result<(), &'static str> {
         if deal.is_empty() {
             return Err("Nothing is on the table.");
         }
@@ -470,7 +470,7 @@ impl Diplomacy {
             return Err("We have not met.");
         }
         let at_war = self.at_war(a, b);
-        let mut gold = [0u32; CIV_COUNT];
+        let mut gold = [0u32; CIV_CAP];
         let mut peace = 0;
         for (giver, taker, c) in deal.clauses() {
             if at_war && !matches!(c, Clause::Peace) {
@@ -620,14 +620,14 @@ impl Diplomacy {
         &mut self,
         env: &dyn Env,
         research: &mut Research,
-        treasury: &mut [u32; CIV_COUNT],
+        treasury: &mut [u32],
         deal: &Deal,
         turn: i32,
         dice: &mut dyn Dice,
         board: &mut MessageBoard,
     ) -> Vec<Event> {
         let mut events = vec![];
-        let mut timed: [Vec<Clause>; CIV_COUNT] = Default::default();
+        let mut timed: [Vec<Clause>; CIV_CAP] = Default::default();
         for (giver, taker, c) in deal.clauses() {
             match c {
                 Clause::Gold(n) => {
@@ -672,7 +672,7 @@ impl Diplomacy {
         if turn < WAR_PLAN_TURN || (turn - WAR_PLAN_TURN) % WAR_PLAN_PERIOD != p as u32 % WAR_PLAN_PERIOD {
             return None;
         }
-        let target = (0..CIV_COUNT)
+        let target = (0..civ_count())
             .filter(|&q| {
                 q != p
                     && self.contact(p, q)
@@ -799,12 +799,12 @@ pub fn meetings(map: &GameMap, units: &[&Unit], cities: &[&City], met: impl Fn(u
     };
     for (i, u) in units.iter().enumerate() {
         for v in &units[i + 1..] {
-            if u.civ != v.civ && u.civ < CIV_COUNT && v.civ < CIV_COUNT && map.distance((u.x, u.y), (v.x, v.y)) <= 2 {
+            if u.civ != v.civ && u.civ < civ_count() && v.civ < civ_count() && map.distance((u.x, u.y), (v.x, v.y)) <= 2 {
                 add(u.civ, v.civ);
             }
         }
         for c in cities {
-            if u.civ != c.civ && u.civ < CIV_COUNT && map.distance((u.x, u.y), (c.x, c.y)) <= 3 {
+            if u.civ != c.civ && u.civ < civ_count() && map.distance((u.x, u.y), (c.x, c.y)) <= 3 {
                 add(u.civ, c.civ);
             }
         }
@@ -821,7 +821,7 @@ pub fn trespassers(owner: &HashMap<(i32, i32), usize>, units: &[&Unit]) -> HashM
             continue;
         }
         if let Some(&host) = owner.get(&(u.x, u.y)) {
-            if host != u.civ && u.civ < CIV_COUNT {
+            if host != u.civ && u.civ < civ_count() {
                 *out.entry((host, u.civ)).or_default() += 1;
             }
         }
@@ -830,8 +830,8 @@ pub fn trespassers(owner: &HashMap<(i32, i32), usize>, units: &[&Unit]) -> HashM
 }
 
 /// The advances each civ knows, for the score.
-fn known_counts(research: &Research) -> [i32; CIV_COUNT] {
-    let mut k = [0; CIV_COUNT];
+fn known_counts(research: &Research) -> [i32; CIV_CAP] {
+    let mut k = [0; CIV_CAP];
     for (civ, n) in k.iter_mut().enumerate() {
         *n = research.world.players[slot(civ) as usize].known_count;
     }
@@ -862,7 +862,7 @@ pub fn detect_contact(
     mut diplomacy: ResMut<Diplomacy>,
     mut board: ResMut<MessageBoard>,
 ) {
-    let pairs = (0..CIV_COUNT).flat_map(|a| (a + 1..CIV_COUNT).map(move |b| (a, b)));
+    let pairs = (0..civ_count()).flat_map(|a| (a + 1..civ_count()).map(move |b| (a, b)));
     if pairs.clone().all(|(a, b)| diplomacy.contact(a, b)) {
         return;
     }
@@ -914,7 +914,7 @@ impl Diplomacy {
         civ: usize,
         turn: u32,
         intruders: &HashMap<(usize, usize), i32>,
-        treasury: &mut [u32; CIV_COUNT],
+        treasury: &mut [u32],
         dice: &mut dyn Dice,
         board: &mut MessageBoard,
     ) {
@@ -934,7 +934,7 @@ impl Diplomacy {
             }
         }
         // Soldiers in another civ's territory build pressure on its owner.
-        for owner in 0..CIV_COUNT {
+        for owner in 0..civ_count() {
             if owner == civ || !self.contact(owner, civ) || self.at_war(owner, civ) {
                 continue;
             }
@@ -975,7 +975,7 @@ impl Diplomacy {
         if let Some(target) = self.war_plan(facts, civ, turn, dice) {
             self.declare(facts, civ, target, 0, board);
         }
-        for human in (0..CIV_COUNT).filter(|&h| !is_ai(h)) {
+        for human in (0..civ_count()).filter(|&h| !is_ai(h)) {
             if self.pitched[civ] + 3 > turn || self.proposals.iter().any(|p| p.from == civ) {
                 continue;
             }
@@ -1006,8 +1006,8 @@ mod tests {
     fn met() -> Diplomacy {
         crate::civs::set_controllers();
         let mut d = Diplomacy::new();
-        for a in 0..CIV_COUNT {
-            for b in a + 1..CIV_COUNT {
+        for a in 0..civ_count() {
+            for b in a + 1..civ_count() {
                 d.meet(a, b);
             }
         }
@@ -1015,7 +1015,7 @@ mod tests {
     }
 
     fn unit(civ: usize, x: i32, y: i32) -> Unit {
-        Unit::new(civ, UnitType::Warrior, x, y)
+        Unit::new(civ, UnitType::named("Warrior"), x, y)
     }
 
     fn city(civ: usize, x: i32, y: i32) -> City {
@@ -1037,7 +1037,7 @@ mod tests {
             citizens: crate::citizens::new_pool(civ, 3),
             food: 0,
             shields: 0,
-            production: crate::cities::Production::Warrior,
+            production: crate::cities::Production::named("Warrior"),
             queue: vec![],
             buildings: vec![],
             culture: 0,
@@ -1048,8 +1048,8 @@ mod tests {
     #[test]
     fn nobody_is_at_war_until_it_is_declared() {
         let d = met();
-        for a in 0..CIV_COUNT {
-            for b in 0..CIV_COUNT {
+        for a in 0..civ_count() {
+            for b in 0..civ_count() {
                 assert!(!d.at_war(a, b));
             }
         }
@@ -1092,7 +1092,7 @@ mod tests {
         let owner: HashMap<(i32, i32), usize> = [((10, 10), 1usize), ((11, 10), 1)].into_iter().collect();
         let own = unit(1, 11, 10);
         let (s1, s2) = (unit(2, 11, 10), unit(2, 10, 10));
-        let worker = Unit::new(2, UnitType::Worker, 10, 10);
+        let worker = Unit::new(2, UnitType::named("Worker"), 10, 10);
         let elsewhere = unit(0, 30, 30);
         let out = trespassers(&owner, &[&own, &s1, &s2, &worker, &elsewhere]);
         assert_eq!(out.get(&(1, 2)), Some(&2), "civ 2's two soldiers are in civ 1's land");
@@ -1105,8 +1105,8 @@ mod tests {
         let land = label_land(&map);
         let (c0, c1, c2) = (city(0, 5, 5), city(0, 9, 9), city(1, 20, 20));
         let u = unit(2, 1, 1);
-        let f = Facts::new(&map, &land, &[&c0, &c1, &c2], &[&u], [3, 3, 3, 3]);
-        assert_eq!(f.cities, [2, 1, 0, 0]);
+        let f = Facts::new(&map, &land, &[&c0, &c1, &c2], &[&u], crate::civs::pad(&[3, 3, 3, 3]));
+        assert_eq!(f.cities[..4], [2, 1, 0, 0]);
         assert_eq!(f.score[0], 29);
         assert_eq!(f.rank[0], 1);
         assert_eq!(f.rank[1], 2);
@@ -1131,7 +1131,7 @@ mod tests {
     fn nothing_is_traded_in_a_war_but_peace() {
         let r = research();
         let mut d = met();
-        let treasury = [100; CIV_COUNT];
+        let treasury = [100; CIV_CAP];
         let mut gold = Deal::new(0, 1);
         gold.from_a.push(Clause::Gold(10));
         assert_eq!(d.check(&r, &treasury, &gold), Ok(()));
@@ -1171,7 +1171,7 @@ mod tests {
         let t = r.giftable(1, 0).first().copied().expect("Rome knows something Japan does not");
         let mut deal = Deal::new(1, 0);
         deal.from_a.push(Clause::Tech(t));
-        let mut treasury = [0; CIV_COUNT];
+        let mut treasury = [0; CIV_CAP];
         assert_eq!(d.check(&r, &treasury, &deal), Ok(()));
         assert!(!r.knows(0, t));
         let events = d.execute(&Facts::even(), &mut r, &mut treasury, &deal, 1, &mut Rng::new(1), &mut MessageBoard::default());
@@ -1186,12 +1186,12 @@ mod tests {
     fn treaties_need_the_advance_on_both_sides() {
         let mut r = research();
         let d = met();
-        let treasury = [0; CIV_COUNT];
+        let treasury = [0; CIV_CAP];
         let mut deal = Deal::new(0, 1);
         deal.from_a.push(Clause::RightOfPassage);
         // Nobody has Map Making at the start.
         assert!(d.check(&r, &treasury, &deal).is_err());
-        let mm = crate::rules_data::TECH_NAMES.iter().position(|&n| n == "Map Making").unwrap() as i32;
+        let mm = crate::ruleset::TECH_NAMES.iter().position(|&n| n == "Map Making").unwrap() as i32;
         r.award(0, mm, &mut Rng::new(1));
         assert!(d.check(&r, &treasury, &deal).is_err(), "Rome still lacks it");
         r.award(1, mm, &mut Rng::new(1));
@@ -1297,7 +1297,7 @@ mod tests {
         let mut d = met();
         let f = Facts::even();
         let mut board = MessageBoard::default();
-        let mut treasury = [0; CIV_COUNT];
+        let mut treasury = [0; CIV_CAP];
         let mut intruders = HashMap::new();
         intruders.insert((1usize, 0usize), 2);
         // Two soldiers add 0x80 a turn: the warning on the first.
@@ -1330,7 +1330,7 @@ mod tests {
         d.rel.apply(&f, slot(1), slot(0), &Clause::RightOfPassage);
         let mut intruders = HashMap::new();
         intruders.insert((1usize, 0usize), 5);
-        let mut treasury = [0; CIV_COUNT];
+        let mut treasury = [0; CIV_CAP];
         d.run_turn_end(&f, &r, 0, 1, &intruders, &mut treasury, &mut Rng::new(1), &mut MessageBoard::default());
         assert_eq!(d.rel.tension(slot(1), slot(0)), 0);
     }
@@ -1342,8 +1342,8 @@ mod tests {
             d.rel.rec_mut(slot(3), slot(q))[rec::HOSTILE_ACTS] = 3;
         }
         let mut f = Facts::even();
-        f.score = [5, 50, 20, 1];
-        f.rank = [3, 1, 2, 4];
+        f.score = crate::civs::pad(&[5, 50, 20, 1]);
+        f.rank = crate::civs::pad(&[3, 1, 2, 4]);
         (d, f)
     }
 
@@ -1388,8 +1388,8 @@ mod tests {
         let mut d = met();
         d.rel.rec_mut(slot(1), slot(2))[rec::HOSTILE_ACTS] = 3;
         let mut f = f;
-        f.score = [5, 50, 60, 1];
-        f.rank = [3, 2, 1, 4];
+        f.score = crate::civs::pad(&[5, 50, 60, 1]);
+        f.rank = crate::civs::pad(&[3, 2, 1, 4]);
         assert_eq!(d.war_plan(&f, 2, WAR_PLAN_TURN + 2, &mut Always(31)), None);
     }
 
@@ -1402,7 +1402,7 @@ mod tests {
         assert!(!r.giftable(1, 0).is_empty() && !r.giftable(0, 1).is_empty(), "the free advances differ");
         let p = d.pitch(&f, &r, 1, 0, &mut Rng::new(2)).expect("a swap to propose");
         assert_eq!((p.from, p.to), (1, 0));
-        assert_eq!(d.check(&r, &[0; CIV_COUNT], &p.deal), Ok(()));
+        assert_eq!(d.check(&r, &[0; CIV_CAP], &p.deal), Ok(()));
         assert_eq!(d.weigh(&f, &r, 1, &p.deal, &mut Rng::new(2)), Verdict::Accept);
         // It is a swap: one advance each way.
         assert_eq!((p.deal.from_a.len(), p.deal.from_b.len()), (1, 1));

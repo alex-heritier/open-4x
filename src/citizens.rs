@@ -164,7 +164,7 @@ impl City {
         let mut race = crate::civs::roster_index(self.civ);
         let n = n.min(self.size());
         let mut remaining = n - self.lose_population(n, Some(race as i32), rng).len() as u8;
-        for civ in 0..crate::civs::CIV_COUNT {
+        for civ in 0..crate::civs::civ_count() {
             if remaining == 0 { break; }
             if civ == self.civ { continue; }
             let foreign = crate::civs::roster_index(civ);

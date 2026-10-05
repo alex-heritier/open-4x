@@ -994,6 +994,19 @@ impl World {
             self.enter_era(p, events, ctx);
         }
     }
+
+    /// The advances a scenario or a saved game gives `p` at the start,
+    /// whatever their era, then the eras they add up to.
+    pub fn grant_known(&mut self, p: u32, techs: &[i32], events: &mut Vec<Event>, ctx: &mut Ctx<'_>) {
+        for &t in techs {
+            if t > NONE && t < self.t() && !self.knows(p, t) {
+                self.acquire(p, t, false, true, false, events, ctx);
+            }
+        }
+        while self.try_advance_era(p) {
+            self.enter_era(p, events, ctx);
+        }
+    }
 }
 
 /// The callers' services for research code that picks or rolls.

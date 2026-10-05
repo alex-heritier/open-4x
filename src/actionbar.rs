@@ -92,13 +92,13 @@ impl UnitCommand {
     pub fn relevant(self, t: UnitType) -> bool {
         match self {
             UnitCommand::Load => units::def(t).class == 0 && units::def(t).special & 1 != 0,
-            UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => t == UnitType::Leader,
+            UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => t == crate::roles::leader(),
             UnitCommand::Unload => units::def(t).capacity > 0 && units::def(t).special & 2 != 0,
             UnitCommand::Bombard => crate::bombard::capable(t),
-            UnitCommand::FoundCity => t == UnitType::Settler,
-            UnitCommand::FoundColony => t == UnitType::Worker,
-            UnitCommand::Work(_) => t == UnitType::Worker,
-            UnitCommand::Fortify => t != UnitType::Scout,
+            UnitCommand::FoundCity => crate::roles::founds_cities(t),
+            UnitCommand::FoundColony => crate::roles::is_worker(t),
+            UnitCommand::Work(_) => crate::roles::is_worker(t),
+            UnitCommand::Fortify => t != crate::roles::scout(),
             // Only a type with a successor and the ability has the button.
             UnitCommand::Upgrade => crate::upgrades::upgradable(t),
             UnitCommand::UpgradeAll => crate::upgrades::upgradable(t),
@@ -106,9 +106,7 @@ impl UnitCommand {
             UnitCommand::Pillage => crate::actions::can_pillage_type(t),
             UnitCommand::Automate => crate::actions::can_automate(t),
             // Civ3's Explore is a recon order; settlers and workers hold.
-            UnitCommand::Explore => {
-                matches!(t, UnitType::Warrior | UnitType::Scout | UnitType::Horseman | UnitType::Galley)
-            }
+            UnitCommand::Explore => crate::roles::can_explore(t),
             _ => true,
         }
     }
@@ -374,7 +372,7 @@ pub fn run_commands(
             UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => {} // `army::commands`
             UnitCommand::Bombard => {} // `bombard::arm`
             UnitCommand::Fortify => {
-                let warrior = u.utype == UnitType::Warrior;
+                let fortify_sound = audio.fortify.get(&crate::audio::sound_key(u.utype)).cloned();
                 u.fortified = true;
                 u.sentry = false;
                 u.moves = 0;
@@ -385,8 +383,8 @@ pub fn run_commands(
                     slot: "FORTIFY",
                     t: 0.0,
                 };
-                if warrior {
-                    commands.spawn(AudioPlayer(audio.fortify.clone()));
+                if let Some(sound) = fortify_sound {
+                    commands.spawn(AudioPlayer(sound));
                 }
             }
             UnitCommand::Sentry => {
@@ -576,7 +574,7 @@ pub fn spawn_bar(
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     let ink = Color::srgb(0.23, 0.14, 0.06);
     let layout = layouts.add(TextureAtlasLayout::from_grid(
         UVec2::splat(BTN_PX as u32),
@@ -585,17 +583,17 @@ pub fn spawn_bar(
         None,
         None,
     ));
-    let sheets = ["norm", "over", "down"].map(|s| assets.load(format!("gen/ui/unitbtns_{s}.png")));
+    let sheets = ["norm", "over", "down"].map(|s| assets.load(format!("cache/ui/unitbtns_{s}.png")));
     commands.insert_resource(ButtonArt {
         sheets: sheets.clone(),
     });
-    let turn_art = [0, 1, 2].map(|i| assets.load(format!("gen/ui/nextturn_{i}.png")));
+    let turn_art = [0, 1, 2].map(|i| assets.load(format!("cache/ui/nextturn_{i}.png")));
     commands.insert_resource(NextTurnArt(turn_art.clone()));
     // Civ3's bottom-right box: unit readout, or the end-turn prompt.
     // `Button` keeps map clicks from landing through it.
     commands
         .spawn((
-            ImageNode::new(assets.load("gen/ui/box_right.png")),
+            ImageNode::new(assets.load("cache/ui/box_right.png")),
             Button,
             InfoBox,
             Node {
@@ -1097,7 +1095,7 @@ mod tests {
             citizens: crate::citizens::new_pool(0, 1),
             food: 0,
             shields: 0,
-            production: Production::Warrior,
+            production: Production::named("Warrior"),
             queue: vec![],
             buildings: vec![],
             culture: 0,
@@ -1112,7 +1110,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(map);
         app.init_resource::<Civilizations>();
-        app.insert_resource(Treasury([12, 3, 0, 0]));
+        app.insert_resource(Treasury(crate::civs::pad(&[12, 3, 0, 0])));
         app.add_systems(Update, update_gold);
         let line = app
             .world_mut()
@@ -1121,13 +1119,13 @@ mod tests {
         app.world_mut().spawn(city);
         // Five units, four free: one gold of support against one of tax.
         for _ in 0..5 {
-            app.world_mut().spawn(Unit::new(0, UnitType::Warrior, x, y));
+            app.world_mut().spawn(Unit::new(0, UnitType::named("Warrior"), x, y));
         }
         app.update();
         let shown = |app: &App| app.world().get::<Text>(line).unwrap().0.clone();
         assert_eq!(shown(&app), "12 Gold (+0 per turn)");
         // A sixth unit tips it into the red.
-        app.world_mut().spawn(Unit::new(0, UnitType::Warrior, x, y));
+        app.world_mut().spawn(Unit::new(0, UnitType::named("Warrior"), x, y));
         app.update();
         assert_eq!(shown(&app), "12 Gold (-1 per turn)");
         assert_ne!(

@@ -77,7 +77,7 @@ fn complete(world: &mut World, choice: Choice) {
     if world.get::<City>(choice.city).unwrap().size() == 0 {
         // The final foreign race taken records this as a razed city.
         if nationality != crate::civs::roster_index(city.civ)
-            && let Some(victim) = (0..crate::civs::CIV_COUNT).find(|&c| crate::civs::roster_index(c) == nationality)
+            && let Some(victim) = (0..crate::civs::civ_count()).find(|&c| crate::civs::roster_index(c) == nationality)
         {
             let mut dip = world.resource_mut::<crate::diplomacy::Diplomacy>();
             let record = dip.rel.rec_mut(crate::research::slot(victim), crate::research::slot(city.civ));
@@ -134,7 +134,7 @@ pub fn show(
     let Some(choice) = choice else { return; };
     if roots.iter().any(|(_, r)| r.0 == choice.city) { return; }
     let city = cities.get(choice.city).unwrap();
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     commands.spawn((AbandonRoot(choice.city), GlobalZIndex(110), Node {
         width: Val::Percent(100.0), height: Val::Percent(100.0),
         justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default()
@@ -142,7 +142,7 @@ pub fn show(
         .with_children(|root| { root.spawn((Node {
             width: Val::Px(460.0), max_width: Val::Percent(95.0), padding: UiRect::all(Val::Px(24.0)),
             flex_direction: FlexDirection::Column, row_gap: Val::Px(16.0), ..default()
-        }, ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
+        }, ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
             BackgroundColor(Color::srgb(0.94, 0.91, 0.77))))
             .with_children(|panel| {
                 panel.spawn((Text::new(format!("Produce {} and abandon {}?\nThis will use the city's last {} {}.",
@@ -211,13 +211,13 @@ mod tests {
     #[test]
     fn keeping_or_zooming_preserves_population_stock_and_random_state() {
         for button in [ScreenButton::AbandonNo, ScreenButton::AbandonZoom] {
-            let (mut app, entity) = pending(Production::Worker, 1);
+            let (mut app, entity) = pending(Production::named("Worker"), 1);
             let before = app.world().get::<City>(entity).unwrap().citizens.clone();
             let zoom = matches!(button, ScreenButton::AbandonZoom);
             answer(&mut app, button);
             let city = app.world().get::<City>(entity).unwrap();
             assert_eq!(city.citizens, before);
-            assert_eq!((city.food, city.shields), (10, city.price(Production::Worker)));
+            assert_eq!((city.food, city.shields), (10, city.price(Production::named("Worker"))));
             assert_eq!(app.world().resource::<crate::combat::CombatRng>().0.state(), 1);
             assert!(!app.world().resource::<Abandon>().blocks(0));
             assert_eq!(app.world().resource::<CityView>().0, zoom.then_some(entity));
@@ -227,8 +227,8 @@ mod tests {
 
     #[test]
     fn acceptance_produces_the_unit_removes_city_and_replaces_capital() {
-        for (production, size, expected) in [(Production::Worker, 1, UnitType::Worker),
-            (Production::Settler, 2, UnitType::Settler)] {
+        for (production, size, expected) in [(Production::named("Worker"), 1, UnitType::named("Worker")),
+            (Production::named("Settler"), 2, UnitType::named("Settler"))] {
             let (mut app, entity) = pending(production, size);
             let replacement = app.world_mut().spawn(City::new(0, "Home", 30, 30)).id();
             let visual = app.world_mut().spawn(crate::cities::CitySprite(entity)).id();
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn final_foreign_citizen_sets_unit_nationality_and_razed_counter() {
-        let (mut app, entity) = pending(Production::Worker, 1);
+        let (mut app, entity) = pending(Production::named("Worker"), 1);
         app.world_mut().get_mut::<City>(entity).unwrap().set_nationality(1);
         answer(&mut app, ScreenButton::AbandonYes);
         assert!(app.world().get::<City>(entity).is_none());
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn enter_keeps_the_city_as_the_first_dialog_choice() {
-        let (mut app, entity) = pending(Production::Worker, 1);
+        let (mut app, entity) = pending(Production::named("Worker"), 1);
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Enter);
         app.update();
         assert_eq!(app.world().get::<City>(entity).unwrap().size(), 1);
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn citizens_of_an_absent_race_survive_native_payment() {
-        let (mut app, entity) = pending(Production::Worker, 1);
+        let (mut app, entity) = pending(Production::named("Worker"), 1);
         let absent = (0..31).find(|r| !crate::civs::players().contains(r)).unwrap();
         app.world_mut().get_mut::<City>(entity).unwrap().citizens.get_mut(0).unwrap().race = absent as i32;
         answer(&mut app, ScreenButton::AbandonYes);
@@ -291,8 +291,8 @@ mod tests {
 
     #[test]
     fn stale_choice_cannot_consume_a_changed_city() {
-        let (mut app, entity) = pending(Production::Worker, 1);
-        app.world_mut().get_mut::<City>(entity).unwrap().production = Production::Warrior;
+        let (mut app, entity) = pending(Production::named("Worker"), 1);
+        app.world_mut().get_mut::<City>(entity).unwrap().production = Production::named("Warrior");
         answer(&mut app, ScreenButton::AbandonYes);
         assert_eq!(app.world().get::<City>(entity).unwrap().size(), 1);
         assert_eq!(app.world().resource::<crate::combat::CombatRng>().0.state(), 1);

@@ -105,7 +105,7 @@ pub fn fog_for(reveal: bool, t: &Tile) -> Fog {
 /// Civ3's fog sheet, written by the `fog` stage of `tools/prep_assets.py`:
 /// 9x9 cells of 128x64 that are black with the terrain's remaining
 /// brightness in the alpha channel.
-pub const FOG_SHEET: &str = "gen/terrain/fog.png";
+pub const FOG_SHEET: &str = "cache/terrain/fog.png";
 
 /// How much of a tile the fog leaves: 0 never seen, 1 remembered, 2 lit.
 fn vertex_fog(reveal: bool, t: &Tile) -> u32 {
@@ -202,7 +202,7 @@ pub fn spawn_terrain(
                 let sheet = if mouth { "deltaRivers" } else { "mtnRivers" };
                 commands.spawn((
                     Sprite {
-                        image: assets.load(format!("gen/terrain/sheets/{sheet}.png")),
+                        image: assets.load(format!("cache/terrain/sheets/{sheet}.png")),
                         rect: Some(cell_rect((river % 4) as u32, (river / 4) as u32)),
                         ..default()
                     },

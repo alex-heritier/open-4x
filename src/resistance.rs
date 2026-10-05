@@ -18,22 +18,22 @@ use civ3mapgen::population::Citizen;
 use civ3mapgen::resistance::{self as native, Standing};
 
 use crate::cities::City;
-use crate::civs::CIV_COUNT;
-use crate::rules_data::{CULT, DIFF_QUELLED, GOVT_ASSIMILATION, GOVT_RESISTANCE};
+use crate::civs::{CIV_CAP, civ_count};
+use crate::ruleset::{CULT, DIFF_QUELLED, GOVT_ASSIMILATION, GOVT_RESISTANCE};
 
 /// The civ playing a RACE row (`0x539D60`); `None` when nobody does.
 pub fn civ_of_race(race: i32) -> Option<usize> {
-    (0..CIV_COUNT).find(|&c| crate::civs::roster_index(c) as i32 == race)
+    (0..civ_count()).find(|&c| crate::civs::roster_index(c) as i32 == race)
 }
 
 /// What the rolls read about every civ, taken once per use.
 #[derive(Clone, Debug)]
 pub struct Nations {
     pub turn: i32,
-    pub rating: [i32; CIV_COUNT],
-    pub govt: [usize; CIV_COUNT],
-    pub cities: [i32; CIV_COUNT],
-    pub war: [[bool; CIV_COUNT]; CIV_COUNT],
+    pub rating: [i32; CIV_CAP],
+    pub govt: [usize; CIV_CAP],
+    pub cities: [i32; CIV_CAP],
+    pub war: [[bool; CIV_CAP]; CIV_CAP],
 }
 
 impl Nations {
@@ -41,12 +41,12 @@ impl Nations {
     pub fn current() -> Self {
         let mut n = Nations {
             turn: crate::realm::turn() as i32,
-            rating: [0; CIV_COUNT],
-            govt: [0; CIV_COUNT],
-            cities: [0; CIV_COUNT],
-            war: [[false; CIV_COUNT]; CIV_COUNT],
+            rating: [0; CIV_CAP],
+            govt: [0; CIV_CAP],
+            cities: [0; CIV_CAP],
+            war: [[false; CIV_CAP]; CIV_CAP],
         };
-        for civ in 0..CIV_COUNT {
+        for civ in 0..civ_count() {
             crate::realm::read(civ, |r| {
                 n.rating[civ] = r.rating;
                 n.govt[civ] = r.govt;
@@ -136,7 +136,7 @@ pub fn city_step(city: &mut City, police: i32, n: &Nations, rng: &mut crate::rng
         out.push(Notice::Assimilated(assimilated));
     }
     let before = resisters(city);
-    let quelling = police * DIFF_QUELLED[crate::research::DIFFICULTY];
+    let quelling = police * DIFF_QUELLED[crate::scenario::difficulty()];
     if before > 0 && quelling > 0 {
         let slots = ids(city);
         let mut pool: Vec<Citizen> = slots.iter().map(|&i| city.citizens.slots()[i].clone().unwrap()).collect();
@@ -165,10 +165,10 @@ mod tests {
     fn nations(war: bool) -> Nations {
         let mut n = Nations {
             turn: 40,
-            rating: [100; CIV_COUNT],
-            govt: [1; CIV_COUNT],
-            cities: [3; CIV_COUNT],
-            war: [[false; CIV_COUNT]; CIV_COUNT],
+            rating: [100; CIV_CAP],
+            govt: [1; CIV_CAP],
+            cities: [3; CIV_CAP],
+            war: [[false; CIV_CAP]; CIV_CAP],
         };
         n.war[0][1] = war;
         n.war[1][0] = war;

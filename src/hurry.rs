@@ -163,7 +163,7 @@ pub fn quote(city: &City, how: i32, gold: u32, buyer: Buyer) -> Result<Offer, Re
     let rem = cost - s;
     let discount = |v: i32, mode: u8| match buyer {
         Buyer::Human => v,
-        Buyer::Ai(t) => ai_handicap(v, mode, t, crate::research::DIFFICULTY as i32),
+        Buyer::Ai(t) => ai_handicap(v, mode, t, crate::scenario::difficulty() as i32),
     };
     match how {
         method::PAY => {
@@ -262,43 +262,43 @@ mod tests {
 
     #[test]
     fn the_validator_checks_in_the_executables_order() {
-        let mut c = city(7, 0, Production::Warrior);
-        let cost = u32::from(c.price(Production::Warrior));
+        let mut c = city(7, 0, Production::named("Warrior"));
+        let cost = u32::from(c.price(Production::named("Warrior")));
         assert_eq!(quote(&c, method::PAY, 1000, Buyer::Human), Ok(Offer::Gold(cost * 8)));
         assert_eq!(
             quote(&c, method::PAY, 1, Buyer::Human),
             Err(Refusal::NotEnoughGold(cost * 8))
         );
         assert_eq!(quote(&c, method::NONE, 1000, Buyer::Human), Err(Refusal::Unavailable));
-        c.production = Production::Palace;
+        c.production = Production::named("Palace");
         assert_eq!(quote(&c, method::PAY, 1000, Buyer::Human), Err(Refusal::Cannot));
         c.unrest = 1;
         assert_eq!(quote(&c, method::PAY, 1000, Buyer::Human), Err(Refusal::Disorder));
-        let full = city(3, 1000, Production::Warrior);
+        let full = city(3, 1000, Production::named("Warrior"));
         assert_eq!(quote(&full, method::PAY, 1000, Buyer::Human), Err(Refusal::NotNecessary));
     }
 
     #[test]
     fn a_size_one_city_cannot_whip_and_half_the_size_is_the_limit() {
-        let c = city(1, 1, Production::Warrior);
+        let c = city(1, 1, Production::named("Warrior"));
         assert_eq!(
             quote(&c, method::FORCED_LABOR, 0, Buyer::Human),
             Err(Refusal::NotEnoughPeople(1))
         );
-        let c = city(2, 1, Production::Warrior);
+        let c = city(2, 1, Production::named("Warrior"));
         assert_eq!(quote(&c, method::FORCED_LABOR, 0, Buyer::Human), Ok(Offer::People(1)));
     }
 
     #[test]
     fn whipping_fills_the_box_kills_and_starts_the_timer() {
         let map = GameMap::generate();
-        let mut c = city(4, 1, Production::Warrior);
+        let mut c = city(4, 1, Production::named("Warrior"));
         let mut gold = 0;
         apply(&map, &mut c, &HashSet::new(), Offer::People(1), &mut gold, &mut crate::rng::MapRng::new(1));
         assert_eq!(c.size(), 3);
-        assert_eq!(c.shields, c.price(Production::Warrior));
+        assert_eq!(c.shields, c.price(Production::named("Warrior")));
         assert_eq!(c.hurry_timer, 20);
-        let mut c = city(4, 1, Production::Warrior);
+        let mut c = city(4, 1, Production::named("Warrior"));
         let mut gold = 100;
         apply(&map, &mut c, &HashSet::new(), Offer::Gold(36), &mut gold, &mut crate::rng::MapRng::new(1));
         assert_eq!((c.size(), gold), (4, 64));
@@ -308,12 +308,12 @@ mod tests {
     fn shrinking_across_a_limit_spills_food_without_a_granary() {
         // S1/S2 (`hurry.md` 9): 7 -> 6 crosses the town limit.
         let map = GameMap::generate();
-        let mut c = city(7, 0, Production::Warrior);
+        let mut c = city(7, 0, Production::named("Warrior"));
         c.food = 25;
         remove_citizens(&map, &mut c, &HashSet::new(), 1, &mut crate::rng::MapRng::new(1));
         assert_eq!((c.size(), c.food), (6, 0));
         // S4: 5 -> 4 keeps the store unchanged, even when the box is full.
-        let mut c = city(5, 0, Production::Warrior);
+        let mut c = city(5, 0, Production::named("Warrior"));
         c.food = 20;
         remove_citizens(&map, &mut c, &HashSet::new(), 1, &mut crate::rng::MapRng::new(1));
         assert_eq!((c.size(), c.food), (4, 20));

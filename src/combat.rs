@@ -20,7 +20,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use civ3mapgen::combat as exe;
 
-use crate::cities::{Capital, City, CityView, Production};
+use crate::cities::{Capital, City, CityView};
 use crate::features::{MessageBoard, post};
 use crate::map::*;
 use crate::production_prompt::ProductionPrompts;
@@ -91,7 +91,7 @@ pub enum Rest {
 /// Where `u` is resting: in one of its own cities, with or without Barracks.
 pub fn rest_of<'a>(u: &Unit, mut cities: impl Iterator<Item = &'a City>) -> Rest {
     match cities.find(|c| c.civ == u.civ && (c.x, c.y) == (u.x, u.y)) {
-        Some(c) if c.buildings.contains(&Production::Barracks) => Rest::Barracks,
+        Some(c) if crate::citycalc::has_flag(c, crate::roster::imp::VETERAN_GROUND_UNITS) => Rest::Barracks,
         Some(_) => Rest::City,
         None => Rest::Field,
     }
@@ -146,9 +146,9 @@ impl Hold {
         // sorted out by `citycalc::active`.
         let list: Vec<exe::BuildingDefense> = crate::citycalc::active(city)
             .filter(|(_, b)| b.defense > 0)
-            .map(|(p, b)| exe::BuildingDefense {
+            .map(|(_p, b)| exe::BuildingDefense {
                 pct: b.defense,
-                town_limited: if p == Production::Walls { 8 } else { 0 },
+                town_limited: b.bombard_defense,
                 obsolete: false,
             })
             .collect();
@@ -192,7 +192,7 @@ fn barbarian_term(att: &Unit, dfn: &Unit, for_attacker: bool) -> i32 {
         return 0;
     }
     let wall = crate::naval::wonders(me) & crate::roster::wonder::DOUBLE_VS_BARBARIANS != 0;
-    exe::barbarian_term(exe::DIFF_VS_BARBARIAN_PCT[crate::research::DIFFICULTY], wall)
+    exe::barbarian_term(exe::DIFF_VS_BARBARIAN_PCT[crate::scenario::difficulty()], wall)
 }
 
 pub fn round_odds(map: &GameMap, att: &Unit, dfn: &Unit, hold: Option<Hold>) -> i32 {
@@ -602,7 +602,7 @@ impl Realm<'_, '_> {
         // `0x4BB090`: the foreigners may resist the new owner. City counts
         // are taken after the transfer.
         let mut nations = crate::resistance::Nations::current();
-        for civ in 0..crate::civs::CIV_COUNT {
+        for civ in 0..crate::civs::civ_count() {
             nations.cities[civ] = self.cities.iter().filter(|(_, c)| c.civ == civ).count() as i32;
         }
         nations.war[by][old] = true;
@@ -1220,7 +1220,7 @@ fn resolve(
             // The melee callers kill only the loser (0x4A63EF / 0x4A6EF2).
             // 0x5BBBC0 recursively removes cargo, not ordinary tile occupants.
             let loser_barbarian = units.get(loser).is_ok_and(|(_, u)| crate::civs::is_barbarian(u.civ));
-            let leaders: Vec<usize> = units.iter().filter(|(_, u)| u.utype == UnitType::Leader).map(|(_, u)| u.civ).collect();
+            let leaders: Vec<usize> = units.iter().filter(|(_, u)| u.utype == crate::roles::leader()).map(|(_, u)| u.civ).collect();
             let leader_alive = |civ: usize| leaders.contains(&civ);
             if let Ok((_, w)) = units.get(winner)
                 && crate::golden::unit_triggers(w.utype, loser_barbarian, w.civ)
@@ -1241,7 +1241,7 @@ fn resolve(
                 {
                     u.made_leader = true;
                     let (civ, x, y) = (u.civ, u.x, u.y);
-                    spawn_unit(commands, art, UnitType::Leader, x, y, civ);
+                    spawn_unit(commands, art, crate::roles::leader(), x, y, civ);
                     if civ == realm.civs.viewer() {
                         post(&mut realm.board, format!("Our victorious {name} has produced a Great Leader!"));
                     }
@@ -1269,13 +1269,13 @@ fn resolve(
                     commands.entity(v).despawn();
                     continue;
                 }
-                if u.utype == UnitType::Settler {
+                if crate::roles::founds_cities(u.utype) {
                     // "A captured Settler becomes two Workers" (`MANUAL`).
                     let (x, y) = (u.x, u.y);
                     let nationality = u.nationality;
                     commands.entity(v).despawn();
                     for _ in 0..2 {
-                        let w = spawn_unit(commands, art, UnitType::Worker, x, y, att_civ);
+                        let w = spawn_unit(commands, art, crate::roles::captured(), x, y, att_civ);
                         commands
                             .entity(w)
                             .entry::<Unit>()
@@ -1340,6 +1340,7 @@ fn advance_attacker(map: &GameMap, u: &mut Unit, to: (i32, i32)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cities::Production;
     use crate::units::{Clip, UnitClipSet};
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
@@ -1383,7 +1384,7 @@ mod tests {
     }
 
     fn warrior(civ: usize, x: i32, y: i32) -> Unit {
-        Unit::new(civ, UnitType::Warrior, x, y)
+        Unit::new(civ, UnitType::named("Warrior"), x, y)
     }
 
     #[test]
@@ -1478,7 +1479,7 @@ mod tests {
 
     #[test]
     fn the_odds_are_clamped_like_the_exe() {
-        let mut att = Unit::new(0, UnitType::Warrior, 1, 1);
+        let mut att = Unit::new(0, UnitType::named("Warrior"), 1, 1);
         att.damage = 0;
         // Equal strength with no bonus is an even fight, 512 of 1024.
         let map = map_of(tile(Base::Ocean, Relief::Flat, Cover::Bare));
@@ -1533,10 +1534,10 @@ mod tests {
             for odds in [200, 512, 900] {
                 for defender_can_step_back in [false, true] {
                     for (a_type, d_type, city) in [
-                        (UnitType::Horseman, UnitType::Warrior, false),
-                        (UnitType::Warrior, UnitType::Horseman, false),
-                        (UnitType::Horseman, UnitType::Horseman, false),
-                        (UnitType::Warrior, UnitType::Horseman, true),
+                        (UnitType::named("Horseman"), UnitType::named("Warrior"), false),
+                        (UnitType::named("Warrior"), UnitType::named("Horseman"), false),
+                        (UnitType::named("Horseman"), UnitType::named("Horseman"), false),
+                        (UnitType::named("Warrior"), UnitType::named("Horseman"), true),
                     ] {
                         let mut att = Unit::new(0, a_type, 1, 1);
                         let mut dfn = Unit::new(1, d_type, 2, 1);
@@ -1579,7 +1580,7 @@ mod tests {
             Entity::from_raw_u32(2).unwrap(),
             Entity::from_raw_u32(3).unwrap(),
         );
-        let worker = Unit::new(1, UnitType::Worker, 2, 1);
+        let worker = Unit::new(1, UnitType::named("Worker"), 2, 1);
         let e4 = Entity::from_raw_u32(4).unwrap();
         let stack = vec![
             (e1, hurt),
@@ -1622,8 +1623,8 @@ mod tests {
             citizens: crate::citizens::new_pool(civ, size),
             food: 3,
             shields: 4,
-            production: Production::Warrior,
-            queue: vec![Production::Temple],
+            production: Production::named("Warrior"),
+            queue: vec![Production::named("Temple")],
             buildings: vec![],
             culture: 0,
             founded: 1,
@@ -1635,7 +1636,7 @@ mod tests {
         let u = warrior(0, 1, 1);
         let mut home = city_at(0, 1, 1, 3);
         assert_eq!(rest_of(&u, [&home].into_iter()), Rest::City);
-        home.buildings.push(Production::Barracks);
+        home.buildings.push(Production::named("Barracks"));
         assert_eq!(rest_of(&u, [&home].into_iter()), Rest::Barracks);
         // An enemy city heals nobody.
         let foreign = city_at(1, 1, 1, 3);
@@ -1647,17 +1648,17 @@ mod tests {
     fn walls_add_half_again_to_a_town_but_not_to_a_city() {
         let mut town = city_at(1, 2, 1, 4);
         assert_eq!(Hold::of(&town).building_pct, 0);
-        town.buildings.push(Production::Walls);
+        town.buildings.push(Production::named("Walls"));
         assert_eq!(Hold::of(&town), Hold { size: 4, resisters: 0, building_pct: 50 });
         // Above a town they stop counting (`BLDG +0x98`), Civil Defense does not.
         let mut city = city_at(1, 2, 1, 9);
-        city.buildings.push(Production::Walls);
+        city.buildings.push(Production::named("Walls"));
         assert_eq!(Hold::of(&city).building_pct, 0);
-        city.buildings.push(Production::CivilDefense);
+        city.buildings.push(Production::named("Civil Defense"));
         assert_eq!(Hold::of(&city).building_pct, 50);
         // The best bonus counts, not the sum.
         let mut both = city_at(1, 2, 1, 4);
-        both.buildings.extend([Production::Walls, Production::CivilDefense]);
+        both.buildings.extend([Production::named("Walls"), Production::named("Civil Defense")]);
         assert_eq!(Hold::of(&both).building_pct, 50);
         // And the odds follow: walls make the defender likelier to win a round.
         let map = GameMap::generate();
@@ -1749,11 +1750,11 @@ mod tests {
         let clip = || test_clip(4);
         let mut art = UnitArt::default();
         for t in [
-            UnitType::Settler,
-            UnitType::Worker,
-            UnitType::Warrior,
-            UnitType::Scout,
-            UnitType::Leader,
+            UnitType::named("Settler"),
+            UnitType::named("Worker"),
+            UnitType::named("Warrior"),
+            UnitType::named("Scout"),
+            UnitType::named("Leader"),
         ] {
             art.insert(
                 t,
@@ -1821,11 +1822,11 @@ mod tests {
                 port.coastal = true;
                 app.world_mut().spawn(port);
             }
-            let ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 1, 1)).id();
+            let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 1, 1)).id();
             let mut cargo = warrior(0, 1, 1);
             cargo.carrier = Some(ship);
             let a = app.world_mut().spawn(cargo).id();
-            let worker = app.world_mut().spawn(Unit::new(1, UnitType::Worker, 2, 1)).id();
+            let worker = app.world_mut().spawn(Unit::new(1, UnitType::named("Worker"), 2, 1)).id();
             attack(&mut app, a, (2, 1));
             settle(&mut app);
             let u = unit(&app, a).unwrap();
@@ -1850,7 +1851,7 @@ mod tests {
             let i = map.idx(1, 1);
             map.tiles[i].base = Base::Coast;
             drop(map);
-            let ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 1, 1)).id();
+            let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 1, 1)).id();
             let mut u = Unit::new(0, marine, 1, 1);
             u.carrier = Some(ship);
             u.attacked = attacked;
@@ -1879,7 +1880,7 @@ mod tests {
             let att = warrior(0, 1, 1);
             let mut dfn = warrior(1, 2, 1);
             dfn.fortified = true;
-            let shooter = Unit::new(1, UnitType::Catapult, 2, 1);
+            let shooter = Unit::new(1, UnitType::named("Catapult"), 2, 1);
             let a = app.world_mut().spawn(att.clone()).id();
             let d = app.world_mut().spawn(dfn.clone()).id();
             let s = app.world_mut().spawn(shooter.clone()).id();
@@ -1926,9 +1927,9 @@ mod tests {
         let archer = Entity::from_bits(2);
         let catapult = Entity::from_bits(3);
         let mut stack = vec![
-            (defender, Unit::new(1, UnitType::Catapult, 2, 1)),
-            (archer, Unit::new(1, UnitType::Archer, 2, 1)),
-            (catapult, Unit::new(1, UnitType::Catapult, 2, 1)),
+            (defender, Unit::new(1, UnitType::named("Catapult"), 2, 1)),
+            (archer, Unit::new(1, UnitType::named("Archer"), 2, 1)),
+            (catapult, Unit::new(1, UnitType::named("Catapult"), 2, 1)),
         ];
         assert_eq!(supporting_shooter(&att, defender, &stack), Some(catapult));
         stack[2].1.defensive_fired = true;
@@ -1948,15 +1949,15 @@ mod tests {
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
             let mut dfn = warrior(1, 2, 1);
             dfn.level = Level::Elite;
-            dfn.utype = UnitType::Spearman;
+            dfn.utype = UnitType::named("Spearman");
             app.world_mut().spawn(dfn);
-            let s = app.world_mut().spawn(Unit::new(1, UnitType::Catapult, 2, 1)).id();
+            let s = app.world_mut().spawn(Unit::new(1, UnitType::named("Catapult"), 2, 1)).id();
             app.world_mut().spawn(City::new(1, "Rome", 2, 1));
             attack(&mut app, a, (2, 1));
             settle(&mut app);
             assert!(unit(&app, s).unwrap().defensive_fired);
             // Ensure the stack is defended even when the first defender died.
-            app.world_mut().spawn(Unit::new(1, UnitType::Spearman, 2, 1));
+            app.world_mut().spawn(Unit::new(1, UnitType::named("Spearman"), 2, 1));
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
             attack(&mut app, a, (2, 1));
             app.update();
@@ -1971,12 +1972,12 @@ mod tests {
             let mut retreats = 0;
             for seed in 0..60 {
                 let mut app = arena(seed);
-                let fast = UnitType::Horseman;
-                let slow = UnitType::Warrior;
+                let fast = UnitType::named("Horseman");
+                let slow = UnitType::named("Warrior");
                 let (a_type, d_type) = if attacker_fast { (fast, slow) } else { (slow, fast) };
                 let a = app.world_mut().spawn(Unit::new(0, a_type, 1, 1)).id();
                 let d = app.world_mut().spawn(Unit::new(1, d_type, 2, 1)).id();
-                let bystander = app.world_mut().spawn(Unit::new(1, UnitType::Worker, 2, 1)).id();
+                let bystander = app.world_mut().spawn(Unit::new(1, UnitType::named("Worker"), 2, 1)).id();
                 attack(&mut app, a, (2, 1));
                 app.update();
                 let seq = app.world().resource::<ActiveCombat>().0.as_ref().unwrap();
@@ -2012,7 +2013,7 @@ mod tests {
         for seed in 0..40 {
             let mut app = arena(seed);
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
-            let d = app.world_mut().spawn(Unit::new(1, UnitType::Horseman, 2, 1)).id();
+            let d = app.world_mut().spawn(Unit::new(1, UnitType::named("Horseman"), 2, 1)).id();
             attack(&mut app, a, (2, 1));
             app.update();
             let seq = app.world().resource::<ActiveCombat>().0.as_ref().unwrap();
@@ -2031,9 +2032,9 @@ mod tests {
         for seed in 0..40 {
             for condition in ["city", "blocked", "fast attacker"] {
                 let mut app = arena(seed);
-                let a_type = if condition == "fast attacker" { UnitType::Horseman } else { UnitType::Warrior };
+                let a_type = if condition == "fast attacker" { UnitType::named("Horseman") } else { UnitType::named("Warrior") };
                 let a = app.world_mut().spawn(Unit::new(0, a_type, 1, 1)).id();
-                let d = app.world_mut().spawn(Unit::new(1, UnitType::Horseman, 2, 1)).id();
+                let d = app.world_mut().spawn(Unit::new(1, UnitType::named("Horseman"), 2, 1)).id();
                 if condition == "city" {
                     app.world_mut().spawn(City::new(1, "Rome", 2, 1));
                 } else if condition == "blocked" {
@@ -2055,7 +2056,7 @@ mod tests {
     fn retreat_destinations_wrap_and_reject_impassable_or_foreign_occupied_tiles() {
         let mut map = grass();
         let att = warrior(0, 4, 1);
-        let dfn = Unit::new(1, UnitType::Horseman, 5, 1);
+        let dfn = Unit::new(1, UnitType::named("Horseman"), 5, 1);
         assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()), Some((0, 1)));
         let friendly = warrior(1, 0, 1);
         assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::once(&friendly), std::iter::empty()), Some((0, 1)));
@@ -2067,7 +2068,7 @@ mod tests {
         map.tiles[i].base = Base::Ocean;
         assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()), None);
         let att = warrior(0, 1, 1);
-        let dfn = Unit::new(1, UnitType::Horseman, 1, 0);
+        let dfn = Unit::new(1, UnitType::named("Horseman"), 1, 0);
         assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()), None, "no escape off the map's pole");
     }
 
@@ -2112,7 +2113,7 @@ mod tests {
             let mut app = arena(seed);
             {
                 let mut art = app.world_mut().resource_mut::<UnitArt>();
-                art.clips_mut(UnitType::Warrior)
+                art.clips_mut(UnitType::named("Warrior"))
                     .insert("ATTACK1".to_string(), test_clip(8));
             }
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
@@ -2171,7 +2172,7 @@ mod tests {
 
     #[test]
     fn losing_a_defender_preserves_other_units_on_its_tile() {
-        for bystander in [UnitType::Warrior, UnitType::Worker, UnitType::Catapult] {
+        for bystander in [UnitType::named("Warrior"), UnitType::named("Worker"), UnitType::named("Catapult")] {
             let mut proved = false;
             for seed in 0..60 {
                 let mut app = arena(seed);
@@ -2202,7 +2203,7 @@ mod tests {
             let mut app = arena(seed);
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
             let d = app.world_mut().spawn(warrior(1, 2, 1)).id();
-            let w = app.world_mut().spawn(Unit::new(1, UnitType::Worker, 2, 1)).id();
+            let w = app.world_mut().spawn(Unit::new(1, UnitType::named("Worker"), 2, 1)).id();
             attack(&mut app, a, (2, 1));
             settle(&mut app);
             if unit(&app, a).is_none() { continue; }
@@ -2230,11 +2231,11 @@ mod tests {
         let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
         let settler = app
             .world_mut()
-            .spawn(Unit::new(1, UnitType::Settler, 2, 1))
+            .spawn(Unit::new(1, UnitType::named("Settler"), 2, 1))
             .id();
         let worker = app
             .world_mut()
-            .spawn(Unit::new(1, UnitType::Worker, 2, 1))
+            .spawn(Unit::new(1, UnitType::named("Worker"), 2, 1))
             .id();
         attack(&mut app, a, (2, 1));
         settle(&mut app);
@@ -2246,7 +2247,7 @@ mod tests {
             .world_mut()
             .query::<&Unit>()
             .iter(app.world())
-            .filter(|u| u.civ == 0 && u.utype == UnitType::Worker)
+            .filter(|u| u.civ == 0 && u.utype == UnitType::named("Worker"))
             .inspect(|u| assert_eq!(u.nationality, crate::civs::roster_index(1), "settler captives retain their nationality too"))
             .count();
         assert_eq!(workers, 3); // the captured Worker plus two from the Settler
@@ -2265,7 +2266,7 @@ mod tests {
         let mut app = arena(1);
         let scout = app
             .world_mut()
-            .spawn(Unit::new(0, UnitType::Scout, 1, 1))
+            .spawn(Unit::new(0, UnitType::named("Scout"), 1, 1))
             .id();
         app.world_mut().spawn(warrior(1, 2, 1));
         attack(&mut app, scout, (2, 1));
@@ -2355,7 +2356,7 @@ mod tests {
         let mut app = arena(1);
         let a = app
             .world_mut()
-            .spawn(Unit::new(0, UnitType::Worker, 1, 1))
+            .spawn(Unit::new(0, UnitType::named("Worker"), 1, 1))
             .id();
         let city = app.world_mut().spawn(city_at(1, 2, 1, 4)).id();
         attack(&mut app, a, (2, 1));
@@ -2474,7 +2475,7 @@ mod tests {
         app.insert_resource(at_war());
         app.init_resource::<crate::unit_picker::UnitPicker>();
         app.add_systems(Update, crate::units::drive_movement.before(start_attacks));
-        let mut chariot = Unit::new(0, UnitType::Chariot, 1, 1);
+        let mut chariot = Unit::new(0, UnitType::named("Chariot"), 1, 1);
         chariot.path = [(2, 1)].into();
         let attacker = app.world_mut().spawn(chariot).id();
         let defender = app.world_mut().spawn(warrior(1, 2, 1)).id();

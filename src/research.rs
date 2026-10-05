@@ -18,14 +18,14 @@ use civ3mapgen::research::{Ctx, Dice, Event, NONE, World};
 use civ3mapgen::research_ai::{Profile, Tables, Valuer, category_mask_from_flags};
 
 use crate::cities::{City, Production};
-use crate::civs::{CIV_COUNT, RACES, CivilizationEnded, Civilizations, is_ai};
+use crate::civs::{CIV_CAP, civ_count, RACES, CivilizationEnded, Civilizations, is_ai};
 use crate::combat::CombatRng;
 use crate::diplomacy::Diplomacy;
 use crate::features::{MessageBoard, post};
 use crate::map::GameMap;
 use crate::rng::MapRng;
-use crate::roster::{BLDG_COUNT, UNIT_COUNT, upgrade_chain};
-use crate::rules_data::{self, ERA_NAMES, TECH_NAMES};
+use crate::roster::upgrade_chain;
+use crate::ruleset::{self as rules_data, ERA_NAMES, TECH_NAMES};
 use crate::units::{Turn, Unit, def};
 
 impl Dice for MapRng {
@@ -49,23 +49,25 @@ pub fn civ_of(slot: u32) -> usize {
 }
 
 /// `DIFF[2]` (Regent) and the standard `WSIZ` row.
-pub const DIFFICULTY: usize = 2;
-const WORLD_SIZE: usize = 2;
 
 /// A set of productions, one bit per `Production::index`.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Bits([u64; WORDS]);
-
-const WORDS: usize = (UNIT_COUNT + BLDG_COUNT).div_ceil(64);
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Bits(Vec<u64>);
 
 impl Bits {
-    const EMPTY: Bits = Bits([0; WORDS]);
+    const EMPTY: Bits = Bits(Vec::new());
 
     pub fn get(&self, i: usize) -> bool {
-        self.0[i / 64] >> (i % 64) & 1 != 0
+        self.0.get(i / 64).is_some_and(|w| w >> (i % 64) & 1 != 0)
     }
 
     pub fn set(&mut self, i: usize, on: bool) {
+        if i / 64 >= self.0.len() {
+            if !on {
+                return;
+            }
+            self.0.resize(i / 64 + 1, 0);
+        }
         if on {
             self.0[i / 64] |= 1 << (i % 64);
         } else {
@@ -77,22 +79,22 @@ impl Bits {
 /// What the city layer's plain functions (`City::buildable`) have to know
 /// about the rest of the game without ECS access. A process-wide setting
 /// like `civs::AI_MASK`; nothing is locked until the research world says so.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Access {
     /// Productions each civ cannot build yet (advance, civ, obsolescence,
     /// strategic resource).
-    locked: [Bits; CIV_COUNT],
+    locked: [Bits; CIV_CAP],
     /// Units each civ could not train even if nothing newer replaced them
     /// (the upgrade walk asks for these: the advance, the race, the goods).
-    lacking: [Bits; CIV_COUNT],
+    lacking: [Bits; CIV_CAP],
     /// Strategic and luxury goods each civ owns, one bit per `GOOD` row.
-    goods: [u32; CIV_COUNT],
+    goods: [u32; CIV_CAP],
     /// Great wonders built anywhere: nobody builds them twice.
     built: Bits,
 }
 
 impl Access {
-    const NONE: Access = Access { locked: [Bits::EMPTY; CIV_COUNT], lacking: [Bits::EMPTY; CIV_COUNT], goods: [0; CIV_COUNT], built: Bits::EMPTY };
+    const NONE: Access = Access { locked: [Bits::EMPTY; CIV_CAP], lacking: [Bits::EMPTY; CIV_CAP], goods: [0; CIV_CAP], built: Bits::EMPTY };
 }
 
 #[cfg(not(test))]
@@ -187,8 +189,8 @@ impl Research {
     pub fn new() -> Self {
         let mut world = World::new(rules_data::rules());
         world.scientific_leaders = true;
-        world.difficulty_cost_factor = rules_data::DIFFICULTY_COST_FACTOR[DIFFICULTY];
-        world.size_tech_rate = rules_data::WORLD_TECH_RATE[WORLD_SIZE];
+        world.difficulty_cost_factor = rules_data::DIFFICULTY_COST_FACTOR[crate::scenario::difficulty()];
+        world.size_tech_rate = rules_data::WORLD_TECH_RATE[crate::scenario::setup().size];
         let mut profiles = vec![Profile::default(); civ3mapgen::research::SLOTS];
         for (civ, race) in RACES.iter().enumerate() {
             let s = slot(civ);
@@ -199,6 +201,11 @@ impl Research {
             let me = &mut world.players[s as usize];
             me.interactive = !is_ai(civ);
             me.free_techs = race.free_techs;
+            // A scenario lead (or a save) names its own advances: they are
+            // all granted at the start, not just the first era's.
+            if crate::scenario::scenario().and_then(|s| s.leads.get(civ)).is_some_and(|l| !l.free_techs.is_empty()) {
+                me.free_techs = [NONE; 4];
+            }
             // RACE trait 3 is Scientific.
             me.scientific = race.traits >> 3 & 1 != 0;
             profiles[s as usize] = Profile {
@@ -231,7 +238,7 @@ impl Research {
         let Ok(n) = usize::try_from(n) else { return false };
         if n > rest.len() { return false; }
         let (leaders, rest) = rest.split_at(n);
-        if leaders.iter().any(|&c| c < 0 || c >= CIV_COUNT as i64) || !self.world.restore(rest) {
+        if leaders.iter().any(|&c| c < 0 || c >= civ_count() as i64) || !self.world.restore(rest) {
             return false;
         }
         self.started = started != 0;
@@ -353,7 +360,7 @@ impl Research {
 
     /// Refresh the bits `City::buildable` reads.
     fn sync_locks(&self) {
-        for civ in 0..CIV_COUNT {
+        for civ in 0..civ_count() {
             let mut mask = Bits::EMPTY;
             let mut lacking = Bits::EMPTY;
             for p in Production::all() {
@@ -378,8 +385,8 @@ impl Research {
     /// Active Great Library-type wonders (`research.md` 8). Read knowledge
     /// directly, rather than the previous frame's realm snapshot.
     fn refresh_wonders<'a>(&mut self, cities: impl Iterator<Item = &'a City>) {
-        let mut library = [false; CIV_COUNT];
-        let mut obsolete = [NONE; CIV_COUNT];
+        let mut library = [false; CIV_CAP];
+        let mut obsolete = [NONE; CIV_CAP];
         for city in cities {
             let civ = city.civ;
             let govt = crate::realm::read(civ, |r| r.govt as i32);
@@ -409,10 +416,13 @@ impl Research {
         self.started = true;
         let mut events = vec![];
         self.with_brain(dice, |w, ctx| {
-            for civ in 0..CIV_COUNT {
+            for civ in 0..civ_count() {
                 w.start_grants(slot(civ), &mut events, ctx);
+                if let Some(lead) = crate::scenario::scenario().and_then(|s| s.leads.get(civ)) {
+                    w.grant_known(slot(civ), &lead.free_techs, &mut events, ctx);
+                }
             }
-            for civ in 0..CIV_COUNT {
+            for civ in 0..civ_count() {
                 let s = slot(civ);
                 if w.players[s as usize].interactive {
                     w.choose_research(s, false, None, ctx.brain, ctx.dice);
@@ -544,20 +554,20 @@ pub fn refresh(
     cities: Query<&City>,
     units: Query<&Unit>,
 ) {
-    let mut rate = [0i32; CIV_COUNT];
-    let mut count = [0i32; CIV_COUNT];
-    let mut defenders = [0i32; CIV_COUNT];
+    let mut rate = [0i32; CIV_CAP];
+    let mut count = [0i32; CIV_CAP];
+    let mut defenders = [0i32; CIV_CAP];
     for c in &cities {
         rate[c.civ] += crate::citycalc::totals(&map, c).sci;
         count[c.civ] += 1;
     }
     for u in &units {
-        if def(u.utype).defense > 0 && def(u.utype).attack > 0 && u.civ < CIV_COUNT {
+        if def(u.utype).defense > 0 && def(u.utype).attack > 0 && u.civ < civ_count() {
             defenders[u.civ] += 1;
         }
     }
     research.world.turn = turn.0 as i32;
-    for civ in 0..CIV_COUNT {
+    for civ in 0..civ_count() {
         let s = slot(civ) as usize;
         let me = &mut research.world.players[s];
         me.rate = if me.science_until.is_some_and(|last| turn.0 as i32 <= last) {
@@ -622,7 +632,7 @@ pub fn spawn_leaders(
 ) {
     for civ in std::mem::take(&mut research.leaders) {
         let Some(city) = capital.0[civ].and_then(|e| cities.get(e).ok()).filter(|c| c.civ == civ) else { continue };
-        let e = crate::units::spawn_unit(&mut commands, &art, crate::units::UnitType::Leader, city.x, city.y, civ);
+        let e = crate::units::spawn_unit(&mut commands, &art, crate::roles::leader(), city.x, city.y, civ);
         commands.entity(e).entry::<Unit>().and_modify(|mut u| u.scientific_leader = true);
         if !is_ai(civ) { post(&mut board, format!("A Scientific Leader has emerged in {}!", city.name)); }
     }
@@ -637,7 +647,7 @@ mod tests {
     /// of the process-wide controller mask.
     fn game() -> Research {
         let mut r = Research::new();
-        for civ in 0..CIV_COUNT {
+        for civ in 0..civ_count() {
             let s = slot(civ);
             let human = civ == 0;
             r.world.players[s as usize].interactive = human;
@@ -677,7 +687,7 @@ mod tests {
         assert_eq!(leaders.len(), 1);
         assert_eq!((leaders[0].civ, leaders[0].x, leaders[0].y), (0, 10, 11));
         assert!(leaders[0].scientific_leader);
-        assert_eq!(leaders[0].utype, crate::units::UnitType::Leader);
+        assert_eq!(leaders[0].utype, crate::units::UnitType::named("Leader"));
         app.update();
         assert_eq!(app.world_mut().query::<&Unit>().iter(app.world()).count(), 1);
         // Successful rolls still consume their die when no capital exists.
@@ -706,7 +716,7 @@ mod tests {
         app.add_message::<CivilizationEnded>();
         let mut city = City::new(0, "Kyoto", 10, 10);
         city.work_tile(app.world().resource::<GameMap>(), (11, 10));
-        city.buildings.push(Production::Library);
+        city.buildings.push(Production::named("Library"));
         let mut map = app.world_mut().resource_mut::<GameMap>();
         let i = map.idx(11, 10);
         map.tiles[i].base = crate::map::Base::Coast;
@@ -775,7 +785,7 @@ mod tests {
         app.update();
         let r = app.world().resource::<Research>();
         assert!(r.knows(0, bw));
-        assert!(can_build(0, Production::Spearman), "the free advance unlocks production");
+        assert!(can_build(0, Production::named("Spearman")), "the free advance unlocks production");
         assert!(r.needs_choice(0), "choose new research after learning the target");
         assert!(app.world().resource::<MessageBoard>().text.contains("The Great Library"));
         let next = r.options(0)[0];
@@ -817,12 +827,12 @@ mod tests {
 
     #[test]
     fn production_prerequisites_come_from_the_roster() {
-        assert_eq!(required_tech(Production::Warrior), NONE);
-        assert_eq!(required_tech(Production::Archer), tech("Warrior Code"));
-        assert_eq!(required_tech(Production::Spearman), tech("Bronze Working"));
-        assert_eq!(required_tech(Production::Horseman), tech("Horseback Riding"));
-        assert_eq!(required_tech(Production::Granary), tech("Pottery"));
-        assert_eq!(required_tech(Production::Temple), tech("Ceremonial Burial"));
+        assert_eq!(required_tech(Production::named("Warrior")), NONE);
+        assert_eq!(required_tech(Production::named("Archer")), tech("Warrior Code"));
+        assert_eq!(required_tech(Production::named("Spearman")), tech("Bronze Working"));
+        assert_eq!(required_tech(Production::named("Horseman")), tech("Horseback Riding"));
+        assert_eq!(required_tech(Production::named("Granary")), tech("Pottery"));
+        assert_eq!(required_tech(Production::named("Temple")), tech("Ceremonial Burial"));
     }
 
     #[test]
@@ -846,7 +856,7 @@ mod tests {
         r.begin(&mut dice);
         assert!(r.needs_choice(0), "the human chooses");
         assert_eq!(r.target(0), None);
-        for civ in 1..CIV_COUNT {
+        for civ in 1..civ_count() {
             let t = r.target(civ).unwrap_or_else(|| panic!("civ {civ} has no target"));
             assert!(!r.knows(civ, t));
             assert!(r.world.can_research(slot(civ), t));
@@ -883,7 +893,7 @@ mod tests {
         let wc = tech("Warrior Code");
         // Japan starts without Warrior Code, so no Archers.
         assert!(!r.knows(0, wc));
-        assert!(!can_build(0, Production::Archer));
+        assert!(!can_build(0, Production::named("Archer")));
         r.pick(0, wc, &mut dice);
         r.world.players[slot(0) as usize].cities = 1;
         r.world.players[slot(0) as usize].rate = 5;
@@ -893,11 +903,11 @@ mod tests {
             r.finish_turn(0, 5, turns, &mut dice);
         }
         assert!(r.knows(0, wc), "no discovery in 60 turns");
-        assert!(can_build(0, Production::Archer));
+        assert!(can_build(0, Production::named("Archer")));
         // The human is asked again: the finished target is not re-run.
         assert!(r.needs_choice(0));
         // Rome (computer) started with it.
-        assert!(can_build(1, Production::Archer));
+        assert!(can_build(1, Production::named("Archer")));
     }
 
     #[test]
@@ -918,10 +928,10 @@ mod tests {
         let mut dice = Rng::new(5);
         r.begin(&mut dice);
         let bw = tech("Bronze Working");
-        assert!(!r.knows(0, bw) && !can_build(0, Production::Spearman));
+        assert!(!r.knows(0, bw) && !can_build(0, Production::named("Spearman")));
         let ev = r.award(0, bw, &mut dice);
         assert!(ev.iter().any(|e| matches!(e, Event::Acquired { tech, by_research: false, .. } if *tech == bw)));
-        assert!(can_build(0, Production::Spearman));
+        assert!(can_build(0, Production::named("Spearman")));
         // Awarding a known advance changes nothing.
         assert!(r.award(0, bw, &mut dice).is_empty());
     }
@@ -945,7 +955,7 @@ mod tests {
         let t = r.options(0)[0];
         let alone = r.world.base_cost(slot(0), t, false);
         // Contact with every civ that knows it makes it cheaper.
-        for civ in 1..CIV_COUNT {
+        for civ in 1..civ_count() {
             r.world.players[slot(0) as usize].contact |= 1 << slot(civ);
         }
         let _ = r.award(1, t, &mut dice);
@@ -959,13 +969,13 @@ mod tests {
         let mut dice = Rng::new(5);
         r.begin(&mut dice);
         let japan = locked(0);
-        assert!(japan.contains(&Production::Spearman));
-        assert!(!japan.contains(&Production::Warrior));
-        assert!(!japan.contains(&Production::Settler));
-        assert!(!locked(1).contains(&Production::Archer));
+        assert!(japan.contains(&Production::named("Spearman")));
+        assert!(!japan.contains(&Production::named("Warrior")));
+        assert!(!japan.contains(&Production::named("Settler")));
+        assert!(!locked(1).contains(&Production::named("Archer")));
         // Every locked building lacks its advance, is obsolete, or needs a
         // good the civ does not own.
-        for civ in 0..CIV_COUNT {
+        for civ in 0..civ_count() {
             for p in locked(civ).into_iter().filter(|p| p.is_building()) {
                 let b = p.bldg().unwrap();
                 let lacks = b.tech != NONE && !r.knows(civ, b.tech);
@@ -989,23 +999,23 @@ mod tests {
             }
         }
         // Without Iron nobody can arm a Swordsman or a Legionary.
-        assert!(!can_build(0, Production::Swordsman));
-        assert!(!can_build(1, Production::Legionary));
+        assert!(!can_build(0, Production::named("Swordsman")));
+        assert!(!can_build(1, Production::named("Legionary")));
         const IRON: u32 = 1 << 1;
         for civ in [0, 1] {
             assert!(set_goods(civ, IRON));
         }
         r.goods_changed();
         // Japan has the plain Swordsman, Rome its Legionary instead.
-        assert!(can_build(0, Production::Swordsman));
-        assert!(!can_build(0, Production::Legionary));
-        assert!(can_build(1, Production::Legionary));
-        assert!(!can_build(1, Production::Swordsman));
+        assert!(can_build(0, Production::named("Swordsman")));
+        assert!(!can_build(0, Production::named("Legionary")));
+        assert!(can_build(1, Production::named("Legionary")));
+        assert!(!can_build(1, Production::named("Swordsman")));
         // A wonder is built once.
-        assert!(!can_build(0, Production::ThePyramids) || required_tech(Production::ThePyramids) != NONE);
-        set_wonder_built(Production::ThePyramids, true);
-        assert!(!can_build(0, Production::ThePyramids));
-        set_wonder_built(Production::ThePyramids, false);
+        assert!(!can_build(0, Production::named("The Pyramids")) || required_tech(Production::named("The Pyramids")) != NONE);
+        set_wonder_built(Production::named("The Pyramids"), true);
+        assert!(!can_build(0, Production::named("The Pyramids")));
+        set_wonder_built(Production::named("The Pyramids"), false);
     }
 
     #[test]
@@ -1070,7 +1080,7 @@ mod tests {
             app.update();
             assert_eq!(app.world().resource::<Research>().era(1), 1);
             let horses = app.world_mut().query::<&Unit>().iter(app.world())
-                .filter(|u| u.civ == crate::civs::BARBARIANS && u.utype == crate::units::UnitType::Horseman).count();
+                .filter(|u| u.civ == crate::civs::BARBARIANS && u.utype == crate::units::UnitType::named("Horseman")).count();
             assert_eq!(horses, 32, "researched={researched}");
         }
     }

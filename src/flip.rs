@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use civ3mapgen::capture::{AcceptFacts, Wonder, ai_accepts_city};
 
 use crate::cities::{self, Capital, City, Production, radius_tiles, territory};
-use crate::civs::{CIV_COUNT, CivilizationEnded, is_ai};
+use crate::civs::{CIV_CAP, civ_count, CivilizationEnded, is_ai};
 use crate::combat::CombatRng;
 use crate::diplomacy::{ConvertAsk, Diplomacy};
 use crate::features::{MessageBoard, post};
@@ -193,7 +193,7 @@ pub fn nationals(city: &City, civ: usize) -> i32 {
 /// The civ's total culture, the "rating" the flip compares (`0x4F8E20`).
 #[derive(Resource, Default)]
 pub struct Flips {
-    pub empire: [u32; CIV_COUNT],
+    pub empire: [u32; CIV_CAP],
 }
 
 /// The flip test of one city (`0x4B28D0`): the civ it flips to, if any.
@@ -201,17 +201,17 @@ pub struct Flips {
 pub fn test_city(
     map: &GameMap,
     city: &City,
-    capital_of: &[Option<(i32, i32)>; CIV_COUNT],
-    owner_rating: &[u32; CIV_COUNT],
+    capital_of: &[Option<(i32, i32)>; CIV_CAP],
+    owner_rating: &[u32],
     tile_owner: &dyn Fn(i32, i32) -> Option<usize>,
     martial: i32,
-    capital_lost: &[bool; CIV_COUNT],
-    in_play: &[bool; CIV_COUNT],
+    capital_lost: &[bool],
+    in_play: &[bool],
     mut die: impl FnMut(i32) -> i32,
 ) -> Option<usize> {
     let owner = city.civ;
     let own_capital = capital_of[owner];
-    for j in (0..CIV_COUNT).filter(|&j| j != owner && in_play[j]) {
+    for j in (0..civ_count()).filter(|&j| j != owner && in_play[j]) {
         let tiles = radius_tiles(map, city.x, city.y)
             .into_iter()
             .filter(|&(x, y)| tile_owner(x, y) == Some(j))
@@ -279,7 +279,7 @@ pub fn run(
     }
     for ev in ended.read() {
         let civ = ev.0;
-        if civ >= CIV_COUNT {
+        if civ >= civ_count() {
             continue;
         }
         // The empire total grows by the culture this turn's cities make.
@@ -309,13 +309,13 @@ pub fn run(
             let city_now = city_ref.clone();
             let owners = territory(&map);
             let tile_owner = |x: i32, y: i32| owners.get(&(x, y)).copied();
-            let mut capital_of = [None; CIV_COUNT];
+            let mut capital_of = [None; CIV_CAP];
             for (k, slot) in capital_of.iter_mut().enumerate() {
                 *slot = capital.0[k].and_then(|ce| cities.get(ce).ok()).map(|(_, c)| (c.x, c.y));
             }
-            let mut in_play = [false; CIV_COUNT];
+            let mut in_play = [false; CIV_CAP];
             for (k, p) in in_play.iter_mut().enumerate() {
-                *p = !civs.eliminated[k];
+                *p = k < civ_count() && !civs.eliminated[k];
             }
             let martial = units
                 .iter()
@@ -329,7 +329,7 @@ pub fn run(
                 &flips.empire,
                 &tile_owner,
                 martial,
-                &[false; CIV_COUNT],
+                &[false; CIV_CAP],
                 &in_play,
                 |d| rng.0.below(d as u32) as i32,
             );
@@ -542,18 +542,18 @@ mod tests {
         city.set_size(4);
         city.culture = 77;
         city.buildings = vec![
-            Production::Temple,
-            Production::Granary,
-            Production::Barracks,
-            Production::Palace,
-            Production::ThePyramids,
+            Production::named("Temple"),
+            Production::named("Granary"),
+            Production::named("Barracks"),
+            Production::named("Palace"),
+            Production::named("The Pyramids"),
         ];
         let lost = transfer(&mut city, 2, true, false, true, || false);
-        assert!(lost.contains(&Production::Temple), "culture buildings go");
-        assert!(lost.contains(&Production::Palace), "a lost capital's Palace goes");
-        assert!(city.buildings.contains(&Production::Granary));
-        assert!(city.buildings.contains(&Production::Barracks), "no quarter rule on a conversion");
-        assert!(city.buildings.contains(&Production::ThePyramids), "great wonders always stay");
+        assert!(lost.contains(&Production::named("Temple")), "culture buildings go");
+        assert!(lost.contains(&Production::named("Palace")), "a lost capital's Palace goes");
+        assert!(city.buildings.contains(&Production::named("Granary")));
+        assert!(city.buildings.contains(&Production::named("Barracks")), "no quarter rule on a conversion");
+        assert!(city.buildings.contains(&Production::named("The Pyramids")), "great wonders always stay");
         assert_eq!(city.civ, 2);
         assert_eq!(city.stakes[1], 77, "the old owner keeps its stake");
         assert_eq!(city.nationals(1), 4, "the people stay Roman");
@@ -566,10 +566,10 @@ mod tests {
     fn a_capture_without_kin_loses_a_quarter_of_the_rest_by_the_dice() {
         let mut city = City::new(1, "Veii", 3, 3);
         city.set_size(3);
-        city.buildings = vec![Production::Granary, Production::Barracks];
+        city.buildings = vec![Production::named("Granary"), Production::named("Barracks")];
         let mut draws = [true, false].into_iter();
         let lost = transfer(&mut city, 0, false, true, false, || draws.next().unwrap());
-        assert_eq!(lost, vec![Production::Granary]);
+        assert_eq!(lost, vec![Production::named("Granary")]);
         assert_eq!(city.cooldown, 1, "a plain capture sleeps for one turn");
     }
 
@@ -581,15 +581,15 @@ mod tests {
         city.set_nationality(2);
         let none = &|_: i32, _: i32| None;
         let ratings = [0, 100, 1, 0];
-        let play = [true; CIV_COUNT];
-        let caps = [None; CIV_COUNT];
+        let play = [true; CIV_CAP];
+        let caps = [None; CIV_CAP];
         // A die that always comes up 0 flips: S is 10, ratio 2/101 -> 0 first.
-        let flip = |city: &City, ratings: &[u32; CIV_COUNT]| {
-            test_city(&map, city, &caps, ratings, none, 0, &[false; CIV_COUNT], &play, |_| 0)
+        let flip = |city: &City, ratings: &[u32]| {
+            test_city(&map, city, &caps, ratings, none, 0, &[false; CIV_CAP], &play, |_| 0)
         };
         assert_eq!(flip(&city, &[0, 5, 5, 0]), Some(2));
         // The die at the maximum never does.
-        let never = test_city(&map, &city, &caps, &[0, 5, 5, 0], none, 0, &[false; CIV_COUNT], &play, |d| d - 1);
+        let never = test_city(&map, &city, &caps, &[0, 5, 5, 0], none, 0, &[false; CIV_CAP], &play, |d| d - 1);
         assert_eq!(never, None);
         // Nobody of that race and no land: nothing to roll.
         city.set_nationality(city.civ);
@@ -624,7 +624,7 @@ mod tests {
         let mut city = City::new(1, "Veii", 10, 10);
         city.set_size(8);
         city.set_nationality(2);
-        city.buildings = vec![Production::Temple, Production::Granary];
+        city.buildings = vec![Production::named("Temple"), Production::named("Granary")];
         city.culture = 40;
         app.world_mut().spawn(city).id()
     }
@@ -641,7 +641,7 @@ mod tests {
             if app.world().get::<City>(e).unwrap().civ != 1 {
                 let city = app.world().get::<City>(e).unwrap();
                 assert_eq!(city.civ, 2);
-                assert!(!city.buildings.contains(&Production::Temple));
+                assert!(!city.buildings.contains(&Production::named("Temple")));
                 assert_eq!(city.cooldown, 10);
                 assert!(turn >= 1, "the first roll is at 8/2000 a turn");
                 return;

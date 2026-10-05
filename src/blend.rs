@@ -210,14 +210,14 @@ pub fn cover_sprite(map: &GameMap, x: i32, y: i32) -> Option<CoverSprite> {
     let y0 = (row as f32 * COVER_ROW_H).round() + 2.0;
     let y1 = ((row + 1) as f32 * COVER_ROW_H).round() - 2.0;
     Some(CoverSprite {
-        path: format!("gen/terrain/sheets/{sheet}.png"),
+        path: format!("cache/terrain/sheets/{sheet}.png"),
         rect: Rect::new(col as f32 * 128.0 + 2.0, y0, (col + 1) as f32 * 128.0 - 2.0, y1),
         anchor_px: Vec2::new(62.0, 48.0),
     })
 }
 
 pub fn sheet_path(stem: &str) -> String {
-    format!("gen/terrain/sheets/{stem}.png")
+    format!("cache/terrain/sheets/{stem}.png")
 }
 
 /// Pixel rect of a cell inside its sheet.

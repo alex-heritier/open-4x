@@ -1,8 +1,8 @@
 //! The leaders of the civilizations and their animated portraits.
 //!
 //! Each civilization has one 200 x 240 clip per era (`RACE.era_art`, the
-//! forward clips; `tools/prep_assets.py leaders` lays the frames out in a
-//! grid sheet). The game plays a clip and then its reverse twin, which is a
+//! forward clips; `tools/prep_assets.py` lays the frames out in a grid
+//! sheet under the clip's cache key). The game plays a clip and then its reverse twin, which is a
 //! ping-pong over the one clip, and that is all this does: the frame shown is
 //! a function of the clock, so a screen that is rebuilt (the diplomacy
 //! panels are, on every click) carries the animation on without a restart.
@@ -13,13 +13,12 @@ use bevy::image::ImageLoaderSettings;
 use bevy::prelude::*;
 use serde::Deserialize;
 
-use crate::civs::{CIV_COUNT, CIVS, is_ai};
+use crate::civs::{civ_count, is_ai};
 use crate::research::{Research, slot};
 
-const MANIFEST: &str = "assets/gen/leaders/manifest.json";
-const DIR: &str = "gen/leaders";
+use crate::assets::{CACHE, CACHE_URL};
 
-pub use crate::rules_data::Leader;
+pub use crate::ruleset::Leader;
 
 /// The rulers of this match, by game slot (like `CIVS`).
 pub struct LeaderTable;
@@ -28,14 +27,14 @@ pub const LEADERS: LeaderTable = LeaderTable;
 impl LeaderTable {
     #[allow(dead_code)] // used by the tests
     pub fn iter(&self) -> impl Iterator<Item = &'static Leader> {
-        (0..CIV_COUNT).map(|i| &crate::rules_data::LEADER_ROSTER[crate::civs::players()[i]])
+        (0..civ_count()).map(|i| &crate::ruleset::LEADER_ROSTER[crate::civs::players()[i]])
     }
 }
 
 impl std::ops::Index<usize> for LeaderTable {
     type Output = Leader;
     fn index(&self, i: usize) -> &Leader {
-        &crate::rules_data::LEADER_ROSTER[crate::civs::roster_index(i)]
+        &crate::ruleset::LEADER_ROSTER[crate::civs::roster_index(i)]
     }
 }
 
@@ -43,6 +42,9 @@ impl std::ops::Index<usize> for LeaderTable {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Clip {
     pub file: String,
+    /// The cache folder of the clip (its key); set on load.
+    #[serde(skip)]
+    pub dir: String,
     /// Width and height of one frame.
     pub frame: [u32; 2],
     /// Frames per row of the sheet.
@@ -80,36 +82,50 @@ pub fn pingpong(tick: u128, n: u32) -> u32 {
 /// The clips and the sheets that are loaded.
 #[derive(Resource, Default)]
 pub struct LeaderArt {
-    /// By civ name, then era.
-    clips: HashMap<String, Vec<Clip>>,
+    /// By `RACE` roster index, then era.
+    clips: HashMap<usize, Vec<Clip>>,
     held: HashMap<(usize, usize), Handle<Image>>,
 }
 
 impl LeaderArt {
-    /// The manifest of `tools/prep_assets.py leaders`; empty without it.
+    /// The clips the cache holds, for every civ of the roster.
     pub fn load() -> LeaderArt {
-        let clips = std::fs::read_to_string(MANIFEST)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
+        let plan = &crate::ruleset::get().art;
+        let mut clips = HashMap::new();
+        for (race, eras) in plan.leaders.iter().enumerate() {
+            let list: Vec<Clip> = eras
+                .iter()
+                .flatten()
+                .filter_map(|item| {
+                    let text = std::fs::read_to_string(format!("{CACHE}/{}/clip.json", item.key)).ok()?;
+                    let mut clip: Clip = serde_json::from_str(&text).ok()?;
+                    clip.dir = item.key.clone();
+                    Some(clip)
+                })
+                .collect();
+            if !list.is_empty() {
+                clips.insert(race, list);
+            }
+        }
         LeaderArt { clips, held: HashMap::new() }
     }
 
     /// The clip of `civ` in `era` (the last one when the civ has fewer).
     pub fn clip(&self, civ: usize, era: usize) -> Option<&Clip> {
-        let clips = self.clips.get(CIVS[civ].name)?;
+        let clips = self.clips.get(&crate::civs::roster_index(civ))?;
         clips.get(era.min(clips.len().saturating_sub(1)))
     }
 
     /// The sheet of `civ` in `era`, loaded and kept loaded. The pixels live
     /// on the GPU only: a sheet is 23 MB.
     pub fn sheet(&mut self, assets: &AssetServer, civ: usize, era: usize) -> Option<Handle<Image>> {
-        let file = self.clip(civ, era)?.file.clone();
+        let clip = self.clip(civ, era)?;
+        let path = format!("{CACHE_URL}/{}/{}", clip.dir, clip.file);
         // One era of a civ at a time: an older sheet is let go.
-        let era = self.clips.get(CIVS[civ].name).map_or(0, |c| era.min(c.len() - 1));
+        let era = self.clips.get(&crate::civs::roster_index(civ)).map_or(0, |c| era.min(c.len() - 1));
         self.held.retain(|&(c, e), _| c != civ || e == era);
         let handle = self.held.entry((civ, era)).or_insert_with(|| {
-            assets.load_with_settings(format!("{DIR}/{file}"), |s: &mut ImageLoaderSettings| {
+            assets.load_with_settings(path, |s: &mut ImageLoaderSettings| {
                 s.asset_usage = RenderAssetUsages::RENDER_WORLD;
             })
         });
@@ -155,7 +171,7 @@ pub fn animate(time: Res<Time<Real>>, art: Res<LeaderArt>, mut heads: Query<(&Le
 /// Start loading the sheets the human will meet first: each rival in its
 /// current era (a sheet takes a moment to decode).
 pub fn preload(assets: Res<AssetServer>, research: Res<Research>, mut art: ResMut<LeaderArt>) {
-    for civ in (0..CIV_COUNT).filter(|&c| is_ai(c)) {
+    for civ in (0..civ_count()).filter(|&c| is_ai(c)) {
         art.sheet(&assets, civ, era_of(&research, civ));
     }
 }
@@ -176,7 +192,7 @@ mod tests {
     }
 
     fn clip() -> Clip {
-        Clip { file: "x.png".into(), frame: [200, 240], cols: 11, frames: 121, ms: 71 }
+        Clip { file: "x.png".into(), dir: String::new(), frame: [200, 240], cols: 11, frames: 121, ms: 71 }
     }
 
     #[test]
@@ -200,17 +216,16 @@ mod tests {
     }
 
     #[test]
-    fn the_converted_sheets_match_the_manifest() {
-        // Skipped without the converted art (`tools/prep_assets.py leaders`).
+    fn the_converted_sheets_match_their_clips() {
+        // Skipped without the converted art (the game converts it at startup).
         let art = LeaderArt::load();
         if art.clips.is_empty() {
-            eprintln!("skipped: {MANIFEST} is not built");
+            eprintln!("skipped: no leader clips in {CACHE}");
             return;
         }
-        for civ in 0..CIV_COUNT {
-            for era in 0..4 {
-                let clip = art.clip(civ, era).unwrap_or_else(|| panic!("{} era {era}", CIVS[civ].name));
-                let path = format!("assets/{DIR}/{}", clip.file);
+        for clips in art.clips.values() {
+            for clip in clips {
+                let path = format!("{CACHE}/{}/{}", clip.dir, clip.file);
                 let (w, h) = image_size(&path);
                 assert_eq!(w, clip.frame[0] * clip.cols, "{path}");
                 assert!(h >= clip.frame[1] * clip.frames.div_ceil(clip.cols), "{path}");

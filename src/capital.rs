@@ -30,7 +30,7 @@ pub fn replace_missing(
     mut cities: Query<(Entity, &mut City)>,
     units: Query<&Unit>,
 ) {
-    for civ in 0..crate::civs::CIV_COUNT {
+    for civ in 0..crate::civs::civ_count() {
         if capital.0[civ].is_some_and(|e| cities.get(e).is_ok_and(|(_, c)| c.civ == civ)) { continue; }
         let next = choose(&map, cities.iter(), civ, |x, y| units.iter().filter(|u|
             (u.x, u.y) == (x, y) && def(u.utype).class == 0 && (u.attack() > 0 || u.defense() > 0)
@@ -76,7 +76,7 @@ mod tests {
         let foreign = app.world_mut().spawn(foreign).id();
         let mut home = City::new(0, "Home", 30, 30); home.set_size(3);
         let home = app.world_mut().spawn(home).id();
-        for _ in 0..2 { app.world_mut().spawn(Unit::new(1, crate::units::UnitType::Warrior, 30, 30)); }
+        for _ in 0..2 { app.world_mut().spawn(Unit::new(1, crate::units::UnitType::named("Warrior"), 30, 30)); }
         app.world_mut().resource_mut::<Capital>().0[0] = Some(old);
         app.update();
         assert_eq!(app.world().resource::<Capital>().0[0], Some(old), "valid capitals do not move");

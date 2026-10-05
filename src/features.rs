@@ -580,8 +580,8 @@ pub struct FeatureArt {
 
 impl FeatureArt {
     pub fn load(asset_server: &bevy::prelude::AssetServer) -> Self {
-        let text = std::fs::read_to_string("assets/gen/features/manifest.json")
-            .expect("run from the repo root after tools/prep_assets.py features");
+        let text = std::fs::read_to_string("assets/cache/features/manifest.json")
+            .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: std::collections::HashMap<String, FeatureEntry> =
             serde_json::from_str(&text).expect("features manifest parses");
         let mut defs = std::collections::HashMap::new();
@@ -593,7 +593,7 @@ impl FeatureArt {
             defs.insert(
                 name.clone(),
                 (
-                    asset_server.load(format!("gen/features/{}", e.file)),
+                    asset_server.load(format!("cache/features/{}", e.file)),
                     anchor,
                 ),
             );
@@ -694,7 +694,7 @@ pub fn resolve_features(
     mut map: bevy::prelude::ResMut<GameMap>,
     units: bevy::prelude::Query<&crate::units::Unit>,
     art: bevy::prelude::Res<crate::units::UnitArt>,
-    mut cities: bevy::prelude::Query<(bevy::prelude::Entity, &mut crate::cities::City)>,
+    cities: bevy::prelude::Query<(bevy::prelude::Entity, &mut crate::cities::City)>,
     mut board: bevy::prelude::ResMut<MessageBoard>,
     audio: bevy::prelude::Res<crate::audio::GameAudio>,
     mut research: bevy::prelude::ResMut<crate::research::Research>,
@@ -738,8 +738,8 @@ pub fn resolve_features(
                 units: &all_units,
                 round: turn.0.saturating_sub(1),
                 era,
-                difficulty: crate::research::DIFFICULTY as i32,
-                players: crate::civs::CIV_COUNT as i32,
+                difficulty: crate::scenario::difficulty() as i32,
+                players: crate::civs::civ_count() as i32,
                 used_tribe: &used,
                 can_build: &build,
                 advance: &mut advance,
@@ -762,7 +762,7 @@ pub fn resolve_features(
                 let e = crate::units::spawn_unit_at_level(
                     &mut commands,
                     &art,
-                    crate::units::UnitType::Warrior,
+                    crate::roles::barbarian_basic(),
                     tx,
                     ty,
                     crate::civs::BARBARIANS,
@@ -885,10 +885,10 @@ mod tests {
     fn art_keys_all_exist_in_manifest() {
         // Catches GOOD-slug vs prep-manifest drift (a runtime panic in
         // spawn_features). Skips when assets were never prepped.
-        let text = match std::fs::read_to_string("assets/gen/features/manifest.json") {
+        let text = match std::fs::read_to_string("assets/cache/features/manifest.json") {
             Ok(t) => t,
             Err(_) => {
-                eprintln!("skip: assets/gen/features missing (run prep_assets.py)");
+                eprintln!("skip: assets/cache/features missing (the game builds it at startup)");
                 return;
             }
         };
@@ -968,7 +968,7 @@ mod tests {
             ui: Default::default(),
             run: Default::default(),
             build: Handle::default(),
-            fortify: Handle::default(),
+            fortify: Default::default(),
             work_road: Handle::default(),
             work_irrigate: Handle::default(),
             work_mine: Handle::default(),
@@ -982,7 +982,7 @@ mod tests {
         app.init_resource::<crate::civs::Civilizations>();
         app.world_mut().spawn(crate::units::Unit {
             civ: 0,
-            utype: crate::units::UnitType::Scout,
+            utype: crate::units::UnitType::named("Scout"),
             x: sx,
             y: sy,
             moves: 2,
@@ -993,7 +993,7 @@ mod tests {
             work: None,
             sentry: false,
             exploring: false,
-            ..crate::units::Unit::new(0, crate::units::UnitType::Scout, sx, sy)
+            ..crate::units::Unit::new(0, crate::units::UnitType::named("Scout"), sx, sy)
         });
         app.init_resource::<crate::cities::Treasury>();
         app.init_resource::<crate::barbarians::Barbarians>();

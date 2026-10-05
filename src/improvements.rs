@@ -50,14 +50,14 @@ pub fn work_needed(action: WorkAction, tile: &Tile) -> i32 {
         WorkAction::Outpost => 11,
         WorkAction::Barricade => 12,
     };
-    crate::rules_data::WORK_NEEDED[row] * i32::from(crate::rules_data::TERRAINS[crate::map::terrain_row(tile)].movement)
+    crate::ruleset::WORK_NEEDED[row] * i32::from(crate::ruleset::TERRAINS[crate::map::terrain_row(tile)].movement)
 }
 
 /// `0x5B33C0`: single-precision multiplications and truncation in native order.
 pub fn work_rate(unit: &Unit) -> i32 {
     let mut rate = crate::realm::govt(unit.civ).worker_steps as f32;
     if crate::civs::RACES[unit.civ].traits & (1 << 5) != 0 { rate *= 1.5; }
-    if crate::realm::read(unit.civ, |r| r.known & crate::rules_data::DOUBLES_WORK != 0) { rate += rate; }
+    if crate::realm::read(unit.civ, |r| r.known & crate::ruleset::doubles_work() != 0) { rate += rate; }
     if unit.nationality != crate::civs::roster_index(unit.civ) { rate *= 0.5; }
     (rate * crate::units::def(unit.utype).worker_strength).trunc().max(1.0) as i32
 }
@@ -135,20 +135,20 @@ pub fn is_water_base(b: Base) -> bool {
 /// Native roads require a nonzero TERR road bonus, including mountains.
 pub fn can_road(map: &GameMap, x: i32, y: i32) -> bool {
     map.get(x, y)
-        .is_some_and(|t| map.is_land(x, y) && crate::rules_data::TERRAINS[crate::map::terrain_row(t)].road != 0 && !t.road)
+        .is_some_and(|t| map.is_land(x, y) && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].road != 0 && !t.road)
 }
 
 /// A mine replaces irrigation on terrain with a nonzero TERR mining bonus.
 pub fn can_mine(map: &GameMap, x: i32, y: i32) -> bool {
     map.get(x, y).is_some_and(|t| map.is_land(x, y) && !t.mine
-        && crate::rules_data::TERRAINS[crate::map::terrain_row(t)].mining != 0)
+        && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].mining != 0)
 }
 
 /// Clear Forest / Wetlands must be the effective terrain's job, on unowned or own land.
 pub fn can_clear(map: &GameMap, civ: usize, x: i32, y: i32) -> bool {
     map.get(x, y).is_some_and(|t| map.is_land(x, y)
         && t.owner.is_none_or(|owner| owner as usize == civ)
-        && matches!(crate::rules_data::TERRAINS[crate::map::terrain_row(t)].worker_job, 6 | 7))
+        && matches!(crate::ruleset::TERRAINS[crate::map::terrain_row(t)].worker_job, 6 | 7))
 }
 
 /// Native water-source predicate 0x5D8400. A city can relay water from
@@ -163,7 +163,7 @@ fn water_source(map: &GameMap, cities: &[(i32, i32)], x: i32, y: i32, chain: boo
 /// Irrigation needs a nonzero TERR bonus and a water source. It replaces a mine.
 pub fn can_irrigate(map: &GameMap, cities: &[(i32, i32)], x: i32, y: i32) -> bool {
     map.get(x, y).is_some_and(|t| map.is_land(x, y) && !t.irrigation
-        && crate::rules_data::TERRAINS[crate::map::terrain_row(t)].irrigation != 0)
+        && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].irrigation != 0)
         && water_source(map, cities, x, y, true)
 }
 
@@ -293,7 +293,7 @@ pub fn end_turn_work(
                     if let Some(mut city) = cities.iter_mut().find(|c| c.civ == event.0
                         && (c.x, c.y) == pos && crate::hurry::ordinary(c.production)) {
                         let before = city.shields;
-                        city.shields = city.shields.saturating_add(crate::rules_data::FOREST_SHIELDS).min(city.price(city.production));
+                        city.shields = city.shields.saturating_add(crate::ruleset::forest_shields()).min(city.price(city.production));
                         harvest = Some(format!("{} receives {} shields from the forest.", city.name, city.shields.saturating_sub(before)));
                         break;
                     }
@@ -329,8 +329,8 @@ pub struct ImprovementArt {
 
 impl ImprovementArt {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let text = std::fs::read_to_string("assets/gen/improvements/manifest.json")
-            .expect("run from the repo root after tools/prep_assets.py improvements");
+        let text = std::fs::read_to_string("assets/cache/improvements/manifest.json")
+            .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: HashMap<String, ImpEntry> =
             serde_json::from_str(&text).expect("improvements manifest parses");
         let mut defs = HashMap::new();
@@ -342,7 +342,7 @@ impl ImprovementArt {
             defs.insert(
                 name.clone(),
                 (
-                    asset_server.load(format!("gen/improvements/{}", e.file)),
+                    asset_server.load(format!("cache/improvements/{}", e.file)),
                     anchor,
                 ),
             );
@@ -593,7 +593,7 @@ mod tests {
         assert!(can_irrigate(&map, &[relay], 12, 11));
         let farm = map.idx(12, 11);
         map.tiles[farm].resource = None;
-        let worker = Unit::new(0, crate::units::UnitType::Worker, 12, 11);
+        let worker = Unit::new(0, crate::units::UnitType::named("Worker"), 12, 11);
         assert!(crate::actionbar::UnitCommand::Work(WorkAction::Irrigate).enabled(&map, &[relay], &worker));
         assert_eq!(crate::ai::job_at(&map, &[relay], (12, 11)), Some(WorkAction::Irrigate));
         map.tiles[lake].irrigation = false;
@@ -724,7 +724,7 @@ mod tests {
             ui: Default::default(),
             run: Default::default(),
             build: Handle::default(),
-            fortify: Handle::default(),
+            fortify: Default::default(),
             work_road: Handle::default(),
             work_irrigate: Handle::default(),
             work_mine: Handle::default(),
@@ -734,7 +734,7 @@ mod tests {
         app.add_message::<crate::civs::CivilizationEnded>();
         app.world_mut().spawn(Unit {
             civ: 0,
-            utype: crate::units::UnitType::Worker,
+            utype: crate::units::UnitType::named("Worker"),
             x: sx,
             y: sy,
             moves: 1,
@@ -748,7 +748,7 @@ mod tests {
                 action: WorkAction::Road,
                 progress: 4,
             }),
-            ..Unit::new(0, crate::units::UnitType::Worker, sx, sy)
+            ..Unit::new(0, crate::units::UnitType::named("Worker"), sx, sy)
         });
         app.add_systems(Update, end_turn_work);
         app.world_mut()
@@ -771,7 +771,7 @@ mod tests {
             ui: Default::default(),
             run: Default::default(),
             build: Handle::default(),
-            fortify: Handle::default(),
+            fortify: Default::default(),
             work_road: Handle::default(),
             work_irrigate: Handle::default(),
             work_mine: Handle::default(),
@@ -811,7 +811,7 @@ mod tests {
         assert!(!map.tiles[i].fortress);
         assert!(map.get(13, 13).unwrap().visible, "mountain outpost sees the full 7x7 without a unit");
         assert!(!map.get(14, 14).unwrap().visible);
-        app.world_mut().spawn(Unit::new(1, crate::units::UnitType::Warrior, 10, 10));
+        app.world_mut().spawn(Unit::new(1, crate::units::UnitType::named("Warrior"), 10, 10));
         app.update();
         let map = app.world().resource::<GameMap>();
         assert!(map.tiles[i].site.is_none());
@@ -822,7 +822,7 @@ mod tests {
     fn worker(x: i32, y: i32, action: WorkAction, progress: i32) -> Unit {
         Unit {
             civ: 0,
-            utype: crate::units::UnitType::Worker,
+            utype: crate::units::UnitType::named("Worker"),
             x,
             y,
             moves: 3,
@@ -833,7 +833,7 @@ mod tests {
             sentry: false,
             exploring: false,
             work: Some(Work { action, progress }),
-            ..Unit::new(0, crate::units::UnitType::Worker, x, y)
+            ..Unit::new(0, crate::units::UnitType::named("Worker"), x, y)
         }
     }
 
@@ -926,17 +926,17 @@ mod tests {
         let egypt = crate::civs::roster_index_named("Egypt").unwrap();
         let mut roster = crate::civs::players();
         roster[0] = egypt;
-        crate::civs::set_players_for_test(roster);
+        crate::civs::set_players_for_test(&roster);
         u.nationality = egypt;
         assert_eq!(work_rate(&u), 3);
         u.nationality = crate::civs::roster_index_named("Japan").unwrap();
         assert_eq!(work_rate(&u), 1, "3 * 0.5 truncates after all multiplications");
         u.nationality = egypt;
-        crate::realm::write(0, |r| { r.govt = civ3mapgen::government::row::FASCISM; r.known |= crate::rules_data::DOUBLES_WORK; });
+        crate::realm::write(0, |r| { r.govt = civ3mapgen::government::row::FASCISM; r.known |= crate::ruleset::doubles_work(); });
         assert_eq!(work_rate(&u), 12);
         u.nationality = crate::civs::roster_index_named("Japan").unwrap();
         assert_eq!(work_rate(&u), 6);
-        u.utype = crate::units::UnitType::Warrior;
+        u.utype = crate::units::UnitType::named("Warrior");
         assert_eq!(work_rate(&u), 1, "zero PRTO strength still floors at one");
         crate::civs::set_controllers();
     }
@@ -961,11 +961,11 @@ mod tests {
         use crate::cities::Production;
         let mut app = chop_app(Cover::Forest);
         let mut wonder = City::new(0, "Wonder", 0, 9); // first spiral tile
-        wonder.production = Production::ThePyramids;
+        wonder.production = Production::named("The Pyramids");
         let wonder = app.world_mut().spawn(wonder).id();
         let enemy = app.world_mut().spawn(City::new(1, "Enemy", 1, 9)).id();
         let mut first = City::new(0, "First", 1, 10);
-        first.production = Production::Spearman;
+        first.production = Production::named("Spearman");
         first.shields = 15;
         let first = app.world_mut().spawn(first).id();
         let later = app.world_mut().spawn(City::new(0, "Later", 0, 11)).id();

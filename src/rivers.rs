@@ -132,8 +132,8 @@ mod tests {
         assert_eq!(crate::cities::tile_commerce(t), 1);
         assert!(crossed(&map, (0, 10), (map.w - 1, 10)));
         assert!(!crossed(&map, (0, 10), (1, 10)));
-        let attacker = crate::units::Unit::new(0, crate::units::UnitType::Warrior, map.w - 1, 10);
-        let defender = crate::units::Unit::new(1, crate::units::UnitType::Warrior, 0, 10);
+        let attacker = crate::units::Unit::new(0, crate::units::UnitType::named("Warrior"), map.w - 1, 10);
+        let defender = crate::units::Unit::new(1, crate::units::UnitType::named("Warrior"), 0, 10);
         let river_odds = crate::combat::round_odds(&map, &attacker, &defender, None);
         map.tiles[i].river = 0;
         assert!(river_odds > crate::combat::round_odds(&map, &attacker, &defender, None));

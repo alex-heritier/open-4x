@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::barbarians::{self, Barbarians, Tribe};
 use crate::cities::{self, Capital, City, CityNamesUsed, Treasury};
-use crate::civs::{CIV_COUNT, Civilizations, Outcome};
+use crate::civs::{CIV_CAP, civ_count, Civilizations, Outcome};
 use crate::diplomacy::{self, Diplomacy};
 use crate::features::{MessageBoard, post};
 use crate::flip::Flips;
@@ -68,7 +68,7 @@ pub struct Save {
     width: i32,
     height: i32,
     tiles: Vec<Tile>,
-    players: [usize; CIV_COUNT],
+    players: Vec<usize>,
     exploration: Exploration,
     cities: Vec<City>,
     units: Vec<UnitSave>,
@@ -92,6 +92,7 @@ fn outcome_code(o: Outcome) -> (u8, usize) {
         Outcome::Victory(c) => (0, c),
         Outcome::Domination(c) => (1, c),
         Outcome::Defeat => (2, 0),
+        Outcome::TimeLimit => (3, 0),
     }
 }
 
@@ -100,6 +101,7 @@ fn outcome_from(code: (u8, usize)) -> Option<Outcome> {
         0 => Outcome::Victory(code.1),
         1 => Outcome::Domination(code.1),
         2 => Outcome::Defeat,
+        3 => Outcome::TimeLimit,
         _ => return None,
     })
 }
@@ -148,7 +150,7 @@ impl Save {
             },
             research: world.resource::<Research>().snapshot(),
             diplomacy: world.resource::<Diplomacy>().snapshot(),
-            realms: (0..CIV_COUNT).map(|c| realm::read(c, |r| r.snapshot())).collect(),
+            realms: (0..civ_count()).map(|c| realm::read(c, |r| r.snapshot())).collect(),
             wonders: world.resource::<Wonders>().snapshot(),
             barbarians: world.resource::<Barbarians>().snapshot(),
             game_rng: world.resource::<rng::GameRng>().state(),
@@ -167,20 +169,20 @@ impl Save {
         if (self.seed, self.width, self.height) != (map.seed, map.w, map.h) {
             return Err("saved on a different map".into());
         }
-        let per_civ = [self.names.len(), self.treasury.len(), self.flips.len(), self.realms.len(), self.capital.len(), self.civs.eliminated.len()];
-        if self.tiles.len() != map.tiles.len() || per_civ.iter().any(|&n| n != CIV_COUNT) {
+        let per_slot = [self.names.len(), self.treasury.len(), self.flips.len(), self.capital.len(), self.civs.eliminated.len()];
+        if self.tiles.len() != map.tiles.len() || per_slot.iter().any(|&n| n != CIV_CAP) || self.realms.len() != civ_count() {
             return Err("the save does not fit this game".into());
         }
-        if self.civs.active >= CIV_COUNT || self.civs.last_human >= CIV_COUNT {
+        if self.civs.active >= civ_count() || self.civs.last_human >= civ_count() {
             return Err("the save names a civilization that does not exist".into());
         }
         if self.exploration.seen.iter().any(|s| s.len() != map.tiles.len())
-            || self.exploration.viewer.is_some_and(|c| c >= CIV_COUNT)
+            || self.exploration.viewer.is_some_and(|c| c >= civ_count())
         {
             return Err("the exploration history does not fit this map".into());
         }
-        if self.cities.iter().any(|c| c.civ >= CIV_COUNT)
-            || self.units.iter().any(|u| u.unit.civ > CIV_COUNT || u.carrier.is_some_and(|i| i >= self.units.len()))
+        if self.cities.iter().any(|c| c.civ >= civ_count())
+            || self.units.iter().any(|u| (u.unit.civ >= civ_count() && u.unit.civ != crate::civs::BARBARIANS) || u.carrier.is_some_and(|i| i >= self.units.len()))
             || self.capital.iter().flatten().any(|&i| i >= self.cities.len())
         {
             return Err("the save names something that does not exist".into());
@@ -373,6 +375,10 @@ fn write(world: &mut World) -> Result<std::path::PathBuf, String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    // The Civ3 file beside it: `quicksave.SAV` opens with `open-4x FILE.SAV`.
+    if world.contains_resource::<crate::boot::Boot>() {
+        crate::savfile::write(world, &path)?;
+    }
     Ok(path)
 }
 
@@ -427,23 +433,23 @@ mod tests {
         city.lose_population(1, None, &mut w.resource_mut::<crate::combat::CombatRng>().0);
         assert!(city.citizens.slots().iter().any(Option::is_none));
         city.shields = 12;
-        city.buildings.push(Production::Walls);
-        city.queue.push(Production::Warrior);
+        city.buildings.push(Production::named("Walls"));
+        city.queue.push(Production::named("Warrior"));
         let capital = w.spawn(city).id();
         w.spawn(City::new(1, "Memphis", start.0 + 5, start.1));
         w.resource_mut::<Capital>().0[0] = Some(capital);
-        let ship = w.spawn(Unit::new(0, UnitType::Settler, start.0, start.1)).id();
-        let mut cargo = Unit::new(0, UnitType::Warrior, start.0, start.1);
+        let ship = w.spawn(Unit::new(0, UnitType::named("Settler"), start.0, start.1)).id();
+        let mut cargo = Unit::new(0, UnitType::named("Warrior"), start.0, start.1);
         cargo.carrier = Some(ship);
         cargo.fortified = true;
         cargo.damage = 1;
         cargo.scientific_leader = true;
         w.spawn(cargo);
-        let mut worker = Unit::new(1, UnitType::Worker, start.0 + 1, start.1);
+        let mut worker = Unit::new(1, UnitType::named("Worker"), start.0 + 1, start.1);
         worker.civ = 0;
         worker.work = Some(crate::improvements::Work { action: crate::improvements::WorkAction::Mine, progress: 7 });
         w.spawn(worker);
-        w.spawn((Unit::new(4, UnitType::Warrior, start.0 + 2, start.1), Tribe(3)));
+        w.spawn((Unit::new(crate::civs::BARBARIANS, UnitType::named("Warrior"), start.0 + 2, start.1), Tribe(3)));
         w.resource_mut::<Turn>().0 = 42;
         w.resource_mut::<Treasury>().0[0] = 321;
         w.resource_mut::<Civilizations>().eliminated[2] = true;
@@ -478,7 +484,7 @@ mod tests {
                 w.despawn(e);
             }
         }
-        w.spawn(Unit::new(2, UnitType::Scout, 1, 1));
+        w.spawn(Unit::new(2, UnitType::named("Scout"), 1, 1));
         let mut advisors = crate::advisors::Advisors::default();
         advisors.show(crate::advisors::Screen::Science);
         w.insert_resource(advisors);
@@ -488,7 +494,7 @@ mod tests {
         choice_city.shields = 30;
         let choice_entity = w.spawn(choice_city).id();
         w.resource_scope(|w, mut choice: Mut<crate::build_switch::BuildSwitch>| {
-            choice.request(choice_entity, &mut w.get_mut::<City>(choice_entity).unwrap(), Production::Worker);
+            choice.request(choice_entity, &mut w.get_mut::<City>(choice_entity).unwrap(), Production::named("Worker"));
         });
         assert!(w.resource::<crate::build_switch::BuildSwitch>().is_pending());
         let stale_switch = w.spawn(crate::build_switch::SwitchRoot).id();
@@ -515,11 +521,11 @@ mod tests {
         let mut q = w.query::<(Entity, &Unit)>();
         let units: Vec<(Entity, Unit)> = q.iter(w).map(|(e, u)| (e, u.clone())).collect();
         assert_eq!(units.len(), 4, "the stray scout is gone");
-        let worker = units.iter().find(|(_, u)| u.utype == UnitType::Worker).unwrap();
+        let worker = units.iter().find(|(_, u)| u.utype == UnitType::named("Worker")).unwrap();
         assert_eq!(worker.1.nationality, crate::civs::roster_index(1));
         assert_eq!(worker.1.work.unwrap().progress, 7);
-        let cargo = units.iter().find(|(_, u)| u.utype == UnitType::Warrior && u.civ == 0).unwrap();
-        let ship = units.iter().find(|(_, u)| u.utype == UnitType::Settler).unwrap();
+        let cargo = units.iter().find(|(_, u)| u.utype == UnitType::named("Warrior") && u.civ == 0).unwrap();
+        let ship = units.iter().find(|(_, u)| u.utype == UnitType::named("Settler")).unwrap();
         assert_eq!(cargo.1.carrier, Some(ship.0), "the passenger is aboard the same ship");
         assert!(cargo.1.scientific_leader);
         assert!(w.resource::<Research>().science_age(0, 62));
@@ -536,7 +542,7 @@ mod tests {
         save.seed += 1;
         assert!(save.apply(w).is_err());
         let mut save = Save::capture(w);
-        save.civs.active = CIV_COUNT;
+        save.civs.active = civ_count();
         assert!(save.apply(w).is_err());
         let mut save = Save::capture(w);
         save.research.pop();
@@ -562,12 +568,12 @@ mod tests {
     fn loading_an_older_game_relocks_units_unlocked_after_the_save() {
         let mut app = app();
         let w = app.world_mut();
-        let bronze = crate::rules_data::TECH_NAMES.iter().position(|&t| t == "Bronze Working").unwrap() as i32;
+        let bronze = crate::ruleset::TECH_NAMES.iter().position(|&t| t == "Bronze Working").unwrap() as i32;
         let save = Save::capture(w);
         w.resource_mut::<Research>().award(0, bronze, &mut rng::MapRng::new(7));
-        assert!(crate::research::can_build(0, Production::Spearman));
+        assert!(crate::research::can_build(0, Production::named("Spearman")));
         save.apply(w).unwrap();
-        assert!(!crate::research::can_build(0, Production::Spearman));
+        assert!(!crate::research::can_build(0, Production::named("Spearman")));
     }
 
     #[test]
@@ -617,7 +623,7 @@ mod tests {
         save.exploration.seen[0].pop();
         assert!(save.apply(w).is_err());
         let mut save = Save::capture(w);
-        save.exploration.viewer = Some(CIV_COUNT);
+        save.exploration.viewer = Some(civ_count());
         assert!(save.apply(w).is_err());
         assert_eq!(serde_json::to_string(&Save::capture(w)).unwrap(), before);
     }

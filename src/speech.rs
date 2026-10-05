@@ -22,7 +22,7 @@ use crate::civs::CIVS;
 use crate::diplomacy::people;
 use crate::leaders::LEADERS;
 
-const PATH: &str = "assets/gen/text/diplomacy.txt";
+const PATH: &str = "assets/cache/text/diplomacy.txt";
 /// Text sets in the file.
 #[cfg(test)]
 pub const TEXT_SETS: usize = 32;
@@ -236,7 +236,7 @@ pub fn mood_tone(class: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::civs::CIV_COUNT;
+    use crate::civs::{CIV_CAP, civ_count};
 
     const SAMPLE: &str = "\
 ;\tDiplomacy
@@ -335,8 +335,8 @@ mod tests {
             eprintln!("skipped: {PATH} is not built");
             return;
         };
-        for ai in 0..CIV_COUNT {
-            let human = (ai + 1) % CIV_COUNT;
+        for ai in 0..civ_count() {
+            let human = (ai + 1) % civ_count();
             let said = s.say("AIFIRSTCONTACT", 0, 0, 0, &Who::between(ai, human)).unwrap();
             assert!(said.contains(LEADERS[ai].name), "{ai}: {said}");
             assert!(!said.contains('$'), "{said}");

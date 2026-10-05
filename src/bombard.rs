@@ -164,7 +164,7 @@ pub fn resolve(
                     acts_on_city: crate::citycalc::active(c).any(|(owned, _)| owned == p),
                     obsolete: b.obsolete >= 0 && crate::realm::read(c.civ, |r| r.knows(b.obsolete)),
                     // Shipped Ancient Age bombard defense is Walls' 8.
-                    land_defense: if p == Production::Walls { 8 } else { 0 }, sea_defense: 0,
+                    land_defense: b.bombard_defense, sea_defense: 0,
                 }
             }).collect();
             let wall = exe::walls_step(rng.0.reference(), &exe::WallsAttack {
@@ -274,8 +274,8 @@ mod tests {
         app.add_message::<Order>();
         app.init_resource::<crate::cities::BorderKey>();
         app.add_systems(Update, (crate::cities::update_borders, resolve).chain());
-        let a = app.world_mut().spawn(Unit::new(0, UnitType::Catapult, 10, 10)).id();
-        let d = app.world_mut().spawn(Unit::new(1, UnitType::Spearman, 11, 10)).id();
+        let a = app.world_mut().spawn(Unit::new(0, UnitType::named("Catapult"), 10, 10)).id();
+        let d = app.world_mut().spawn(Unit::new(1, UnitType::named("Spearman"), 11, 10)).id();
         (app, a, d)
     }
 
@@ -382,7 +382,7 @@ mod tests {
             } else if case == "one hp" {
                 app.world_mut().get_mut::<Unit>(d).unwrap().damage = 2;
             } else if case == "worker" {
-                app.world_mut().get_mut::<Unit>(d).unwrap().utype = UnitType::Worker;
+                app.world_mut().get_mut::<Unit>(d).unwrap().utype = UnitType::named("Worker");
             }
             let before = app.world().get::<Unit>(d).unwrap().damage;
             fire(&mut app, a, at);
@@ -399,11 +399,11 @@ mod tests {
         for seed in 0..80 {
             let (mut app, a, d) = arena(seed, true);
             let mut city = City::new(1, "Rome", 11, 10);
-            city.buildings.push(Production::Walls);
+            city.buildings.push(Production::named("Walls"));
             let c = app.world_mut().spawn(city).id();
             fire(&mut app, a, (11, 10));
             assert_eq!(app.world().get::<Unit>(d).unwrap().damage, 0);
-            if !app.world().get::<City>(c).unwrap().has(Production::Walls) { destroyed += 1; }
+            if !app.world().get::<City>(c).unwrap().has(Production::named("Walls")) { destroyed += 1; }
         }
         assert!(destroyed > 0 && destroyed < 80);
     }
@@ -416,13 +416,13 @@ mod tests {
             app.world_mut().despawn(d);
             let mut city = City::new(1, "Rome", 11, 10);
             city.set_size(3);
-            city.buildings.extend([Production::Temple, Production::ThePyramids]);
+            city.buildings.extend([Production::named("Temple"), Production::named("The Pyramids")]);
             let c = app.world_mut().spawn(city).id();
             fire(&mut app, a, (11, 10));
             let c = app.world().get::<City>(c).unwrap();
-            assert!(c.has(Production::ThePyramids));
+            assert!(c.has(Production::named("The Pyramids")));
             citizens += i32::from(c.size() == 2);
-            buildings += i32::from(!c.has(Production::Temple));
+            buildings += i32::from(!c.has(Production::named("Temple")));
         }
         assert!(citizens > 0 && buildings > 0);
     }

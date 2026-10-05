@@ -23,18 +23,22 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use crate::cities::City;
-use crate::civs::{BARBARIANS, CIV_COUNT, is_barbarian};
+use crate::civs::{BARBARIANS, civ_count, is_barbarian};
 use crate::combat::{CombatRng, Level};
 use crate::map::GameMap;
 use crate::units::{Unit, UnitAnim, UnitArt, UnitType, def};
 
 /// The resolved barbarian setting `S` (`[0x9C737C]`). 1 is the editor's
 /// "roaming", the game's default (label mapping **H**, section 1.1).
-pub const ACTIVITY: i32 = 1;
+pub fn activity() -> i32 {
+    crate::scenario::barbarian_activity()
+}
 
 /// Players in play, `N` of section 2: the civilizations and the
 /// barbarians.
-const N: i32 = CIV_COUNT as i32 + 1;
+fn n() -> i32 {
+    civ_count() as i32 + 1
+}
 
 /// How far a barbarian looks for prey (HYPOTHESIS).
 pub const SIGHT: i32 = 8;
@@ -163,14 +167,14 @@ pub fn uprising(
     civs: Res<crate::civs::Civilizations>,
     mut board: ResMut<crate::features::MessageBoard>,
 ) {
-    if !UPRISING.swap(false, std::sync::atomic::Ordering::Relaxed) || ACTIVITY <= 0 {
+    if !UPRISING.swap(false, std::sync::atomic::Ordering::Relaxed) || activity() <= 0 {
         return;
     }
     let all: Vec<City> = cities.iter().cloned().collect();
     let refs: Vec<&City> = all.iter().collect();
     let snapshot: Vec<(Entity, Unit)> = units.iter().map(|(e, u)| (e, u.clone())).collect();
     let existing = map.tiles.iter().filter(|t| t.camp).count() as i32;
-    for _ in 0..(N - existing - 1).max(0) {
+    for _ in 0..(n() - existing - 1).max(0) {
         found_camp(&mut commands, &art, &mut map, &mut barb, &mut rng, &refs, &snapshot);
     }
     let camps: Vec<(i32, i32)> = (0..map.h)
@@ -178,8 +182,8 @@ pub fn uprising(
         .filter(|&(x, y)| map.tiles[map.idx(x, y)].camp)
         .collect();
     for &tile in &camps {
-        for _ in 0..8 * ACTIVITY {
-            spawn(&mut commands, &art, UnitType::Horseman, tile, barb.tribe_at(tile));
+        for _ in 0..8 * activity() {
+            spawn(&mut commands, &art, crate::roles::barbarian_advanced(), tile, barb.tribe_at(tile));
         }
     }
     // SUMMARY_BARBARIAN_EXPLOSION_CITY: the human's city nearest a camp.
@@ -203,17 +207,17 @@ pub fn idle(b: Res<Barbarians>) -> bool {
 /// Land units the camps spawn under the cap `2 (N-1) S`: the basic unit,
 /// or the advanced one once the world holds more than `4N - 4` cities.
 pub fn land_cap() -> i32 {
-    2 * (N - 1) * ACTIVITY
+    2 * (n() - 1) * activity()
 }
 
 /// Section 2.1: no activity before the world holds `2N - 2` cities.
 pub fn active(world_cities: i32) -> bool {
-    ACTIVITY > 0 && world_cities >= 2 * N - 2
+    activity() > 0 && world_cities >= 2 * n() - 2
 }
 
 /// Section 2.1 `many`: the advanced unit and the sea spawns.
 pub fn many(world_cities: i32) -> bool {
-    world_cities > 4 * N - 4
+    world_cities > 4 * n() - 4
 }
 
 /// The tribe a new camp takes (section 4): a free name of the nearest
@@ -236,7 +240,7 @@ pub fn site_radii(w: i32, h: i32) -> (i32, i32) {
     (a + 1, b + 2)
 }
 
-fn spawn(commands: &mut Commands, art: &UnitArt, t: UnitType, tile: (i32, i32), tribe: u8) -> Entity {
+pub(crate) fn spawn(commands: &mut Commands, art: &UnitArt, t: UnitType, tile: (i32, i32), tribe: u8) -> Entity {
     let e = crate::units::spawn_unit_at_level(commands, art, t, tile.0, tile.1, BARBARIANS, Level::Conscript);
     commands.entity(e).insert(Tribe(tribe));
     e
@@ -249,8 +253,9 @@ pub fn setup_camps(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>,
         for x in 0..map.w {
             if map.tiles[map.idx(x, y)].camp {
                 barb.camps.insert((x, y), DEFAULT_TRIBE);
-                for _ in 0..2 {
-                    spawn(&mut commands, &art, UnitType::Warrior, (x, y), DEFAULT_TRIBE);
+                // A scenario places its own barbarians.
+                for _ in 0..if crate::scenario::scenario().is_some() { 0 } else { 2 } {
+                    spawn(&mut commands, &art, crate::roles::barbarian_basic(), (x, y), DEFAULT_TRIBE);
                 }
             }
         }
@@ -347,7 +352,7 @@ fn found_camp(
         }
         barb.camps.insert((x, y), tribe);
         for _ in 0..2 {
-            spawn(commands, art, UnitType::Warrior, (x, y), tribe);
+            spawn(commands, art, crate::roles::barbarian_basic(), (x, y), tribe);
         }
         return Some((x, y));
     }
@@ -385,18 +390,18 @@ fn spawn_round(
             // The factory refuses a tile another civ's unit stands on.
             let blocked = units.iter().any(|(_, u)| (u.x, u.y) == tile && !is_barbarian(u.civ));
             if !blocked {
-                let t = if many { UnitType::Horseman } else { UnitType::Warrior };
+                let t = if many { crate::roles::barbarian_advanced() } else { crate::roles::barbarian_basic() };
                 spawn(commands, art, t, tile, barb.tribe_at(tile));
                 land += 1;
             }
         }
         // Sea spawns (section 2.2) need Galleys the barbarians can sail and
         // land; HYPOTHESIS-free parts only: the draw is made.
-        if many && 0 < (N - 1) * ACTIVITY / 2 {
+        if many && 0 < (n() - 1) * activity() / 2 {
             let _ = rng.0.below(8);
         }
     }
-    if camps < N - 1 {
+    if camps < n() - 1 {
         found_camp(commands, art, map, barb, rng, cities, units);
     }
 }

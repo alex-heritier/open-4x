@@ -21,7 +21,7 @@ pub fn step(map: &GameMap, city: &mut City, rng: &mut MapRng) -> Option<Option<u
     for (x, y) in worked {
         if let Some(t) = map.get(x, y) { counts[crate::map::terrain_row(t)] += 1; }
     }
-    let terrains = crate::rules_data::TERRAINS.each_ref().map(|t| t.disease);
+    let terrains: [exe::Terrain; 14] = std::array::from_fn(|i| crate::ruleset::TERRAINS[i].disease);
     let cured = crate::realm::read(city.civ, |r| r.knows(exe::CURE_TECH));
     let terrain = exe::infection(i32::from(city.size()), &counts, &terrains, cured,
         |n| rng.reference().below(n))?;
@@ -102,7 +102,7 @@ mod tests {
         city.set_specialists(vec![crate::cities::Specialist::Scientist; 3]);
         city.diseased = true;
         city.food = 10;
-        city.production = crate::cities::Production::Settler;
+        city.production = crate::cities::Production::named("Settler");
         city.shields = city.price(city.production);
         let events = crate::cities::process_city_turn(&map, &mut city,
             &std::collections::HashSet::new(), &mut MapRng::new(1));

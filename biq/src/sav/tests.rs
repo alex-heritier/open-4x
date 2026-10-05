@@ -369,3 +369,44 @@ fn corrupt_saves_error_instead_of_panicking() {
     let scenario = Biq::new(crate::Version::new(12, 8)).to_bytes().unwrap();
     assert!(matches!(Save::parse(&scenario), Err(Error::BadMagic(_))));
 }
+
+/// A save written from nothing reads back through the accessors, with
+/// the same players, tiles, units and cities that went in.
+#[test]
+fn a_blank_save_takes_what_is_set_and_reads_back() {
+    let mut s = Save::blank(Vec::new(), 8, 6, 12, -3000).unwrap();
+    s.set_player(1, 5, 2, 123);
+    s.set_player(2, 7, 1, 9);
+    {
+        let t = s.map.tile_mut(2, 2).unwrap();
+        t.set_terrain(5, 2);
+        t.set_overlay_plane(0b1);
+        t.set_river_connection_mask(0xAA);
+        t.set_resource(3);
+        t.set_owner(1);
+    }
+    s.add_city(City::new(0, 2, 2, 1, "Roma", 3, &[1, 5, 70], &s.counts.clone()));
+    s.add_unit(Unit::new(0, 2, 2, 1, 4, 2, 1, 1));
+    s.add_unit(Unit::new(1, 4, 2, 2, 7, 0, 0, 0));
+    s.players[1].set_capital_city(0);
+    s.finish();
+    let bytes = s.to_bytes().unwrap();
+    let back = Save::parse(&bytes).unwrap();
+    assert_eq!(back.game.turn(), 12);
+    assert_eq!(back.year(), -3000);
+    assert_eq!((back.map.width(), back.map.height()), (8, 6));
+    assert!(back.players[0].in_use() && back.players[1].in_use() && back.players[2].in_use() && !back.players[3].in_use());
+    assert_eq!((back.players[1].race(), back.players[1].government(), back.players[1].gold()), (5, 2, 123));
+    assert_eq!(back.players[1].capital_city(), 0);
+    let t = back.map.tile(2, 2).unwrap();
+    assert_eq!((t.terrain_id(), t.river_connection_mask(), t.resource(), t.owner(), t.city_id()), (5, 0xAA, 3, 1, 0));
+    assert_eq!(back.map.tile(0, 0).unwrap().city_id(), -1);
+    assert_eq!(back.cities.len(), 1);
+    let c = &back.cities[0];
+    assert_eq!((c.name().as_str(), c.size(), c.owner(), c.x(), c.y()), ("Roma", 3, 1, 2, 2));
+    assert_eq!(c.improvements(), vec![1, 5, 70]);
+    assert_eq!(back.units.len(), 2);
+    let u = &back.units[0];
+    assert_eq!((u.x(), u.y(), u.owner(), u.unit_type(), u.experience_level(), u.damage(), u.order()), (2, 2, 1, 4, 2, 1, 1));
+    assert_eq!(back.to_bytes().unwrap(), bytes, "and writes back byte for byte");
+}

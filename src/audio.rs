@@ -7,14 +7,44 @@ use std::collections::HashMap;
 
 use crate::units::UnitType;
 
+/// Run sounds, `(Art/Units folder, wav in it)`.
+const RUN_SOUNDS: &[(&str, &str)] = &[
+    ("settler", "SetRunFoot1.wav"),
+    ("worker", "WorkRunFoot1.wav"),
+    ("warrior", "WarriorRunFoot1.wav"),
+    ("scout", "ScoutRunFoot1.wav"),
+    ("archer", "ArchRunFoot1.wav"),
+    ("spearman", "SpearmanRunFoot1.wav"),
+    ("horseman", "HorsemanRunHooves.wav"),
+];
+
+/// Fortify sounds, by `Art/Units` folder.
+const FORTIFY_SOUNDS: &[(&str, &str)] = &[("warrior", "WarriorFortify.wav")];
+
+/// A wav in the cached folder of the unit art `art`; nothing plays when the
+/// ruleset has no such unit.
+fn unit_sound(assets: &AssetServer, art: &str, file: &str) -> Handle<AudioSource> {
+    match crate::ruleset::get().art.unit_key(art) {
+        Some(key) => assets.load(format!("{}/{key}/{file}", crate::assets::CACHE_URL)),
+        None => Handle::default(),
+    }
+}
+
+/// The sound table key of a unit: its art folder, lowercase.
+pub fn sound_key(t: UnitType) -> String {
+    t.row().art.to_ascii_lowercase()
+}
+
 #[derive(Resource)]
 pub struct GameAudio {
     pub menu: Handle<AudioSource>,
     pub peace: Handle<AudioSource>,
     pub ui: HashMap<&'static str, Handle<AudioSource>>,
-    pub run: HashMap<UnitType, Handle<AudioSource>>,
+    /// Movement sound by `Art/Units` folder (lowercase).
+    pub run: HashMap<String, Handle<AudioSource>>,
     pub build: Handle<AudioSource>,
-    pub fortify: Handle<AudioSource>,
+    /// Fortify sound by `Art/Units` folder (lowercase).
+    pub fortify: HashMap<String, Handle<AudioSource>>,
     pub work_road: Handle<AudioSource>,
     pub work_irrigate: Handle<AudioSource>,
     pub work_mine: Handle<AudioSource>,
@@ -35,48 +65,29 @@ impl GameAudio {
         ];
         let mut ui = HashMap::new();
         for n in ui_names {
-            ui.insert(n, assets.load(format!("gen/audio/ui/{n}.wav")));
+            ui.insert(n, assets.load(format!("cache/audio/ui/{n}.wav")));
         }
+        // Unit sounds are keyed by the unit's `Art/Units` folder (lowercase),
+        // the Civ3 file they come from.
         let mut run = HashMap::new();
-        run.insert(
-            UnitType::Settler,
-            assets.load("gen/audio/units/Settler/SetRunFoot1.wav"),
-        );
-        run.insert(
-            UnitType::Worker,
-            assets.load("gen/audio/units/Worker/WorkRunFoot1.wav"),
-        );
-        run.insert(
-            UnitType::Warrior,
-            assets.load("gen/audio/units/warrior/WarriorRunFoot1.wav"),
-        );
-        run.insert(
-            UnitType::Scout,
-            assets.load("gen/audio/units/Scout/ScoutRunFoot1.wav"),
-        );
-        run.insert(
-            UnitType::Archer,
-            assets.load("gen/audio/units/Archer/ArchRunFoot1.wav"),
-        );
-        run.insert(
-            UnitType::Spearman,
-            assets.load("gen/audio/units/Spearman/SpearmanRunFoot1.wav"),
-        );
-        run.insert(
-            UnitType::Horseman,
-            assets.load("gen/audio/units/Horseman/HorsemanRunHooves.wav"),
-        );
+        for (art, file) in RUN_SOUNDS {
+            run.insert(art.to_string(), unit_sound(assets, art, file));
+        }
+        let mut fortify = HashMap::new();
+        for (art, file) in FORTIFY_SOUNDS {
+            fortify.insert(art.to_string(), unit_sound(assets, art, file));
+        }
         Self {
-            menu: assets.load("gen/audio/music/menu.ogg"),
-            peace: assets.load("gen/audio/music/as_early_peace.ogg"),
+            menu: assets.load("cache/audio/music/menu.ogg"),
+            peace: assets.load("cache/audio/music/as_early_peace.ogg"),
             ui,
             run,
-            build: assets.load("gen/audio/units/Settler/SettlerBuild.wav"),
-            fortify: assets.load("gen/audio/units/warrior/WarriorFortify.wav"),
-            work_road: assets.load("gen/audio/units/Worker/WorkRoadShovelIn.wav"),
-            work_irrigate: assets.load("gen/audio/units/Worker/WorkIrrigateHoe1.wav"),
-            work_mine: assets.load("gen/audio/units/Worker/WorkMinePickAxe.wav"),
-            work_clear: assets.load("gen/audio/units/Worker/WorkForestAxe.wav"),
+            build: unit_sound(assets, "settler", "SettlerBuild.wav"),
+            fortify,
+            work_road: unit_sound(assets, "worker", "WorkRoadShovelIn.wav"),
+            work_irrigate: unit_sound(assets, "worker", "WorkIrrigateHoe1.wav"),
+            work_mine: unit_sound(assets, "worker", "WorkMinePickAxe.wav"),
+            work_clear: unit_sound(assets, "worker", "WorkForestAxe.wav"),
             music: None,
         }
     }

@@ -365,9 +365,9 @@ mod tests {
 
     #[test]
     fn settlers_and_workers_join_by_their_population_cost() {
-        assert_eq!(join_pop(UnitType::Settler), Some(2));
-        assert_eq!(join_pop(UnitType::Worker), Some(1));
-        assert_eq!(join_pop(UnitType::Warrior), None);
+        assert_eq!(join_pop(UnitType::named("Settler")), Some(2));
+        assert_eq!(join_pop(UnitType::named("Worker")), Some(1));
+        assert_eq!(join_pop(UnitType::named("Warrior")), None);
     }
 
     #[test]
@@ -376,13 +376,13 @@ mod tests {
         let map = flat_map();
         let mut city = City::new(0, "Kyoto", 3, 3);
         city.set_size(4);
-        let u = Unit::new(0, UnitType::Settler, 3, 3);
+        let u = Unit::new(0, UnitType::named("Settler"), 3, 3);
         assert!(can_join(&map, &u, Some(&city)));
         // A town of six holds no more without an Aqueduct.
         city.set_size(5);
         assert!(!can_join(&map, &u, Some(&city)), "5 + 2 passes the town limit");
-        assert!(can_join(&map, &Unit::new(0, UnitType::Worker, 3, 3), Some(&city)));
-        city.buildings.push(cities::Production::Aqueduct);
+        assert!(can_join(&map, &Unit::new(0, UnitType::named("Worker"), 3, 3), Some(&city)));
+        city.buildings.push(cities::Production::named("Aqueduct"));
         assert!(can_join(&map, &u, Some(&city)));
         // Somebody else's city, an empty tile, or no movement left.
         let foreign = City::new(1, "Rome", 3, 3);
@@ -400,13 +400,13 @@ mod tests {
         let mut city = City::new(0, "Kyoto", 3, 3);
         let lake = map.idx(2, 3);
         map.tiles[lake].base = crate::map::Base::Coast;
-        let worker = Unit::new(0, UnitType::Worker, 3, 3);
+        let worker = Unit::new(0, UnitType::named("Worker"), 3, 3);
         city.set_size(6);
         assert!(can_join(&map, &worker, Some(&city)));
         assert!(check(UnitCommand::JoinCity, &map, &worker, Some(&city)).unwrap());
         city.set_size(12);
         assert!(!can_join(&map, &worker, Some(&city)));
-        city.buildings.push(cities::Production::Hospital);
+        city.buildings.push(cities::Production::named("Hospital"));
         assert!(can_join(&map, &worker, Some(&city)));
         // Irrigation is not freshwater for city growth.
         city.buildings.clear();
@@ -458,7 +458,7 @@ mod tests {
         let mut app = world();
         let (cx, cy) = (app.world().resource::<GameMap>().w / 2, 10);
         app.world_mut().spawn(City::new(0, "Kyoto", cx, cy));
-        let mut worker = Unit::new(0, UnitType::Worker, cx, cy);
+        let mut worker = Unit::new(0, UnitType::named("Worker"), cx, cy);
         worker.auto = true;
         let w = app.world_mut().spawn(worker).id();
         app.add_systems(Update, auto_workers);
@@ -492,7 +492,7 @@ mod tests {
         let mut city = City::new(0, "Kyoto", cx, cy);
         city.set_size(3);
         let c = app.world_mut().spawn(city).id();
-        let mut settler = Unit::new(0, UnitType::Settler, cx, cy);
+        let mut settler = Unit::new(0, UnitType::named("Settler"), cx, cy);
         settler.nationality = crate::civs::roster_index(1);
         let s = app.world_mut().spawn(settler).id();
         app.insert_resource(crate::units::Selected(Some(s)));
@@ -519,7 +519,7 @@ mod tests {
             let i = map.idx(x, y);
             map.tiles[i].road = true;
         }
-        let u = app.world_mut().spawn(Unit::new(0, UnitType::Warrior, x, y)).id();
+        let u = app.world_mut().spawn(Unit::new(0, UnitType::named("Warrior"), x, y)).id();
         app.insert_resource(crate::units::Selected(Some(u)));
         app.init_resource::<crate::cities::BorderKey>();
         app.add_systems(Update, (crate::cities::update_borders, run).chain());
@@ -532,9 +532,9 @@ mod tests {
 
     #[test]
     fn only_workers_automate_and_only_fighters_pillage() {
-        assert!(can_automate(UnitType::Worker));
-        assert!(!can_automate(UnitType::Warrior));
-        assert!(can_pillage_type(UnitType::Warrior));
-        assert!(!can_pillage_type(UnitType::Worker));
+        assert!(can_automate(UnitType::named("Worker")));
+        assert!(!can_automate(UnitType::named("Warrior")));
+        assert!(can_pillage_type(UnitType::named("Warrior")));
+        assert!(!can_pillage_type(UnitType::named("Worker")));
     }
 }

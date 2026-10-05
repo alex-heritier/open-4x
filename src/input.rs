@@ -194,7 +194,7 @@ mod tests {
     fn unit_at(x: i32, y: i32) -> Unit {
         Unit {
             civ: 0,
-            utype: UnitType::Scout,
+            utype: UnitType::named("Scout"),
             x,
             y,
             moves: 3,
@@ -205,7 +205,7 @@ mod tests {
             work: None,
             sentry: false,
             exploring: false,
-            ..Unit::new(0, UnitType::Scout, x, y)
+            ..Unit::new(0, UnitType::named("Scout"), x, y)
         }
     }
 
@@ -319,7 +319,7 @@ fn order_with_sfx(
 ) {
     if let Ok((_, u)) = units.get(s) {
         if u.moves > 0 {
-            if let Some(h) = audio.run.get(&u.utype) {
+            if let Some(h) = audio.run.get(&crate::audio::sound_key(u.utype)) {
                 commands.spawn(AudioPlayer(h.clone()));
             }
         }

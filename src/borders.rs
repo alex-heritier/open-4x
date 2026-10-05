@@ -77,7 +77,7 @@ impl BorderArt {
         for side in Side::ALL {
             defs.insert(
                 side,
-                asset_server.load(format!("gen/borders/border_{}.png", side.name())),
+                asset_server.load(format!("cache/borders/border_{}.png", side.name())),
             );
         }
         Self { defs }
@@ -176,7 +176,7 @@ pub fn sync_borders(
 mod tests {
     use super::*;
     use crate::cities::{City, recompute_borders};
-    use crate::civs::CIV_COUNT;
+    use crate::civs::{CIV_CAP, civ_count};
 
     fn city(name: &str, x: i32, y: i32, culture: u32, founded: u32) -> City {
         City {
@@ -197,7 +197,7 @@ mod tests {
             citizens: crate::citizens::new_pool(0, 1),
             food: 0,
             shields: 0,
-            production: crate::cities::Production::Warrior,
+            production: crate::cities::Production::named("Warrior"),
             queue: vec![],
             buildings: vec![],
             culture,
@@ -210,7 +210,7 @@ mod tests {
         for t in &mut map.tiles {
             t.owner = None;
         }
-        recompute_borders(map, cities, &[0; CIV_COUNT]);
+        recompute_borders(map, cities, &[0; CIV_CAP]);
         territory(map)
     }
 

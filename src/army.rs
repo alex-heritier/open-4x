@@ -35,7 +35,7 @@ pub fn leader_eligible(u: &Unit, loser_barbarian: bool) -> bool {
         && def(u.utype).abilities & ability::ARMY == 0
         && !loser_barbarian
         && !u.made_leader
-        && u.civ < crate::civs::CIV_COUNT
+        && u.civ < crate::civs::civ_count()
 }
 
 /// The leader die: 16, or 12 with the Heroic Epic (BLDG `+0xF4` bit 0),
@@ -65,7 +65,7 @@ pub fn can_join(u: &Unit, army: &Unit) -> bool {
         && def(u.utype).class == 0
         && def(u.utype).attack > 0
         && !is_army(u.utype)
-        && u.utype != UnitType::Leader
+        && u.utype != crate::roles::leader()
         && u.carrier.is_none()
 }
 
@@ -97,9 +97,9 @@ mod tests {
 
     #[test]
     fn an_army_averages_its_members_and_adds_a_sixth() {
-        let mut army = Unit::new(0, UnitType::Army, 3, 3);
+        let mut army = Unit::new(0, UnitType::named("Army"), 3, 3);
         army.moves = army.allowance();
-        for t in [UnitType::Swordsman, UnitType::Swordsman, UnitType::Spearman] {
+        for t in [UnitType::named("Swordsman"), UnitType::named("Swordsman"), UnitType::named("Spearman")] {
             let u = soldier(t, Level::Regular);
             assert!(can_join(&u, &army));
             join(&mut army, &u);
@@ -111,25 +111,25 @@ mod tests {
         // Three Regulars: 3 + 3 + 3 hit points.
         assert_eq!(army.max_hp(), 9);
         // Full at three.
-        assert!(!can_join(&soldier(UnitType::Warrior, Level::Regular), &army));
+        assert!(!can_join(&soldier(UnitType::named("Warrior"), Level::Regular), &army));
     }
 
     #[test]
     fn an_army_moves_at_its_slowest_member_plus_one() {
-        let mut army = Unit::new(0, UnitType::Army, 3, 3);
-        join(&mut army, &soldier(UnitType::Horseman, Level::Regular));
-        join(&mut army, &soldier(UnitType::Warrior, Level::Regular));
+        let mut army = Unit::new(0, UnitType::named("Army"), 3, 3);
+        join(&mut army, &soldier(UnitType::named("Horseman"), Level::Regular));
+        join(&mut army, &soldier(UnitType::named("Warrior"), Level::Regular));
         assert_eq!(army.allowance(), 2 * crate::map::MP);
     }
 
     #[test]
     fn only_an_elite_land_winner_that_never_made_one_can_make_a_leader() {
-        let mut u = soldier(UnitType::Swordsman, Level::Elite);
+        let mut u = soldier(UnitType::named("Swordsman"), Level::Elite);
         assert!(leader_eligible(&u, false));
         assert!(!leader_eligible(&u, true));
         u.made_leader = true;
         assert!(!leader_eligible(&u, false));
-        assert!(!leader_eligible(&soldier(UnitType::Swordsman, Level::Veteran), false));
+        assert!(!leader_eligible(&soldier(UnitType::named("Swordsman"), Level::Veteran), false));
         assert_eq!(leader_die(0, false), 16);
         assert_eq!(leader_die(0, true), 32);
     }
@@ -146,7 +146,7 @@ mod tests {
         app.add_message::<UnitCommand>();
         app.add_systems(Update, commands);
         app.world_mut().spawn(City::new(0, "Kyoto", 3, 3));
-        let mut u = Unit::new(0, UnitType::Leader, 3, 3);
+        let mut u = Unit::new(0, UnitType::named("Leader"), 3, 3);
         let e = app.world_mut().spawn(u.clone()).id();
         app.world_mut().resource_mut::<crate::units::Selected>().0 = Some(e);
         app.world_mut().write_message(UnitCommand::ScienceAge);
@@ -165,7 +165,7 @@ mod tests {
         assert!(research.science_age(0, 27));
         assert!(!research.science_age(0, 28));
         // A second scientific leader remains available for later use.
-        let mut u = Unit::new(0, UnitType::Leader, 3, 3);
+        let mut u = Unit::new(0, UnitType::named("Leader"), 3, 3);
         u.scientific_leader = true;
         let other = app.world_mut().spawn(u).id();
         app.world_mut().resource_mut::<crate::units::Selected>().0 = Some(other);
@@ -191,9 +191,9 @@ mod tests {
         app.insert_resource(crate::units::Turn(7));
         app.add_systems(Update, ai_science_leaders);
         let mut city = City::new(1, "Rome", 3, 3);
-        city.production = crate::cities::Production::ThePyramids;
+        city.production = crate::cities::Production::named("The Pyramids");
         app.world_mut().spawn(city);
-        let mut scientist = Unit::new(1, UnitType::Leader, 3, 3);
+        let mut scientist = Unit::new(1, UnitType::named("Leader"), 3, 3);
         scientist.scientific_leader = true;
         let first = app.world_mut().spawn(scientist.clone()).id();
         app.update();
@@ -258,7 +258,7 @@ pub fn commands(
             UnitCommand::BuildArmy => {
                 if u.scientific_leader { continue; }
                 commands.entity(e).despawn();
-                let a = crate::units::spawn_unit(&mut commands, &art, UnitType::Army, u.x, u.y, u.civ);
+                let a = crate::units::spawn_unit(&mut commands, &art, UnitType::named("Army"), u.x, u.y, u.civ);
                 commands.entity(a).entry::<Unit>().and_modify(|mut a| a.moves = 0);
                 selected.0 = None;
                 post(&mut board, "Our Great Leader has formed an Army!");

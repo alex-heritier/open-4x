@@ -141,7 +141,7 @@ pub fn update(
     let pos = window
         .cursor_position()
         .unwrap_or(Vec2::new(window.width() / 2.0, window.height() / 2.0));
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     let root = commands
         .spawn((
             PickerBackdrop,
@@ -329,8 +329,8 @@ mod tests {
                 })
                 .id()
         };
-        let warrior = spawn(UnitType::Warrior);
-        let worker = spawn(UnitType::Worker);
+        let warrior = spawn(UnitType::named("Warrior"));
+        let worker = spawn(UnitType::named("Worker"));
         app.insert_resource(Selected(None));
         app.add_systems(
             Update,
@@ -356,7 +356,7 @@ mod tests {
     fn bombard_key_then_target_click_fires_without_ordering_a_move() {
         let (mut app, a, _) = app();
         app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
-        app.world_mut().get_mut::<Unit>(a).unwrap().utype = UnitType::Catapult;
+        app.world_mut().get_mut::<Unit>(a).unwrap().utype = UnitType::named("Catapult");
         app.world_mut().resource_mut::<Selected>().0 = Some(a);
         let mut diplomacy = crate::diplomacy::Diplomacy::new();
         diplomacy.declare(&crate::diplomacy::Facts::even(), 0, 1, 0, &mut crate::features::MessageBoard::default());
@@ -364,7 +364,7 @@ mod tests {
         app.insert_resource(crate::combat::CombatRng(crate::rng::MapRng::new(1)));
         app.init_resource::<crate::features::MessageBoard>();
         app.add_systems(Update, (crate::bombard::arm, crate::bombard::resolve).chain().after(crate::input::orders));
-        app.world_mut().spawn(Unit::new(1, UnitType::Spearman, 11, 10));
+        app.world_mut().spawn(Unit::new(1, UnitType::named("Spearman"), 11, 10));
         {
             let mut map = app.world_mut().resource_mut::<crate::map::GameMap>();
             let i = map.idx(11, 10);
@@ -454,11 +454,11 @@ mod tests {
                 u.carrier = Some(ship);
                 u.sentry = true;
             }
-            let mut settler = Unit::new(0, UnitType::Settler, 10, 10);
+            let mut settler = Unit::new(0, UnitType::named("Settler"), 10, 10);
             settler.carrier = Some(ship);
             settler.sentry = true;
             let other = app.world_mut().spawn(settler).id();
-            let mut exhausted = Unit::new(0, UnitType::Warrior, 10, 10);
+            let mut exhausted = Unit::new(0, UnitType::named("Warrior"), 10, 10);
             exhausted.carrier = Some(ship);
             exhausted.moves = 0;
             let exhausted = app.world_mut().spawn(exhausted).id();
@@ -466,7 +466,7 @@ mod tests {
             let snapshot: Vec<_> = app.world_mut().query::<(Entity, &Unit)>().iter(app.world()).map(|(e, u)| (e, u.clone())).collect();
             {
                 let mut u = app.world_mut().get_mut::<Unit>(ship).unwrap();
-                u.utype = UnitType::Galley;
+                u.utype = UnitType::named("Galley");
                 u.moves = 9;
                 crate::naval::order_move(&map, &mut u, (11, 10), &[], &snapshot);
                 assert_eq!(u.path.front(), Some(&(11, 10)));
@@ -500,14 +500,14 @@ mod tests {
     fn passenger_selection_wakes_at_sea_and_disembarks_in_port_without_movement() {
         for in_port in [false, true] {
             let (mut app, ship, worker) = app();
-            app.world_mut().get_mut::<Unit>(ship).unwrap().utype = UnitType::Galley;
+            app.world_mut().get_mut::<Unit>(ship).unwrap().utype = UnitType::named("Galley");
             {
                 let mut u = app.world_mut().get_mut::<Unit>(worker).unwrap();
                 u.carrier = Some(ship);
                 u.sentry = true;
                 u.moves = if in_port { 0 } else { 3 };
             }
-            let mut passenger = Unit::new(0, UnitType::Settler, 10, 10);
+            let mut passenger = Unit::new(0, UnitType::named("Settler"), 10, 10);
             passenger.carrier = Some(ship);
             let other = app.world_mut().spawn(passenger).id();
             if in_port {

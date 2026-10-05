@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use civ3mapgen::government as exe;
 
 use crate::cities::{City, territory};
-use crate::civs::{CIV_COUNT, CivilizationEnded};
+use crate::civs::{CIV_CAP, civ_count, CivilizationEnded};
 use crate::diplomacy::Diplomacy;
 use crate::features::{MessageBoard, post};
 use crate::map::GameMap;
@@ -35,10 +35,10 @@ pub fn scan(
     civ: usize,
     owner_of: impl Fn(i32, i32) -> Option<usize>,
     units: &[&Unit],
-) -> ([bool; CIV_COUNT], [bool; CIV_COUNT]) {
-    let mut abroad = [false; CIV_COUNT];
-    let mut at_home = [false; CIV_COUNT];
-    for u in units.iter().filter(|u| military(u) && u.civ < CIV_COUNT) {
+) -> ([bool; CIV_CAP], [bool; CIV_CAP]) {
+    let mut abroad = [false; CIV_CAP];
+    let mut at_home = [false; CIV_CAP];
+    for u in units.iter().filter(|u| military(u) && u.civ < civ_count()) {
         let Some(owner) = owner_of(u.x, u.y) else { continue };
         if u.civ == civ && owner != civ {
             abroad[owner] = true;
@@ -63,7 +63,7 @@ pub fn end_turn(
 ) {
     for ev in ended.read() {
         let civ = ev.0;
-        if civ >= CIV_COUNT {
+        if civ >= civ_count() {
             continue;
         }
         let cs: Vec<&City> = cities.iter().collect();
@@ -86,7 +86,7 @@ pub fn end_turn(
                 .filter(|&g| g != current)
                 .unwrap_or(exe::row::DESPOTISM);
             crate::govern::revolt(civ, then, &mut dice);
-            if !crate::civs::is_ai(civ) || (0..CIV_COUNT).any(|h| !crate::civs::is_ai(h) && diplomacy.contact(h, civ)) {
+            if !crate::civs::is_ai(civ) || (0..civ_count()).any(|h| !crate::civs::is_ai(h) && diplomacy.contact(h, civ)) {
                 post(
                     &mut board,
                     format!("War weariness has toppled the government of the {}!", crate::civs::CIVS[civ].name),
@@ -103,8 +103,8 @@ mod tests {
 
     #[test]
     fn the_scan_tells_invaders_from_defenders_and_ignores_civilians() {
-        let soldier = |civ, x| Unit::new(civ, UnitType::Warrior, x, 0);
-        let worker = Unit::new(1, UnitType::Worker, 0, 0);
+        let soldier = |civ, x| Unit::new(civ, UnitType::named("Warrior"), x, 0);
+        let worker = Unit::new(1, UnitType::named("Worker"), 0, 0);
         let mine = soldier(0, 1);
         let theirs = soldier(1, 0);
         let owner = |x: i32, _| Some(if x == 0 { 0 } else { 1 });
@@ -112,7 +112,7 @@ mod tests {
         assert!(abroad[1], "our warrior stands on their land");
         assert!(home[1], "their warrior stands on ours");
         let (abroad, home) = scan(0, owner, &[&worker]);
-        assert_eq!((abroad, home), ([false; CIV_COUNT], [false; CIV_COUNT]));
+        assert_eq!((abroad, home), ([false; CIV_CAP], [false; CIV_CAP]));
     }
 
     #[test]
@@ -127,7 +127,7 @@ mod tests {
             d.incident(1, 0, incident);
             d
         };
-        let none = [false; CIV_COUNT];
+        let none = [false; CIV_CAP];
         let (mut hit, mut calm) = (war(16), war(0));
         // Above 30 with no invader, the decay of one comes off each turn.
         for (turn, want) in [16, 31, 46].into_iter().enumerate() {
@@ -147,7 +147,7 @@ mod tests {
         let mut board = MessageBoard::default();
         d.declare(&crate::diplomacy::Facts::even(), 0, 1, 0, &mut board);
         *d.rel.war_counter_mut(1, 2) = 40;
-        let none = [false; CIV_COUNT];
+        let none = [false; CIV_CAP];
         d.update_weariness(0, &none, &none, false);
         assert_eq!(d.weariness(0, 1), 39);
         let mut abroad = none;

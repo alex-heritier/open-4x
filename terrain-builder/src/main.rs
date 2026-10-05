@@ -77,10 +77,10 @@ enum Cmd {
         /// civ3/civ3-gog/app/Art/Terrain in the repo).
         #[arg(long)]
         civ3: Option<PathBuf>,
-        /// Copy the result into the game's assets/gen/terrain.
+        /// Copy the result into the game's assets/cache/terrain.
         #[arg(long)]
         install: bool,
-        /// Game asset directory for --install (default: <repo>/assets/gen/terrain).
+        /// Game asset directory for --install (default: <repo>/assets/cache/terrain).
         #[arg(long)]
         assets: Option<PathBuf>,
         /// Render the preview with this map instead of the built-in one
@@ -103,7 +103,7 @@ enum Cmd {
         assets: Option<PathBuf>,
     },
     /// Render a test map from any directory of sheets (e.g. the Civ3 ones
-    /// in assets/gen/terrain/sheets) for side-by-side comparison.
+    /// in assets/cache/terrain/sheets) for side-by-side comparison.
     Preview {
         sheets: PathBuf,
         #[arg(long)]
@@ -268,7 +268,7 @@ fn dump_masks(out: &Path, civ3: Option<PathBuf>, procedural: bool) -> Result<()>
 fn assets_dir(arg: Option<PathBuf>) -> Result<PathBuf> {
     match arg {
         Some(a) => Ok(a),
-        None => Ok(repo_root().context("can't find the open-4x repo; pass --assets")?.join("assets/gen/terrain")),
+        None => Ok(repo_root().context("can't find the open-4x repo; pass --assets")?.join("assets/cache/terrain")),
     }
 }
 

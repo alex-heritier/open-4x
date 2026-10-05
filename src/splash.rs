@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 
 use crate::audio::{self, GameAudio};
-use crate::civs::{CIV_COUNT, CIVS};
+use crate::civs::CIVS;
 
 #[derive(Resource, Default)]
 pub struct SplashUp(pub bool);
@@ -19,9 +19,10 @@ pub(crate) struct SplashRoot;
 fn greeting() -> String {
     let list = CIVS.iter().map(|c| c.name).collect::<Vec<_>>().join(", ");
     format!(
-        "Greetings. {CIV_COUNT} civilizations share this world, and each \
+        "Greetings. {} civilizations share this world, and each \
          takes the chair in turn: {list}. Found your first city, explore \
-         these lands, and make them yours."
+         these lands, and make them yours.",
+        crate::civs::civ_count()
     )
 }
 
@@ -41,7 +42,7 @@ pub fn setup_splash(
         return;
     }
     splash.0 = true;
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     commands
         .spawn((
             Node {
@@ -56,7 +57,7 @@ pub fn setup_splash(
         ))
         .with_children(|root| {
             root.spawn((
-                ImageNode::new(assets.load("gen/splash/tokugawa.png")),
+                ImageNode::new(assets.load("cache/splash/tokugawa.png")),
                 Node {
                     width: Val::Px(400.0),
                     height: Val::Px(480.0),

@@ -24,10 +24,10 @@ use civ3mapgen::government::{Govt, SHIPPED, row};
 pub use civ3mapgen::government::row as govt_row;
 
 use crate::cities::{Capital, City, Production, territory};
-use crate::civs::CIV_COUNT;
+use crate::civs::{CIV_CAP, civ_count};
 use crate::map::GameMap;
 use crate::research::{self, Research};
-use crate::roster::{self, BLDG_COUNT};
+use crate::roster::{self, bldg_count};
 use crate::units::{Unit, def};
 
 /// The three commerce rates in tenths of the commerce; they add up to 10.
@@ -133,7 +133,7 @@ pub struct Realm {
     /// Empire culture (`Player +0x183C`), as `flip::Flips` totals it.
     pub rating: i32,
     /// At war with each civ (`Player +0xD30`).
-    pub at_war: [bool; CIV_COUNT],
+    pub at_war: [bool; CIV_CAP],
     /// The civ's cities in city order (the native pool order is not kept:
     /// **H**, the clone's query order stands in for city ids).
     pub city_order: Vec<(i32, i32)>,
@@ -196,8 +196,8 @@ impl Realm {
             capital: None,
             known: 0,
             double_wealth: false,
-            owned: vec![0; BLDG_COUNT],
-            doubled: vec![false; BLDG_COUNT],
+            owned: vec![0; bldg_count()],
+            doubled: vec![false; bldg_count()],
             continent: HashMap::new(),
             on_continent: HashMap::new(),
             luxuries: 0,
@@ -210,14 +210,14 @@ impl Realm {
             golden: false,
             golden_due: false,
             rating: 0,
-            at_war: [false; CIV_COUNT],
+            at_war: [false; CIV_CAP],
             city_order: Vec::new(),
             connected: std::collections::HashSet::new(),
             palaces: Vec::new(),
             born_content: if cfg!(test) {
                 99
             } else {
-                civ3mapgen::happiness::shipped::BORN_CONTENT[research::DIFFICULTY]
+                civ3mapgen::happiness::shipped::BORN_CONTENT[crate::scenario::difficulty()]
             },
         }
     }
@@ -303,7 +303,7 @@ impl Default for Realm {
 fn fresh() -> Vec<Realm> {
     // One more for the barbarians, whose units ask about their owner's
     // government and advances like anyone's.
-    (0..=CIV_COUNT).map(|_| Realm::new()).collect()
+    (0..CIV_CAP).map(|_| Realm::new()).collect()
 }
 
 #[cfg(not(test))]
@@ -407,7 +407,7 @@ pub fn strategic_row(id: u8) -> Option<usize> {
 /// The placed resource (`features::GOODS` id) of a `GOOD` row, matched by
 /// name; the clone calls two of them by their Civilopedia names.
 pub fn good_id(row: i32) -> Option<u8> {
-    let name = *crate::rules_data::GOOD_NAMES.get(usize::try_from(row).ok()?)?;
+    let name = *crate::ruleset::GOOD_NAMES.get(usize::try_from(row).ok()?)?;
     let name = match name {
         "Wines" => "Wine",
         "Gems" => "Diamonds",
@@ -471,11 +471,11 @@ pub fn sync(
     }
     let all: Vec<(Entity, City)> = cities.iter().map(|(e, c)| (e, c.clone())).collect();
     let owners = territory(&map);
-    let tech_count = crate::rules_data::TECH_NAMES.len() as i32;
+    let tech_count = crate::ruleset::TECH_NAMES.len() as i32;
 
-    let mut built = [false; BLDG_COUNT];
+    let mut built = vec![false; bldg_count()];
     // The trade network of every civ, over every city (`trade.rs`).
-    let war = |a: usize, b: usize| a < CIV_COUNT && b < CIV_COUNT && a != b && diplomacy.as_ref().is_some_and(|d| d.at_war(a, b));
+    let war = |a: usize, b: usize| a < civ_count() && b < civ_count() && a != b && diplomacy.as_ref().is_some_and(|d| d.at_war(a, b));
     let trade_flag = |c: &City, flag: u32| {
         c.buildings.iter().filter_map(|b| b.building_row()).any(|row| {
             let b = roster::bldg(row);
@@ -491,14 +491,14 @@ pub fn sync(
             air: trade_flag(c, crate::trade::AIR_TRADE),
         })
         .collect();
-    for civ in 0..CIV_COUNT {
+    for civ in 0..civ_count() {
         let mut known = 0u128;
         for t in 0..tech_count {
             if research_state.knows(civ, t) {
                 known |= 1 << t;
             }
         }
-        let mut owned = vec![0u16; BLDG_COUNT];
+        let mut owned = vec![0u16; bldg_count()];
         let mut on_continent: HashMap<(u16, u16), u16> = HashMap::new();
         let mut continent = HashMap::new();
         let mine: Vec<&(Entity, City)> = all.iter().filter(|(_, c)| c.civ == civ).collect();
@@ -546,8 +546,8 @@ pub fn sync(
             b.obsolete >= 0 && b.obsolete < 128 && known >> b.obsolete & 1 != 0
         };
         // A live wonder doubles the happiness of another improvement.
-        let mut doubled = vec![false; BLDG_COUNT];
-        for row in 0..BLDG_COUNT {
+        let mut doubled = vec![false; bldg_count()];
+        for row in 0..bldg_count() {
             let b = roster::bldg(row);
             if owned[row] > 0 && b.doubles >= 0 && !obsolete(row) {
                 doubled[b.doubles as usize] = true;
@@ -610,7 +610,7 @@ pub fn sync(
                 }
                 let usable = match crate::features::GOODS[id as usize].kind {
                     crate::features::GoodKind::Strategic => strategic_row(id).is_some_and(|row| {
-                        let need = crate::rules_data::GOOD[row];
+                        let need = crate::ruleset::GOOD[row];
                         need < 0 || known >> need & 1 != 0
                     }),
                     crate::features::GoodKind::Luxury => true,
@@ -692,7 +692,7 @@ pub fn sync(
             research_state.goods_changed();
         }
     }
-    for row in 0..BLDG_COUNT {
+    for row in 0..bldg_count() {
         let b = roster::bldg(row);
         if b.is_great_wonder() {
             research::set_wonder_built(Production::from_building_row(row), built[row]);

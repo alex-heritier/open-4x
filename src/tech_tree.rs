@@ -24,9 +24,9 @@ use crate::advisor_frame::{self, ArtButton, Frame, Tab};
 use crate::advisors::Action;
 use crate::cities::Production;
 use crate::research::{Research, tech_name};
-use crate::roster::{self, BLDG_COUNT, UNIT_COUNT};
+use crate::roster::{self, bldg_count, unit_count};
 use crate::civs::RACES;
-use crate::rules_data::TECH_TREE;
+use crate::ruleset::TECH_TREE;
 use crate::stage::Ui;
 use crate::units::UnitType;
 
@@ -81,16 +81,16 @@ pub fn brings(civ: usize, t: i32) -> Vec<Production> {
     let race = RACES[civ].race;
     let mut names: Vec<&str> = vec![];
     let mut out = vec![];
-    for u in 0..UNIT_COUNT {
-        let row = UnitType(u as u8).row();
+    for u in 0..unit_count() {
+        let row = UnitType(u as u16).row();
         if row.tech == t && row.races >> race & 1 != 0 && !names.contains(&row.name) {
             names.push(row.name);
-            out.push(Production::from_unit(UnitType(u as u8)));
+            out.push(Production::from_unit(UnitType(u as u16)));
         }
     }
     let wonder = |i: usize| roster::bldg(i).wonder != 0 || roster::bldg(i).small != 0;
     for pass_wonders in [false, true] {
-        for i in 0..BLDG_COUNT {
+        for i in 0..bldg_count() {
             if roster::bldg(i).tech == t && wonder(i) == pass_wonders {
                 out.push(Production::from_building_row(i));
             }
@@ -128,8 +128,8 @@ fn title_color(s: State) -> Color {
 /// The 32-px icon of something an advance brings.
 pub fn item_icon(assets: &AssetServer, p: Production) -> ImageNode {
     let (path, rect) = match p.unit() {
-        Some(_) => ("gen/ui/unit_icons.png", p.unit_icon_rect()),
-        None => ("gen/cityscreen/buildings-small.png", p.building_rect()),
+        Some(_) => ("cache/ui/unit_icons.png", p.unit_icon_rect()),
+        None => ("cache/cityscreen/buildings-small.png", p.building_rect()),
     };
     let mut n = ImageNode::new(assets.load(path));
     n.rect = rect;
@@ -165,14 +165,9 @@ fn tech_box(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Res
                 TextLayout::new(Justify::Left, LineBreak::NoWrap),
             ));
         });
-    ui.picture(
-        s,
-        ImageNode::new(assets.load(format!("gen/tech/{t}.png"))),
-        bx + ICON_AT.0,
-        by + ICON_AT.1,
-        ICON,
-        ICON,
-    );
+    if let Some(icon) = crate::ruleset::get().art.tech_icon(t as usize) {
+        ui.picture(s, ImageNode::new(assets.load(icon)), bx + ICON_AT.0, by + ICON_AT.1, ICON, ICON);
+    }
     // The tall box's second row runs under the first row's items.
     let per_row = if size == Size::Tall { 3 } else { room };
     for (k, p) in items.iter().take(room).enumerate() {
@@ -263,7 +258,7 @@ fn nav(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, x: f32, step
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules_data::TECH_NAMES;
+    use crate::ruleset::TECH_NAMES;
 
     fn tech(name: &str) -> i32 {
         TECH_NAMES.iter().position(|n| *n == name).unwrap() as i32

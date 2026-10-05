@@ -94,9 +94,9 @@ pub(super) fn orders(map: &GameMap, board: &Board, civ: usize, turn: u32, target
         let from = (u.x, u.y);
         let water = flood(map, from, |p| coast(map, board, civ, p));
         let cargo: Vec<_> = board.at.values().flatten().filter(|(_, v)| v.carrier == Some(*ship)).collect();
-        if cargo.iter().any(|(_, v)| v.utype == UnitType::Settler) {
+        if cargo.iter().any(|(_, v)| crate::roles::founds_cities(v.utype)) {
             if cargo.iter().any(|(_, v)| !v.path.is_empty()) { continue; }
-            if !cargo.iter().any(|(_, v)| v.utype == UnitType::Settler && v.moves > 0) { continue; }
+            if !cargo.iter().any(|(_, v)| crate::roles::founds_cities(v.utype) && v.moves > 0) { continue; }
             let goal = shores(map, board, civ, &water, &claimed).into_iter()
                 .max_by_key(|&p| (site_score(map, &spots, p.0, p.1) - 2 * map.distance(from, p), std::cmp::Reverse(p)));
             if let Some(goal) = goal && let Some(path) = voyage(map, board, civ, from, goal) {
@@ -162,7 +162,7 @@ pub(super) fn orders(map: &GameMap, board: &Board, civ: usize, turn: u32, target
                 }
             }
         }
-        let mut settlers: Vec<_> = board.at.values().flatten().filter(|(e, v)| v.civ == civ && v.utype == UnitType::Settler
+        let mut settlers: Vec<_> = board.at.values().flatten().filter(|(e, v)| v.civ == civ && crate::roles::founds_cities(v.utype)
             && v.carrier.is_none() && v.moves > 0 && v.path.is_empty() && !used.contains(e)).collect();
         settlers.sort_by_key(|(e, v)| (map.distance(from, (v.x, v.y)), *e));
         for &(passenger, v) in &settlers {
@@ -214,7 +214,7 @@ mod tests {
         let board = Board::new(vec![city.clone()], vec![], &map);
         assert!(room(&map, &board, 1, (2, 3)));
         let enemies = [(8, 3), (8, 4)].into_iter().enumerate().map(|(i, p)|
-            (Entity::from_bits(i as u64 + 1), Unit::new(2, UnitType::Warrior, p.0, p.1))).collect();
+            (Entity::from_bits(i as u64 + 1), Unit::new(2, UnitType::named("Warrior"), p.0, p.1))).collect();
         let occupied = Board::new(vec![city], enemies, &map);
         assert!(!room(&map, &occupied, 1, (2, 3)));
         for y in 1..=6 { let i = map.idx(6, y); map.tiles[i].base = Base::Sea; }
@@ -246,8 +246,8 @@ mod tests {
         app.add_message::<crate::combat::AttackOrder>();
         app.add_systems(Update, (play_turn, crate::units::drive_movement, crate::naval::sync_cargo).chain());
         app.world_mut().spawn(city);
-        let settler = app.world_mut().spawn(Unit::new(1, UnitType::Settler, 3, 3)).id();
-        let ship = app.world_mut().spawn(Unit::new(1, UnitType::Galley, 4, 3)).id();
+        let settler = app.world_mut().spawn(Unit::new(1, UnitType::named("Settler"), 3, 3)).id();
+        let ship = app.world_mut().spawn(Unit::new(1, UnitType::named("Galley"), 4, 3)).id();
         let mut boarded = false;
         let mut landed = false;
         let mut founded = false;
@@ -311,10 +311,10 @@ mod tests {
         let mut enemy = City::new(2, "Away", 8, 3);
         enemy.coastal = true;
         app.world_mut().spawn(enemy);
-        app.world_mut().spawn(Unit::new(1, UnitType::Warrior, 2, 3));
+        app.world_mut().spawn(Unit::new(1, UnitType::named("Warrior"), 2, 3));
         let band: Vec<_> = [(3, 3), (3, 4), (2, 4)].into_iter()
-            .map(|p| app.world_mut().spawn(Unit::new(1, UnitType::Archer, p.0, p.1)).id()).collect();
-        let ship = app.world_mut().spawn(Unit::new(1, UnitType::Galley, 4, 3)).id();
+            .map(|p| app.world_mut().spawn(Unit::new(1, UnitType::named("Archer"), p.0, p.1)).id()).collect();
+        let ship = app.world_mut().spawn(Unit::new(1, UnitType::named("Galley"), 4, 3)).id();
         let mut boarded = 0;
         let mut struck = false;
         for _ in 0..200 {

@@ -13,12 +13,11 @@ use civ3mapgen::government as exe;
 use civ3mapgen::rng::Rng;
 
 use crate::cities::{City, Treasury};
-use crate::civs::{CIV_COUNT, Civilizations, is_ai};
+use crate::civs::{civ_count, Civilizations, is_ai};
 use crate::diplomacy::Diplomacy;
 use crate::economy;
 use crate::map::GameMap;
 use crate::realm::{self, Rates};
-use crate::research::DIFFICULTY;
 use crate::rng::GameRng;
 use crate::units::{Turn, Unit};
 
@@ -49,8 +48,8 @@ pub fn optimal_cities(civ: usize) -> i32 {
         class,
         commercial: exe_econ::has_trait(crate::cities::traits(civ), exe_econ::trait_bit::COMMERCIAL),
         human: !is_ai(civ),
-        game_level: DIFFICULTY as i32,
-        percent: OCN_PERCENT[DIFFICULTY],
+        game_level: crate::scenario::difficulty() as i32,
+        percent: OCN_PERCENT[crate::scenario::difficulty()],
     })
 }
 
@@ -64,7 +63,7 @@ fn rng_from(dice: &mut GameRng) -> Rng {
 /// is a turn or none (`0x55CE91`). Returns the turns of Anarchy.
 pub fn revolt(civ: usize, then: usize, dice: &mut GameRng) -> u8 {
     let cities = realm::read(civ, |r| r.cities) as i32;
-    let cap = (is_ai(civ) && AI_ANARCHY_CAP[DIFFICULTY] > 0).then_some(AI_ANARCHY_CAP[DIFFICULTY]);
+    let cap = (is_ai(civ) && AI_ANARCHY_CAP[crate::scenario::difficulty()] > 0).then_some(AI_ANARCHY_CAP[crate::scenario::difficulty()]);
     let religious = exe_econ::has_trait(crate::cities::traits(civ), exe_econ::trait_bit::RELIGIOUS);
     let turns = exe::anarchy_turns(religious, &mut rng_from(dice), cities, optimal_cities(civ), cap)
         .clamp(0, 255) as u8;
@@ -131,7 +130,7 @@ pub fn ai_turn(
     }
     let owned = units.iter().filter(|u| u.civ == civ).count();
     let war = diplomacy.war_matrix();
-    let wars = (0..CIV_COUNT).filter(|&o| o != civ && war[civ][o]).count() as i32;
+    let wars = (0..civ_count()).filter(|&o| o != civ && war[civ][o]).count() as i32;
 
     if !realm::in_anarchy(civ) {
         // Cooldown counts down in `Realm::tick`; the gate is `0x444A10`.
@@ -174,7 +173,7 @@ pub fn choose_government(civ: usize, mine: &[&City], units: usize) -> Option<usi
     let cities = mine.len() as i32;
     let classes: Vec<i32> = mine.iter().map(|c| i32::from(economy::size_class(c.size()))).collect();
     let upkeep: i32 = mine.iter().map(|c| crate::citycalc::upkeep(c)).sum();
-    let ai_bonus = is_ai(civ).then_some((AI_FREE_FLAT[DIFFICULTY], AI_FREE_PER_CITY[DIFFICULTY]));
+    let ai_bonus = is_ai(civ).then_some((AI_FREE_FLAT[crate::scenario::difficulty()], AI_FREE_PER_CITY[crate::scenario::difficulty()]));
     let race = &crate::civs::RACES[civ];
     let (enemy_weariness, average_weariness) = realm::read(civ, |r| (r.war_counters.clone(), r.average_weariness));
     let scores = (0..exe::SHIPPED.len()).map(|g| {
@@ -268,7 +267,7 @@ mod tests {
         };
         let mut city = City::new(1, "Rome", 20, 20);
         city.set_size(4);
-        city.buildings = vec![crate::cities::Production::Temple, crate::cities::Production::Granary];
+        city.buildings = vec![crate::cities::Production::named("Temple"), crate::cities::Production::named("Granary")];
         crate::cities::governor_assign(&map, &mut city, &Default::default());
         let one = [&city];
         // With upkeep to pay and no savings, taxes must cover it.

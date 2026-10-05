@@ -17,7 +17,7 @@ use bevy::prelude::*;
 
 use crate::advisors::Action;
 use crate::cities::City;
-use crate::civs::{CIV_COUNT, CIVS, is_ai};
+use crate::civs::{civ_count, CIVS, is_ai};
 use crate::diplomacy::{Diplomacy, people};
 use crate::features::{MessageBoard, post};
 use crate::leaders::LEADERS;
@@ -197,7 +197,7 @@ pub fn track(turn: Res<Turn>, cities: Query<&City>, mut wonders: ResMut<Wonders>
                 if !is_ai(seen.civ) {
                     wonders.splash.push_back(Splash { seen: seen.clone() });
                 }
-                if great && (0..CIV_COUNT).any(|h| !is_ai(h) && h != seen.civ) {
+                if great && (0..civ_count()).any(|h| !is_ai(h) && h != seen.civ) {
                     post(&mut board, produced(&seen));
                 }
             }
@@ -229,22 +229,9 @@ pub fn splash_text(seen: &Seen) -> String {
     format!("{}, we have completed {} in {}.", LEADERS[seen.civ].title, roster::bldg(seen.row).name, seen.city)
 }
 
-/// File stem of a wonder's art: `Sun Tzu's Art of War` is `sun_tzu_s_art_of_war`
-/// (`slug` in `tools/prep_assets.py`).
-pub fn slug(name: &str) -> String {
-    let mut out = String::new();
-    for c in name.chars().flat_map(char::to_lowercase) {
-        if c.is_ascii_alphanumeric() {
-            out.push(c);
-        } else if !out.is_empty() && !out.ends_with('_') {
-            out.push('_');
-        }
-    }
-    out.trim_end_matches('_').to_string()
-}
-
-fn art_exists(dir: &str, row: usize) -> bool {
-    std::path::Path::new(&format!("assets/gen/wonders/{dir}/{}.png", slug(roster::bldg(row).name))).is_file()
+/// The cached splash picture (or thumbnail) of a wonder, when it has one.
+fn art_of(row: usize, thumb: bool) -> Option<String> {
+    crate::ruleset::get().art.wonder_art(row, thumb)
 }
 
 // ---------------------------------------------------------------------
@@ -256,11 +243,10 @@ const ART: (f32, f32, f32) = (351.0, 109.0, 320.0);
 
 pub fn splash(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, s: &Splash) {
     let seen = &s.seen;
-    if art_exists("splash", seen.row) {
-        let path = format!("gen/wonders/splash/{}.png", slug(roster::bldg(seen.row).name));
+    if let Some(path) = art_of(seen.row, false) {
         ui.picture(stage, ImageNode::new(assets.load(path)), ART.0, ART.1, ART.2, ART.2);
     }
-    ui.picture(stage, ImageNode::new(assets.load("gen/wonders/frame.png")), 0.0, 0.0, 1024.0, 768.0);
+    ui.picture(stage, ImageNode::new(assets.load("cache/wonders/frame.png")), 0.0, 0.0, 1024.0, 768.0);
     ui.words(stage, 285.0, 450.0, 454.0, 90.0, splash_text(seen), 24.0, INK, true);
     ui.button(stage, 300.0, 590.0, 200.0, 34.0, "Zoom to City.", 18.0, Action::Zoom(seen.x, seen.y), false);
     ui.button(stage, 524.0, 590.0, 200.0, 34.0, "Sounds Good.", 18.0, Action::Close, false);
@@ -275,7 +261,7 @@ pub fn fanfare(
 ) {
     let up = advisors.screen == crate::advisors::Screen::Splash;
     if up && !*played {
-        commands.spawn(AudioPlayer::<AudioSource>(assets.load("gen/audio/ui/Wonder.wav")));
+        commands.spawn(AudioPlayer::<AudioSource>(assets.load("cache/audio/ui/Wonder.wav")));
     }
     *played = up;
 }
@@ -339,7 +325,7 @@ fn eye_state(i: u32) -> Rect {
 }
 
 pub fn window(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, cards: &[Card], page: usize) {
-    ui.picture(stage, ImageNode::new(assets.load("gen/wonders/window.png")), 0.0, 0.0, 1024.0, 768.0);
+    ui.picture(stage, ImageNode::new(assets.load("cache/wonders/window.png")), 0.0, 0.0, 1024.0, 768.0);
     ui.words(stage, 174.0, 18.0, 682.0, 34.0, "WONDERS OF THE WORLD", 28.0, INK, true);
     let page = page.min(pages(cards.len()) - 1);
     if cards.is_empty() {
@@ -348,7 +334,7 @@ pub fn window(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c
     for (i, card) in cards.iter().skip(page * PER_PAGE).take(PER_PAGE).enumerate() {
         let (x, y) = slot_at(i);
         let name = roster::bldg(card.row).name;
-        ui.picture(stage, ImageNode::new(assets.load("gen/wonders/card.png")), x, y, 370.0, 200.0);
+        ui.picture(stage, ImageNode::new(assets.load("cache/wonders/card.png")), x, y, 370.0, 200.0);
         ui.words(stage, x + 12.0, y + 10.0, 146.0, 40.0, name, 17.0, INK, false);
         let when = match card.turn {
             _ if card.lost => "Destroyed".to_string(),
@@ -367,15 +353,14 @@ pub fn window(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c
             ui.words(stage, x + 12.0, top + 16.0, 146.0, 22.0, value, 16.0, if card.lost { WARN } else { INK }, false);
         }
         let built = card.turn.is_some() && !card.lost;
-        if built && art_exists("thumb", card.row) {
-            let path = format!("gen/wonders/thumb/{}.png", slug(name));
+        if let Some(path) = art_of(card.row, true).filter(|_| built) {
             ui.picture(stage, ImageNode::new(assets.load(path)), x + 162.0, y + 47.0, 190.0, 132.0);
         }
         if !built {
             // Not built: the plate over the picture.
-            ui.picture(stage, ImageNode::new(assets.load("gen/wonders/card_hidden.png")), x, y, 370.0, 200.0);
+            ui.picture(stage, ImageNode::new(assets.load("cache/wonders/card_hidden.png")), x, y, 370.0, 200.0);
         } else {
-            let mut eye = ImageNode::new(assets.load("gen/wonders/eye.png"));
+            let mut eye = ImageNode::new(assets.load("cache/wonders/eye.png"));
             eye.rect = Some(eye_state(0));
             stage
                 .spawn((Button, Action::Zoom(card.x, card.y), ui.st.rect(x + 286.0, y + 47.0, 66.0, 47.0), eye));
@@ -422,7 +407,7 @@ mod tests {
             citizens: crate::citizens::new_pool(civ, 3),
             food: 0,
             shields: 0,
-            production: Production::Warrior,
+            production: Production::named("Warrior"),
             queue: vec![],
             buildings: vec![],
             culture: 0,
@@ -504,24 +489,16 @@ mod tests {
     }
 
     #[test]
-    fn art_names_follow_the_prep_script() {
-        assert_eq!(slug("Sun Tzu's Art of War"), "sun_tzu_s_art_of_war");
-        assert_eq!(slug("The Pyramids"), "the_pyramids");
-        assert_eq!(slug("SETI program"), "seti_program");
-        assert_eq!(slug("JS Bach's Cathedral"), "js_bach_s_cathedral");
-        assert_eq!(slug("Copernicus' Observatory"), "copernicus_observatory");
-    }
-
-    #[test]
-    fn every_wonder_but_the_internet_has_its_art() {
-        // Skipped without the converted art (`tools/prep_assets.py wonders`).
-        if !std::path::Path::new("assets/gen/wonders/splash").is_dir() {
-            eprintln!("skipped: assets/gen/wonders is not built");
+    fn every_great_wonder_has_its_art() {
+        // Skipped without the converted art (the game converts it at startup).
+        if !crate::assets::cache_covers_plan() {
+            eprintln!("skipped: assets/cache was not built for these rules");
             return;
         }
-        for (row, b) in roster::BLDGS.iter().enumerate().filter(|(_, b)| b.is_great_wonder() || b.is_small_wonder()) {
-            let has = art_exists("splash", row) && art_exists("thumb", row);
-            assert_eq!(has, b.name != "The Internet", "{}", b.name);
+        // PediaIcons.txt names a splash for each great wonder; the small ones
+        // (Forbidden Palace, ...) have none.
+        for (row, b) in roster::BLDGS.iter().enumerate().filter(|(_, b)| b.is_great_wonder()) {
+            assert!(art_of(row, false).is_some() && art_of(row, true).is_some(), "{}", b.name);
         }
     }
 

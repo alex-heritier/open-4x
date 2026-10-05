@@ -9,12 +9,15 @@ mod advisors;
 mod ai;
 mod army;
 mod barbarians;
+mod assets;
 mod audio;
 mod blend;
+mod boot;
 mod borders;
 mod bombard;
 mod build_switch;
 mod calendar;
+mod cli;
 mod capital;
 mod cities;
 mod citizens;
@@ -34,6 +37,7 @@ mod huts;
 mod naval;
 mod improvements;
 mod input;
+mod install;
 mod leaders;
 mod map;
 mod production_prompt;
@@ -42,10 +46,14 @@ mod realm;
 mod research;
 mod resistance;
 mod rng;
+mod roles;
+mod populate;
+mod savfile;
+mod scenario;
 mod rivers;
 mod save;
 mod roster;
-mod rules_data;
+mod ruleset;
 mod screenshot;
 mod script;
 mod speech;
@@ -66,8 +74,27 @@ mod wonders;
 use map::GameMap;
 
 fn main() {
+    let options = cli::init();
+    let boot = match boot::load(options) {
+        Ok(b) => b,
+        Err(msg) => {
+            eprintln!("open-4x: {msg}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(msg) = scenario::install(&boot) {
+        eprintln!("open-4x: {msg}");
+        std::process::exit(1);
+    }
     civs::set_controllers();
+    let (roster, colors) = assets::in_play();
+    let wanted = assets::Wanted { install: &boot.install, plan: &ruleset::get().art, roster: &roster, colors };
+    if let Err(msg) = assets::ensure(&wanted) {
+        eprintln!("open-4x: {msg}");
+        std::process::exit(1);
+    }
     App::new()
+        .insert_resource(boot)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -91,7 +118,7 @@ fn main() {
         .init_resource::<ai::AiState>()
         .init_resource::<combat::ActiveCombat>()
         .init_resource::<combat::CombatSpeed>()
-        .init_resource::<civs::Civilizations>()
+        .insert_resource(civs::Civilizations::start())
         .init_resource::<units::Exploration>()
         .insert_resource(research::Research::new())
         .insert_resource(diplomacy::Diplomacy::new())
@@ -104,8 +131,8 @@ fn main() {
         .init_resource::<actionbar::GotoMode>()
         .insert_resource(GameMap::generate())
         // Debug: CIV3_REVEAL=1 starts with fog off, like the F9 toggle.
-        .insert_resource(render::RevealAll(std::env::var("CIV3_REVEAL").is_ok()))
-        .insert_resource(units::Turn(1))
+        .insert_resource(render::RevealAll(std::env::var("CIV3_REVEAL").is_ok() || scenario::settings().reveal_map))
+        .insert_resource(units::Turn(scenario::start_turn()))
         .init_resource::<unit_picker::UnitPicker>()
         .init_resource::<input::Hovered>()
         .init_resource::<input::HoverPin>()
@@ -151,6 +178,7 @@ fn main() {
             )
                 .chain(),
         )
+        .add_systems(Startup, populate::populate.after(units::spawn_party).before(units::spawn_selection_ring))
         .add_systems(
             Update,
             (
@@ -215,6 +243,7 @@ fn main() {
                         weariness::end_turn,
                         flip::run,
                         civs::check_domination,
+                        civs::check_time_limit,
                         cities::end_turn_cities,
                         wonders::track,
                     )
@@ -311,6 +340,7 @@ fn setup_camera(mut commands: Commands, map: Res<GameMap>) {
             let (x, y) = s.split_once(',')?;
             Some((x.parse().ok()?, y.parse().ok()?))
         })
+        .or_else(populate::human_start)
         .unwrap_or(map.start);
     let c = map::tile_to_world(center.0, center.1);
     commands.spawn((Camera2d, Transform::from_xyz(c.x, c.y, 0.0)));

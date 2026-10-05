@@ -74,6 +74,54 @@ impl Tile {
     }
 }
 
+/// What the world characteristics do to the generator: the grid size and a
+/// shift of each threshold. The default is a Standard world with every
+/// setting in the middle.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shape {
+    pub w: i32,
+    pub h: i32,
+    /// Spatial frequency of the elevation noise: Archipelago, Continents, Pangaea.
+    pub frequency: f32,
+    /// Added to the sea-level thresholds (more water when positive).
+    pub sea: f32,
+    /// Added to the moisture field (Arid below zero, Wet above).
+    pub moisture: f32,
+    /// Latitude beyond which land is tundra.
+    pub tundra: f32,
+    /// Latitude below which wet land can be jungle.
+    pub jungle: f32,
+    /// Added to the hill and mountain thresholds (Young worlds below zero).
+    pub relief: f32,
+    /// Barbarian activity `S`; below zero the map has no camps.
+    pub barbarians: i32,
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Shape { w: MAP_W, h: MAP_H, frequency: 0.055, sea: 0.0, moisture: 0.0, tundra: 0.78, jungle: 0.30, relief: 0.0, barbarians: 1 }
+    }
+}
+
+impl Shape {
+    /// The shape of the match's `WCHR` settings (`scenario::Setup`).
+    pub fn of(s: &crate::scenario::Setup) -> Shape {
+        let o = &s.opts;
+        let pick = |v: i32, table: &[f32]| table[v.clamp(0, table.len() as i32 - 1) as usize];
+        Shape {
+            w: s.w,
+            h: s.h,
+            frequency: pick(o.landmass, &[0.080, 0.055, 0.040]),
+            sea: pick(o.ocean, &[-0.05, 0.0, 0.05, 0.09, 0.13]),
+            moisture: pick(o.climate, &[-0.08, 0.0, 0.08]),
+            tundra: pick(o.temperature, &[0.66, 0.78, 0.88]),
+            jungle: pick(o.temperature, &[0.20, 0.30, 0.40]),
+            relief: pick(o.age, &[-0.06, 0.0, 0.06]),
+            barbarians: o.barbarians,
+        }
+    }
+}
+
 #[derive(Resource, Clone)]
 pub struct GameMap {
     pub w: i32,
@@ -233,17 +281,23 @@ impl GameMap {
             self.water_body_size(p) > civ3mapgen::lakes::LAKE_MAX)
     }
 
+    /// The match's map: the file's own when it has one, else a random one
+    /// from the match's size and world characteristics.
     pub fn generate() -> Self {
-        let seed: u64 = std::env::var("MAP_SEED")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(MAP_SEED);
-        Self::generate_with_seed(seed)
+        if let Some(map) = crate::scenario::file_map() {
+            return map.clone();
+        }
+        let s = crate::scenario::setup();
+        Self::generate_with(s.seed, &Shape::of(s))
     }
 
     pub fn generate_with_seed(seed: u64) -> Self {
-        let w = MAP_W;
-        let h = MAP_H;
+        Self::generate_with(seed, &Shape::default())
+    }
+
+    pub fn generate_with(seed: u64, shape: &Shape) -> Self {
+        let w = shape.w;
+        let h = shape.h;
         let mut tiles = Vec::with_capacity((w * h) as usize);
         for y in 0..h {
             let lat = ((y as f32 - (h - 1) as f32 / 2.0).abs() * 2.0) / (h - 1) as f32;
@@ -254,17 +308,17 @@ impl GameMap {
                     fbm(x as f32 * f, y as f32 * f, s) * (1.0 - t)
                         + fbm((x - w) as f32 * f, y as f32 * f, s) * t
                 };
-                let e = blend(seed, 0.055);
-                let m = blend(seed + 101, 0.07);
+                let e = blend(seed, shape.frequency);
+                let m = blend(seed + 101, 0.07) + shape.moisture;
                 let r = blend(seed + 202, 0.09);
 
-                let mut base = if e < 0.36 {
+                let mut base = if e < 0.36 + shape.sea {
                     Base::Ocean
-                } else if e < 0.42 {
+                } else if e < 0.42 + shape.sea {
                     Base::Sea
-                } else if e < 0.46 {
+                } else if e < 0.46 + shape.sea {
                     Base::Coast
-                } else if lat > 0.78 {
+                } else if lat > shape.tundra {
                     Base::Tundra
                 } else if (0.15..0.5).contains(&lat) && m < 0.45 || m < 0.30 {
                     Base::Desert
@@ -284,9 +338,9 @@ impl GameMap {
                 );
                 let mut relief = Relief::Flat;
                 if land {
-                    if e > 0.74 && r > 0.5 {
+                    if e > 0.74 + shape.relief && r > 0.5 {
                         relief = Relief::Mountain;
-                    } else if e > 0.64 || r > 0.66 {
+                    } else if e > 0.64 + shape.relief || r > 0.66 + shape.relief {
                         relief = Relief::Hill;
                     }
                 }
@@ -297,7 +351,7 @@ impl GameMap {
                             cover = Cover::Pine;
                         }
                     } else if land {
-                        if lat < 0.30 && m > 0.68 {
+                        if lat < shape.jungle && m > 0.68 {
                             cover = Cover::Jungle;
                         } else if m > 0.60 {
                             cover = Cover::Forest;
@@ -343,7 +397,9 @@ impl GameMap {
         let wl = (seed % 101) as u32;
         crate::features::place_resources(&mut map, wl);
         crate::features::place_goody_huts(&mut map, wl);
-        crate::features::place_barbarian_camps(&mut map, wl);
+        if shape.barbarians >= 0 {
+            crate::features::place_barbarian_camps(&mut map, wl);
+        }
         map
     }
 
@@ -352,7 +408,7 @@ impl GameMap {
     /// vertex comes from a land sheet, whose only water is coast, so a sea
     /// or ocean tile beside land would meet its all-water neighbor cells
     /// with a hard coast/sea seam.
-    fn coast_shores(&mut self) {
+    pub(crate) fn coast_shores(&mut self) {
         let shore: Vec<usize> = (0..self.h)
             .flat_map(|y| (0..self.w).map(move |x| (x, y)))
             .filter(|&(x, y)| {
@@ -417,7 +473,7 @@ pub(crate) fn terrain_row(t: &Tile) -> usize {
 /// Food and shields from shipped TERR values, improvements and GOOD bonuses.
 pub fn yields(t: &Tile) -> (u8, u8) {
     if t.base == Base::Ice { return (0, 0); }
-    let terrain = &crate::rules_data::TERRAINS[terrain_row(t)];
+    let terrain = &crate::ruleset::TERRAINS[terrain_row(t)];
     let (df, ds) = t.resource.map_or((0, 0), |id| crate::features::GOODS[id as usize].bonus);
     (terrain.food + df + if t.irrigation { terrain.irrigation } else { 0 },
      terrain.shields + ds + if t.mine { terrain.mining } else { 0 })
@@ -431,7 +487,7 @@ pub const MP: u8 = 3;
 pub fn move_cost(t: &Tile) -> Option<u8> {
     match t.base {
         Base::Ocean | Base::Sea | Base::Coast | Base::Ice => None,
-        _ => Some(crate::rules_data::TERRAINS[terrain_row(t)].movement),
+        _ => Some(crate::ruleset::TERRAINS[terrain_row(t)].movement),
     }
 }
 

@@ -35,6 +35,7 @@
 //! corrupt-save repair (a negative per-player counter at `Player+0x18C`).
 
 mod body;
+mod build;
 mod counts;
 mod game;
 mod objects;

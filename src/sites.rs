@@ -92,7 +92,7 @@ pub fn colony_refusal(
         return Some("A colony needs a luxury or strategic resource.");
     }
     if let Some(row) = crate::realm::strategic_row(id)
-        && !known(crate::rules_data::GOOD[row])
+        && !known(crate::ruleset::GOOD[row])
     {
         return Some("We do not yet know how to use that resource.");
     }

@@ -12,7 +12,7 @@ transition masks ──────────┼─> compositor ─> sheets/xt
 ```
 
 The output has the same files, sizes and addressing as
-`tools/prep_assets.py` writes to `assets/gen/terrain/`: 1152x576 sheets of
+`tools/prep_assets.py` writes to `assets/cache/terrain/`: 1152x576 sheets of
 9x9 cells of 128x64, with `col = 3*W + N` and `row = 3*S + E`
 (`reverse-engineering/blending.md`, `src/blend.rs`). The game needs no
 changes.
@@ -28,7 +28,7 @@ $B init terrain-builder/packs/meiji --style "early-Meiji Japanese landscape pain
 export FAL_KEY=...                       # https://fal.ai/dashboard/keys
 $B generate terrain-builder/packs/meiji  # 8 materials: 7 terrains + beach sand
 $B build terrain-builder/packs/meiji     # -> packs/meiji/out/
-$B build terrain-builder/packs/meiji --install   # also copy into assets/gen/terrain
+$B build terrain-builder/packs/meiji --install   # also copy into assets/cache/terrain
 cargo run                                 # play on it
 $B restore                                # put the Civ3 art back
 ```
@@ -50,7 +50,7 @@ generating it.
 | `out/report.json` | validation results |
 
 `preview <sheets dir> --out x.png` renders the same island from any sheets,
-for example the originals in `assets/gen/terrain/sheets`, for a
+for example the originals in `assets/cache/terrain/sheets`, for a
 side-by-side comparison. `masks --out dir` dumps the masks on their own.
 
 ## pack.json

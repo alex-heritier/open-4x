@@ -24,7 +24,7 @@ pub(crate) struct MessageLabel;
 pub(crate) struct GameOverLabel;
 
 pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     commands.spawn((
         Text::new(""),
         TextFont {
@@ -205,6 +205,10 @@ pub fn update_game_over(
         ),
         Some(Outcome::Domination(c)) => (
             format!("The {} dominate the world.", CIVS[c].name),
+            Visibility::Visible,
+        ),
+        Some(Outcome::TimeLimit) => (
+            "The turn limit has been reached. The game is over.".to_string(),
             Visibility::Visible,
         ),
         Some(Outcome::Defeat) => (

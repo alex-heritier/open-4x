@@ -1,6 +1,6 @@
 # Running Civ3's own files: `.biq` and `.sav`
 
-Status: **brainstorm / proposal**. Open questions at the end.
+Status: **implemented** (steps 1 to 7 below). The decisions on the open questions are at the end.
 
 ## Goal
 
@@ -24,11 +24,11 @@ What happens with a `.biq` depends on what it holds:
 | a map and players | the scenario as authored: its map, players, cities, units, victory settings |
 | no rules (the scenario uses the defaults) | the rules of the stock `conquests.biq`, like Civ3 does |
 
-## Where we are today
+## Where we started
 
 | What | Where it lives now | Problem |
 |---|---|---|
-| Units, buildings, techs, civs, leaders, governments, terrain facts | `src/rules_data.rs`, generated from `conquests.biq` by `biq/examples/gen_game_rules.rs` and compiled in | One rule set per build |
+| Units, buildings, techs, civs, leaders, governments, terrain facts | `src/rules_data.rs` (now `src/ruleset.rs`, built from the BIQ at startup), generated from `conquests.biq` by `biq/examples/gen_game_rules.rs` and compiled in | One rule set per build |
 | Game logic tied to specific rows | ~640 uses of named constants: `UnitType::Warrior` (104), `UnitType::Worker` (59), `Production::Temple` (37), `Production::ThePyramids` (17), ... | A mod that changes or drops those rows breaks the game |
 | Player count | `civs::CIV_COUNT = 4`, `[T; CIV_COUNT]` arrays everywhere | Scenarios have 2 to 31 players |
 | Map | `GameMap::generate` from `MAP_SEED` | No way to play a scenario's map |
@@ -277,3 +277,17 @@ them.
    Conquests saves (format 24).
 3. **Rules the engine does not implement** (a mod's flag nobody has coded):
    print a warning at startup and ignore it (proposed), or refuse to start?
+
+### Decisions
+
+1. **`.SAV` compatibility**: open-4x writes `.SAV` files that open-4x reads
+   back, not files real Civ3 is known to open: most runtime blocks are only
+   partly decoded, so what is not decoded is written blank. F5 writes
+   `saves/quicksave.SAV` and, beside it, `saves/quicksave.json`, the stopgap
+   that holds the state the clone keeps and the format cannot yet (F8 reads
+   the JSON). `open-4x saves/quicksave.SAV` plays the `.SAV`.
+2. **Vanilla and PTW**: Conquests `.biq` and Conquests `.SAV` (format 24).
+   Older `.biq` files load for their rules and maps; older saves are
+   rejected with a message.
+3. **Unimplemented rules**: the game ignores them (it plays the rest of the
+   file) rather than refusing to start.

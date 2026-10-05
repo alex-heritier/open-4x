@@ -18,9 +18,9 @@ use civ3mapgen::government::Govt;
 use civ3mapgen::happiness::{self as hap, BuildingFaces, Citizen, mood};
 
 use crate::cities::{City, Production, tile_commerce};
-use crate::map::{Base, GameMap, Tile, yields};
+use crate::map::{Base, GameMap, yields};
 use crate::realm::{self, Realm};
-use crate::roster::{self, BLDG_COUNT, BldgDef, imp, oth, wonder};
+use crate::roster::{self, bldg_count, BldgDef, imp, oth, wonder};
 
 /// Food each citizen eats (RULE "Food Consumption per Citizen").
 pub const FOOD_PER_CITIZEN: i32 = 2;
@@ -326,7 +326,7 @@ pub fn corruption(map: &GameMap, city: &City, gross: i32, kind: Loss) -> i32 {
         // Only a Policeman (`CTZN +0x78`) cuts corruption; the clone's
         // specialists are entertainers, tax collectors and scientists.
         specialists: 0,
-        difficulty_percent: crate::rules_data::DIFF_CORRUPTION[crate::research::DIFFICULTY],
+        difficulty_percent: crate::ruleset::DIFF_CORRUPTION[crate::scenario::difficulty()],
     })
 }
 
@@ -358,7 +358,7 @@ pub fn entertainers(city: &City) -> u8 {
 fn faces(city: &City, r: &Realm) -> Vec<BuildingFaces> {
     let land = r.continent.get(&(city.x, city.y)).copied().unwrap_or(0);
     let mut out = Vec::new();
-    for row in 0..BLDG_COUNT {
+    for row in 0..bldg_count() {
         let b = roster::bldg(row);
         if b.happy == 0 && b.happy_all == 0 && b.unhappy == 0 && b.unhappy_all == 0 {
             continue;
@@ -586,7 +586,7 @@ pub fn produced_units(city: &mut City, has_good: impl Fn(i32) -> bool) -> Vec<cr
             city.unit_clocks[at].1 += 1;
         } else if need.iter().all(|&g| has_good(g)) {
             city.unit_clocks[at].1 = 0;
-            made.push(crate::units::UnitType(unit as u8));
+            made.push(crate::units::UnitType(unit as u16));
         }
     }
     made
@@ -647,7 +647,7 @@ mod tests {
         let map = flat();
         let mut city = City::new(0, "Kyoto", 5, 5);
         city.set_size(2);
-        city.buildings.extend([Production::Library, Production::Marketplace]);
+        city.buildings.extend([Production::named("Library"), Production::named("Marketplace")]);
         city.set_specialists(vec![crate::cities::Specialist::Entertainer; 2]);
         let before = totals(&map, &city);
         city.set_specialists(vec![crate::cities::Specialist::Scientist, crate::cities::Specialist::TaxCollector]);
@@ -714,7 +714,7 @@ mod tests {
         realm::reset();
         let row = roster::BLDGS.iter().position(|b| b.name == "The Statue of Zeus").unwrap();
         let mut c = town(3);
-        c.buildings.push(Production(crate::roster::UNIT_COUNT as u16 + row as u16));
+        c.buildings.push(Production(crate::roster::unit_count() as u16 + row as u16));
         let b = roster::bldg(row);
         assert_eq!((b.produces, b.frequency), (118, 5));
         let mut turns = vec![];
@@ -755,9 +755,9 @@ mod tests {
     #[test]
     fn agricultural_food_follows_freshwater_and_effective_desert_terrain() {
         realm::reset();
-        let old = std::array::from_fn(crate::civs::roster_index);
+        let old = crate::civs::players();
         let dutch = crate::civs::roster_index_named("Netherlands").unwrap();
-        crate::civs::set_players_for_test([dutch, 0, 1, 6]);
+        crate::civs::set_players_for_test(&[dutch, 0, 1, 6]);
         let mut map = flat();
         let mut city = town(1);
         work_all(&map, &mut city);
@@ -782,7 +782,7 @@ mod tests {
         assert_eq!(tile_yields(&map, &city, 11, 10).0, 2);
         map.tiles[neighbor].river = crate::rivers::EAST;
         assert_eq!(tile_yields(&map, &city, 11, 10).0, 4, "Flood Plain gets no Desert trait bonus");
-        crate::civs::set_players_for_test(old);
+        crate::civs::set_players_for_test(&old);
         assert_eq!(center(&map, &city).0, 2, "the bonus belongs to the Agricultural owner");
     }
 
@@ -825,21 +825,21 @@ mod tests {
         map.tiles[i].base = Base::Ocean;
         let mut c = town(1);
         let lake = tile_yields(&map, &c, 11, 10).0;
-        c.buildings.push(Production::Harbor);
+        c.buildings.push(Production::named("Harbor"));
         assert_eq!(tile_yields(&map, &c, 11, 10).0, lake, "Harbors do not boost lakes");
         for x in 12..=31 { let i = map.idx(x, 10); map.tiles[i].base = Base::Ocean; }
         c.buildings.clear();
         let dry = tile_yields(&map, &c, 11, 10).0;
         assert_eq!(lake, dry + 1);
-        c.buildings.push(Production::Harbor);
+        c.buildings.push(Production::named("Harbor"));
         assert_eq!(tile_yields(&map, &c, 11, 10).0, dry + 1);
     }
 
     #[test]
     fn seafaring_commerce_requires_an_ocean_coast_and_obeys_the_cap() {
         realm::reset();
-        let old = std::array::from_fn(crate::civs::roster_index);
-        crate::civs::set_players_for_test([crate::civs::roster_index_named("Netherlands").unwrap(), 0, 1, 6]);
+        let old = crate::civs::players();
+        crate::civs::set_players_for_test(&[crate::civs::roster_index_named("Netherlands").unwrap(), 0, 1, 6]);
         let mut map = flat();
         let city = town(1);
         assert_eq!(center(&map, &city).2, 1);
@@ -851,7 +851,7 @@ mod tests {
         assert_eq!(center(&map, &city).2, 4, "capital floor then Seafaring then Despotism cap");
         realm::write(0, |r| r.adopt(realm::govt_row::MONARCHY));
         assert_eq!(center(&map, &city).2, 5);
-        crate::civs::set_players_for_test(old);
+        crate::civs::set_players_for_test(&old);
         assert_eq!(center(&map, &city).2, 4, "a non-Seafaring capital gets no bonus");
     }
 
@@ -864,7 +864,7 @@ mod tests {
         let coast = map.idx(11, 10); map.tiles[coast].base = Base::Coast;
         let road = map.idx(10, 11); map.tiles[road].road = true;
         let before = [center(&map, &city).2, tile_yields(&map, &city, 11, 10).2, tile_yields(&map, &city, 10, 11).2];
-        city.buildings.push(Production::TheColossus);
+        city.buildings.push(Production::named("The Colossus"));
         let after = [center(&map, &city).2, tile_yields(&map, &city, 11, 10).2, tile_yields(&map, &city, 10, 11).2];
         assert_eq!(after, before.map(|n| n + 1));
         assert_eq!(tile_yields(&map, &city, 9, 10).2, 0);
@@ -876,14 +876,14 @@ mod tests {
     fn a_factory_adds_half_and_a_plant_adds_half_more_only_with_the_factory() {
         let mut c = town(1);
         assert_eq!(shield_quarters(&c), 4);
-        c.buildings.push(Production::Factory);
+        c.buildings.push(Production::named("Factory"));
         assert_eq!(shield_quarters(&c), 6);
-        c.buildings.push(Production::ManufacturingPlant);
+        c.buildings.push(Production::named("Manufacturing Plant"));
         assert_eq!(shield_quarters(&c), 8);
         c.buildings.clear();
-        c.buildings.push(Production::SolarPlant);
+        c.buildings.push(Production::named("Solar Plant"));
         assert_eq!(shield_quarters(&c), 4, "a plant without the Factory does nothing");
-        c.buildings.push(Production::Factory);
+        c.buildings.push(Production::named("Factory"));
         assert_eq!(shield_quarters(&c), 8);
     }
 
@@ -912,7 +912,7 @@ mod tests {
         realm::write(0, |r| r.connected.clear());
         // A Courthouse: one halving (27 -> 14), threshold 18 + 20/4 = 23,
         // (1400*23 + 575) / 1150 = 28, under its 80% cap.
-        far.buildings.push(Production::Courthouse);
+        far.buildings.push(Production::named("Courthouse"));
         assert_eq!(corruption(&map, &far, 100, Loss::Commerce), 28);
         far.buildings.clear();
         // Three cities nearer the capital, the capital itself included,
@@ -935,7 +935,7 @@ mod tests {
             r.govt = realm::govt_row::ANARCHY;
         });
         let mut c = town(1);
-        c.buildings.push(Production::Temple);
+        c.buildings.push(Production::named("Temple"));
         assert_eq!(corruption(&map, &c, 7, Loss::Shields), 7);
         assert_eq!(upkeep(&c), 0);
     }
@@ -944,8 +944,8 @@ mod tests {
     fn upkeep_is_the_sum_of_the_improvements() {
         realm::reset();
         let mut c = town(1);
-        c.buildings.push(Production::Temple);
-        c.buildings.push(Production::Barracks);
+        c.buildings.push(Production::named("Temple"));
+        c.buildings.push(Production::named("Barracks"));
         assert_eq!(upkeep(&c), 2);
     }
 
@@ -962,7 +962,7 @@ mod tests {
         work_all(&map, &mut c);
         assert!(totals(&map, &c).disorder);
         // A Temple (1 content face) calms the third citizen.
-        c.buildings.push(Production::Temple);
+        c.buildings.push(Production::named("Temple"));
         assert!(!totals(&map, &c).disorder);
     }
 
@@ -1062,11 +1062,11 @@ mod tests {
         let mut c = town(4);
         work_all(&map, &mut c);
         let base = totals(&map, &c);
-        c.buildings.push(Production::Library);
+        c.buildings.push(Production::named("Library"));
         let lib = totals(&map, &c);
         assert_eq!(lib.sci, base.sci * 3 / 2);
         assert_eq!(lib.tax, base.tax);
-        c.buildings.push(Production::Marketplace);
+        c.buildings.push(Production::named("Marketplace"));
         let mk = totals(&map, &c);
         assert_eq!(mk.tax, base.tax * 3 / 2);
     }
@@ -1077,11 +1077,11 @@ mod tests {
         assert!(!growth_blocked(&c, false));
         c.set_size(6);
         assert!(growth_blocked(&c, false));
-        c.buildings.push(Production::Aqueduct);
+        c.buildings.push(Production::named("Aqueduct"));
         assert!(!growth_blocked(&c, false));
         c.set_size(12);
         assert!(growth_blocked(&c, false));
-        c.buildings.push(Production::Hospital);
+        c.buildings.push(Production::named("Hospital"));
         assert!(!growth_blocked(&c, false));
     }
 
@@ -1091,7 +1091,7 @@ mod tests {
         let map = flat();
         let mut c = town(3);
         work_all(&map, &mut c);
-        c.production = Production::Wealth;
+        c.production = Production::named("Wealth");
         let t = totals(&map, &c);
         assert_eq!(t.wealth, t.shields / 4 + i32::from(t.shields > 0 && t.shields < 4));
     }

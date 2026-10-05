@@ -386,7 +386,7 @@ pub fn drive_script(
             "meet" => {
                 let mut civs = arg.split_whitespace().filter_map(|c| c.parse::<usize>().ok());
                 match (civs.next(), civs.next()) {
-                    (Some(a), Some(b)) if a != b && a.max(b) < crate::civs::CIV_COUNT => {
+                    (Some(a), Some(b)) if a != b && a.max(b) < crate::civs::civ_count() => {
                         reach.diplomacy.meet(a, b);
                     }
                     _ => eprintln!("script: bad meet {arg}"),
@@ -396,7 +396,7 @@ pub fn drive_script(
                 // The civ offers the first advance it can spare, for peace.
                 use civ3mapgen::diplomacy::Clause;
                 use crate::diplomacy::{Deal, Proposal};
-                let from = arg.parse::<usize>().ok().filter(|&c| c != civs.viewer() && c < crate::civs::CIV_COUNT);
+                let from = arg.parse::<usize>().ok().filter(|&c| c != civs.viewer() && c < crate::civs::civ_count());
                 let spare = from.and_then(|c| reach.research.giftable(c, civs.viewer()).first().copied());
                 match (from, spare) {
                     (Some(from), Some(tech)) => {
@@ -411,7 +411,7 @@ pub fn drive_script(
             }
             "wonder" | "build" => {
                 let (civ, name) = arg.split_once(' ').unwrap_or((arg, ""));
-                let row = (0..crate::roster::BLDG_COUNT).find(|&r| crate::roster::bldg(r).name.eq_ignore_ascii_case(name.trim()));
+                let row = (0..crate::roster::bldg_count()).find(|&r| crate::roster::bldg(r).name.eq_ignore_ascii_case(name.trim()));
                 let city = civ.parse::<usize>().ok().and_then(|civ| cities.iter_mut().find(|c| c.civ == civ));
                 match (row, city) {
                     (Some(row), Some(mut city)) if verb == "wonder" => city.buildings.push(Production::from_building_row(row)),

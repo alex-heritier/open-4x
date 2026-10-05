@@ -22,7 +22,7 @@ use crate::production_prompt::ProductionPrompts;
 use crate::realm::{self, GOVT_NAMES, Rate, Rates};
 use crate::rng::GameRng;
 use crate::research::{Research, tech_name};
-use crate::rules_data::TECH_NAMES;
+use crate::ruleset::TECH_NAMES;
 use crate::stage::{self, Stage, Ui};
 use bevy::window::PrimaryWindow;
 use crate::units::Unit;
@@ -143,7 +143,7 @@ pub fn hotkeys(
 
 /// The small button for the mouse, under the other advisors'.
 pub fn spawn_button(mut commands: Commands, assets: Res<AssetServer>) {
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     commands
         .spawn((
             Node { position_type: PositionType::Absolute, top: Val::Px(36.0), right: Val::Px(8.0), ..default() },
@@ -377,7 +377,7 @@ fn slider(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, which: Ra
 fn header(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer) {
     line(ui, s, 91.0, 255.0, 80.0, "Cities", 13.0, Color::BLACK, true);
     let city_icon = |cell: u32| {
-        let mut n = ImageNode::new(assets.load("gen/cityscreen/CityIcons.png"));
+        let mut n = ImageNode::new(assets.load("cache/cityscreen/CityIcons.png"));
         let x = 1.0 + cell as f32 * 31.0;
         n.rect = Some(Rect::new(x, 1.0, x + 30.0, 31.0));
         n
@@ -420,9 +420,9 @@ fn city_row(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c: &Cit
     }
     if c.entertainers + c.scientists + c.tax_collectors > 0 {
         x += step;
-        for head in std::iter::repeat_n("gen/ui/entertainer.png", c.entertainers as usize)
-            .chain(std::iter::repeat_n("gen/ui/scientist.png", c.scientists as usize))
-            .chain(std::iter::repeat_n("gen/ui/tax_collector.png", c.tax_collectors as usize))
+        for head in std::iter::repeat_n("cache/ui/entertainer.png", c.entertainers as usize)
+            .chain(std::iter::repeat_n("cache/ui/scientist.png", c.scientists as usize))
+            .chain(std::iter::repeat_n("cache/ui/tax_collector.png", c.tax_collectors as usize))
         {
             ui.picture(s, ImageNode::new(assets.load(head)), x, y - 19.0, 34.0, 34.0);
             x += step;
@@ -507,7 +507,7 @@ fn body(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, pg: &Page) 
     }
     if pg.cities.len() > ROWS {
         for (stem, y, d) in [("scroll_up_0", 290.0, -1), ("scroll_down_0", 690.0, 1)] {
-            s.spawn((Button, Click::Scroll(d), ImageNode::new(assets.load(format!("gen/ui/{stem}.png"))), ui.st.rect(958.0, y, 18.0, 16.0)));
+            s.spawn((Button, Click::Scroll(d), ImageNode::new(assets.load(format!("cache/ui/{stem}.png"))), ui.st.rect(958.0, y, 18.0, 16.0)));
         }
     }
 }
@@ -564,7 +564,7 @@ pub fn show(
     for e in &roots {
         commands.entity(e).despawn();
     }
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     let st = Stage(scale);
     let ui = Ui { font: &font, st };
     let root = stage::spawn(&mut commands, DomesticRoot, st, 0.0, 100);

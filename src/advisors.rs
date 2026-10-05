@@ -18,7 +18,7 @@ use bevy::window::PrimaryWindow;
 use civ3mapgen::diplomacy::Clause;
 
 use crate::cities::{City, CityView, Treasury};
-use crate::civs::{CIV_COUNT, Civilizations, is_ai};
+use crate::civs::{CIV_CAP, civ_count, Civilizations, is_ai};
 use crate::combat::CombatRng;
 use crate::diplomacy::{Deal, Diplomacy, attitude_label, clause_text, people, verdict_text};
 use crate::features::{MessageBoard, post};
@@ -81,7 +81,7 @@ pub struct Advisors {
     /// Declaring war from the talk screen takes two clicks.
     armed: bool,
     /// The leaders who have greeted us.
-    greeted: [bool; CIV_COUNT],
+    greeted: [bool; CIV_CAP],
     /// Picks among the phrasings of a line; moves on at every screen, so a
     /// screen that is rebuilt keeps its words and the next one has others.
     seed: u32,
@@ -334,7 +334,7 @@ pub fn interrupt(
         advisors.open(Screen::ResearchAsk);
     } else if diplomacy.proposals.iter().any(|p| p.to == me) {
         advisors.open(Screen::Proposal);
-    } else if let Some(other) = (0..CIV_COUNT).find(|&o| o != me && diplomacy.contact(me, o) && !advisors.greeted[o]) {
+    } else if let Some(other) = (0..civ_count()).find(|&o| o != me && diplomacy.contact(me, o) && !advisors.greeted[o]) {
         advisors.greeted[other] = true;
         advisors.open(Screen::Greeting(other));
     }
@@ -435,7 +435,7 @@ fn standing(v: &View, other: usize) -> String {
 
 fn foreign(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
     text(p, font, "Foreign Advisor", 30.0);
-    for other in (0..CIV_COUNT).filter(|&o| o != v.me) {
+    for other in (0..civ_count()).filter(|&o| o != v.me) {
         let met = v.diplomacy.contact(v.me, other);
         row(p, |r| {
             text(r, font, format!("The {}: {}", people(other), standing(v, other)), 18.0);
@@ -479,7 +479,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
     let label = |t: i32| format!("{} ({})", tech_name(t), turns_text(v.research.turns(v.me, t)));
     let slices = TextureSlicer { border: BorderRect::all(6.0), ..default() };
     let parchment = |assets: &AssetServer| {
-        ImageNode::new(assets.load("gen/advisors/popup.png")).with_mode(NodeImageMode::Sliced(slices.clone()))
+        ImageNode::new(assets.load("cache/advisors/popup.png")).with_mode(NodeImageMode::Sliced(slices.clone()))
     };
     commands
         .spawn((
@@ -492,7 +492,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
                 .with_children(|s| {
                     // The head rises over the popup, which hides the shoulders.
                     let era = crate::tech_tree::era_of(v.research, v.me);
-                    ui.picture(s, ImageNode::new(v.assets.load(format!("gen/advisors/portrait_science_{era}.png"))), 221.0, -132.0, 150.0, 150.0);
+                    ui.picture(s, ImageNode::new(v.assets.load(format!("cache/advisors/portrait_science_{era}.png"))), 221.0, -132.0, 150.0, 150.0);
                     s.spawn((parchment(v.assets), st.rect(0.0, 0.0, w, h)));
                     ui.words(s, 0.0, 10.0, w, 30.0, "Science Advisor", 24.0, Color::BLACK, true);
                     ui.words(s, 27.0, 59.0, w - 40.0, 44.0, "Great One, our Sages need direction.\nShall we look into the secrets of", 16.0, Color::BLACK, false);
@@ -518,7 +518,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
                             TextLayout::new(Justify::Left, LineBreak::NoWrap),
                             Underline,
                         ));
-                        b.spawn((ImageNode::new(v.assets.load("gen/advisors/pulldown.png")), st.rect(pw - 23.0, 0.0, 21.0, 21.0)));
+                        b.spawn((ImageNode::new(v.assets.load("cache/advisors/pulldown.png")), st.rect(pw - 23.0, 0.0, 21.0, 21.0)));
                     });
                     ui.words(s, px + pw + 3.0, py, 12.0, ph, "?", 16.0, Color::BLACK, false);
                     for (k, (text, action, focus)) in
@@ -529,7 +529,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
                             .with_children(|b| {
                                 let bullet = if focus { "bullet_2" } else { "bullet_0" };
                                 b.spawn((
-                                    ImageNode::new(v.assets.load(format!("gen/advisors/{bullet}.png"))),
+                                    ImageNode::new(v.assets.load(format!("cache/advisors/{bullet}.png"))),
                                     Node { width: st.px(19.0), height: st.px(20.0), ..default() },
                                 ));
                                 b.spawn((
@@ -582,7 +582,7 @@ fn portrait(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt
 }
 
 fn frame(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, name: &str) {
-    ui.picture(s, ImageNode::new(v.assets.load(format!("gen/diplomacy/{name}.png"))), 0.0, 0.0, 1024.0, 768.0);
+    ui.picture(s, ImageNode::new(v.assets.load(format!("cache/diplomacy/{name}.png"))), 0.0, 0.0, 1024.0, 768.0);
 }
 
 /// "Emperor Caesar of the Romans".
@@ -685,7 +685,7 @@ fn talk(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt, ot
     ui.button(s, 522.0, 506.0, 190.0, 26.0, "Foreign Advisor", 15.0, Action::Foreign, false);
     // The lower box: treaties are offered when the clause alone would stand.
     let mut options = vec![Clause::Peace, Clause::RightOfPassage, Clause::MutualProtection];
-    for x in (0..CIV_COUNT).filter(|&x| x != me && x != other) {
+    for x in (0..civ_count()).filter(|&x| x != me && x != other) {
         options.push(Clause::MilitaryAlliance(crate::research::slot(x)));
         options.push(Clause::Embargo(crate::research::slot(x)));
     }
@@ -832,7 +832,7 @@ pub fn show(
     if !advisors.is_open() {
         return;
     }
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     let cs: Vec<&City> = cities.iter().collect();
     let us: Vec<&Unit> = units.iter().collect();
     let facts = diplomacy.facts(&map, &research, &cs, &us);
@@ -903,7 +903,7 @@ pub fn show(
                     border: UiRect::all(Val::Px(2.0)),
                     ..default()
                 },
-                ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
+                ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
                 BackgroundColor(Color::srgb(0.94, 0.91, 0.77)),
                 BorderColor::all(Color::srgb(0.25, 0.4, 0.28)),
             ))
@@ -1169,7 +1169,7 @@ pub fn update_science_line(
 
 /// Small buttons for the mouse: Science (F6), Foreign (F4) and Wonders (F7).
 pub fn spawn_buttons(mut commands: Commands, assets: Res<AssetServer>) {
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     commands
         .spawn((
             Node {
@@ -1394,7 +1394,7 @@ mod tests {
         app.world_mut().resource_scope(|w, mut r: Mut<Research>| {
             r.pick(0, t, &mut w.resource_mut::<CombatRng>().0);
         });
-        let strike = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::Horseman, 3, 3)).id();
+        let strike = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Horseman"), 3, 3)).id();
         app.world_mut().resource_mut::<Diplomacy>().war_ask =
             Some(crate::diplomacy::WarAsk { attacker: strike, to: (4, 3), target: 1 });
         app.update();
@@ -1412,7 +1412,7 @@ mod tests {
     fn declining_the_strike_leaves_the_peace() {
         let mut app = app();
         app.add_systems(Update, (interrupt, respond).chain());
-        let strike = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::Horseman, 3, 3)).id();
+        let strike = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Horseman"), 3, 3)).id();
         app.world_mut().resource_mut::<Diplomacy>().war_ask =
             Some(crate::diplomacy::WarAsk { attacker: strike, to: (4, 3), target: 1 });
         app.world_mut().spawn((Interaction::Pressed, Action::WarNo));

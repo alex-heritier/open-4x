@@ -244,11 +244,11 @@ mod tests {
         // 60, 60 and 40 shields over the 4 shields a gold costs, for a
         // civ with neither of their traits (Rome: Militaristic and
         // Commercial, so its Barracks are the one half-price building).
-        assert_eq!(sale_price(1, Production::Temple), 15);
-        assert_eq!(sale_price(1, Production::Granary), 15);
-        assert_eq!(sale_price(1, Production::Barracks), 5);
+        assert_eq!(sale_price(1, Production::named("Temple")), 15);
+        assert_eq!(sale_price(1, Production::named("Granary")), 15);
+        assert_eq!(sale_price(1, Production::named("Barracks")), 5);
         // Japan is Religious: its Temples cost half.
-        assert_eq!(sale_price(0, Production::Temple), 7);
+        assert_eq!(sale_price(0, Production::named("Temple")), 7);
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
             citizens: crate::citizens::new_pool(civ, 1),
             food: 0,
             shields: 0,
-            production: Production::Warrior,
+            production: Production::named("Warrior"),
             queue: vec![],
             buildings: vec![],
             culture: 0,
@@ -319,8 +319,8 @@ mod tests {
                 map.tiles[i].road = true;
             }
         }
-        a.buildings.push(Production::Temple);
-        b.buildings.extend([Production::Barracks, Production::Granary]);
+        a.buildings.push(Production::named("Temple"));
+        b.buildings.extend([Production::named("Barracks"), Production::named("Granary")]);
         let f = finance(&map, [&a, &b], 9);
         assert_eq!(f.tax, 2);
         assert_eq!(f.upkeep, 3);
@@ -332,19 +332,19 @@ mod tests {
     #[test]
     fn a_broke_civ_gives_up_the_cheapest_unit() {
         let units = [
-            (1u32, UnitType::Settler),
-            (2, UnitType::Scout),
-            (3, UnitType::Warrior),
-            (4, UnitType::Worker),
-            (5, UnitType::Warrior),
+            (1u32, UnitType::named("Settler")),
+            (2, UnitType::named("Scout")),
+            (3, UnitType::named("Warrior")),
+            (4, UnitType::named("Worker")),
+            (5, UnitType::named("Warrior")),
         ];
         // Warriors, Scouts and Workers cost 10 shields, the least; fighters
         // go first, so a Warrior goes.
-        assert_eq!(disband_pick(units), Some((5, UnitType::Warrior)));
+        assert_eq!(disband_pick(units), Some((5, UnitType::named("Warrior"))));
         // Without them, the Scout (10) goes before the Settler (30).
         assert_eq!(
             disband_pick(units[..2].iter().copied()),
-            Some((2, UnitType::Scout))
+            Some((2, UnitType::named("Scout")))
         );
         assert_eq!(disband_pick(Vec::<(u32, UnitType)>::new()), None);
     }
@@ -352,17 +352,17 @@ mod tests {
     #[test]
     fn at_equal_price_a_warrior_goes_before_a_worker_whatever_the_ids() {
         for (warrior, worker) in [(1u32, 9u32), (9, 1)] {
-            let units = [(worker, UnitType::Worker), (warrior, UnitType::Warrior)];
+            let units = [(worker, UnitType::named("Worker")), (warrior, UnitType::named("Warrior"))];
             assert_eq!(
                 disband_pick(units),
-                Some((warrior, UnitType::Warrior)),
+                Some((warrior, UnitType::named("Warrior"))),
                 "warrior {warrior}, worker {worker}"
             );
         }
         // With no Warrior left the Worker is next, ahead of the Scout that
         // costs the same but is listed after it.
-        let rest = [(2u32, UnitType::Scout), (7, UnitType::Worker)];
-        assert_eq!(disband_pick(rest), Some((7, UnitType::Worker)));
+        let rest = [(2u32, UnitType::named("Scout")), (7, UnitType::named("Worker"))];
+        assert_eq!(disband_pick(rest), Some((7, UnitType::named("Worker"))));
     }
 
     #[test]
@@ -372,8 +372,8 @@ mod tests {
         let mut new = city_at(&map, 0, 20, 10);
         old.founded = 1;
         new.founded = 5;
-        old.buildings = vec![Production::Temple, Production::Granary];
-        new.buildings = vec![Production::Barracks];
+        old.buildings = vec![Production::named("Temple"), Production::named("Granary")];
+        new.buildings = vec![Production::named("Barracks")];
         // Equal upkeep: the newer city, then its newest building.
         assert_eq!(sale_pick([(1u32, &old), (2, &new)]), Some((2, 0)));
         new.buildings.clear();

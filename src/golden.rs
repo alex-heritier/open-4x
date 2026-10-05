@@ -13,7 +13,7 @@
 use bevy::prelude::*;
 
 use crate::cities::City;
-use crate::civs::{CIV_COUNT, Civilizations};
+use crate::civs::{CIV_CAP, civ_count, Civilizations};
 use crate::features::{MessageBoard, post};
 use crate::roster::{self, oth};
 use crate::units::Turn;
@@ -39,14 +39,14 @@ pub fn wonder_triggers(traits: u32, rows: impl IntoIterator<Item = usize>) -> bo
 pub fn unit_triggers(winner: crate::units::UnitType, loser_barbarian: bool, civ: usize) -> bool {
     crate::units::def(winner).abilities & roster::ability::STARTS_GOLDEN_AGE != 0
         && !loser_barbarian
-        && civ < CIV_COUNT
+        && civ < civ_count()
         && crate::realm::read(civ, |r| r.golden_end.is_none())
 }
 
 /// Ask for a Golden Age for `civ` at the next check (the combat sequencer
 /// has no calendar).
 pub fn request(civ: usize) {
-    if civ < CIV_COUNT {
+    if civ < civ_count() {
         crate::realm::write(civ, |r| r.golden_due = true);
     }
 }
@@ -57,9 +57,9 @@ pub fn track(
     cities: Query<&City>,
     civs: Res<Civilizations>,
     mut board: ResMut<MessageBoard>,
-    mut ended: Local<[bool; CIV_COUNT]>,
+    mut ended: Local<[bool; CIV_CAP]>,
 ) {
-    for civ in 0..CIV_COUNT {
+    for civ in 0..civ_count() {
         let (end, due) = crate::realm::read(civ, |r| (r.golden_end, r.golden_due));
         if end.is_none() {
             let rows = cities
@@ -93,7 +93,7 @@ mod tests {
     use super::*;
 
     fn row(name: &str) -> usize {
-        (0..roster::BLDG_COUNT).find(|&r| roster::bldg(r).name == name).unwrap()
+        (0..roster::bldg_count()).find(|&r| roster::bldg(r).name == name).unwrap()
     }
 
     #[test]

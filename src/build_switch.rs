@@ -73,7 +73,7 @@ pub fn show(
     if !roots.is_empty() { return; }
     let city = cities.get(choice.city).unwrap();
     let lost = choice.shields - city.price(choice.to);
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     commands.spawn((SwitchRoot, GlobalZIndex(110), Node {
         width: Val::Percent(100.0), height: Val::Percent(100.0),
         justify_content: JustifyContent::Center, align_items: AlignItems::Center,
@@ -84,7 +84,7 @@ pub fn show(
                 width: Val::Px(460.0), max_width: Val::Percent(95.0),
                 padding: UiRect::all(Val::Px(24.0)), flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(16.0), ..default()
-            }, ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
+            }, ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
                 BackgroundColor(Color::srgb(0.94, 0.91, 0.77))))
                 .with_children(|panel| {
                     panel.spawn((Text::new(format!("Switch {} to {}?\nThis will discard {} {}.",
@@ -116,7 +116,7 @@ mod tests {
         app.init_resource::<ButtonInput<KeyCode>>();
         app.add_systems(Update, respond);
         let mut city = City::new(0, "Town", 5, 5);
-        city.production = Production::Barracks;
+        city.production = Production::named("Barracks");
         city.shields = 30;
         let city = app.world_mut().spawn(city).id();
         (app, city)
@@ -131,35 +131,35 @@ mod tests {
     #[test]
     fn cancel_preserves_production_and_accept_discards_only_the_quoted_surplus() {
         let (mut app, entity) = fixture();
-        request(&mut app, entity, Production::Warrior);
+        request(&mut app, entity, Production::named("Warrior"));
         assert!(app.world().resource::<BuildSwitch>().is_pending());
         assert_eq!(app.world().get::<City>(entity).unwrap().shields, 30);
         let cancel = app.world_mut().spawn((Interaction::Pressed, ScreenButton::SwitchNo)).id();
         app.update();
         let city = app.world().get::<City>(entity).unwrap();
-        assert_eq!((city.production, city.shields), (Production::Barracks, 30));
+        assert_eq!((city.production, city.shields), (Production::named("Barracks"), 30));
         assert!(!app.world().resource::<BuildSwitch>().is_pending());
         app.world_mut().despawn(cancel);
-        request(&mut app, entity, Production::Warrior);
+        request(&mut app, entity, Production::named("Warrior"));
         app.world_mut().spawn((Interaction::Pressed, ScreenButton::SwitchYes));
         app.update();
         let city = app.world().get::<City>(entity).unwrap();
-        assert_eq!((city.production, city.shields), (Production::Warrior, 10));
+        assert_eq!((city.production, city.shields), (Production::named("Warrior"), 10));
     }
 
     #[test]
     fn affordable_switch_is_immediate_and_stale_or_foreign_choices_cannot_commit() {
         let (mut app, entity) = fixture();
-        request(&mut app, entity, Production::Granary);
+        request(&mut app, entity, Production::named("Granary"));
         assert!(!app.world().resource::<BuildSwitch>().is_pending());
         assert_eq!(app.world().get::<City>(entity).unwrap().shields, 30);
         for foreign in [false, true] {
-            request(&mut app, entity, Production::Warrior);
+            request(&mut app, entity, Production::named("Warrior"));
             if foreign { app.world_mut().get_mut::<City>(entity).unwrap().civ = 1; }
             else { app.world_mut().get_mut::<City>(entity).unwrap().shields = 35; }
             app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Enter);
             app.update();
-            assert_eq!(app.world().get::<City>(entity).unwrap().production, Production::Granary);
+            assert_eq!(app.world().get::<City>(entity).unwrap().production, Production::named("Granary"));
             assert!(!app.world().resource::<BuildSwitch>().is_pending());
             app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset_all();
         }
@@ -168,11 +168,11 @@ mod tests {
     #[test]
     fn escape_keeps_the_current_item_and_shields() {
         let (mut app, entity) = fixture();
-        request(&mut app, entity, Production::Warrior);
+        request(&mut app, entity, Production::named("Warrior"));
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
         app.update();
         assert!(!app.world().resource::<BuildSwitch>().is_pending());
         let city = app.world().get::<City>(entity).unwrap();
-        assert_eq!((city.production, city.shields), (Production::Barracks, 30));
+        assert_eq!((city.production, city.shields), (Production::named("Barracks"), 30));
     }
 }

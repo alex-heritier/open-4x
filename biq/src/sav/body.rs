@@ -58,6 +58,21 @@ impl<const N: usize> Body<N> {
         i32::from_le_bytes(self.array(off))
     }
 
+    /// Store a byte at `off`.
+    pub fn set_u8(&mut self, off: usize, v: u8) {
+        self.0[off] = v;
+    }
+
+    /// Store a little-endian `i16` at `off`.
+    pub fn set_i16(&mut self, off: usize, v: i16) {
+        self.0[off..off + 2].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// Store a little-endian `i32` at `off`.
+    pub fn set_i32(&mut self, off: usize, v: i32) {
+        self.0[off..off + 4].copy_from_slice(&v.to_le_bytes());
+    }
+
     /// Store a little-endian `u16` at `off`.
     pub fn set_u16(&mut self, off: usize, v: u16) {
         self.0[off..off + 2].copy_from_slice(&v.to_le_bytes());

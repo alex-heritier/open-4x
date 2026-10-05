@@ -106,7 +106,7 @@ pub fn choose_unit(
     let mut cur = dice.below(n as u32) as usize;
     for _ in 0..n {
         let r = crate::roster::unit(cur);
-        let tech_era = if r.tech < 0 { 0 } else { crate::rules_data::TECH_TREE[r.tech as usize].0 };
+        let tech_era = if r.tech < 0 { 0 } else { crate::ruleset::TECH_TREE[r.tech as usize].0 };
         let ok = r.abilities & 1 == 0
             && r.races & 1 != 0
             && r.races & (1 << race) != 0
@@ -114,7 +114,7 @@ pub fn choose_unit(
             && tech_era == era
             && r.playable;
         if ok && players > 0 && have(cur) >= players {
-            return Some(UnitType(cur as u8));
+            return Some(UnitType(cur as u16));
         }
         cur = (cur + step) % n;
     }
@@ -237,10 +237,10 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
             Outcome::City => false,
             Outcome::Nothing => true,
             Outcome::Settlers => {
-                let settling = ctx.units.iter().filter(|u| u.civ == ctx.civ && u.utype == UnitType::Settler).count()
-                    + ctx.cities.iter().filter(|c| c.civ == ctx.civ && c.production.unit() == Some(UnitType::Settler)).count();
+                let settling = ctx.units.iter().filter(|u| u.civ == ctx.civ && u.utype == crate::roles::settler()).count()
+                    + ctx.cities.iter().filter(|c| c.civ == ctx.civ && c.production.unit() == Some(crate::roles::settler())).count();
                 if settling == 0 && average_ok {
-                    out.units.push((UnitType::Settler, false));
+                    out.units.push((crate::roles::settler(), false));
                     true
                 } else {
                     false
@@ -254,7 +254,7 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
                             if live > 0 {
                                 live
                             } else {
-                                i32::from((ctx.can_build)(q, UnitType(row as u8)))
+                                i32::from((ctx.can_build)(q, UnitType(row as u16)))
                             }
                         })
                         .sum()
@@ -386,7 +386,7 @@ mod tests {
         let mut dice = MapRng::new(7);
         for _ in 0..50 {
             let t = choose_unit(&mut dice, 9, 0, false, 4, &|_| 4).unwrap();
-            assert!(t == UnitType::Warrior || t == UnitType::Horseman, "{}", def(t).name);
+            assert!(t == UnitType::named("Warrior") || t == UnitType::named("Horseman"), "{}", def(t).name);
         }
         assert_eq!(choose_unit(&mut dice, 9, 1, false, 4, &|_| 4), None);
     }

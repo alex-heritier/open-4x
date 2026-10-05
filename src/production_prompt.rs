@@ -151,7 +151,7 @@ pub fn show(
     };
     let completed = prompts.pending[i].2;
     prompts.open = Some(civs.active);
-    let font = assets.load("gen/fonts/lsans.ttf");
+    let font = assets.load("cache/fonts/lsans.ttf");
     let rate = city_yields(&map, city).1;
     let label = |p: Production| {
         let mut preview = city.clone();
@@ -187,7 +187,7 @@ pub fn show(
                     border: UiRect::all(Val::Px(2.0)),
                     ..default()
                 },
-                ImageNode::new(assets.load("gen/cityscreen/ProductionQueueBox.png")),
+                ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
                 BackgroundColor(Color::srgb(0.94, 0.91, 0.77)),
                 BorderColor::all(Color::srgb(0.25, 0.4, 0.28)),
             ))
@@ -298,25 +298,25 @@ mod tests {
             app.init_resource::<ButtonInput<KeyCode>>();
             app.add_systems(Update, (respond, crate::build_switch::respond).chain());
             let mut city = City::new(0, "Town", 5, 5);
-            city.production = Production::Barracks;
+            city.production = Production::named("Barracks");
             city.shields = 30;
             let entity = app.world_mut().spawn(city).id();
             let mut prompts = app.world_mut().resource_mut::<ProductionPrompts>();
-            prompts.push(entity, 0, Production::Warrior);
+            prompts.push(entity, 0, Production::named("Warrior"));
             prompts.open = Some(0);
-            app.world_mut().spawn((Interaction::Pressed, PromptButton::Pick(Production::Warrior)));
+            app.world_mut().spawn((Interaction::Pressed, PromptButton::Pick(Production::named("Warrior"))));
             app.update();
             assert!(app.world().resource::<crate::build_switch::BuildSwitch>().is_pending());
             let city = app.world().get::<City>(entity).unwrap();
-            assert_eq!((city.production, city.shields), (Production::Barracks, 30));
+            assert_eq!((city.production, city.shields), (Production::named("Barracks"), 30));
             app.world_mut().spawn((Interaction::Pressed, if accept {
                 crate::cities::ScreenButton::SwitchYes
             } else { crate::cities::ScreenButton::SwitchNo }));
             app.update();
             let city = app.world().get::<City>(entity).unwrap();
             assert_eq!((city.production, city.shields), if accept {
-                (Production::Warrior, 10)
-            } else { (Production::Barracks, 30) });
+                (Production::named("Warrior"), 10)
+            } else { (Production::named("Barracks"), 30) });
             assert!(app.world().resource::<ProductionPrompts>().blocks(0), "the advisor decision remains pending");
         }
     }
@@ -330,15 +330,15 @@ mod tests {
         let mut prompts = ProductionPrompts::default();
         let first = Entity::from_bits(1);
         let second = Entity::from_bits(2);
-        prompts.push(first, 0, Production::Warrior);
-        prompts.push(second, 0, Production::Granary);
+        prompts.push(first, 0, Production::named("Warrior"));
+        prompts.push(second, 0, Production::named("Granary"));
         assert_eq!(
             prompts.pending.pop_front(),
-            Some(prompt(1, 0, Production::Warrior))
+            Some(prompt(1, 0, Production::named("Warrior")))
         );
         assert_eq!(
             prompts.pending.pop_front(),
-            Some(prompt(2, 0, Production::Granary))
+            Some(prompt(2, 0, Production::named("Granary")))
         );
         assert!(prompts.pending.is_empty());
     }
@@ -348,8 +348,8 @@ mod tests {
     #[test]
     fn another_civs_prompt_waits_for_its_own_turn() {
         let mut prompts = ProductionPrompts::default();
-        prompts.push(Entity::from_bits(1), 0, Production::Warrior);
-        prompts.push(Entity::from_bits(2), 1, Production::Granary);
+        prompts.push(Entity::from_bits(1), 0, Production::named("Warrior"));
+        prompts.push(Entity::from_bits(2), 1, Production::named("Granary"));
         assert!(prompts.blocks(0), "civ 0 owes a decision");
         assert!(prompts.blocks(1));
         assert!(!prompts.blocks(2), "a third civ is never held up");
@@ -363,7 +363,7 @@ mod tests {
         assert!(prompts.blocks(1));
         assert_eq!(
             prompts.pending.front(),
-            Some(&prompt(2, 1, Production::Granary))
+            Some(&prompt(2, 1, Production::named("Granary")))
         );
     }
 }

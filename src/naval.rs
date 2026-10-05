@@ -222,6 +222,11 @@ pub fn wonders(civ: usize) -> u32 {
         .fold(0, |flags, (_, b)| flags | b.wonder))
 }
 
+/// Whether `civ` has the Seafaring trait. The barbarians have no race.
+fn seafaring(civ: usize) -> bool {
+    civ < crate::civs::civ_count() && crate::civs::RACES[civ].traits & (1 << 7) != 0
+}
+
 /// 0x5CDDF0: Seafaring and the two ship-movement wonder flags are additive.
 pub fn moves(t: UnitType, civ: usize) -> u8 {
     let d = def(t);
@@ -230,7 +235,7 @@ pub fn moves(t: UnitType, civ: usize) -> u8 {
         let w = wonders(civ);
         m += MP * u8::from(w & 8 != 0);
         m += 2 * MP * u8::from(w & 0x4000 != 0);
-        m += MP * u8::from(crate::civs::RACES[civ].traits & (1 << 7) != 0);
+        m += MP * u8::from(seafaring(civ));
     }
     m
 }
@@ -256,11 +261,11 @@ pub fn unit_hazards(
     let mut lost = std::collections::HashSet::new();
     for event in ended.read() {
         let civ = event.0;
-        let rules = crate::rules_data::rules();
+        let rules = crate::ruleset::rules();
         let tech_flags = crate::realm::read(civ, |r| rules.techs.iter().enumerate()
             .filter(|(i, _)| r.knows(*i as i32)).fold(0, |flags, (_, t)| flags | t.flags));
         let safe_sea = wonders(civ) & 1 != 0;
-        let seafaring = crate::civs::RACES[civ].traits & (1 << 7) != 0;
+        let seafaring = seafaring(civ);
         for (e, u) in units.iter().filter(|(_, u)| u.civ == civ && u.carrier.is_none()) {
             if lost.contains(&e) { continue; }
             let Some(t) = map.get(u.x, u.y) else { continue };
@@ -294,10 +299,10 @@ mod tests {
         let mut w = World::new();
         let (a, b, p) = (w.spawn_empty().id(), w.spawn_empty().id(), w.spawn_empty().id());
         let ships = vec![
-            (b, Unit::new(0, UnitType::Galley, 5, 5)),
-            (a, Unit::new(0, UnitType::Galley, 5, 5)),
+            (b, Unit::new(0, UnitType::named("Galley"), 5, 5)),
+            (a, Unit::new(0, UnitType::named("Galley"), 5, 5)),
         ];
-        let passenger = Unit::new(0, UnitType::Warrior, 5, 5);
+        let passenger = Unit::new(0, UnitType::named("Warrior"), 5, 5);
         let mut ask = None;
         assert!(matches!(choose_carrier(p, &passenger, (5, 5), &ships, &mut ask, false), Boarding::Asking));
         let shown = ask.as_ref().unwrap();
@@ -311,8 +316,8 @@ mod tests {
         assert!(ask.is_none());
         // One ship needs no question, and the computer never asks.
         assert!(matches!(choose_carrier(p, &passenger, (5, 5), &ships[..1], &mut ask, false), Boarding::Ship(s) if s == b));
-        let ai = Unit::new(1, UnitType::Warrior, 5, 5);
-        let theirs = vec![(b, Unit::new(1, UnitType::Galley, 5, 5)), (a, Unit::new(1, UnitType::Galley, 5, 5))];
+        let ai = Unit::new(1, UnitType::named("Warrior"), 5, 5);
+        let theirs = vec![(b, Unit::new(1, UnitType::named("Galley"), 5, 5)), (a, Unit::new(1, UnitType::named("Galley"), 5, 5))];
         assert!(matches!(choose_carrier(p, &ai, (5, 5), &theirs, &mut ask, false), Boarding::Ship(s) if s == first));
         assert!(ask.is_none());
     }
@@ -342,9 +347,9 @@ mod tests {
     #[test]
     fn boarding_reserves_capacity_and_cargo_follows_then_lands_without_movement() {
         let mut app = cargo_app();
-        assert_eq!(def(UnitType::Galley).capacity, 2);
-        let ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 2, 1)).id();
-        let passengers: Vec<_> = [UnitType::Settler, UnitType::Worker, UnitType::Warrior].into_iter().map(|t| {
+        assert_eq!(def(UnitType::named("Galley")).capacity, 2);
+        let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 2, 1)).id();
+        let passengers: Vec<_> = [UnitType::named("Settler"), UnitType::named("Worker"), UnitType::named("Warrior")].into_iter().map(|t| {
             let mut u = Unit::new(0, t, 1, 1);
             u.path.push_back((2, 1));
             app.world_mut().spawn(u).id()
@@ -379,13 +384,13 @@ mod tests {
     fn port_commands_load_and_unload_and_refuse_foreign_transports() {
         use crate::actionbar::UnitCommand;
         let mut app = cargo_app();
-        let foreign = app.world_mut().spawn(Unit::new(1, UnitType::Galley, 1, 1)).id();
-        let cargo = app.world_mut().spawn(Unit::new(0, UnitType::Settler, 1, 1)).id();
+        let foreign = app.world_mut().spawn(Unit::new(1, UnitType::named("Galley"), 1, 1)).id();
+        let cargo = app.world_mut().spawn(Unit::new(0, UnitType::named("Settler"), 1, 1)).id();
         app.world_mut().resource_mut::<crate::units::Selected>().0 = Some(cargo);
         app.world_mut().write_message(UnitCommand::Load);
         app.update();
         assert_eq!(app.world().get::<Unit>(cargo).unwrap().carrier, None);
-        let ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 1, 1)).id();
+        let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 1, 1)).id();
         app.world_mut().write_message(UnitCommand::Load);
         app.update();
         assert_eq!(app.world().get::<Unit>(cargo).unwrap().carrier, Some(ship));
@@ -409,8 +414,8 @@ mod tests {
         let mut app = cargo_app();
         app.insert_resource(crate::render::RevealAll(true));
         app.add_systems(Update, crate::units::unit_visibility.after(crate::units::auto_select));
-        let ship = app.world_mut().spawn((Unit::new(0, UnitType::Galley, 2, 1), Visibility::Visible)).id();
-        let mut u = Unit::new(0, UnitType::Settler, 2, 1);
+        let ship = app.world_mut().spawn((Unit::new(0, UnitType::named("Galley"), 2, 1), Visibility::Visible)).id();
+        let mut u = Unit::new(0, UnitType::named("Settler"), 2, 1);
         u.carrier = Some(ship);
         u.sentry = true;
         let cargo = app.world_mut().spawn((u, Visibility::Visible)).id();
@@ -435,11 +440,11 @@ mod tests {
     fn destroying_a_ship_kills_only_its_sea_cargo_and_releases_port_cargo() {
         for x in [1, 2] {
             let mut app = cargo_app();
-            let ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, x, 1)).id();
-            let mut u = Unit::new(0, UnitType::Settler, x, 1);
+            let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), x, 1)).id();
+            let mut u = Unit::new(0, UnitType::named("Settler"), x, 1);
             u.carrier = Some(ship);
             let cargo = app.world_mut().spawn(u).id();
-            let bystander = app.world_mut().spawn(Unit::new(0, UnitType::Worker, x, 1)).id();
+            let bystander = app.world_mut().spawn(Unit::new(0, UnitType::named("Worker"), x, 1)).id();
             app.world_mut().despawn(ship);
             app.update();
             if x == 2 { assert!(app.world().get::<Unit>(cargo).is_none()); }
@@ -451,12 +456,12 @@ mod tests {
     #[test]
     fn loaded_units_do_not_defend_or_attack_from_the_ship() {
         let mut app = cargo_app();
-        let ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 2, 1)).id();
-        let mut u = Unit::new(0, UnitType::Warrior, 2, 1);
+        let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 2, 1)).id();
+        let mut u = Unit::new(0, UnitType::named("Warrior"), 2, 1);
         u.carrier = Some(ship);
         u.path.push_back((2, 2));
         let cargo = app.world_mut().spawn(u).id();
-        app.world_mut().spawn(Unit::new(1, UnitType::Warrior, 2, 2));
+        app.world_mut().spawn(Unit::new(1, UnitType::named("Warrior"), 2, 2));
         app.update();
         let u = app.world().get::<Unit>(cargo).unwrap();
         assert_eq!((u.x, u.y, u.moves, u.carrier), (2, 1, MP, Some(ship)));
@@ -466,7 +471,7 @@ mod tests {
         assert_eq!(crate::actions::check(crate::actionbar::UnitCommand::Goto, app.world().resource::<GameMap>(), u, None), None);
         assert_eq!(app.world().resource::<Messages<crate::combat::AttackOrder>>().len(), 0);
         let stack = [(cargo, u.clone())];
-        assert!(crate::combat::pick_defender(app.world().resource::<GameMap>(), &Unit::new(1, UnitType::Warrior, 2, 2), None, &stack).is_none());
+        assert!(crate::combat::pick_defender(app.world().resource::<GameMap>(), &Unit::new(1, UnitType::named("Warrior"), 2, 2), None, &stack).is_none());
         assert!(!crate::actionbar::UnitCommand::Work(crate::improvements::WorkAction::Road).enabled(app.world().resource::<GameMap>(), &[], u));
     }
 
@@ -477,9 +482,9 @@ mod tests {
         let board = (8, 6);
         assert_eq!(map.get(from.0, from.1).unwrap().base, Base::Grassland);
         assert_eq!(map.get(board.0, board.1).unwrap().base, Base::Coast);
-        let passenger = Unit::new(0, UnitType::Settler, from.0, from.1);
+        let passenger = Unit::new(0, UnitType::named("Settler"), from.0, from.1);
         let ship = Entity::from_bits(1);
-        let mut units = vec![(ship, Unit::new(1, UnitType::Galley, board.0, board.1))];
+        let mut units = vec![(ship, Unit::new(1, UnitType::named("Galley"), board.0, board.1))];
         assert!(route(&map, &passenger, board, &[], &units).is_none());
         units[0].1.civ = 0;
         assert_eq!(route(&map, &passenger, board, &[], &units), Some(vec![board]));
@@ -494,11 +499,11 @@ mod tests {
     #[test]
     fn galleys_require_a_coastal_city_and_follow_water_routes_between_ports() {
         crate::realm::reset();
-        crate::research::set_trainable(0, UnitType::Galley.0 as usize, true);
+        crate::research::set_trainable(0, UnitType::named("Galley").0 as usize, true);
         let mut port = City::new(0, "Port", 1, 1);
-        assert!(!port.can_build_here(Production::Galley));
+        assert!(!port.can_build_here(Production::named("Galley")));
         port.coastal = true;
-        assert!(port.can_build_here(Production::Galley));
+        assert!(port.can_build_here(Production::named("Galley")));
         let mut map = GameMap::generate();
         for t in &mut map.tiles { t.base = Base::Grassland; }
         for x in 1..=20 { let i = map.idx(x, 10); map.tiles[i].base = Base::Coast; }
@@ -509,12 +514,12 @@ mod tests {
             let i = map.idx(x, 1);
             map.tiles[i].base = base;
         }
-        let mut galley = Unit::new(0, UnitType::Galley, 1, 1);
+        let mut galley = Unit::new(0, UnitType::named("Galley"), 1, 1);
         let ports = [(1, 1), (5, 1)];
         crate::units::order_move(&map, &mut galley, (5, 1), &ports);
         assert_eq!(galley.path.iter().copied().collect::<Vec<_>>(), [(2, 1), (3, 1), (4, 1), (5, 1)]);
         assert!(crate::units::route(&map, &galley, (6, 1), &ports).is_none());
-        let warrior = Unit::new(0, UnitType::Warrior, 1, 1);
+        let warrior = Unit::new(0, UnitType::named("Warrior"), 1, 1);
         assert!(crate::units::route(&map, &warrior, (2, 1), &ports).is_none());
         for &to in &galley.path {
             assert_eq!(crate::units::entry_cost(&map, &galley, (galley.x, galley.y), to, &ports), Some(MP));
@@ -564,11 +569,11 @@ mod tests {
             app.insert_resource(CombatRng(crate::rng::MapRng::new(seed)));
             app.add_message::<crate::civs::CivilizationEnded>();
             app.add_systems(Update, (unit_hazards, sync_cargo).chain());
-            let mut warrior = Unit::new(0, UnitType::Warrior, 10, 10);
+            let mut warrior = Unit::new(0, UnitType::named("Warrior"), 10, 10);
             warrior.fortified = true;
             let exposed = app.world_mut().spawn(warrior.clone()).id();
             let mut immune = Vec::new();
-            for (x, kind) in [(11, UnitType::Settler), (12, UnitType::Worker)] {
+            for (x, kind) in [(11, UnitType::named("Settler")), (12, UnitType::named("Worker"))] {
                 let mut u = Unit::new(0, kind, x, 10);
                 assert_ne!(def(kind).pop_cost, 0);
                 u.fortified = true;
@@ -579,7 +584,7 @@ mod tests {
             immune.push(app.world_mut().spawn(warrior.clone()).id());
             warrior.x = 14;
             warrior.fortified = true;
-            let carrier = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 14, 10)).id();
+            let carrier = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 14, 10)).id();
             immune.push(carrier);
             warrior.carrier = Some(carrier);
             immune.push(app.world_mut().spawn(warrior.clone()).id());
@@ -617,12 +622,12 @@ mod tests {
             app.insert_resource(CombatRng(crate::rng::MapRng::new(seed)));
             app.add_message::<crate::civs::CivilizationEnded>();
             app.add_systems(Update, (unit_hazards, sync_cargo).chain());
-            let unsafe_ship = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 10, 10)).id();
-            let mut cargo = Unit::new(0, UnitType::Settler, 10, 10);
+            let unsafe_ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 10, 10)).id();
+            let mut cargo = Unit::new(0, UnitType::named("Settler"), 10, 10);
             cargo.carrier = Some(unsafe_ship);
             let cargo = app.world_mut().spawn(cargo).id();
-            let coast = app.world_mut().spawn(Unit::new(0, UnitType::Galley, 11, 10)).id();
-            let foreign = app.world_mut().spawn(Unit::new(1, UnitType::Galley, 10, 10)).id();
+            let coast = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 11, 10)).id();
+            let foreign = app.world_mut().spawn(Unit::new(1, UnitType::named("Galley"), 10, 10)).id();
             let mut reference = crate::rng::MapRng::new(seed);
             let lost = reference.below(2) == 0;
             app.world_mut().write_message(crate::civs::CivilizationEnded(0));
@@ -644,12 +649,12 @@ mod tests {
         assert_eq!(sinking_die(Base::Ocean, abilities, 0, true, false), Some(2));
         assert_eq!(sinking_die(Base::Ocean, abilities, 0x4000, false, false), None);
         crate::realm::reset();
-        let row = Production::TheGreatLighthouse.building_row().unwrap();
+        let row = Production::named("The Great Lighthouse").building_row().unwrap();
         crate::realm::write(0, |r| r.owned[row] = 1);
-        assert_eq!(moves(UnitType::Galley, 0), 4 * MP);
+        assert_eq!(moves(UnitType::named("Galley"), 0), 4 * MP);
         let obsolete = crate::roster::BLDGS[row].obsolete;
         crate::realm::write(0, |r| r.known |= 1 << obsolete);
-        assert_eq!(moves(UnitType::Galley, 0), 3 * MP);
-        assert_eq!(moves(UnitType::Warrior, 0), MP);
+        assert_eq!(moves(UnitType::named("Galley"), 0), 3 * MP);
+        assert_eq!(moves(UnitType::named("Warrior"), 0), MP);
     }
 }
