@@ -11,3 +11,9 @@ serde_json = "1.0.151"
 civ3mapgen = { path = "reverse-engineering/rust" }
 # Civ3's own files: .biq rules, maps and scenarios, and .SAV saved games.
 civ3-biq = { path = "civ3_utils/biq" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+js-sys = "0.3.106"
+wasm-bindgen = "0.2.129"
+web-sys = { version = "0.3.106", features = ["Document", "Window", "XmlHttpRequest"] }

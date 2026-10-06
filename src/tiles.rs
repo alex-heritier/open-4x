@@ -4,7 +4,6 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fs;
 
 #[derive(Deserialize)]
 struct TileEntry {
@@ -26,7 +25,7 @@ pub struct TileArt {
 
 impl TileArt {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let text = fs::read_to_string("assets/cache/terrain/manifest.json")
+        let text = crate::web::read_text("assets/cache/terrain/manifest.json")
             .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: HashMap<String, TileEntry> =
             serde_json::from_str(&text).expect("terrain manifest parses");

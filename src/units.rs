@@ -5,7 +5,6 @@ use bevy::sprite::Anchor;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::OnceLock;
-use std::fs;
 
 use crate::combat::Level;
 use crate::improvements::{Work, action_slot};
@@ -194,7 +193,7 @@ impl UnitArt {
             return None;
         };
         let palette = team_colors();
-        let text = match fs::read_to_string(format!("{CACHE}/{dir}/manifest.json")) {
+        let text = match crate::web::read_text(format!("{CACHE}/{dir}/manifest.json")) {
             Ok(text) => text,
             Err(e) => {
                 warn!("{}: no converted art ({e})", def(t).name);
@@ -208,7 +207,7 @@ impl UnitArt {
             let strips: Vec<Handle<Image>> = (0..8)
                 .map(|d| asset_server.load(format!("{CACHE_URL}/{dir}/{slot}_d{d}.png")))
                 .collect();
-            let tinted = std::path::Path::new(&format!("{CACHE}/{dir}/{slot}_d0_c{}.png", palette[0])).exists();
+            let tinted = crate::web::cache_exists(format!("{CACHE}/{dir}/{slot}_d0_c{}.png", palette[0]));
             let teams: Vec<[Handle<Image>; 8]> = if tinted {
                 palette
                     .iter()
@@ -1633,7 +1632,7 @@ struct RingEntry {
 
 impl SelectionRing {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let text = fs::read_to_string("assets/cache/cursor/manifest.json")
+        let text = crate::web::read_text("assets/cache/cursor/manifest.json")
             .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: HashMap<String, RingEntry> =
             serde_json::from_str(&text).expect("cursor manifest parses");

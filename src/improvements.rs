@@ -329,7 +329,7 @@ pub struct ImprovementArt {
 
 impl ImprovementArt {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let text = std::fs::read_to_string("assets/cache/improvements/manifest.json")
+        let text = crate::web::read_text("assets/cache/improvements/manifest.json")
             .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: HashMap<String, ImpEntry> =
             serde_json::from_str(&text).expect("improvements manifest parses");

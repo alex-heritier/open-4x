@@ -68,43 +68,55 @@ mod units;
 mod upgrades;
 mod sites;
 mod weariness;
+mod web;
 mod zoc;
 mod wonders;
 
 use map::GameMap;
 
 fn main() {
-    let options = cli::init();
-    let boot = match boot::load(options) {
-        Ok(b) => b,
-        Err(msg) => {
-            eprintln!("open-4x: {msg}");
-            std::process::exit(1);
-        }
-    };
-    if let Err(msg) = scenario::install(&boot) {
-        eprintln!("open-4x: {msg}");
-        std::process::exit(1);
+    #[cfg(target_arch = "wasm32")]
+    {
+        console_error_panic_hook::set_once();
+        let console_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            web::show_error(&info.to_string());
+            console_hook(info);
+        }));
     }
+    let boot = match load_boot() {
+        Ok(b) => b,
+        Err(msg) => fail(&msg),
+    };
+    #[cfg(target_arch = "wasm32")]
+    web::show_progress("rules ready");
+    if let Err(msg) = scenario::install(&boot) {
+        fail(&msg);
+    }
+    #[cfg(target_arch = "wasm32")]
+    web::show_progress("scenario ready");
     civs::set_controllers();
     let (roster, colors) = assets::in_play();
     let wanted = assets::Wanted { install: &boot.install, plan: &ruleset::get().art, roster: &roster, colors };
     if let Err(msg) = assets::ensure(&wanted) {
-        eprintln!("open-4x: {msg}");
-        std::process::exit(1);
+        fail(&msg);
     }
-    App::new()
-        .insert_resource(boot)
+    let mut app = App::new();
+    app.insert_resource(boot)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Civ3 Clone".into(),
                         resolution: WindowResolution::new(1280, 800),
+                        canvas: Some("#game".into()),
+                        fit_canvas_to_parent: true,
+                        prevent_default_event_handling: true,
                         ..default()
                     }),
                     ..default()
                 })
+                .set(asset_plugin())
                 .set(ImagePlugin::default_nearest()),
         )
         .add_message::<units::TurnEnded>()
@@ -328,11 +340,44 @@ fn main() {
         .add_systems(First, (save::keys, save::run).chain())
         .add_systems(Update, cities::frame_city_view.after(cities::maintain_city_screen))
         .add_systems(Update, cities::highlight_menu_rows)
-        .add_systems(Update, (advisor_frame::hover_art, advisor_frame::switch_tabs))
-        .run();
+        .add_systems(Update, (advisor_frame::hover_art, advisor_frame::switch_tabs));
+    #[cfg(target_arch = "wasm32")]
+    web::show_progress("app run");
+    app.run();
+}
+
+fn asset_plugin() -> bevy::asset::AssetPlugin {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut plugin = bevy::asset::AssetPlugin::default();
+        plugin.meta_check = bevy::asset::AssetMetaCheck::Never;
+        plugin
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    bevy::asset::AssetPlugin::default()
+}
+
+fn fail(message: &str) -> ! {
+    eprintln!("open-4x: {message}");
+    #[cfg(target_arch = "wasm32")]
+    panic!("open-4x: {message}");
+    #[cfg(not(target_arch = "wasm32"))]
+    std::process::exit(1);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_boot() -> Result<boot::Boot, String> {
+    boot::load(cli::init())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_boot() -> Result<boot::Boot, String> {
+    boot::load_web(cli::options())
 }
 
 fn setup_camera(mut commands: Commands, map: Res<GameMap>) {
+    #[cfg(target_arch = "wasm32")]
+    web::show_ready();
     // Debug: MAP_CENTER=x,y starts the camera over a tile (like MAP_SEED).
     let center = std::env::var("MAP_CENTER")
         .ok()

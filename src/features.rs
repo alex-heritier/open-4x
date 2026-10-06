@@ -580,7 +580,7 @@ pub struct FeatureArt {
 
 impl FeatureArt {
     pub fn load(asset_server: &bevy::prelude::AssetServer) -> Self {
-        let text = std::fs::read_to_string("assets/cache/features/manifest.json")
+        let text = crate::web::read_text("assets/cache/features/manifest.json")
             .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: std::collections::HashMap<String, FeatureEntry> =
             serde_json::from_str(&text).expect("features manifest parses");
@@ -885,7 +885,7 @@ mod tests {
     fn art_keys_all_exist_in_manifest() {
         // Catches GOOD-slug vs prep-manifest drift (a runtime panic in
         // spawn_features). Skips when assets were never prepped.
-        let text = match std::fs::read_to_string("assets/cache/features/manifest.json") {
+        let text = match crate::web::read_text("assets/cache/features/manifest.json") {
             Ok(t) => t,
             Err(_) => {
                 eprintln!("skip: assets/cache/features missing (the game builds it at startup)");

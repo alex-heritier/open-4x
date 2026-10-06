@@ -284,6 +284,8 @@ impl GameMap {
     /// The match's map: the file's own when it has one, else a random one
     /// from the match's size and world characteristics.
     pub fn generate() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_progress("map");
         if let Some(map) = crate::scenario::file_map() {
             return map.clone();
         }

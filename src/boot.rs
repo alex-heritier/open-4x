@@ -131,3 +131,20 @@ pub fn load(options: &Options) -> Result<Boot, String> {
     ruleset::install(ruleset::build(&rules_from, &install));
     Ok(Boot { options: options.clone(), install, file, world })
 }
+
+/// Start the stock game from data bundled with the WASM binary and the
+/// converted art cache served beside it.
+#[cfg(target_arch = "wasm32")]
+pub fn load_web(options: &Options) -> Result<Boot, String> {
+    let biq = Biq::parse(crate::web::stock_biq()).map_err(|e| format!("stock conquests.biq: {e}"))?;
+    let install = crate::web::install();
+    let file = PathBuf::from("Conquests/conquests.biq");
+    let world = world_of(biq);
+    let rules_from = match &world {
+        World::Map(biq) | World::Scenario(biq) => (**biq).clone(),
+        World::Random => Biq::parse(crate::web::stock_biq()).map_err(|e| format!("stock conquests.biq: {e}"))?,
+        World::Saved(_) => unreachable!("the bundled file is a BIQ"),
+    };
+    ruleset::install(ruleset::build(&rules_from, &install));
+    Ok(Boot { options: options.clone(), install, file, world })
+}

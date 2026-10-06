@@ -10,7 +10,6 @@ use bevy::text::TextLayoutInfo;
 use bevy::window::PrimaryWindow;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 
 use crate::audio::{self, GameAudio};
 use crate::civs::{CIV_CAP, CIVS, CivilizationEnded, Civilizations};
@@ -374,7 +373,7 @@ const CITY_ERAS: usize = 4;
 
 impl CityArt {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let text = fs::read_to_string("assets/cache/cities/manifest.json")
+        let text = crate::web::read_text("assets/cache/cities/manifest.json")
             .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: HashMap<String, CityEntry> =
             serde_json::from_str(&text).expect("cities manifest parses");

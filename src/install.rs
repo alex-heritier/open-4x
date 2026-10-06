@@ -45,7 +45,21 @@ impl Install {
 
     /// Whether the folder `rel` exists somewhere on the path.
     pub fn has_dir(&self, rel: &str) -> bool {
-        self.resolve(rel).is_some_and(|p| p.is_dir())
+        self.resolve(rel).is_some_and(|p| self.is_dir(&p))
+    }
+
+    pub fn is_dir(&self, path: &Path) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        return crate::web::kind(path) == Some(crate::web::PathKind::Dir);
+        #[cfg(not(target_arch = "wasm32"))]
+        return path.is_dir();
+    }
+
+    pub fn is_file(&self, path: &Path) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        return crate::web::kind(path) == Some(crate::web::PathKind::File);
+        #[cfg(not(target_arch = "wasm32"))]
+        return path.is_file();
     }
 
     /// The scenario folders of a BIQ at `file` with the given
@@ -83,7 +97,11 @@ fn child(dir: &Path, name: &str) -> Option<PathBuf> {
 /// `rel` under `root`, matching each component case-insensitively. `..` and
 /// `.` are honored; either slash separates.
 pub fn resolve_in(root: &Path, rel: &str) -> Option<PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    return crate::web::resolve(root, rel);
+    #[cfg(not(target_arch = "wasm32"))]
     let mut at = root.to_path_buf();
+    #[cfg(not(target_arch = "wasm32"))]
     for part in rel.split(['/', '\\']).filter(|p| !p.is_empty()) {
         match part {
             "." => {}
@@ -93,6 +111,7 @@ pub fn resolve_in(root: &Path, rel: &str) -> Option<PathBuf> {
             _ => at = child(&at, part)?,
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     Some(at)
 }
 

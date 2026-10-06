@@ -90,7 +90,7 @@ impl ArtPlan {
     pub fn wonder_art(&self, row: usize, thumb: bool) -> Option<String> {
         let key = &self.wonders.get(&row)?.key;
         let rel = if thumb { format!("{key}.thumb.png") } else { format!("{key}.png") };
-        Path::new(CACHE).join(&rel).is_file().then(|| format!("{CACHE_URL}/{rel}"))
+        crate::web::cache_exists(Path::new(CACHE).join(&rel)).then(|| format!("{CACHE_URL}/{rel}"))
     }
 }
 
@@ -136,8 +136,11 @@ pub fn plan(biq: &Biq, install: &Install, pedia: &HashMap<String, String>, units
             if plan.unit_keys.contains_key(&name.to_ascii_lowercase()) {
                 continue;
             }
-            let dirs: Vec<PathBuf> =
-                install.resolve_all(&format!("Art/Units/{name}")).into_iter().filter(|p| p.is_dir()).collect();
+            let dirs: Vec<PathBuf> = install
+                .resolve_all(&format!("Art/Units/{name}"))
+                .into_iter()
+                .filter(|p| install.is_dir(p))
+                .collect();
             let Some(first) = dirs.first() else { continue };
             let key = key_of(install, first);
             plan.unit_keys.insert(name.to_ascii_lowercase(), key.clone());
@@ -150,7 +153,7 @@ pub fn plan(biq: &Biq, install: &Install, pedia: &HashMap<String, String>, units
         let at = |i: usize| -> Option<PathBuf> {
             let s = c.era_art.get(i)?.text();
             let s = s.trim();
-            if s.is_empty() { None } else { install.resolve(s).filter(|p| p.is_file()) }
+            if s.is_empty() { None } else { install.resolve(s).filter(|p| install.is_file(p)) }
         };
         plan.leaders.push(std::array::from_fn(|era| {
             let forward = at(era)?;
@@ -159,7 +162,7 @@ pub fn plan(biq: &Biq, install: &Install, pedia: &HashMap<String, String>, units
     }
 
     let pic = |key: String| -> Option<PicItem> {
-        let path = install.resolve(pedia.get(&key)?).filter(|p| p.is_file())?;
+        let path = install.resolve(pedia.get(&key)?).filter(|p| install.is_file(p))?;
         Some(PicItem { key: key_of(install, &path), path })
     };
     for (row, b) in r.buildings.iter().enumerate() {
@@ -329,6 +332,7 @@ fn have(cmd: &str, args: &[&str]) -> bool {
 
 /// Convert what the match needs and the cache lacks. `Err` is a message for
 /// the user (a tool is missing, or the script failed).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn ensure(wanted: &Wanted) -> Result<(), String> {
     let script = std::fs::read(SCRIPT).map_err(|e| format!("{SCRIPT}: {e} (run from the repository root)"))?;
     let index = read_index(&fnv(&script));
@@ -359,6 +363,13 @@ pub fn ensure(wanted: &Wanted) -> Result<(), String> {
         return Err(format!("{SCRIPT} failed ({status})"));
     }
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn ensure(_wanted: &Wanted) -> Result<(), String> {
+    crate::web::read_text(Path::new(CACHE).join("request.json"))
+        .map(|_| ())
+        .map_err(|e| format!("{CACHE}/request.json: {e}"))
 }
 
 /// The team colors and civs of the match in play, for [`Wanted`].

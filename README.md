@@ -74,6 +74,13 @@ fan content; see `docs/civ3-files.md` section 7). Back up an existing
 
 See `docs/civ3-files.md` for the file formats the game plays.
 
+## Browser
+
+The browser build plays the same game with the cache already under
+`assets/cache/`. Install [Trunk](https://trunkrs.dev), run
+`python3 tools/prep_assets.py` once if that cache is missing, then run
+`tools/serve_web.sh` and open `http://127.0.0.1:8080`.
+
 `CIV3_HOTSEAT=1` makes all four civs human again (the old hotseat mode),
 `CIV3_AUTOPLAY=1` hands all four to the computer to watch, `CIV3_AI_FAST=1`
 skips the computer's animations and `CIV3_AI_LOG=1` prints what it decides

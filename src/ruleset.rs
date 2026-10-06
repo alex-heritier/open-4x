@@ -379,7 +379,7 @@ const BLDG_PLAYABLE: &[&str] = &[
 pub fn pedia_icons(install: &Install) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for path in install.resolve_all("Text/PediaIcons.txt") {
-        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(bytes) = crate::web::read_bytes(&path) else { continue };
         let text = String::from_utf8_lossy(&bytes);
         let mut key: Option<String> = None;
         for line in text.lines() {
@@ -401,7 +401,7 @@ pub fn pedia_icons(install: &Install) -> HashMap<String, String> {
 /// last 768 bytes of a 256-color PCX.
 fn team_rgb(install: &Install, n: i32) -> (u8, u8, u8) {
     let Some(path) = install.resolve(&format!("Art/Units/Palettes/ntp{n:02}.pcx")) else { return (128, 128, 128) };
-    let Ok(bytes) = std::fs::read(path) else { return (128, 128, 128) };
+    let Ok(bytes) = crate::web::read_bytes(path) else { return (128, 128, 128) };
     if bytes.len() < 768 {
         return (128, 128, 128);
     }
@@ -440,7 +440,7 @@ fn art_dir(install: &Install, pedia: &HashMap<String, String>, entry: &str, firs
     let era_key = format!("{key}_{}", first_era.trim().to_ascii_lowercase());
     let name = pedia.get(&key).or_else(|| pedia.get(&era_key))?;
     // The folder's own spelling: references and file names disagree in case.
-    let dir = install.resolve(&format!("Art/Units/{name}")).filter(|p| p.is_dir())?;
+    let dir = install.resolve(&format!("Art/Units/{name}")).filter(|p| install.is_dir(p))?;
     dir.file_name().map(|f| f.to_string_lossy().into_owned())
 }
 

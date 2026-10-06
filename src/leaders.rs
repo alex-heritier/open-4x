@@ -90,14 +90,22 @@ pub struct LeaderArt {
 impl LeaderArt {
     /// The clips the cache holds, for every civ of the roster.
     pub fn load() -> LeaderArt {
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_progress("leader art");
         let plan = &crate::ruleset::get().art;
         let mut clips = HashMap::new();
+        #[cfg(target_arch = "wasm32")]
+        let active = crate::civs::players();
         for (race, eras) in plan.leaders.iter().enumerate() {
+            #[cfg(target_arch = "wasm32")]
+            if !active.contains(&race) {
+                continue;
+            }
             let list: Vec<Clip> = eras
                 .iter()
                 .flatten()
                 .filter_map(|item| {
-                    let text = std::fs::read_to_string(format!("{CACHE}/{}/clip.json", item.key)).ok()?;
+                    let text = crate::web::read_text(format!("{CACHE}/{}/clip.json", item.key)).ok()?;
                     let mut clip: Clip = serde_json::from_str(&text).ok()?;
                     clip.dir = item.key.clone();
                     Some(clip)
@@ -107,6 +115,8 @@ impl LeaderArt {
                 clips.insert(race, list);
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_progress("leader art ready");
         LeaderArt { clips, held: HashMap::new() }
     }
 

@@ -78,7 +78,7 @@ pub struct Speech {
 impl Speech {
     /// The converted file; empty (every `say` is `None`) when it is missing.
     pub fn load() -> Speech {
-        match std::fs::read_to_string(PATH) {
+        match crate::web::read_text(PATH) {
             Ok(text) => Speech::parse(&text),
             Err(_) => Speech::default(),
         }
