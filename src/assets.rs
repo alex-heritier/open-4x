@@ -310,7 +310,7 @@ impl Wanted<'_> {
         let colors = json!(self.colors);
         let mut n = 0;
         for s in STAGES {
-            let want_search = (*s == "diplomacy").then_some(search.as_slice());
+            let want_search = (*s == "diplomacy" || *s == "cities").then_some(search.as_slice());
             n += usize::from(!index.fresh(root, &format!("stage:{s}"), &Value::Null, want_search));
         }
         n += self.plan.units.iter().filter(|u| !index.fresh(root, &u.key, &colors, None)).count();

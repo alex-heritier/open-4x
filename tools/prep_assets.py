@@ -759,14 +759,14 @@ def convert_unit(item):
 
 
 def stage_cities():
+    # A scenario ships its own city sheets (the Middle Ages conquests all
+    # draw medieval cities): resolve along the search path, like the game.
     d = os.path.join(OUT, "cities", "sheets")
     os.makedirs(d, exist_ok=True)
     for name in ["rAMER", "rEURO", "rROMAN", "rMIDEAST", "rASIAN",
                  "AMERWALL", "EUROWALL", "ROMANWALL", "MIDEASTWALL", "ASIANWALL",
                  "city icons"]:
-        src = os.path.join(GOG, "Art", "Cities", name + ".PCX")
-        if not os.path.exists(src):
-            src = os.path.join(GOG, "Art", "Cities", name + ".pcx")
+        src = track(search_file(f"Art/Cities/{name}.pcx"))
         size = convert_pcx(src, os.path.join(d, name + ".png"))
         print(f"  cities/{name}: {size}")
     crop_cities()
@@ -1573,8 +1573,9 @@ STAGES = {"terrain": stage_terrain,
           "fog": stage_fog, "borders": stage_borders,
           "cursor": stage_cursor, "diplomacy": stage_diplomacy,
           "wonders_ui": stage_wonders_ui, "advisors": stage_advisors}
-# Stages whose input depends on the search path (a scenario's own text).
-SEARCH_STAGES = {"diplomacy"}
+# Stages whose input depends on the search path (a scenario's own text and
+# city sheets).
+SEARCH_STAGES = {"diplomacy", "cities"}
 ITEMS = ("units", "leaders", "wonders", "techs")
 
 
