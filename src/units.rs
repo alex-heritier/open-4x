@@ -1102,6 +1102,58 @@ pub struct Exploration {
     pub viewer: Option<usize>,
 }
 
+/// Remember what a saved game knew: a `.SAV` carries every civilization's
+/// discovered tiles (`sav::Tile::discovered`, map trades included), which
+/// the map build drops. Seed each chair's memory and the viewer's tiles
+/// before the first `refresh_visibility`, which otherwise starts from an
+/// empty memory and forgets the whole remembered map.
+pub fn seed_exploration_from_save(
+    boot: Res<crate::boot::Boot>,
+    mut map: ResMut<GameMap>,
+    mut explored: ResMut<Exploration>,
+    civs: Res<crate::civs::Civilizations>,
+) {
+    let crate::boot::World::Saved(save) = &boot.world else { return };
+    let Some(sc) = crate::scenario::scenario() else { return };
+    let used = crate::scenario::save_used_slots(save);
+    if used.is_empty() {
+        return;
+    }
+    let (w, h) = (save.map.width() as i32, save.map.height() as i32);
+    let mut memories: Vec<Vec<bool>> = used.iter().map(|_| vec![false; map.tiles.len()]).collect();
+    for y in 0..h {
+        for x in 0..w {
+            if (x + y) % 2 != 0 {
+                continue;
+            }
+            let Some(t) = save.map.tile(x as u32, y as u32) else { continue };
+            let (u, v) = sc.lattice.to_clone(x, y);
+            if u < 0 || v < 0 || u >= map.w || v >= map.h {
+                continue;
+            }
+            let i = map.idx(u, v);
+            for (memory, &slot) in memories.iter_mut().zip(&used) {
+                if t.discovered(slot as u32) {
+                    memory[i] = true;
+                }
+            }
+        }
+    }
+    for (civ, memory) in memories.iter().enumerate() {
+        if civ < explored.seen.len() {
+            explored.seen[civ] = memory.clone();
+        }
+    }
+    let viewer = civs.viewer();
+    if let Some(memory) = memories.get(viewer) {
+        for (tile, &seen) in map.tiles.iter_mut().zip(memory.iter()) {
+            tile.seen = seen;
+        }
+    }
+    explored.viewer = Some(viewer);
+    info!("exploration: {} of {} tiles remembered", memories.get(viewer).map(|m| m.iter().filter(|&&s| s).count()).unwrap_or(0), map.tiles.len());
+}
+
 impl Exploration {
     pub fn snapshot(&self, map: &GameMap) -> Self {
         let mut saved = self.clone();

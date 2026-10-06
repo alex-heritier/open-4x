@@ -125,6 +125,26 @@ impl Tile {
         self.cell_58.u32(0)
     }
 
+    /// `Cell+0x58`: whether the civilization in `slot` has ever seen the
+    /// tile (`vision.md` 1.2; map trades and goody huts set this bit far
+    /// from the civilization's units, so it is the whole remembered map).
+    pub fn discovered(&self, slot: u32) -> bool {
+        self.cell_u32(0x58).is_some_and(|m| m & (1 << slot) != 0)
+    }
+
+    /// Whether the tile is currently visible to `slot`: seen by a unit
+    /// (`+0x5C`), a structure (`+0x60`), territory (`+0x64`) or an air
+    /// reveal (`+0xD0`) (`vision.md` 1.3; the radar mask `+0xD4` is not
+    /// part of it).
+    pub fn visible_to(&self, slot: u32) -> bool {
+        [0x5C, 0x60, 0x64, 0xD0]
+            .iter()
+            .filter_map(|&off| self.cell_u32(off))
+            .fold(0, |acc, m| acc | m)
+            & (1 << slot)
+            != 0
+    }
+
     /// `Cell+0x28`: the overlay plane ([`crate::sections::tile::overlay`]).
     pub fn overlay_plane(&self) -> u32 {
         self.cell_28.u32(0)

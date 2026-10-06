@@ -217,6 +217,7 @@ fn main() {
                 .chain(),
         )
         .add_systems(Startup, populate::populate.after(units::spawn_party).before(units::spawn_selection_ring))
+        .add_systems(Startup, units::seed_exploration_from_save.after(populate::populate))
         .add_systems(
             Update,
             (

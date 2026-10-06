@@ -204,6 +204,32 @@ fn decoded_fields_are_consistent() {
     }
 }
 
+/// Sight masks read the documented offsets, and the set primitive always
+/// discovers: nothing is visible to a slot without being remembered by it.
+#[test]
+fn sight_masks_are_consistent() {
+    let mut raw = [0u8; 128];
+    raw[0] = 0x02;
+    raw[4] = 0x02;
+    raw[8] = 0x08;
+    let t = Tile { cell_58: Body(raw), ..Default::default() };
+    assert!(t.discovered(1));
+    assert!(!t.discovered(3));
+    assert!(t.visible_to(1));
+    assert!(t.visible_to(3));
+    assert!(!t.visible_to(2));
+    for (path, bytes) in &saves() {
+        let n = name(path);
+        let s = Save::parse(bytes).unwrap();
+        let slots: Vec<u32> = (0..s.players.len()).filter(|&k| s.players[k].in_use()).map(|k| k as u32).collect();
+        for tile in &s.map.tiles {
+            for &k in &slots {
+                assert!(!tile.visible_to(k) || tile.discovered(k), "{n}: slot {k} sees an undiscovered tile");
+            }
+        }
+    }
+}
+
 /// The embedded scenario parses and its counts size the arrays.
 #[test]
 fn embedded_scenario_gives_the_array_sizes() {

@@ -586,12 +586,17 @@ fn objects_from_biq(biq: &Biq, lattice: Lattice, placed: bool) -> Scenario {
     Scenario { lattice, civs: assign_civs(&leads), leads, cities, units, colonies, starts, turn: 1 }
 }
 
+/// Save slots playing civs, in chair order: slot 0 is the barbarians.
+pub fn save_used_slots(save: &civ3_biq::Save) -> Vec<usize> {
+    (1..save.players.len()).filter(|&k| save.players[k].in_use() && save.players[k].race() >= 0).take(crate::civs::MAX_CIVS).collect()
+}
+
 /// The players, cities and units of a saved game. Slot 0 of a save is the
 /// barbarians; the other used slots are the civs, in order. What the save
 /// keeps undecoded (research, production, attitudes) starts at its default.
 pub fn scenario_from_save(save: &civ3_biq::Save, lattice: Lattice) -> Scenario {
     use civ3_biq::owner::Owner;
-    let used: Vec<usize> = (1..save.players.len()).filter(|&k| save.players[k].in_use() && save.players[k].race() >= 0).take(crate::civs::MAX_CIVS).collect();
+    let used: Vec<usize> = save_used_slots(save);
     let ours = |k: u32| -> Option<Owner> {
         if k == 0 { Some(Owner::BarbarianTribe(0)) } else { used.iter().position(|&u| u as u32 == k).map(|i| Owner::Player(i as i32)) }
     };
