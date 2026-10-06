@@ -11,9 +11,7 @@ use crate::cities::{City, Treasury, can_found};
 use crate::civs::{CIVS, Civilizations};
 use crate::economy;
 use crate::features::{MessageBoard, post};
-use crate::improvements::{
-    WorkAction, action_slot, can_clear, can_irrigate, can_mine, can_road,
-};
+use crate::improvements::{WorkAction, action_slot, can_clear, can_irrigate, can_mine, can_road};
 use crate::map::{Cover, GameMap};
 use crate::units::{self, Selected, Unit, UnitAnim, UnitType};
 
@@ -92,7 +90,9 @@ impl UnitCommand {
     pub fn relevant(self, t: UnitType) -> bool {
         match self {
             UnitCommand::Load => units::def(t).class == 0 && units::def(t).special & 1 != 0,
-            UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => t == crate::roles::leader(),
+            UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => {
+                t == crate::roles::leader()
+            }
             UnitCommand::Unload => units::def(t).capacity > 0 && units::def(t).special & 2 != 0,
             UnitCommand::Bombard => crate::bombard::capable(t),
             UnitCommand::FoundCity => crate::roles::founds_cities(t),
@@ -113,13 +113,23 @@ impl UnitCommand {
 
     /// Is the command currently possible for this unit?
     pub fn enabled(self, map: &GameMap, cities: &[(i32, i32)], u: &Unit) -> bool {
-        if u.carrier.is_some() && !matches!(self, UnitCommand::Goto | UnitCommand::Skip | UnitCommand::Disband) {
+        if u.carrier.is_some()
+            && !matches!(
+                self,
+                UnitCommand::Goto | UnitCommand::Skip | UnitCommand::Disband
+            )
+        {
             return false;
         }
         let idle = u.work.is_none();
         match self {
             UnitCommand::Load => u.moves > 0 && u.carrier.is_none(),
-            UnitCommand::Unload => u.moves > 0 && map.get(u.x, u.y).is_some_and(|t| !crate::improvements::is_water_base(t.base)),
+            UnitCommand::Unload => {
+                u.moves > 0
+                    && map
+                        .get(u.x, u.y)
+                        .is_some_and(|t| !crate::improvements::is_water_base(t.base))
+            }
             UnitCommand::Bombard => idle && u.moves > 0 && !u.attacked,
             UnitCommand::Wake => u.fortified || u.sentry || u.exploring || u.work.is_some(),
             UnitCommand::Explore => idle && (u.moves > 0 || u.exploring),
@@ -139,7 +149,9 @@ impl UnitCommand {
             UnitCommand::FoundColony => {
                 u.moves > 0
                     && idle
-                    && map.get(u.x, u.y).is_some_and(|t| t.resource.is_some() && t.site.is_none())
+                    && map
+                        .get(u.x, u.y)
+                        .is_some_and(|t| t.resource.is_some() && t.site.is_none())
                     && !cities.contains(&(u.x, u.y))
             }
             UnitCommand::Work(a) => {
@@ -151,13 +163,33 @@ impl UnitCommand {
                         WorkAction::Irrigate => can_irrigate(map, cities, u.x, u.y),
                         WorkAction::Mine => can_mine(map, u.x, u.y),
                         WorkAction::Clear => can_clear(map, u.civ, u.x, u.y),
-                        WorkAction::Barricade => crate::realm::read(u.civ, |r| r.knows(crate::sites::CONSTRUCTION))
-                            && crate::sites::can_barricade(map, cities.contains(&(u.x, u.y)), u.x, u.y),
-                        WorkAction::Outpost => crate::realm::read(u.civ, |r| r.knows(crate::sites::MASONRY))
-                            && crate::sites::can_outpost(map, u.civ, cities.contains(&(u.x, u.y)), u.x, u.y),
+                        WorkAction::Barricade => {
+                            crate::realm::read(u.civ, |r| r.knows(crate::sites::CONSTRUCTION))
+                                && crate::sites::can_barricade(
+                                    map,
+                                    cities.contains(&(u.x, u.y)),
+                                    u.x,
+                                    u.y,
+                                )
+                        }
+                        WorkAction::Outpost => {
+                            crate::realm::read(u.civ, |r| r.knows(crate::sites::MASONRY))
+                                && crate::sites::can_outpost(
+                                    map,
+                                    u.civ,
+                                    cities.contains(&(u.x, u.y)),
+                                    u.x,
+                                    u.y,
+                                )
+                        }
                         WorkAction::Fortress => {
                             crate::realm::read(u.civ, |r| r.knows(crate::sites::CONSTRUCTION))
-                                && crate::sites::can_fortress(map, cities.contains(&(u.x, u.y)), u.x, u.y)
+                                && crate::sites::can_fortress(
+                                    map,
+                                    cities.contains(&(u.x, u.y)),
+                                    u.x,
+                                    u.y,
+                                )
                         }
                     }
             }
@@ -247,7 +279,9 @@ pub fn key_commands(keys: &ButtonInput<KeyCode>) -> Vec<UnitCommand> {
         .filter(|(k, c)| keys.just_pressed(*k) && (*c != UnitCommand::Pillage || shift))
         // Ctrl+F builds the fortress; plain F fortifies.
         .filter(|(_, c)| match c {
-            UnitCommand::Work(WorkAction::Fortress | WorkAction::Barricade | WorkAction::Outpost) => ctrl,
+            UnitCommand::Work(
+                WorkAction::Fortress | WorkAction::Barricade | WorkAction::Outpost,
+            ) => ctrl,
             UnitCommand::Fortify => !ctrl,
             _ => true,
         })
@@ -279,16 +313,23 @@ pub fn run_commands(
         };
         // Ctrl+F is one native action: upgrade a fort when present.
         // The hotkey emits both candidates; only the applicable job runs.
-        if matches!(cmd, UnitCommand::Work(WorkAction::Fortress | WorkAction::Barricade)) {
-            let Some((_, u)) = units.get(s).ok() else { continue };
+        if matches!(
+            cmd,
+            UnitCommand::Work(WorkAction::Fortress | WorkAction::Barricade)
+        ) {
+            let Some((_, u)) = units.get(s).ok() else {
+                continue;
+            };
             let fort = map.get(u.x, u.y).is_some_and(|t| t.fortress);
-            if (cmd == UnitCommand::Work(WorkAction::Fortress)) == fort { continue; }
+            if (cmd == UnitCommand::Work(WorkAction::Fortress)) == fort {
+                continue;
+            }
         }
         // Upgrades need the cities and the treasury as well as the unit.
         if matches!(cmd, UnitCommand::Upgrade | UnitCommand::UpgradeAll) {
-            let mine = units
-                .get(s)
-                .is_ok_and(|(_, u)| u.civ == civs.active && u.carrier.is_none() && cmd.relevant(u.utype));
+            let mine = units.get(s).is_ok_and(|(_, u)| {
+                u.civ == civs.active && u.carrier.is_none() && cmd.relevant(u.utype)
+            });
             if mine {
                 goto.0 = false;
                 if cmd == UnitCommand::Upgrade {
@@ -355,8 +396,12 @@ pub fn run_commands(
                         WorkAction::Mine => "Mines need hills, mountains or desert.",
                         WorkAction::Clear => "Nothing to clear here.",
                         WorkAction::Fortress => "A fortress needs Construction and open land.",
-                        WorkAction::Barricade => "A barricade needs Construction and an existing fortress.",
-                        WorkAction::Outpost => "An outpost needs Masonry and unowned or friendly land.",
+                        WorkAction::Barricade => {
+                            "A barricade needs Construction and an existing fortress."
+                        }
+                        WorkAction::Outpost => {
+                            "An outpost needs Masonry and unowned or friendly land."
+                        }
                     },
                 );
             } else if cmd == UnitCommand::FoundCity {
@@ -372,7 +417,10 @@ pub fn run_commands(
             UnitCommand::BuildArmy | UnitCommand::LeaderHurry | UnitCommand::ScienceAge => {} // `army::commands`
             UnitCommand::Bombard => {} // `bombard::arm`
             UnitCommand::Fortify => {
-                let fortify_sound = audio.fortify.get(&crate::audio::sound_key(u.utype)).cloned();
+                let fortify_sound = audio
+                    .fortify
+                    .get(&crate::audio::sound_key(u.utype))
+                    .cloned();
                 u.fortified = true;
                 u.sentry = false;
                 u.moves = 0;
@@ -583,7 +631,8 @@ pub fn spawn_bar(
         None,
         None,
     ));
-    let sheets = ["norm", "over", "down"].map(|s| assets.load(format!("cache/ui/unitbtns_{s}.png")));
+    let sheets =
+        ["norm", "over", "down"].map(|s| assets.load(format!("cache/ui/unitbtns_{s}.png")));
     commands.insert_resource(ButtonArt {
         sheets: sheets.clone(),
     });
@@ -817,7 +866,8 @@ pub fn update_bar(
             node.display = Display::None;
             continue;
         };
-        node.display = if b.0.relevant(u.utype) && (b.0 != UnitCommand::Upgrade || plan.is_some())
+        node.display = if b.0.relevant(u.utype)
+            && (b.0 != UnitCommand::Upgrade || plan.is_some())
             && (b.0 != UnitCommand::BuildArmy || !u.scientific_leader)
             && (b.0 != UnitCommand::ScienceAge || u.scientific_leader)
         {
@@ -830,10 +880,11 @@ pub fn update_bar(
         } else if b.0 == UnitCommand::ScienceAge {
             b.0.enabled(&map, &spots, u) && !research.science_age(u.civ, turn.0 as i32)
         } else {
-            crate::actions::check(b.0, &map, u, here).unwrap_or_else(|| b.0.enabled(&map, &spots, u))
+            crate::actions::check(b.0, &map, u, here)
+                .unwrap_or_else(|| b.0.enabled(&map, &spots, u))
         };
-        let active =
-            (b.0 == UnitCommand::Goto && goto.0) || (b.0 == UnitCommand::Explore && u.exploring)
+        let active = (b.0 == UnitCommand::Goto && goto.0)
+            || (b.0 == UnitCommand::Explore && u.exploring)
             || (b.0 == UnitCommand::Bombard && bombard.0 == selected.0);
         // Civ3's states: gold idle, orange hover, blue held or toggled on.
         let state = match (*interaction, ok) {
@@ -853,7 +904,13 @@ pub fn update_bar(
             Color::srgb(0.62, 0.58, 0.52)
         };
         if !matches!(*interaction, Interaction::None) && b.0 == UnitCommand::Upgrade {
-            hint = plan.map(|p| format!("Upgrade to {} for {} gold (U)", units::def(p.to).name, p.cost));
+            hint = plan.map(|p| {
+                format!(
+                    "Upgrade to {} for {} gold (U)",
+                    units::def(p.to).name,
+                    p.cost
+                )
+            });
         } else if ok && !matches!(*interaction, Interaction::None) {
             hint = Some(b.0.label().to_string());
         }
@@ -872,8 +929,15 @@ pub fn update_bar(
             Some(u) => {
                 let d = units::def(u.utype);
                 let state = if u.work.is_some() {
-                    let left = crate::improvements::work_turns_left(u, map.get(u.x, u.y).unwrap(), units.iter());
-                    format!("working ({left} {} left)", if left == 1 { "turn" } else { "turns" })
+                    let left = crate::improvements::work_turns_left(
+                        u,
+                        map.get(u.x, u.y).unwrap(),
+                        units.iter(),
+                    );
+                    format!(
+                        "working ({left} {} left)",
+                        if left == 1 { "turn" } else { "turns" }
+                    )
                 } else if u.sentry {
                     "sentry".to_string()
                 } else if u.fortified {
@@ -897,9 +961,24 @@ pub fn update_bar(
                 };
                 // Soldiers show their rank and hit points, as in Civ3.
                 let title = if d.attack > 0 {
-                    format!("{} ({})  HP {}/{}", if u.scientific_leader { "Scientific Leader" } else { d.name }, u.level.name(), u.hp(), u.max_hp())
+                    format!(
+                        "{} ({})  HP {}/{}",
+                        if u.scientific_leader {
+                            "Scientific Leader"
+                        } else {
+                            d.name
+                        },
+                        u.level.name(),
+                        u.hp(),
+                        u.max_hp()
+                    )
                 } else {
-                    if u.scientific_leader { "Scientific Leader" } else { d.name }.to_string()
+                    if u.scientific_leader {
+                        "Scientific Leader"
+                    } else {
+                        d.name
+                    }
+                    .to_string()
                 };
                 format!(
                     "{}\nMoves {}/{}  -  {}\n{terrain}",
@@ -917,7 +996,11 @@ pub fn update_bar(
     }
     if let Ok(mut t) = status.single_mut() {
         t.0 = if civs.active == civs.viewer() {
-            format!("{}  -  {}", CIVS[civs.active].adjective, crate::calendar::label(turn.0))
+            format!(
+                "{}  -  {}",
+                CIVS[civs.active].adjective,
+                crate::calendar::label(turn.0)
+            )
         } else {
             // The line above already says who is moving; naming them here
             // too would overflow the box's single status row.
@@ -1031,11 +1114,23 @@ mod tests {
         };
         for (row, cmds) in BAR_ROWS.iter().enumerate() {
             for cmd in cmds.iter() {
-                assert_eq!(band(action_cell(*cmd, Cover::Bare)), row, "{cmd:?} is in the wrong row");
+                assert_eq!(
+                    band(action_cell(*cmd, Cover::Bare)),
+                    row,
+                    "{cmd:?} is in the wrong row"
+                );
             }
         }
-        for cmd in [UnitCommand::Automate, UnitCommand::JoinCity, UnitCommand::Pillage, UnitCommand::Load] {
-            assert!(BAR_ROW_UNIT.contains(&cmd), "{cmd:?} sits over the standard orders");
+        for cmd in [
+            UnitCommand::Automate,
+            UnitCommand::JoinCity,
+            UnitCommand::Pillage,
+            UnitCommand::Load,
+        ] {
+            assert!(
+                BAR_ROW_UNIT.contains(&cmd),
+                "{cmd:?} sits over the standard orders"
+            );
         }
     }
 
@@ -1119,13 +1214,15 @@ mod tests {
         app.world_mut().spawn(city);
         // Five units, four free: one gold of support against one of tax.
         for _ in 0..5 {
-            app.world_mut().spawn(Unit::new(0, UnitType::named("Warrior"), x, y));
+            app.world_mut()
+                .spawn(Unit::new(0, UnitType::named("Warrior"), x, y));
         }
         app.update();
         let shown = |app: &App| app.world().get::<Text>(line).unwrap().0.clone();
         assert_eq!(shown(&app), "12 Gold (+0 per turn)");
         // A sixth unit tips it into the red.
-        app.world_mut().spawn(Unit::new(0, UnitType::named("Warrior"), x, y));
+        app.world_mut()
+            .spawn(Unit::new(0, UnitType::named("Warrior"), x, y));
         app.update();
         assert_eq!(shown(&app), "12 Gold (-1 per turn)");
         assert_ne!(

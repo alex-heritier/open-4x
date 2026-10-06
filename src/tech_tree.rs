@@ -23,14 +23,19 @@ use bevy::prelude::*;
 use crate::advisor_frame::{self, ArtButton, Frame, Tab};
 use crate::advisors::Action;
 use crate::cities::Production;
+use crate::civs::RACES;
 use crate::research::{Research, tech_name};
 use crate::roster::{self, bldg_count, unit_count};
-use crate::civs::RACES;
 use crate::ruleset::TECH_TREE;
 use crate::stage::Ui;
 use crate::units::UnitType;
 
-pub const ERAS: [&str; 4] = ["Ancient Times", "Middle Ages", "Industrial Ages", "Modern Times"];
+pub const ERAS: [&str; 4] = [
+    "Ancient Times",
+    "Middle Ages",
+    "Industrial Ages",
+    "Modern Times",
+];
 
 /// Where an advance stands for the viewer: the column of `techboxes.pcx`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,10 +59,30 @@ pub enum Size {
 /// size, measured off `techboxes.pcx` (grid lines at a 189-px column stride
 /// and the rows' own lines).
 const CELLS: [[(f32, f32, f32, f32); 4]; 4] = [
-    [(98.0, 64.0, 3.0, 9.0), (159.0, 70.0, 1.0, 5.0), (161.0, 101.0, 1.0, 4.0), (188.0, 70.0, 1.0, 5.0)],
-    [(98.0, 64.0, 3.0, 9.0), (159.0, 70.0, 1.0, 6.0), (160.0, 100.0, 1.0, 7.0), (188.0, 70.0, 1.0, 7.0)],
-    [(104.0, 67.0, 3.0, 7.0), (158.0, 75.0, 3.0, 3.0), (159.0, 101.0, 2.0, 5.0), (188.0, 72.0, 1.0, 4.0)],
-    [(106.0, 69.0, 1.0, 7.0), (163.0, 75.0, 1.0, 5.0), (163.0, 103.0, 1.0, 4.0), (188.0, 72.0, 1.0, 5.0)],
+    [
+        (98.0, 64.0, 3.0, 9.0),
+        (159.0, 70.0, 1.0, 5.0),
+        (161.0, 101.0, 1.0, 4.0),
+        (188.0, 70.0, 1.0, 5.0),
+    ],
+    [
+        (98.0, 64.0, 3.0, 9.0),
+        (159.0, 70.0, 1.0, 6.0),
+        (160.0, 100.0, 1.0, 7.0),
+        (188.0, 70.0, 1.0, 7.0),
+    ],
+    [
+        (104.0, 67.0, 3.0, 7.0),
+        (158.0, 75.0, 3.0, 3.0),
+        (159.0, 101.0, 2.0, 5.0),
+        (188.0, 72.0, 1.0, 4.0),
+    ],
+    [
+        (106.0, 69.0, 1.0, 7.0),
+        (163.0, 75.0, 1.0, 5.0),
+        (163.0, 103.0, 1.0, 4.0),
+        (188.0, 72.0, 1.0, 5.0),
+    ],
 ];
 
 const ICON: f32 = 32.0;
@@ -136,7 +161,14 @@ pub fn item_icon(assets: &AssetServer, p: Production) -> ImageNode {
     n
 }
 
-fn tech_box(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Research, civ: usize, t: i32) {
+fn tech_box(
+    s: &mut ChildSpawnerCommands,
+    ui: &Ui,
+    assets: &AssetServer,
+    r: &Research,
+    civ: usize,
+    t: i32,
+) {
     let (era, _, x, y) = TECH_TREE[t as usize];
     let st = state(r, civ, t);
     let items = brings(civ, t);
@@ -147,7 +179,12 @@ fn tech_box(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Res
     let cell = format!("techbox_{era}_{}_{}", size as usize, st as usize);
     let node = ui.st.rect(bx, by, w, h);
     if matches!(st, State::Open | State::Researching) {
-        s.spawn((Button, Action::Pick(t), advisor_frame::art(assets, &cell), node));
+        s.spawn((
+            Button,
+            Action::Pick(t),
+            advisor_frame::art(assets, &cell),
+            node,
+        ));
     } else {
         s.spawn((advisor_frame::art(assets, &cell), node));
     }
@@ -156,17 +193,31 @@ fn tech_box(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Res
         name = format!("{name} ({})", crate::advisors::turns_text(r.turns(civ, t)));
     }
     // One line, cut at the box's edge ("Monarchy (15 tu").
-    s.spawn((Node { overflow: Overflow::clip(), ..ui.st.rect(bx + 14.0, by + 9.0, w - 22.0, 16.0) },))
+    s.spawn((Node {
+        overflow: Overflow::clip(),
+        ..ui.st.rect(bx + 14.0, by + 9.0, w - 22.0, 16.0)
+    },))
         .with_children(|clip| {
             clip.spawn((
                 Text::new(name),
-                TextFont { font: ui.font.clone(), font_size: ui.st.font(11.0), ..default() },
+                TextFont {
+                    font: ui.font.clone(),
+                    font_size: ui.st.font(11.0),
+                    ..default()
+                },
                 TextColor(title_color(st)),
                 TextLayout::new(Justify::Left, LineBreak::NoWrap),
             ));
         });
     if let Some(icon) = crate::ruleset::get().art.tech_icon(t as usize) {
-        ui.picture(s, ImageNode::new(assets.load(icon)), bx + ICON_AT.0, by + ICON_AT.1, ICON, ICON);
+        ui.picture(
+            s,
+            ImageNode::new(assets.load(icon)),
+            bx + ICON_AT.0,
+            by + ICON_AT.1,
+            ICON,
+            ICON,
+        );
     }
     // The tall box's second row runs under the first row's items.
     let per_row = if size == Size::Tall { 3 } else { room };
@@ -177,7 +228,14 @@ fn tech_box(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Res
         ui.picture(s, item_icon(assets, *p), ix, iy, ICON, ICON);
     }
     if r.world.rules.techs[t as usize].flags & NOT_REQUIRED_FOR_ERA != 0 {
-        ui.picture(s, advisor_frame::art(assets, "non_required"), bx + w - 16.0, by - 10.0, 27.0, 27.0);
+        ui.picture(
+            s,
+            advisor_frame::art(assets, "non_required"),
+            bx + w - 16.0,
+            by - 10.0,
+            27.0,
+            27.0,
+        );
     }
 }
 
@@ -188,10 +246,16 @@ const NOT_REQUIRED_FOR_ERA: u32 = 0x20000;
 /// What the Science Advisor says on the tree.
 pub fn says(r: &Research, civ: usize) -> String {
     match r.target(civ) {
-        _ if r.needs_choice(civ) => "Excellency, what shall our scientists study? Choose an advance in yellow.".into(),
+        _ if r.needs_choice(civ) => {
+            "Excellency, what shall our scientists study? Choose an advance in yellow.".into()
+        }
         Some(t) => {
             let names: Vec<&str> = brings(civ, t).iter().take(3).map(|p| p.name()).collect();
-            let gives = if names.is_empty() { String::new() } else { format!(" {} will give us {}.", tech_name(t), names.join(", ")) };
+            let gives = if names.is_empty() {
+                String::new()
+            } else {
+                format!(" {} will give us {}.", tech_name(t), names.join(", "))
+            };
             format!(
                 "We are researching {} and will learn it in {}.{gives}",
                 tech_name(t),
@@ -204,7 +268,14 @@ pub fn says(r: &Research, civ: usize) -> String {
 }
 
 /// The page of `era`.
-pub fn page(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Research, civ: usize, era: usize) {
+pub fn page(
+    s: &mut ChildSpawnerCommands,
+    ui: &Ui,
+    assets: &AssetServer,
+    r: &Research,
+    civ: usize,
+    era: usize,
+) {
     let background = format!("science_{era}");
     let f = Frame {
         background: &background,
@@ -220,14 +291,38 @@ pub fn page(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, r: &Res
             tech_box(s, ui, assets, r, civ, t);
         }
     }
-    ui.words(s, 300.0, 728.0, 424.0, 30.0, ERAS[era], 22.0, Color::BLACK, true);
+    ui.words(
+        s,
+        300.0,
+        728.0,
+        424.0,
+        30.0,
+        ERAS[era],
+        22.0,
+        Color::BLACK,
+        true,
+    );
     if era > 0 {
         nav(s, ui, assets, 229.0, -1, era - 1);
-        ui.picture(s, advisor_frame::art(assets, "nav_left"), 183.0, 742.0, 45.0, 10.0);
+        ui.picture(
+            s,
+            advisor_frame::art(assets, "nav_left"),
+            183.0,
+            742.0,
+            45.0,
+            10.0,
+        );
     }
     if era < 3 {
         nav(s, ui, assets, 674.0, 1, era + 1);
-        ui.picture(s, advisor_frame::art(assets, "nav_right"), 806.0, 742.0, 45.0, 10.0);
+        ui.picture(
+            s,
+            advisor_frame::art(assets, "nav_right"),
+            806.0,
+            742.0,
+            45.0,
+            10.0,
+        );
     }
 }
 
@@ -244,12 +339,20 @@ fn nav(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, x: f32, step
         ArtButton("nav"),
         Action::Era(step),
         advisor_frame::art(assets, "nav_0"),
-        Node { justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..ui.st.rect(x, 730.0, 129.0, 34.0) },
+        Node {
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..ui.st.rect(x, 730.0, 129.0, 34.0)
+        },
     ))
     .with_children(|b| {
         b.spawn((
             Text::new(to_name),
-            TextFont { font: ui.font.clone(), font_size: ui.st.font(13.0), ..default() },
+            TextFont {
+                font: ui.font.clone(),
+                font_size: ui.st.font(13.0),
+                ..default()
+            },
             TextColor(Color::BLACK),
         ));
     });
@@ -268,7 +371,10 @@ mod tests {
     fn a_box_brings_the_viewers_units_then_improvements_then_wonders() {
         // Egypt (civ 2) at Bronze Working: the Spearman and the Colossus,
         // not the Greeks' Hoplite or the Zulus' Impi (Conquests' screen).
-        let got: Vec<&str> = brings(2, tech("Bronze Working")).iter().map(|p| p.name()).collect();
+        let got: Vec<&str> = brings(2, tech("Bronze Working"))
+            .iter()
+            .map(|p| p.name())
+            .collect();
         assert_eq!(got, ["Spearman", "The Colossus"]);
     }
 

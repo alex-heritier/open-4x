@@ -169,8 +169,19 @@ fn button_matches(b: &ScreenButton, name: &str) -> bool {
 #[derive(SystemParam)]
 pub struct Reach<'w, 's> {
     picker: Res<'w, crate::unit_picker::UnitPicker>,
-    picker_buttons: Query<'w, 's, (&'static mut Interaction, &'static crate::unit_picker::PickerRow),
-        (Without<ScreenButton>, Without<crate::advisors::Action>, Without<crate::domestic::Click>)>,
+    picker_buttons: Query<
+        'w,
+        's,
+        (
+            &'static mut Interaction,
+            &'static crate::unit_picker::PickerRow,
+        ),
+        (
+            Without<ScreenButton>,
+            Without<crate::advisors::Action>,
+            Without<crate::domestic::Click>,
+        ),
+    >,
     mouse: ResMut<'w, ButtonInput<MouseButton>>,
     pin: ResMut<'w, crate::input::HoverPin>,
     diplomacy: ResMut<'w, crate::diplomacy::Diplomacy>,
@@ -202,7 +213,10 @@ pub fn drive_script(
     mut view: ResMut<CityView>,
     mut buttons: Query<
         (&mut Interaction, &ScreenButton),
-        (Without<crate::advisors::Action>, Without<crate::domestic::Click>),
+        (
+            Without<crate::advisors::Action>,
+            Without<crate::domestic::Click>,
+        ),
     >,
     mut advisor_buttons: Query<
         (&mut Interaction, &crate::advisors::Action),
@@ -240,11 +254,14 @@ pub fn drive_script(
         match verb {
             "key" => {
                 for part in arg.split('+') {
-                    let Some(k) = key_code(part) else { eprintln!("script: unknown key {part}"); continue; };
+                    let Some(k) = key_code(part) else {
+                        eprintln!("script: unknown key {part}");
+                        continue;
+                    };
                     keys.press(k);
                     script.held.push(k);
                 }
-            },
+            }
             "end" => {
                 for _ in 0..arg.parse().unwrap_or(1) {
                     turn_end.write(TurnEnded);
@@ -290,7 +307,11 @@ pub fn drive_script(
                 let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
                 if let (Some(dest), Some(s)) = (coord(arg), selected.0) {
                     if let Ok((_, mut u)) = units.get_mut(s) {
-                        let ports: Vec<_> = cities.iter().filter(|c| c.civ == u.civ && c.coastal).map(|c| (c.x, c.y)).collect();
+                        let ports: Vec<_> = cities
+                            .iter()
+                            .filter(|c| c.civ == u.civ && c.coastal)
+                            .map(|c| (c.x, c.y))
+                            .collect();
                         crate::naval::order_move(&map, &mut u, dest, &ports, &snapshot);
                     }
                 }
@@ -326,7 +347,10 @@ pub fn drive_script(
                         "irr" => t.irrigation = true,
                         "mine" => t.mine = true,
                         "fort" => t.fortress = true,
-                        "barricade" => { t.fortress = true; t.barricade = true; },
+                        "barricade" => {
+                            t.fortress = true;
+                            t.barricade = true;
+                        }
                         "outpost" => t.site = Some(crate::sites::Site::Outpost(0)),
                         "colony" => t.site = Some(crate::sites::Site::Colony(0)),
                         _ => eprintln!("script: unknown improvement {kind}"),
@@ -337,8 +361,12 @@ pub fn drive_script(
             "size" => {
                 let mut it = arg.split_whitespace().map(|v| v.parse::<u16>().ok());
                 if let Some(c) = cities.iter_mut().find(|c| c.civ == civs.active).as_mut() {
-                    if let Some(Some(n)) = it.next() { c.set_size(n as u8); }
-                    if let Some(Some(sh)) = it.next() { c.shields = sh; }
+                    if let Some(Some(n)) = it.next() {
+                        c.set_size(n as u8);
+                    }
+                    if let Some(Some(sh)) = it.next() {
+                        c.shields = sh;
+                    }
                 }
             }
             "hover" => match coord(arg) {
@@ -356,8 +384,13 @@ pub fn drive_script(
                     .find(|e| cities.get(*e).is_ok_and(|c| c.civ == civs.active))
             }
             "pick" => match reach.picker_buttons.iter_mut().find(|(_, row)| {
-                if arg == "All" { reach.picker.unload == Some(row.0) }
-                else { units.get(row.0).is_ok_and(|(_, u)| units::def(u.utype).name.eq_ignore_ascii_case(arg)) }
+                if arg == "All" {
+                    reach.picker.unload == Some(row.0)
+                } else {
+                    units
+                        .get(row.0)
+                        .is_ok_and(|(_, u)| units::def(u.utype).name.eq_ignore_ascii_case(arg))
+                }
             }) {
                 Some((mut i, _)) => *i = Interaction::Pressed,
                 None => eprintln!("script: no picker row {arg}"),
@@ -373,18 +406,27 @@ pub fn drive_script(
                 }
                 None => eprintln!("script: no button {arg}"),
             },
-            "adv" => match advisor_buttons.iter_mut().find(|(_, a)| a.script_name() == arg) {
+            "adv" => match advisor_buttons
+                .iter_mut()
+                .find(|(_, a)| a.script_name() == arg)
+            {
                 Some((mut i, _)) => *i = Interaction::Pressed,
                 None => eprintln!("script: no advisor button {arg}"),
             },
             "dom" => {
-                match reach.domestic_buttons.iter_mut().find(|(_, c)| c.script_name() == arg) {
+                match reach
+                    .domestic_buttons
+                    .iter_mut()
+                    .find(|(_, c)| c.script_name() == arg)
+                {
                     Some((mut i, _)) => *i = Interaction::Pressed,
                     None => eprintln!("script: no domestic button {arg}"),
                 }
             }
             "meet" => {
-                let mut civs = arg.split_whitespace().filter_map(|c| c.parse::<usize>().ok());
+                let mut civs = arg
+                    .split_whitespace()
+                    .filter_map(|c| c.parse::<usize>().ok());
                 match (civs.next(), civs.next()) {
                     (Some(a), Some(b)) if a != b && a.max(b) < crate::civs::civ_count() => {
                         reach.diplomacy.meet(a, b);
@@ -394,28 +436,47 @@ pub fn drive_script(
             }
             "propose" => {
                 // The civ offers the first advance it can spare, for peace.
-                use civ3mapgen::diplomacy::Clause;
                 use crate::diplomacy::{Deal, Proposal};
-                let from = arg.parse::<usize>().ok().filter(|&c| c != civs.viewer() && c < crate::civs::civ_count());
-                let spare = from.and_then(|c| reach.research.giftable(c, civs.viewer()).first().copied());
+                use civ3mapgen::diplomacy::Clause;
+                let from = arg
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|&c| c != civs.viewer() && c < crate::civs::civ_count());
+                let spare =
+                    from.and_then(|c| reach.research.giftable(c, civs.viewer()).first().copied());
                 match (from, spare) {
                     (Some(from), Some(tech)) => {
                         let mut deal = Deal::new(civs.viewer(), from);
                         deal.from_b.push(Clause::Tech(tech));
                         deal.from_a.push(Clause::Peace);
                         reach.diplomacy.meet(civs.viewer(), from);
-                        reach.diplomacy.proposals.push_back(Proposal { from, to: civs.viewer(), deal });
+                        reach.diplomacy.proposals.push_back(Proposal {
+                            from,
+                            to: civs.viewer(),
+                            deal,
+                        });
                     }
                     _ => eprintln!("script: bad propose {arg}"),
                 }
             }
             "wonder" | "build" => {
                 let (civ, name) = arg.split_once(' ').unwrap_or((arg, ""));
-                let row = (0..crate::roster::bldg_count()).find(|&r| crate::roster::bldg(r).name.eq_ignore_ascii_case(name.trim()));
-                let city = civ.parse::<usize>().ok().and_then(|civ| cities.iter_mut().find(|c| c.civ == civ));
+                let row = (0..crate::roster::bldg_count()).find(|&r| {
+                    crate::roster::bldg(r)
+                        .name
+                        .eq_ignore_ascii_case(name.trim())
+                });
+                let city = civ
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|civ| cities.iter_mut().find(|c| c.civ == civ));
                 match (row, city) {
-                    (Some(row), Some(mut city)) if verb == "wonder" => city.buildings.push(Production::from_building_row(row)),
-                    (Some(row), Some(mut city)) => city.production = Production::from_building_row(row),
+                    (Some(row), Some(mut city)) if verb == "wonder" => {
+                        city.buildings.push(Production::from_building_row(row))
+                    }
+                    (Some(row), Some(mut city)) => {
+                        city.production = Production::from_building_row(row)
+                    }
                     _ => eprintln!("script: bad {verb} {arg}"),
                 }
             }

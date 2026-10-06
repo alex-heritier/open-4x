@@ -18,7 +18,7 @@ use bevy::window::PrimaryWindow;
 use civ3mapgen::diplomacy::Clause;
 
 use crate::cities::{City, CityView, Treasury};
-use crate::civs::{CIV_CAP, civ_count, Civilizations, is_ai};
+use crate::civs::{CIV_CAP, Civilizations, civ_count, is_ai};
 use crate::combat::CombatRng;
 use crate::diplomacy::{Deal, Diplomacy, attitude_label, clause_text, people, verdict_text};
 use crate::features::{MessageBoard, post};
@@ -103,7 +103,12 @@ impl Advisors {
     }
 
     fn open(&mut self, screen: Screen) {
-        *self = Advisors { screen, greeted: self.greeted, seed: self.seed.wrapping_add(1), ..Default::default() };
+        *self = Advisors {
+            screen,
+            greeted: self.greeted,
+            seed: self.seed.wrapping_add(1),
+            ..Default::default()
+        };
     }
 
     /// The talk screen with an empty table between `me` and `other`.
@@ -242,7 +247,11 @@ pub fn hotkeys(
     if advisors.is_open() {
         let question = matches!(
             advisors.screen,
-            Screen::ResearchAsk | Screen::Proposal | Screen::WarAsk | Screen::Convert | Screen::Transport
+            Screen::ResearchAsk
+                | Screen::Proposal
+                | Screen::WarAsk
+                | Screen::Convert
+                | Screen::Transport
         );
         if advisors.screen == Screen::ResearchAsk {
             if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
@@ -254,7 +263,12 @@ pub fn hotkeys(
                 consume(&mut keys, &[KeyCode::Enter, KeyCode::NumpadEnter]);
             }
         } else if advisors.screen == Screen::Splash {
-            let ends = [KeyCode::Escape, KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space];
+            let ends = [
+                KeyCode::Escape,
+                KeyCode::Enter,
+                KeyCode::NumpadEnter,
+                KeyCode::Space,
+            ];
             if keys.any_just_pressed(ends) {
                 wonders.dismiss(me);
                 advisors.close();
@@ -315,12 +329,19 @@ pub fn interrupt(
         }
         return;
     }
-    if diplomacy.convert_ask.is_some_and(|a| a.answer.is_none() && a.to == me)
+    if diplomacy
+        .convert_ask
+        .is_some_and(|a| a.answer.is_none() && a.to == me)
         && !advisors.is_open()
     {
         advisors.open(Screen::Convert);
     }
-    if diplomacy.board_ask.as_ref().is_some_and(|a| a.answer.is_none()) && !advisors.is_open() {
+    if diplomacy
+        .board_ask
+        .as_ref()
+        .is_some_and(|a| a.answer.is_none())
+        && !advisors.is_open()
+    {
         advisors.open(Screen::Transport);
     }
     if advisors.is_open() || domestic.is_open() || prompts.blocks(civs.active) || view.0.is_some() {
@@ -328,13 +349,18 @@ pub fn interrupt(
     }
     if wonders.next_for(me).is_some() {
         advisors.open(Screen::Splash);
-    } else if research.needs_choice(me) && !research.options(me).is_empty() && settled(&cities, me, turn.0) {
+    } else if research.needs_choice(me)
+        && !research.options(me).is_empty()
+        && settled(&cities, me, turn.0)
+    {
         // Civ3 asks in the advisor's popup, from the turn after the first
         // city is founded; the tree is a click away.
         advisors.open(Screen::ResearchAsk);
     } else if diplomacy.proposals.iter().any(|p| p.to == me) {
         advisors.open(Screen::Proposal);
-    } else if let Some(other) = (0..civ_count()).find(|&o| o != me && diplomacy.contact(me, o) && !advisors.greeted[o]) {
+    } else if let Some(other) =
+        (0..civ_count()).find(|&o| o != me && diplomacy.contact(me, o) && !advisors.greeted[o])
+    {
         advisors.greeted[other] = true;
         advisors.open(Screen::Greeting(other));
     }
@@ -351,12 +377,22 @@ const IDLE: Color = Color::srgba(0.65, 0.60, 0.40, 0.18);
 fn text(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, s: impl Into<String>, size: f32) {
     parent.spawn((
         Text::new(s),
-        TextFont { font: font.clone(), font_size: size, ..default() },
+        TextFont {
+            font: font.clone(),
+            font_size: size,
+            ..default()
+        },
         TextColor(Color::BLACK),
     ));
 }
 
-fn button(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label: String, action: Action, on: bool) {
+fn button(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: String,
+    action: Action,
+    on: bool,
+) {
     parent
         .spawn((
             Button,
@@ -372,7 +408,11 @@ fn button(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label: String,
         .with_children(|b| {
             b.spawn((
                 Text::new(label),
-                TextFont { font: font.clone(), font_size: 18.0, ..default() },
+                TextFont {
+                    font: font.clone(),
+                    font_size: 18.0,
+                    ..default()
+                },
                 TextColor(INK),
             ));
         });
@@ -380,7 +420,11 @@ fn button(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label: String,
 
 fn row(parent: &mut ChildSpawnerCommands, f: impl FnOnce(&mut ChildSpawnerCommands)) {
     parent
-        .spawn(Node { column_gap: Val::Px(10.0), align_items: AlignItems::Center, ..default() })
+        .spawn(Node {
+            column_gap: Val::Px(10.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
         .with_children(f);
 }
 
@@ -402,13 +446,31 @@ impl View<'_> {
     /// What the leader of `other` says under `key` to the human: in the tone
     /// of their relative strength and of their attitude.
     fn says(&self, other: usize, key: &str, who: &Who) -> Option<String> {
-        says(self.speech, self.diplomacy, self.facts, self.me, other, key, self.advisors.seed as usize, who)
+        says(
+            self.speech,
+            self.diplomacy,
+            self.facts,
+            self.me,
+            other,
+            key,
+            self.advisors.seed as usize,
+            who,
+        )
     }
 }
 
 /// The line of `key` that the leader of `other` speaks to `me`.
 #[allow(clippy::too_many_arguments)]
-fn says(speech: &Speech, d: &Diplomacy, facts: &crate::diplomacy::Facts, me: usize, other: usize, key: &str, roll: usize, who: &Who) -> Option<String> {
+fn says(
+    speech: &Speech,
+    d: &Diplomacy,
+    facts: &crate::diplomacy::Facts,
+    me: usize,
+    other: usize,
+    key: &str,
+    roll: usize,
+    who: &Who,
+) -> Option<String> {
     let power = power_tone(facts.score[other], facts.score[me]);
     let mood = mood_tone(d.attitude(facts, other, me));
     speech.say(key, power, mood, roll, who)
@@ -429,7 +491,11 @@ fn standing(v: &View, other: usize) -> String {
         return "No contact".into();
     }
     let mood = attitude_label(d.attitude(v.facts, other, v.me));
-    let status = if d.at_war(v.me, other) { "At war" } else { "At peace" };
+    let status = if d.at_war(v.me, other) {
+        "At war"
+    } else {
+        "At peace"
+    };
     format!("{mood}. {status}{}", d.treaties_text(v.me, other))
 }
 
@@ -438,14 +504,22 @@ fn foreign(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
     for other in (0..civ_count()).filter(|&o| o != v.me) {
         let met = v.diplomacy.contact(v.me, other);
         row(p, |r| {
-            text(r, font, format!("The {}: {}", people(other), standing(v, other)), 18.0);
+            text(
+                r,
+                font,
+                format!("The {}: {}", people(other), standing(v, other)),
+                18.0,
+            );
             if met {
                 button(r, font, "Talk".into(), Action::Talk(other), false);
             }
         });
     }
     // Room for the boxed X in the corner.
-    p.spawn(Node { height: Val::Px(40.0), ..default() });
+    p.spawn(Node {
+        height: Val::Px(40.0),
+        ..default()
+    });
 }
 
 // ---------------------------------------------------------------------
@@ -456,7 +530,10 @@ fn foreign(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
 /// else the advisor's suggestion, the cheapest open advance.
 fn asked(advisors: &Advisors, research: &Research, me: usize) -> Option<i32> {
     let options = research.options(me);
-    advisors.ask.filter(|t| options.contains(t)).or_else(|| options.first().copied())
+    advisors
+        .ask
+        .filter(|t| options.contains(t))
+        .or_else(|| options.first().copied())
 }
 
 /// The popup's size, and where it sits below the top of the window, read
@@ -476,94 +553,198 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
     let (w, h, top) = ASK;
     let options = v.research.options(v.me);
     let chosen = asked(v.advisors, v.research, v.me);
-    let label = |t: i32| format!("{} ({})", tech_name(t), turns_text(v.research.turns(v.me, t)));
-    let slices = TextureSlicer { border: BorderRect::all(6.0), ..default() };
+    let label = |t: i32| {
+        format!(
+            "{} ({})",
+            tech_name(t),
+            turns_text(v.research.turns(v.me, t))
+        )
+    };
+    let slices = TextureSlicer {
+        border: BorderRect::all(6.0),
+        ..default()
+    };
     let parchment = |assets: &AssetServer| {
-        ImageNode::new(assets.load("cache/advisors/popup.png")).with_mode(NodeImageMode::Sliced(slices.clone()))
+        ImageNode::new(assets.load("cache/advisors/popup.png"))
+            .with_mode(NodeImageMode::Sliced(slices.clone()))
     };
     commands
         .spawn((
             AdvisorRoot(scale),
             GlobalZIndex(100),
-            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() },
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
         ))
         .with_children(|root| {
-            root.spawn(Node { width: st.px(w), height: st.px(h), margin: UiRect::top(st.px(top)), ..default() })
-                .with_children(|s| {
-                    // The head rises over the popup, which hides the shoulders.
-                    let era = crate::tech_tree::era_of(v.research, v.me);
-                    ui.picture(s, ImageNode::new(v.assets.load(format!("cache/advisors/portrait_science_{era}.png"))), 221.0, -132.0, 150.0, 150.0);
-                    s.spawn((parchment(v.assets), st.rect(0.0, 0.0, w, h)));
-                    ui.words(s, 0.0, 10.0, w, 30.0, "Science Advisor", 24.0, Color::BLACK, true);
-                    ui.words(s, 27.0, 59.0, w - 40.0, 44.0, "Great One, our Sages need direction.\nShall we look into the secrets of", 16.0, Color::BLACK, false);
-                    let (px, py, pw, ph) = PULLDOWN;
+            root.spawn(Node {
+                width: st.px(w),
+                height: st.px(h),
+                margin: UiRect::top(st.px(top)),
+                ..default()
+            })
+            .with_children(|s| {
+                // The head rises over the popup, which hides the shoulders.
+                let era = crate::tech_tree::era_of(v.research, v.me);
+                ui.picture(
+                    s,
+                    ImageNode::new(
+                        v.assets
+                            .load(format!("cache/advisors/portrait_science_{era}.png")),
+                    ),
+                    221.0,
+                    -132.0,
+                    150.0,
+                    150.0,
+                );
+                s.spawn((parchment(v.assets), st.rect(0.0, 0.0, w, h)));
+                ui.words(
+                    s,
+                    0.0,
+                    10.0,
+                    w,
+                    30.0,
+                    "Science Advisor",
+                    24.0,
+                    Color::BLACK,
+                    true,
+                );
+                ui.words(
+                    s,
+                    27.0,
+                    59.0,
+                    w - 40.0,
+                    44.0,
+                    "Great One, our Sages need direction.\nShall we look into the secrets of",
+                    16.0,
+                    Color::BLACK,
+                    false,
+                );
+                let (px, py, pw, ph) = PULLDOWN;
+                s.spawn((
+                    Button,
+                    Action::Pulldown,
+                    Node {
+                        border: UiRect::all(Val::Px(1.0)),
+                        align_items: AlignItems::Center,
+                        padding: UiRect::left(st.px(4.0)),
+                        overflow: Overflow::clip(),
+                        ..st.rect(px, py, pw, ph)
+                    },
+                    BackgroundColor(Color::srgb(0.97, 0.95, 0.88)),
+                    BorderColor::all(Color::srgb(0.35, 0.35, 0.35)),
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        Text::new(chosen.map(label).unwrap_or_default()),
+                        TextFont {
+                            font: ui.font.clone(),
+                            font_size: st.font(15.0),
+                            ..default()
+                        },
+                        TextColor(ASK_LINK),
+                        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                        Underline,
+                    ));
+                    b.spawn((
+                        ImageNode::new(v.assets.load("cache/advisors/pulldown.png")),
+                        st.rect(pw - 23.0, 0.0, 21.0, 21.0),
+                    ));
+                });
+                ui.words(
+                    s,
+                    px + pw + 3.0,
+                    py,
+                    12.0,
+                    ph,
+                    "?",
+                    16.0,
+                    Color::BLACK,
+                    false,
+                );
+                for (k, (text, action, focus)) in [
+                    ("OK.", Action::Ok, true),
+                    ("What's the big picture?", Action::BigPicture, false),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let y = 128.0 + 27.0 * k as f32;
                     s.spawn((
                         Button,
-                        Action::Pulldown,
+                        action,
                         Node {
-                            border: UiRect::all(Val::Px(1.0)),
+                            column_gap: st.px(3.0),
                             align_items: AlignItems::Center,
-                            padding: UiRect::left(st.px(4.0)),
-                            overflow: Overflow::clip(),
-                            ..st.rect(px, py, pw, ph)
+                            ..st.rect(27.0, y, 300.0, 22.0)
                         },
-                        BackgroundColor(Color::srgb(0.97, 0.95, 0.88)),
-                        BorderColor::all(Color::srgb(0.35, 0.35, 0.35)),
                     ))
                     .with_children(|b| {
+                        let bullet = if focus { "bullet_2" } else { "bullet_0" };
                         b.spawn((
-                            Text::new(chosen.map(label).unwrap_or_default()),
-                            TextFont { font: ui.font.clone(), font_size: st.font(15.0), ..default() },
-                            TextColor(ASK_LINK),
-                            TextLayout::new(Justify::Left, LineBreak::NoWrap),
-                            Underline,
+                            ImageNode::new(v.assets.load(format!("cache/advisors/{bullet}.png"))),
+                            Node {
+                                width: st.px(19.0),
+                                height: st.px(20.0),
+                                ..default()
+                            },
                         ));
-                        b.spawn((ImageNode::new(v.assets.load("cache/advisors/pulldown.png")), st.rect(pw - 23.0, 0.0, 21.0, 21.0)));
+                        b.spawn((
+                            Text::new(text),
+                            TextFont {
+                                font: ui.font.clone(),
+                                font_size: st.font(16.0),
+                                ..default()
+                            },
+                            TextColor(if focus { ASK_FOCUS } else { Color::BLACK }),
+                        ));
                     });
-                    ui.words(s, px + pw + 3.0, py, 12.0, ph, "?", 16.0, Color::BLACK, false);
-                    for (k, (text, action, focus)) in
-                        [("OK.", Action::Ok, true), ("What's the big picture?", Action::BigPicture, false)].into_iter().enumerate()
-                    {
-                        let y = 128.0 + 27.0 * k as f32;
-                        s.spawn((Button, action, Node { column_gap: st.px(3.0), align_items: AlignItems::Center, ..st.rect(27.0, y, 300.0, 22.0) }))
-                            .with_children(|b| {
-                                let bullet = if focus { "bullet_2" } else { "bullet_0" };
-                                b.spawn((
-                                    ImageNode::new(v.assets.load(format!("cache/advisors/{bullet}.png"))),
-                                    Node { width: st.px(19.0), height: st.px(20.0), ..default() },
-                                ));
-                                b.spawn((
-                                    Text::new(text),
-                                    TextFont { font: ui.font.clone(), font_size: st.font(16.0), ..default() },
-                                    TextColor(if focus { ASK_FOCUS } else { Color::BLACK }),
-                                ));
-                            });
-                    }
-                    if v.advisors.pulldown {
-                        let row = 20.0;
-                        s.spawn((
-                            parchment(v.assets),
-                            GlobalZIndex(101),
-                            Node { flex_direction: FlexDirection::Column, padding: UiRect::all(st.px(4.0)), ..st.rect(px, py + ph, pw, row * options.len() as f32 + 8.0) },
-                        ))
-                        .with_children(|list| {
-                            for &t in &options {
-                                list.spawn((
-                                    Button,
-                                    Action::Choose(t),
-                                    Node { height: st.px(row), align_items: AlignItems::Center, padding: UiRect::left(st.px(4.0)), ..default() },
-                                    BackgroundColor(if Some(t) == chosen { SELECTED } else { Color::NONE }),
-                                ))
-                                .with_child((
-                                    Text::new(label(t)),
-                                    TextFont { font: ui.font.clone(), font_size: st.font(15.0), ..default() },
-                                    TextColor(ASK_LINK),
-                                    TextLayout::new(Justify::Left, LineBreak::NoWrap),
-                                ));
-                            }
-                        });
-                    }
-                });
+                }
+                if v.advisors.pulldown {
+                    let row = 20.0;
+                    s.spawn((
+                        parchment(v.assets),
+                        GlobalZIndex(101),
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(st.px(4.0)),
+                            ..st.rect(px, py + ph, pw, row * options.len() as f32 + 8.0)
+                        },
+                    ))
+                    .with_children(|list| {
+                        for &t in &options {
+                            list.spawn((
+                                Button,
+                                Action::Choose(t),
+                                Node {
+                                    height: st.px(row),
+                                    align_items: AlignItems::Center,
+                                    padding: UiRect::left(st.px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(if Some(t) == chosen {
+                                    SELECTED
+                                } else {
+                                    Color::NONE
+                                }),
+                            ))
+                            .with_child((
+                                Text::new(label(t)),
+                                TextFont {
+                                    font: ui.font.clone(),
+                                    font_size: st.font(15.0),
+                                    ..default()
+                                },
+                                TextColor(ASK_LINK),
+                                TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                            ));
+                        }
+                    });
+                }
+            });
         });
 }
 
@@ -577,17 +758,33 @@ const PORTRAIT: (f32, f32, f32, f32) = (411.0, 59.0, 200.0, 240.0);
 /// The animated leader of `other` behind the frame.
 fn portrait(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt, other: usize) {
     if let Some((head, image)) = leaders::head(art, v.assets, v.research, other, v.now_ms) {
-        s.spawn((ui.st.rect(PORTRAIT.0, PORTRAIT.1, PORTRAIT.2, PORTRAIT.3), image, head));
+        s.spawn((
+            ui.st.rect(PORTRAIT.0, PORTRAIT.1, PORTRAIT.2, PORTRAIT.3),
+            image,
+            head,
+        ));
     }
 }
 
 fn frame(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, name: &str) {
-    ui.picture(s, ImageNode::new(v.assets.load(format!("cache/diplomacy/{name}.png"))), 0.0, 0.0, 1024.0, 768.0);
+    ui.picture(
+        s,
+        ImageNode::new(v.assets.load(format!("cache/diplomacy/{name}.png"))),
+        0.0,
+        0.0,
+        1024.0,
+        768.0,
+    );
 }
 
 /// "Emperor Caesar of the Romans".
 fn leader_title(other: usize) -> String {
-    format!("{} {} of the {}", LEADERS[other].title, LEADERS[other].name, people(other))
+    format!(
+        "{} {} of the {}",
+        LEADERS[other].title,
+        LEADERS[other].name,
+        people(other)
+    )
 }
 
 /// The leader's greeting when we sit down: by the state of the world.
@@ -600,7 +797,8 @@ fn hello(v: &View, other: usize) -> String {
     } else {
         "AIPEACEGREETINGS"
     };
-    v.says(other, key, &Who::between(other, v.me)).unwrap_or_else(|| format!("Greetings. I am {}.", LEADERS[other].name))
+    v.says(other, key, &Who::between(other, v.me))
+        .unwrap_or_else(|| format!("Greetings. I am {}.", LEADERS[other].name))
 }
 
 /// A leader we have just met, in the small frame.
@@ -609,11 +807,47 @@ fn greeting(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt
     frame(s, ui, v, "talk_offer");
     let line = v
         .says(other, "AIFIRSTCONTACT", &Who::between(other, v.me))
-        .unwrap_or_else(|| format!("Greetings. We are the {}, and I am {}.", people(other), LEADERS[other].name));
-    ui.words(s, 308.0, 335.0, 416.0, 20.0, leader_title(other), 15.0, stage::LABEL, true);
+        .unwrap_or_else(|| {
+            format!(
+                "Greetings. We are the {}, and I am {}.",
+                people(other),
+                LEADERS[other].name
+            )
+        });
+    ui.words(
+        s,
+        308.0,
+        335.0,
+        416.0,
+        20.0,
+        leader_title(other),
+        15.0,
+        stage::LABEL,
+        true,
+    );
     ui.words(s, 316.0, 372.0, 400.0, 130.0, line, 17.0, stage::INK, true);
-    ui.button(s, 322.0, 520.0, 180.0, 28.0, "Let us talk", 16.0, Action::Talk(other), false);
-    ui.button(s, 522.0, 520.0, 180.0, 28.0, "Farewell", 16.0, Action::Close, false);
+    ui.button(
+        s,
+        322.0,
+        520.0,
+        180.0,
+        28.0,
+        "Let us talk",
+        16.0,
+        Action::Talk(other),
+        false,
+    );
+    ui.button(
+        s,
+        522.0,
+        520.0,
+        180.0,
+        28.0,
+        "Farewell",
+        16.0,
+        Action::Close,
+        false,
+    );
 }
 
 /// "Peace treaty" and the like, short enough for a button of the table.
@@ -630,18 +864,58 @@ fn side(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, other: usize, give: boo
     let deal = &v.advisors.deal;
     let (giver, taker) = if give { (v.me, other) } else { (other, v.me) };
     let from = if give { &deal.from_a } else { &deal.from_b };
-    ui.words(s, x, 231.0, 183.0, 22.0, if give { "We give" } else { "They give" }, 19.0, stage::LABEL, true);
+    ui.words(
+        s,
+        x,
+        231.0,
+        183.0,
+        22.0,
+        if give { "We give" } else { "They give" },
+        19.0,
+        stage::LABEL,
+        true,
+    );
     let techs = v.research.giftable(giver, taker);
     for (i, &t) in techs.iter().take(TECHS_SHOWN).enumerate() {
         let on = from.contains(&Clause::Tech(t));
         let mark = if on { "* " } else { "" };
-        ui.button(s, x, 258.0 + 23.0 * i as f32, 183.0, 21.0, format!("{mark}{}", tech_name(t)), 13.0, Action::Tech(give, t), on);
+        ui.button(
+            s,
+            x,
+            258.0 + 23.0 * i as f32,
+            183.0,
+            21.0,
+            format!("{mark}{}", tech_name(t)),
+            13.0,
+            Action::Tech(give, t),
+            on,
+        );
     }
     if techs.len() > TECHS_SHOWN {
-        ui.words(s, x, 258.0 + 23.0 * TECHS_SHOWN as f32, 183.0, 16.0, format!("...and {} more.", techs.len() - TECHS_SHOWN), 12.0, stage::INK, true);
+        ui.words(
+            s,
+            x,
+            258.0 + 23.0 * TECHS_SHOWN as f32,
+            183.0,
+            16.0,
+            format!("...and {} more.", techs.len() - TECHS_SHOWN),
+            12.0,
+            stage::INK,
+            true,
+        );
     }
     if techs.is_empty() {
-        ui.words(s, x, 262.0, 183.0, 18.0, "No advances to trade.", 13.0, stage::INK, true);
+        ui.words(
+            s,
+            x,
+            262.0,
+            183.0,
+            18.0,
+            "No advances to trade.",
+            13.0,
+            stage::INK,
+            true,
+        );
     }
     let amount = |per_turn: bool| {
         from.iter()
@@ -652,13 +926,36 @@ fn side(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, other: usize, give: boo
             .unwrap_or(0)
     };
     let (once, per) = (amount(false), amount(true));
-    let stepper = |s: &mut ChildSpawnerCommands, y: f32, label: String, minus: Action, plus: Action| {
-        ui.button(s, x, y, 28.0, 24.0, "-", 16.0, minus, false);
-        ui.words(s, x + 30.0, y + 5.0, 123.0, 18.0, label, 13.0, stage::INK, true);
-        ui.button(s, x + 155.0, y, 28.0, 24.0, "+", 16.0, plus, false);
-    };
-    stepper(s, 468.0, format!("{once} of {} gold", v.treasury.0[giver]), Action::Gold(give, -GOLD_STEP), Action::Gold(give, GOLD_STEP));
-    stepper(s, 500.0, format!("{per} gold a turn"), Action::GoldPerTurn(give, -1), Action::GoldPerTurn(give, 1));
+    let stepper =
+        |s: &mut ChildSpawnerCommands, y: f32, label: String, minus: Action, plus: Action| {
+            ui.button(s, x, y, 28.0, 24.0, "-", 16.0, minus, false);
+            ui.words(
+                s,
+                x + 30.0,
+                y + 5.0,
+                123.0,
+                18.0,
+                label,
+                13.0,
+                stage::INK,
+                true,
+            );
+            ui.button(s, x + 155.0, y, 28.0, 24.0, "+", 16.0, plus, false);
+        };
+    stepper(
+        s,
+        468.0,
+        format!("{once} of {} gold", v.treasury.0[giver]),
+        Action::Gold(give, -GOLD_STEP),
+        Action::Gold(give, GOLD_STEP),
+    );
+    stepper(
+        s,
+        500.0,
+        format!("{per} gold a turn"),
+        Action::GoldPerTurn(give, -1),
+        Action::GoldPerTurn(give, 1),
+    );
 }
 
 /// The trading screen: the leader above, our offer left, theirs right, the
@@ -668,23 +965,85 @@ fn talk(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt, ot
     portrait(s, ui, v, art, other);
     frame(s, ui, v, "counter");
     // The upper box: who speaks, and what they say.
-    let spoken = if v.advisors.said.is_empty() { hello(v, other) } else { v.advisors.said.clone() };
-    ui.words(s, 306.0, 330.0, 420.0, 18.0, leader_title(other), 14.0, stage::LABEL, true);
+    let spoken = if v.advisors.said.is_empty() {
+        hello(v, other)
+    } else {
+        v.advisors.said.clone()
+    };
+    ui.words(
+        s,
+        306.0,
+        330.0,
+        420.0,
+        18.0,
+        leader_title(other),
+        14.0,
+        stage::LABEL,
+        true,
+    );
     ui.words(s, 306.0, 350.0, 420.0, 72.0, spoken, 15.0, stage::INK, true);
     side(s, ui, v, other, true, 49.0);
     side(s, ui, v, other, false, 798.0);
     // The bar: where we stand, what the game itself has to say.
-    ui.words(s, 320.0, 446.0, 394.0, 34.0, standing(v, other), 14.0, stage::INK, true);
+    ui.words(
+        s,
+        320.0,
+        446.0,
+        394.0,
+        34.0,
+        standing(v, other),
+        14.0,
+        stage::INK,
+        true,
+    );
     if !v.advisors.note.is_empty() {
-        ui.words(s, 320.0, 482.0, 394.0, 20.0, v.advisors.note.clone(), 14.0, stage::WARN, true);
+        ui.words(
+            s,
+            320.0,
+            482.0,
+            394.0,
+            20.0,
+            v.advisors.note.clone(),
+            14.0,
+            stage::WARN,
+            true,
+        );
     }
     if !d.at_war(me, other) {
-        let label = if v.advisors.armed { "Really declare war?" } else { "Declare war" };
-        ui.button(s, 322.0, 506.0, 190.0, 26.0, label, 15.0, Action::DeclareWar, v.advisors.armed);
+        let label = if v.advisors.armed {
+            "Really declare war?"
+        } else {
+            "Declare war"
+        };
+        ui.button(
+            s,
+            322.0,
+            506.0,
+            190.0,
+            26.0,
+            label,
+            15.0,
+            Action::DeclareWar,
+            v.advisors.armed,
+        );
     }
-    ui.button(s, 522.0, 506.0, 190.0, 26.0, "Foreign Advisor", 15.0, Action::Foreign, false);
+    ui.button(
+        s,
+        522.0,
+        506.0,
+        190.0,
+        26.0,
+        "Foreign Advisor",
+        15.0,
+        Action::Foreign,
+        false,
+    );
     // The lower box: treaties are offered when the clause alone would stand.
-    let mut options = vec![Clause::Peace, Clause::RightOfPassage, Clause::MutualProtection];
+    let mut options = vec![
+        Clause::Peace,
+        Clause::RightOfPassage,
+        Clause::MutualProtection,
+    ];
     for x in (0..civ_count()).filter(|&x| x != me && x != other) {
         options.push(Clause::MilitaryAlliance(crate::research::slot(x)));
         options.push(Clause::Embargo(crate::research::slot(x)));
@@ -697,25 +1056,82 @@ fn talk(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt, ot
             d.check(v.research, &v.treasury.0, &alone).is_ok()
         })
         .collect();
-    ui.words(s, 306.0, 562.0, 420.0, 20.0, "Treaties", 16.0, stage::LABEL, true);
+    ui.words(
+        s,
+        306.0,
+        562.0,
+        420.0,
+        20.0,
+        "Treaties",
+        16.0,
+        stage::LABEL,
+        true,
+    );
     if treaties.is_empty() {
-        ui.words(s, 306.0, 620.0, 420.0, 20.0, "No treaty is open to us.", 14.0, stage::INK, true);
+        ui.words(
+            s,
+            306.0,
+            620.0,
+            420.0,
+            20.0,
+            "No treaty is open to us.",
+            14.0,
+            stage::INK,
+            true,
+        );
     }
     for (i, c) in treaties.into_iter().take(2 * TREATY_ROWS).enumerate() {
         let on = v.advisors.deal.from_a.contains(&c);
         let mark = if on { "* " } else { "" };
-        let (x, y) = (308.0 + 213.0 * (i % 2) as f32, 586.0 + 28.0 * (i / 2) as f32);
-        ui.button(s, x, y, 205.0, 24.0, format!("{mark}{}", treaty_label(&c)), 13.0, Action::Treaty(c), on);
+        let (x, y) = (
+            308.0 + 213.0 * (i % 2) as f32,
+            586.0 + 28.0 * (i / 2) as f32,
+        );
+        ui.button(
+            s,
+            x,
+            y,
+            205.0,
+            24.0,
+            format!("{mark}{}", treaty_label(&c)),
+            13.0,
+            Action::Treaty(c),
+            on,
+        );
     }
-    ui.button(s, 354.0, 727.0, 150.0, 24.0, "Propose", 16.0, Action::Propose, false);
-    ui.button(s, 514.0, 727.0, 150.0, 24.0, "Leave", 16.0, Action::Close, false);
+    ui.button(
+        s,
+        354.0,
+        727.0,
+        150.0,
+        24.0,
+        "Propose",
+        16.0,
+        Action::Propose,
+        false,
+    );
+    ui.button(
+        s,
+        514.0,
+        727.0,
+        150.0,
+        24.0,
+        "Leave",
+        16.0,
+        Action::Close,
+        false,
+    );
 }
 
 fn describe(clauses: &[Clause]) -> String {
     if clauses.is_empty() {
         return "nothing".into();
     }
-    clauses.iter().map(clause_text).collect::<Vec<_>>().join(", ")
+    clauses
+        .iter()
+        .map(clause_text)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The block of `diplomacy.txt` that makes a leader's case for `deal`, and
@@ -743,56 +1159,143 @@ fn proposal_key(deal: &Deal) -> (&'static str, Option<usize>) {
 
 /// The computer's proposal: the leader makes the case, the terms below it.
 fn proposal(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt) {
-    let Some(offer) = v.diplomacy.proposals.iter().find(|q| q.to == v.me) else { return };
+    let Some(offer) = v.diplomacy.proposals.iter().find(|q| q.to == v.me) else {
+        return;
+    };
     let other = offer.from;
     portrait(s, ui, v, art, other);
     frame(s, ui, v, "talk_offer");
     let (give, get) = (describe(&offer.deal.from_b), describe(&offer.deal.from_a));
     let (key, third) = proposal_key(&offer.deal);
-    let who = Who { third, give: &give, get: &get, ..Who::between(other, v.me) };
+    let who = Who {
+        third,
+        give: &give,
+        get: &get,
+        ..Who::between(other, v.me)
+    };
     let case = v
         .says(other, key, &who)
         .unwrap_or_else(|| format!("The {} propose a trade.", people(other)));
-    ui.words(s, 308.0, 335.0, 416.0, 20.0, leader_title(other), 15.0, stage::LABEL, true);
+    ui.words(
+        s,
+        308.0,
+        335.0,
+        416.0,
+        20.0,
+        leader_title(other),
+        15.0,
+        stage::LABEL,
+        true,
+    );
     ui.words(s, 316.0, 362.0, 400.0, 100.0, case, 16.0, stage::INK, true);
-    ui.words(s, 316.0, 454.0, 400.0, 36.0, format!("They give: {give}."), 15.0, stage::INK, true);
-    ui.words(s, 316.0, 490.0, 400.0, 36.0, format!("We give: {get}."), 15.0, stage::INK, true);
-    ui.button(s, 322.0, 522.0, 180.0, 28.0, "Accept", 16.0, Action::Accept, false);
-    ui.button(s, 522.0, 522.0, 180.0, 28.0, "Decline", 16.0, Action::Decline, false);
+    ui.words(
+        s,
+        316.0,
+        454.0,
+        400.0,
+        36.0,
+        format!("They give: {give}."),
+        15.0,
+        stage::INK,
+        true,
+    );
+    ui.words(
+        s,
+        316.0,
+        490.0,
+        400.0,
+        36.0,
+        format!("We give: {get}."),
+        15.0,
+        stage::INK,
+        true,
+    );
+    ui.button(
+        s,
+        322.0,
+        522.0,
+        180.0,
+        28.0,
+        "Accept",
+        16.0,
+        Action::Accept,
+        false,
+    );
+    ui.button(
+        s,
+        522.0,
+        522.0,
+        180.0,
+        28.0,
+        "Decline",
+        16.0,
+        Action::Decline,
+        false,
+    );
 }
 
 fn convert_ask(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View, cities: &Query<&City>) {
-    let Some(ask) = v.diplomacy.convert_ask else { return };
-    let name = cities.get(ask.city).map_or("The city".to_string(), |c| c.name.clone());
+    let Some(ask) = v.diplomacy.convert_ask else {
+        return;
+    };
+    let name = cities
+        .get(ask.city)
+        .map_or("The city".to_string(), |c| c.name.clone());
     text(p, font, format!("{name} wishes to join us!"), 30.0);
     text(
         p,
         font,
-        format!("The people of {name} want to switch their allegiance to our civilization. Shall we install a new governor?"),
+        format!(
+            "The people of {name} want to switch their allegiance to our civilization. Shall we install a new governor?"
+        ),
         20.0,
     );
     row(p, |r| {
-        button(r, font, "Great! Install a new governor.".into(), Action::ConvertYes, false);
-        button(r, font, format!("We don't want {name}. Rebuff the rebels."), Action::ConvertNo, false);
+        button(
+            r,
+            font,
+            "Great! Install a new governor.".into(),
+            Action::ConvertYes,
+            false,
+        );
+        button(
+            r,
+            font,
+            format!("We don't want {name}. Rebuff the rebels."),
+            Action::ConvertNo,
+            false,
+        );
     });
 }
 
 fn transport_ask(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
-    let Some(ask) = v.diplomacy.board_ask.as_ref() else { return };
+    let Some(ask) = v.diplomacy.board_ask.as_ref() else {
+        return;
+    };
     text(p, font, "Select transport", 30.0);
-    text(p, font, "Several ships here could take the unit aboard. Which one?", 20.0);
+    text(
+        p,
+        font,
+        "Several ships here could take the unit aboard. Which one?",
+        20.0,
+    );
     for (ship, line) in &ask.options {
         button(p, font, line.clone(), Action::Transport(*ship), false);
     }
 }
 
 fn war_ask(p: &mut ChildSpawnerCommands, font: &Handle<Font>, v: &View) {
-    let Some(ask) = v.diplomacy.war_ask else { return };
+    let Some(ask) = v.diplomacy.war_ask else {
+        return;
+    };
     text(p, font, "Declare war?", 30.0);
     text(
         p,
         font,
-        format!("We are at peace with the {}. Our soldiers cannot strike them unless we declare war.", people(ask.target)),
+        format!(
+            "We are at peace with the {}. Our soldiers cannot strike them unless we declare war.",
+            people(ask.target)
+        ),
         20.0,
     );
     row(p, |r| {
@@ -853,30 +1356,46 @@ pub fn show(
         research_ask(&mut commands, &ui, &v, scale);
         return;
     }
-    let staged = !matches!(advisors.screen, Screen::Foreign | Screen::WarAsk | Screen::Convert | Screen::Transport);
+    let staged = !matches!(
+        advisors.screen,
+        Screen::Foreign | Screen::WarAsk | Screen::Convert | Screen::Transport
+    );
     if staged {
         // Civ3's advisors sit over the map undimmed.
-        let dim = if advisors.screen == Screen::Science { 0.0 } else { 0.55 };
+        let dim = if advisors.screen == Screen::Science {
+            0.0
+        } else {
+            0.55
+        };
         let stage = stage::spawn(&mut commands, AdvisorRoot(scale), st, dim, 100);
-        commands.entity(stage).with_children(|s| match advisors.screen {
-            Screen::Greeting(other) => greeting(s, &ui, &v, &mut art, other),
-            Screen::Talk(other) => talk(s, &ui, &v, &mut art, other),
-            Screen::Proposal => proposal(s, &ui, &v, &mut art),
-            Screen::Wonders => {
-                let list = wonders::cards(&wonders, &cs, &diplomacy, v.me);
-                wonders::window(s, &ui, &assets, &list, advisors.page);
-            }
-            Screen::Splash => {
-                if let Some(splash) = wonders.next_for(v.me) {
-                    wonders::splash(s, &ui, &assets, splash);
+        commands
+            .entity(stage)
+            .with_children(|s| match advisors.screen {
+                Screen::Greeting(other) => greeting(s, &ui, &v, &mut art, other),
+                Screen::Talk(other) => talk(s, &ui, &v, &mut art, other),
+                Screen::Proposal => proposal(s, &ui, &v, &mut art),
+                Screen::Wonders => {
+                    let list = wonders::cards(&wonders, &cs, &diplomacy, v.me);
+                    wonders::window(s, &ui, &assets, &list, advisors.page);
                 }
-            }
-            Screen::Science => {
-                let era = advisors.era.unwrap_or_else(|| crate::tech_tree::era_of(&research, v.me));
-                crate::tech_tree::page(s, &ui, &assets, &research, v.me, era);
-            }
-            Screen::ResearchAsk | Screen::Foreign | Screen::WarAsk | Screen::Convert | Screen::Transport | Screen::Closed => {}
-        });
+                Screen::Splash => {
+                    if let Some(splash) = wonders.next_for(v.me) {
+                        wonders::splash(s, &ui, &assets, splash);
+                    }
+                }
+                Screen::Science => {
+                    let era = advisors
+                        .era
+                        .unwrap_or_else(|| crate::tech_tree::era_of(&research, v.me));
+                    crate::tech_tree::page(s, &ui, &assets, &research, v.me, era);
+                }
+                Screen::ResearchAsk
+                | Screen::Foreign
+                | Screen::WarAsk
+                | Screen::Convert
+                | Screen::Transport
+                | Screen::Closed => {}
+            });
         return;
     }
     commands
@@ -942,7 +1461,11 @@ pub fn show(
 /// Put `c` on the table on the human's side (`give`) or the other's, or take
 /// it off if it is there.
 fn toggle_clause(deal: &mut Deal, give: bool, c: Clause) {
-    let side = if give { &mut deal.from_a } else { &mut deal.from_b };
+    let side = if give {
+        &mut deal.from_a
+    } else {
+        &mut deal.from_b
+    };
     match side.iter().position(|x| *x == c) {
         Some(i) => {
             side.remove(i);
@@ -953,8 +1476,17 @@ fn toggle_clause(deal: &mut Deal, give: bool, c: Clause) {
 
 /// Move the one gold clause of a side by `delta`, dropping it at zero.
 fn move_gold(deal: &mut Deal, give: bool, delta: i32, per_turn: bool, purse: u32) {
-    let side = if give { &mut deal.from_a } else { &mut deal.from_b };
-    let is = |c: &Clause| matches!((c, per_turn), (Clause::Gold(_), false) | (Clause::GoldPerTurn(_), true));
+    let side = if give {
+        &mut deal.from_a
+    } else {
+        &mut deal.from_b
+    };
+    let is = |c: &Clause| {
+        matches!(
+            (c, per_turn),
+            (Clause::Gold(_), false) | (Clause::GoldPerTurn(_), true)
+        )
+    };
     let now = side
         .iter()
         .find_map(|c| match c {
@@ -965,7 +1497,11 @@ fn move_gold(deal: &mut Deal, give: bool, delta: i32, per_turn: bool, purse: u32
     let next = (now + delta).clamp(0, purse as i32);
     side.retain(|c| !is(c));
     if next > 0 {
-        side.push(if per_turn { Clause::GoldPerTurn(next) } else { Clause::Gold(next) });
+        side.push(if per_turn {
+            Clause::GoldPerTurn(next)
+        } else {
+            Clause::Gold(next)
+        });
     }
 }
 
@@ -987,7 +1523,9 @@ pub fn respond(
     mut wonders: ResMut<Wonders>,
     mut camera: Query<&mut Transform, With<Camera2d>>,
 ) {
-    let Some((_, action)) = buttons.iter().find(|(i, _)| **i == Interaction::Pressed) else { return };
+    let Some((_, action)) = buttons.iter().find(|(i, _)| **i == Interaction::Pressed) else {
+        return;
+    };
     let action = action.clone();
     let me = civs.viewer();
     let screen = advisors.screen;
@@ -1007,7 +1545,9 @@ pub fn respond(
         Action::Foreign => advisors.open(Screen::Foreign),
         Action::Wonders => advisors.open(Screen::Wonders),
         Action::Era(step) => {
-            let now = advisors.era.unwrap_or_else(|| crate::tech_tree::era_of(&research, me));
+            let now = advisors
+                .era
+                .unwrap_or_else(|| crate::tech_tree::era_of(&research, me));
             advisors.era = Some((now as i32 + step).clamp(0, 3) as usize);
         }
         Action::Page(step) => {
@@ -1080,12 +1620,37 @@ pub fn respond(
                     };
                     advisors.seed = advisors.seed.wrapping_add(1);
                     let (give, get) = (describe(&deal.from_b), describe(&deal.from_a));
-                    let who = Who { give: &give, get: &get, ..Who::between(other, me) };
-                    let said = says(&speech, &diplomacy, &facts, me, other, key, advisors.seed as usize, &who);
-                    advisors.note = if said.is_some() { String::new() } else { verdict_text(verdict).into() };
+                    let who = Who {
+                        give: &give,
+                        get: &get,
+                        ..Who::between(other, me)
+                    };
+                    let said = says(
+                        &speech,
+                        &diplomacy,
+                        &facts,
+                        me,
+                        other,
+                        key,
+                        advisors.seed as usize,
+                        &who,
+                    );
+                    advisors.note = if said.is_some() {
+                        String::new()
+                    } else {
+                        verdict_text(verdict).into()
+                    };
                     advisors.said = said.unwrap_or_default();
                     if verdict == Verdict::Accept {
-                        let events = diplomacy.execute(&facts, &mut research, &mut treasury.0, &deal, turn.0 as i32, &mut rng.0, &mut board);
+                        let events = diplomacy.execute(
+                            &facts,
+                            &mut research,
+                            &mut treasury.0,
+                            &deal,
+                            turn.0 as i32,
+                            &mut rng.0,
+                            &mut board,
+                        );
                         announce(&events, &mut board);
                         advisors.deal = Deal::new(me, other);
                     }
@@ -1108,11 +1673,27 @@ pub fn respond(
                 advisors.close();
                 return;
             };
-            let offer = diplomacy.proposals.remove(i).expect("the proposal was just found");
-            if action == Action::Accept && diplomacy.check(&research, &treasury.0, &offer.deal).is_ok() {
-                let events = diplomacy.execute(&facts, &mut research, &mut treasury.0, &offer.deal, turn.0 as i32, &mut rng.0, &mut board);
+            let offer = diplomacy
+                .proposals
+                .remove(i)
+                .expect("the proposal was just found");
+            if action == Action::Accept
+                && diplomacy.check(&research, &treasury.0, &offer.deal).is_ok()
+            {
+                let events = diplomacy.execute(
+                    &facts,
+                    &mut research,
+                    &mut treasury.0,
+                    &offer.deal,
+                    turn.0 as i32,
+                    &mut rng.0,
+                    &mut board,
+                );
                 announce(&events, &mut board);
-                post(&mut board, format!("We have a deal with the {}.", people(offer.from)));
+                post(
+                    &mut board,
+                    format!("We have a deal with the {}.", people(offer.from)),
+                );
             }
             advisors.close();
         }
@@ -1155,7 +1736,9 @@ pub fn update_science_line(
     research: Res<Research>,
     mut line: Query<&mut Text, With<crate::actionbar::BoxScience>>,
 ) {
-    let Ok(mut text) = line.single_mut() else { return };
+    let Ok(mut text) = line.single_mut() else {
+        return;
+    };
     let me = civs.viewer();
     let shown = match (research.target(me), research.progress(me)) {
         (Some(t), Some((have, cost))) => format!("{} {have}/{cost}", tech_name(t)),
@@ -1182,17 +1765,28 @@ pub fn spawn_buttons(mut commands: Commands, assets: Res<AssetServer>) {
             GlobalZIndex(5),
         ))
         .with_children(|bar| {
-            for (label, action) in [("Science (F6)", Action::Science), ("Foreign (F4)", Action::Foreign), ("Wonders (F7)", Action::Wonders)] {
+            for (label, action) in [
+                ("Science (F6)", Action::Science),
+                ("Foreign (F4)", Action::Foreign),
+                ("Wonders (F7)", Action::Wonders),
+            ] {
                 bar.spawn((
                     Button,
                     OpenButton(action),
-                    Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)), ..default() },
+                    Node {
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                        ..default()
+                    },
                     BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
                 ))
                 .with_children(|b| {
                     b.spawn((
                         Text::new(label),
-                        TextFont { font: font.clone(), font_size: 15.0, ..default() },
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 15.0,
+                            ..default()
+                        },
                         TextColor(Color::srgb(1.0, 0.95, 0.7)),
                     ));
                 });
@@ -1211,7 +1805,11 @@ pub fn open_buttons(
     view: Res<CityView>,
     mut advisors: ResMut<Advisors>,
 ) {
-    if human(&civs).is_none() || advisors.is_open() || prompts.blocks(civs.active) || view.0.is_some() {
+    if human(&civs).is_none()
+        || advisors.is_open()
+        || prompts.blocks(civs.active)
+        || view.0.is_some()
+    {
         return;
     }
     for (interaction, OpenButton(action)) in &buttons {
@@ -1235,7 +1833,10 @@ mod tests {
         let mut deal = Deal::new(0, 1);
         toggle_clause(&mut deal, true, Clause::Tech(3));
         toggle_clause(&mut deal, false, Clause::Peace);
-        assert_eq!((deal.from_a.clone(), deal.from_b.clone()), (vec![Clause::Tech(3)], vec![Clause::Peace]));
+        assert_eq!(
+            (deal.from_a.clone(), deal.from_b.clone()),
+            (vec![Clause::Tech(3)], vec![Clause::Peace])
+        );
         toggle_clause(&mut deal, true, Clause::Tech(3));
         assert!(deal.from_a.is_empty());
     }
@@ -1246,9 +1847,17 @@ mod tests {
         move_gold(&mut deal, true, 10, false, 25);
         move_gold(&mut deal, true, 10, false, 25);
         move_gold(&mut deal, true, 10, false, 25);
-        assert_eq!(deal.from_a, vec![Clause::Gold(25)], "the purse is the limit");
+        assert_eq!(
+            deal.from_a,
+            vec![Clause::Gold(25)],
+            "the purse is the limit"
+        );
         move_gold(&mut deal, true, 1, true, 25);
-        assert_eq!(deal.from_a.len(), 2, "once and per turn are separate clauses");
+        assert_eq!(
+            deal.from_a.len(),
+            2,
+            "once and per turn are separate clauses"
+        );
         move_gold(&mut deal, true, -10, false, 25);
         move_gold(&mut deal, true, -10, false, 25);
         move_gold(&mut deal, true, -10, false, 25);
@@ -1313,7 +1922,10 @@ mod tests {
         settle(&mut app);
         app.add_systems(Update, (interrupt, respond).chain());
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk);
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::ResearchAsk
+        );
         let t = app.world().resource::<Research>().options(0)[0];
         press(&mut app, Action::Ok);
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
@@ -1326,14 +1938,25 @@ mod tests {
         let mut app = app();
         app.add_systems(Update, interrupt);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed, "no city, nothing to study with");
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::Closed,
+            "no city, nothing to study with"
+        );
         let kyoto = City::new(0, "Kyoto", 10, 11);
         app.world_mut().spawn(kyoto);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed, "founded this turn");
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::Closed,
+            "founded this turn"
+        );
         app.world_mut().resource_mut::<Turn>().0 = 2;
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk);
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::ResearchAsk
+        );
     }
 
     #[test]
@@ -1358,13 +1981,23 @@ mod tests {
         app.add_systems(Update, (hotkeys, interrupt).chain());
         app.init_resource::<ButtonInput<KeyCode>>();
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk);
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::ResearchAsk
+        );
         let t = app.world().resource::<Research>().options(0)[0];
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Enter);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
         app.update();
         assert_eq!(app.world().resource::<Research>().target(0), Some(t));
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
-        assert!(!app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Enter), "spent on the popup");
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .just_pressed(KeyCode::Enter),
+            "spent on the popup"
+        );
     }
 
     #[test]
@@ -1377,7 +2010,11 @@ mod tests {
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Science);
         press(&mut app, Action::Close);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk, "the choice is still owed");
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::ResearchAsk,
+            "the choice is still owed"
+        );
         let t = app.world().resource::<Research>().options(0)[0];
         press(&mut app, Action::BigPicture);
         press(&mut app, Action::Pick(t));
@@ -1394,12 +2031,24 @@ mod tests {
         app.world_mut().resource_scope(|w, mut r: Mut<Research>| {
             r.pick(0, t, &mut w.resource_mut::<CombatRng>().0);
         });
-        let strike = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Horseman"), 3, 3)).id();
-        app.world_mut().resource_mut::<Diplomacy>().war_ask =
-            Some(crate::diplomacy::WarAsk { attacker: strike, to: (4, 3), target: 1 });
+        let strike = app
+            .world_mut()
+            .spawn(Unit::new(
+                0,
+                crate::units::UnitType::named("Horseman"),
+                3,
+                3,
+            ))
+            .id();
+        app.world_mut().resource_mut::<Diplomacy>().war_ask = Some(crate::diplomacy::WarAsk {
+            attacker: strike,
+            to: (4, 3),
+            target: 1,
+        });
         app.update();
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::WarAsk);
-        app.world_mut().spawn((Interaction::Pressed, Action::WarYes));
+        app.world_mut()
+            .spawn((Interaction::Pressed, Action::WarYes));
         app.update();
         let d = app.world().resource::<Diplomacy>();
         assert!(d.at_war(0, 1));
@@ -1412,9 +2061,20 @@ mod tests {
     fn declining_the_strike_leaves_the_peace() {
         let mut app = app();
         app.add_systems(Update, (interrupt, respond).chain());
-        let strike = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Horseman"), 3, 3)).id();
-        app.world_mut().resource_mut::<Diplomacy>().war_ask =
-            Some(crate::diplomacy::WarAsk { attacker: strike, to: (4, 3), target: 1 });
+        let strike = app
+            .world_mut()
+            .spawn(Unit::new(
+                0,
+                crate::units::UnitType::named("Horseman"),
+                3,
+                3,
+            ))
+            .id();
+        app.world_mut().resource_mut::<Diplomacy>().war_ask = Some(crate::diplomacy::WarAsk {
+            attacker: strike,
+            to: (4, 3),
+            target: 1,
+        });
         app.world_mut().spawn((Interaction::Pressed, Action::WarNo));
         app.update();
         assert!(!app.world().resource::<Diplomacy>().at_war(0, 1));
@@ -1435,10 +2095,15 @@ mod tests {
         d.from_b.push(Clause::Tech(t));
         let mut diplomacy = app.world_mut().resource_mut::<Diplomacy>();
         diplomacy.meet(0, 1);
-        diplomacy.proposals.push_back(crate::diplomacy::Proposal { from: 1, to: 0, deal: d });
+        diplomacy.proposals.push_back(crate::diplomacy::Proposal {
+            from: 1,
+            to: 0,
+            deal: d,
+        });
         app.update();
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Proposal);
-        app.world_mut().spawn((Interaction::Pressed, Action::Accept));
+        app.world_mut()
+            .spawn((Interaction::Pressed, Action::Accept));
         app.update();
         assert!(app.world().resource::<Research>().knows(0, t));
         assert!(app.world().resource::<Diplomacy>().proposals.is_empty());
@@ -1464,16 +2129,31 @@ mod tests {
         app.add_systems(Update, (interrupt, respond).chain());
         pick_research(&mut app);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed, "nobody has been met");
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::Closed,
+            "nobody has been met"
+        );
         app.world_mut().resource_mut::<Diplomacy>().meet(0, 2);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Greeting(2));
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::Greeting(2)
+        );
         press(&mut app, Action::Close);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed, "the greeting is not repeated");
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::Closed,
+            "the greeting is not repeated"
+        );
         app.world_mut().resource_mut::<Diplomacy>().meet(0, 3);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::Greeting(3), "the next leader is");
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::Greeting(3),
+            "the next leader is"
+        );
     }
 
     #[test]
@@ -1486,7 +2166,10 @@ mod tests {
         press(&mut app, Action::Talk(1));
         let a = app.world().resource::<Advisors>();
         assert_eq!(a.screen, Screen::Talk(1));
-        assert!(a.deal.is_empty() && a.said.is_empty(), "the table is bare and the leader has yet to answer");
+        assert!(
+            a.deal.is_empty() && a.said.is_empty(),
+            "the table is bare and the leader has yet to answer"
+        );
     }
 
     #[test]
@@ -1500,11 +2183,19 @@ mod tests {
         // A gift is welcome.
         let t = app.world().resource::<Research>().giftable(0, 1)[0];
         app.world_mut().resource_mut::<Advisors>().talk_with(0, 1);
-        app.world_mut().resource_mut::<Advisors>().deal.from_a.push(Clause::Tech(t));
+        app.world_mut()
+            .resource_mut::<Advisors>()
+            .deal
+            .from_a
+            .push(Clause::Tech(t));
         press(&mut app, Action::Propose);
         let a = app.world().resource::<Advisors>();
         assert_eq!(a.said, "Thanks, Tokugawa.");
-        assert!(a.note.is_empty(), "the leader's words are all there is: {}", a.note);
+        assert!(
+            a.note.is_empty(),
+            "the leader's words are all there is: {}",
+            a.note
+        );
         assert!(a.deal.is_empty(), "the table is cleared after a deal");
         assert!(app.world().resource::<Research>().knows(1, t));
     }
@@ -1518,7 +2209,11 @@ mod tests {
         app.world_mut().resource_mut::<Advisors>().greeted[1] = true;
         let t = app.world().resource::<Research>().giftable(0, 1)[0];
         app.world_mut().resource_mut::<Advisors>().talk_with(0, 1);
-        app.world_mut().resource_mut::<Advisors>().deal.from_a.push(Clause::Tech(t));
+        app.world_mut()
+            .resource_mut::<Advisors>()
+            .deal
+            .from_a
+            .push(Clause::Tech(t));
         press(&mut app, Action::Propose);
         let a = app.world().resource::<Advisors>();
         assert!(a.said.is_empty());
@@ -1533,7 +2228,11 @@ mod tests {
         deal.from_b.push(Clause::Tech(3));
         assert_eq!(proposal_key(&deal).0, "AITECHTRADE");
         deal.from_a.push(Clause::Embargo(crate::research::slot(2)));
-        assert_eq!(proposal_key(&deal), ("AITRADEEMBARGO", Some(2)), "the treaty outranks the trade");
+        assert_eq!(
+            proposal_key(&deal),
+            ("AITRADEEMBARGO", Some(2)),
+            "the treaty outranks the trade"
+        );
         deal.from_a.push(Clause::Peace);
         assert_eq!(proposal_key(&deal).0, "AIPEACETREATY", "peace outranks all");
     }
@@ -1546,14 +2245,27 @@ mod tests {
         app.init_resource::<ButtonInput<KeyCode>>();
         let camera = app.world_mut().spawn((Camera2d, Transform::default())).id();
         // Research is still owed, and a wonder is done in Kyoto at (5, 6).
-        let seen = crate::wonders::Seen { row: 0, civ: 0, city: "Kyoto".into(), x: 5, y: 6 };
-        app.world_mut().resource_mut::<Wonders>().splash.push_back(crate::wonders::Splash { seen });
+        let seen = crate::wonders::Seen {
+            row: 0,
+            civ: 0,
+            city: "Kyoto".into(),
+            x: 5,
+            y: 6,
+        };
+        app.world_mut()
+            .resource_mut::<Wonders>()
+            .splash
+            .push_back(crate::wonders::Splash { seen });
         app.update();
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Splash);
         press(&mut app, Action::Zoom(5, 6));
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
         app.update();
-        assert_eq!(app.world().resource::<Advisors>().screen, Screen::ResearchAsk, "the splash is over; research is next");
+        assert_eq!(
+            app.world().resource::<Advisors>().screen,
+            Screen::ResearchAsk,
+            "the splash is over; research is next"
+        );
         assert!(app.world().resource::<Wonders>().splash.is_empty());
         let at = crate::map::tile_to_world(5, 6);
         let eye = app.world().get::<Transform>(camera).unwrap().translation;
@@ -1566,16 +2278,34 @@ mod tests {
         app.add_systems(Update, (hotkeys, interrupt).chain());
         app.init_resource::<ButtonInput<KeyCode>>();
         pick_research(&mut app);
-        let seen = |civ| crate::wonders::Seen { row: 0, civ, city: "Kyoto".into(), x: 5, y: 6 };
+        let seen = |civ| crate::wonders::Seen {
+            row: 0,
+            civ,
+            city: "Kyoto".into(),
+            x: 5,
+            y: 6,
+        };
         let mut wonders = app.world_mut().resource_mut::<Wonders>();
-        wonders.splash.push_back(crate::wonders::Splash { seen: seen(1) });
-        wonders.splash.push_back(crate::wonders::Splash { seen: seen(0) });
+        wonders
+            .splash
+            .push_back(crate::wonders::Splash { seen: seen(1) });
+        wonders
+            .splash
+            .push_back(crate::wonders::Splash { seen: seen(0) });
         app.update();
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Splash);
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Space);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
         app.update();
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
-        let left: Vec<usize> = app.world().resource::<Wonders>().splash.iter().map(|s| s.seen.civ).collect();
+        let left: Vec<usize> = app
+            .world()
+            .resource::<Wonders>()
+            .splash
+            .iter()
+            .map(|s| s.seen.civ)
+            .collect();
         assert_eq!(left, [1], "only ours was seen");
     }
 
@@ -1585,17 +2315,25 @@ mod tests {
         app.add_systems(Update, (hotkeys, interrupt, respond).chain());
         app.init_resource::<ButtonInput<KeyCode>>();
         pick_research(&mut app);
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::F7);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F7);
         app.update();
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Wonders);
         let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
         keys.release(KeyCode::F7);
         keys.clear();
         press(&mut app, Action::Page(1));
-        assert_eq!(app.world().resource::<Advisors>().page, 0, "nothing is built: one page");
+        assert_eq!(
+            app.world().resource::<Advisors>().page,
+            0,
+            "nothing is built: one page"
+        );
         press(&mut app, Action::Page(-1));
         assert_eq!(app.world().resource::<Advisors>().page, 0);
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::F7);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F7);
         app.update();
         assert_eq!(app.world().resource::<Advisors>().screen, Screen::Closed);
     }

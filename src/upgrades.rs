@@ -33,8 +33,10 @@ pub struct Offer {
 /// The unit a type becomes in a city of `civ`: the furthest type on its
 /// upgrade chain the civ can train (`City::replacement`, `0x4C0690`).
 pub fn replacement(civ: usize, t: UnitType) -> Option<UnitType> {
-    exe::replacement(roster::upgrade_chain(t.0 as usize), |n| crate::research::can_train(civ, n))
-        .map(|n| UnitType(n as u16))
+    exe::replacement(roster::upgrade_chain(t.0 as usize), |n| {
+        crate::research::can_train(civ, n)
+    })
+    .map(|n| UnitType(n as u16))
 }
 
 /// A Halves-Upgrade-Cost wonder (Leonardo's Workshop) stands in one of the
@@ -76,7 +78,10 @@ pub fn plan(u: &Unit, city: Option<&City>) -> Option<Offer> {
         return None;
     }
     let to = replacement(city.civ, u.utype)?;
-    Some(Offer { to, cost: price(u.civ, u.utype, to) })
+    Some(Offer {
+        to,
+        cost: price(u.civ, u.utype, to),
+    })
 }
 
 /// Can `u` upgrade now, with `gold` in the treasury (`0x5C1AD0`, which
@@ -144,7 +149,13 @@ pub fn tally<'a>(
     units
         .into_iter()
         .filter(|u| u.civ == civ && u.utype == t)
-        .filter_map(|u| offer(u, cities.iter().find(|c| (c.x, c.y) == (u.x, u.y)).copied(), gold))
+        .filter_map(|u| {
+            offer(
+                u,
+                cities.iter().find(|c| (c.x, c.y) == (u.x, u.y)).copied(),
+                gold,
+            )
+        })
         .fold((0, 0), |(n, sum), o| (n + 1, sum + o.cost))
 }
 
@@ -161,7 +172,9 @@ pub fn run_one(
     treasury: &mut Treasury,
     board: &mut MessageBoard,
 ) -> bool {
-    let Ok((_, mut u)) = units.get_mut(e) else { return false };
+    let Ok((_, mut u)) = units.get_mut(e) else {
+        return false;
+    };
     let here = cities.iter().find(|c| (c.x, c.y) == (u.x, u.y));
     let Some(o) = offer(&u, here, treasury.0[u.civ]) else {
         post(board, "This unit cannot be upgraded here.");
@@ -170,7 +183,15 @@ pub fn run_one(
     treasury.0[u.civ] -= o.cost;
     let from = u.utype;
     apply(&mut u, o.to);
-    post(board, format!("{} upgraded to {} for {} gold.", name(from), name(o.to), o.cost));
+    post(
+        board,
+        format!(
+            "{} upgraded to {} for {} gold.",
+            name(from),
+            name(o.to),
+            o.cost
+        ),
+    );
     true
 }
 
@@ -187,11 +208,17 @@ pub fn run_all(
     let cs: Vec<&City> = cities.iter().collect();
     let (count, sum) = tally(civ, t, units.iter().map(|(_, u)| u), &cs, u32::MAX);
     if count == 0 {
-        post(board, format!("We have not a single {} which can be upgraded!", name(t)));
+        post(
+            board,
+            format!("We have not a single {} which can be upgraded!", name(t)),
+        );
         return;
     }
     if sum > treasury.0[civ] {
-        post(board, format!("We would need {sum} gold in order to complete all the upgrades!"));
+        post(
+            board,
+            format!("We would need {sum} gold in order to complete all the upgrades!"),
+        );
         return;
     }
     // The pool order of the exe is the entity order here.
@@ -206,7 +233,10 @@ pub fn run_all(
         }
     }
     treasury.0[civ] = gold;
-    post(board, format!("{} {} upgraded for {} gold.", done.0, name(t), done.1));
+    post(
+        board,
+        format!("{} {} upgraded for {} gold.", done.0, name(t), done.1),
+    );
 }
 
 /// Gold the computer keeps back when it upgrades: a few turns' pay for its
@@ -236,17 +266,25 @@ pub fn ai_turn(
     }
     *done = Some((civ, turn.0));
     let cs: Vec<&City> = cities.iter().collect();
-    let mut order: Vec<Entity> = units.iter().filter(|(_, u)| u.civ == civ).map(|(e, _)| e).collect();
+    let mut order: Vec<Entity> = units
+        .iter()
+        .filter(|(_, u)| u.civ == civ)
+        .map(|(e, _)| e)
+        .collect();
     order.sort();
     for e in order {
-        let Ok((_, mut u)) = units.get_mut(e) else { continue };
+        let Ok((_, mut u)) = units.get_mut(e) else {
+            continue;
+        };
         let row = u.utype.row();
         let keeps = row.abilities & roster::ability::STARTS_GOLDEN_AGE != 0 && row.ai & 2 == 0;
         if keeps {
             continue;
         }
         let here = cs.iter().find(|c| (c.x, c.y) == (u.x, u.y)).copied();
-        let Some(o) = offer(&u, here, treasury.0[civ]) else { continue };
+        let Some(o) = offer(&u, here, treasury.0[civ]) else {
+            continue;
+        };
         if treasury.0[civ] < o.cost + AI_RESERVE {
             continue;
         }
@@ -305,7 +343,12 @@ mod tests {
     #[test]
     fn a_unit_without_a_successor_or_the_ability_is_never_offered() {
         realm::reset();
-        let c = city_with(0, 3, 3, &[Production::named("Barracks"), Production::named("Harbor")]);
+        let c = city_with(
+            0,
+            3,
+            3,
+            &[Production::named("Barracks"), Production::named("Harbor")],
+        );
         for t in [UnitType::named("Settler"), UnitType::named("Worker")] {
             assert_eq!(offer(&Unit::new(0, t, 3, 3), Some(&c), 10_000), None);
         }
@@ -314,13 +357,20 @@ mod tests {
     #[test]
     fn the_walk_skips_what_the_civ_cannot_train() {
         realm::reset();
-        let chain: Vec<usize> = roster::upgrade_chain(UnitType::named("Warrior").0 as usize).collect();
-        assert!(chain.len() >= 2, "the Warrior chain is longer than one step");
+        let chain: Vec<usize> =
+            roster::upgrade_chain(UnitType::named("Warrior").0 as usize).collect();
+        assert!(
+            chain.len() >= 2,
+            "the Warrior chain is longer than one step"
+        );
         // Only the first step is trainable: the Warrior becomes that.
         for &n in &chain[1..] {
             research::set_trainable(0, n, false);
         }
-        assert_eq!(replacement(0, UnitType::named("Warrior")), Some(UnitType(chain[0] as u16)));
+        assert_eq!(
+            replacement(0, UnitType::named("Warrior")),
+            Some(UnitType(chain[0] as u16))
+        );
         // Nothing at all is trainable: no upgrade.
         research::set_trainable(0, chain[0], false);
         assert_eq!(replacement(0, UnitType::named("Warrior")), None);
@@ -332,13 +382,24 @@ mod tests {
     #[test]
     fn leonardo_halves_the_price() {
         realm::reset();
-        let plain = price(0, UnitType::named("Warrior"), last(UnitType::named("Warrior")));
+        let plain = price(
+            0,
+            UnitType::named("Warrior"),
+            last(UnitType::named("Warrior")),
+        );
         let row = (0..bldg_count())
             .find(|&r| roster::bldg(r).wonder & roster::wonder::HALVES_UPGRADE_COST != 0)
             .expect("a Halves-Upgrade-Cost wonder exists");
         realm::write(0, |r| r.owned[row] = 1);
         assert!(halved(0));
-        assert_eq!(price(0, UnitType::named("Warrior"), last(UnitType::named("Warrior"))), plain / 2);
+        assert_eq!(
+            price(
+                0,
+                UnitType::named("Warrior"),
+                last(UnitType::named("Warrior"))
+            ),
+            plain / 2
+        );
         // Another civ does not own it.
         assert!(!halved(1));
     }
@@ -367,7 +428,9 @@ mod tests {
         let c = city_with(0, 3, 3, &[Production::named("Barracks")]);
         let to = last(UnitType::named("Warrior"));
         let each = price(0, UnitType::named("Warrior"), to);
-        let mut units: Vec<Unit> = (0..3).map(|_| Unit::new(0, UnitType::named("Warrior"), 3, 3)).collect();
+        let mut units: Vec<Unit> = (0..3)
+            .map(|_| Unit::new(0, UnitType::named("Warrior"), 3, 3))
+            .collect();
         // Out in the field, a fourth cannot.
         units.push(Unit::new(0, UnitType::named("Warrior"), 9, 9));
         let mut other = Unit::new(1, UnitType::named("Warrior"), 3, 3);
@@ -375,14 +438,27 @@ mod tests {
         units.push(other);
         let cities = [&c];
         // The tally judges each unit alone.
-        assert_eq!(tally(0, UnitType::named("Warrior"), units.iter(), &cities, 1000), (3, 3 * each));
+        assert_eq!(
+            tally(0, UnitType::named("Warrior"), units.iter(), &cities, 1000),
+            (3, 3 * each)
+        );
         // Gold for two: the third is skipped.
         let mut gold = 2 * each + each / 2;
-        let (n, spent) = upgrade_all(0, UnitType::named("Warrior"), units.iter_mut(), &cities, &mut gold);
+        let (n, spent) = upgrade_all(
+            0,
+            UnitType::named("Warrior"),
+            units.iter_mut(),
+            &cities,
+            &mut gold,
+        );
         assert_eq!((n, spent, gold), (2, 2 * each, each / 2));
         assert_eq!(units.iter().filter(|u| u.utype == to).count(), 2);
         assert_eq!(units[2].utype, UnitType::named("Warrior"));
-        assert_eq!(units[4].utype, UnitType::named("Warrior"), "another civ's unit stays");
+        assert_eq!(
+            units[4].utype,
+            UnitType::named("Warrior"),
+            "another civ's unit stays"
+        );
     }
 
     #[test]
@@ -398,8 +474,12 @@ mod tests {
         let mut t = Treasury::default();
         t.0[1] = each + AI_RESERVE - 1;
         app.insert_resource(t);
-        app.world_mut().spawn(city_with(1, 3, 3, &[Production::named("Barracks")]));
-        let unit = app.world_mut().spawn(Unit::new(1, UnitType::named("Warrior"), 3, 3)).id();
+        app.world_mut()
+            .spawn(city_with(1, 3, 3, &[Production::named("Barracks")]));
+        let unit = app
+            .world_mut()
+            .spawn(Unit::new(1, UnitType::named("Warrior"), 3, 3))
+            .id();
         app.world_mut().resource_mut::<Civilizations>().active = 1;
         // The controllers are a per-thread setting under test.
         app.edit_schedule(Update, |s| {
@@ -407,7 +487,11 @@ mod tests {
         });
         app.add_systems(Update, ai_turn);
         app.update();
-        assert_eq!(app.world().get::<Unit>(unit).unwrap().utype, UnitType::named("Warrior"), "a reserve is kept");
+        assert_eq!(
+            app.world().get::<Unit>(unit).unwrap().utype,
+            UnitType::named("Warrior"),
+            "a reserve is kept"
+        );
         // Next turn it has the gold.
         app.world_mut().resource_mut::<Treasury>().0[1] += 1;
         app.world_mut().resource_mut::<crate::units::Turn>().0 = 2;

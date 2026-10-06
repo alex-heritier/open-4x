@@ -99,7 +99,17 @@ pub struct Shape {
 
 impl Default for Shape {
     fn default() -> Self {
-        Shape { w: MAP_W, h: MAP_H, frequency: 0.055, sea: 0.0, moisture: 0.0, tundra: 0.78, jungle: 0.30, relief: 0.0, barbarians: 1 }
+        Shape {
+            w: MAP_W,
+            h: MAP_H,
+            frequency: 0.055,
+            sea: 0.0,
+            moisture: 0.0,
+            tundra: 0.78,
+            jungle: 0.30,
+            relief: 0.0,
+            barbarians: 1,
+        }
     }
 }
 
@@ -180,14 +190,22 @@ impl GameMap {
     pub fn land_cost(&self, from: (i32, i32), to: (i32, i32), bridges: bool) -> Option<u8> {
         let origin = self.get(from.0, from.1)?;
         let destination = self.get(to.0, to.1)?;
-        Some(civ3mapgen::movement::land_step_cost(move_cost(destination)?,
-            origin.road, destination.road, crate::rivers::crossed(self, from, to), bridges))
+        Some(civ3mapgen::movement::land_step_cost(
+            move_cost(destination)?,
+            origin.road,
+            destination.road,
+            crate::rivers::crossed(self, from, to),
+            bridges,
+        ))
     }
 
     /// The same path search with domain-specific entry costs.
-    pub fn find_path_by(&self, start: (i32, i32), goal: (i32, i32),
-        cost: impl Fn((i32, i32), (i32, i32)) -> Option<u8>) -> Option<Vec<(i32, i32)>>
-    {
+    pub fn find_path_by(
+        &self,
+        start: (i32, i32),
+        goal: (i32, i32),
+        cost: impl Fn((i32, i32), (i32, i32)) -> Option<u8>,
+    ) -> Option<Vec<(i32, i32)>> {
         if start == goal {
             return Some(vec![]);
         }
@@ -236,9 +254,7 @@ impl GameMap {
     pub fn is_land(&self, x: i32, y: i32) -> bool {
         matches!(
             self.get(x, y).map(|t| t.base),
-            Some(
-                Base::Grassland | Base::Plains | Base::Desert | Base::Tundra
-            )
+            Some(Base::Grassland | Base::Plains | Base::Desert | Base::Tundra)
         )
     }
 
@@ -247,9 +263,13 @@ impl GameMap {
     /// above the lake threshold; the callers only need small versus large.
     pub fn water_body_size(&self, start: (i32, i32)) -> usize {
         use std::collections::{HashSet, VecDeque};
-        let water = |p: (i32, i32)| self.get(p.0, p.1).is_some_and(|t|
-            matches!(t.base, Base::Coast | Base::Sea | Base::Ocean));
-        if !water(start) { return 0; }
+        let water = |p: (i32, i32)| {
+            self.get(p.0, p.1)
+                .is_some_and(|t| matches!(t.base, Base::Coast | Base::Sea | Base::Ocean))
+        };
+        if !water(start) {
+            return 0;
+        }
         let start = (self.wrap_x(start.0), start.1);
         let mut seen = HashSet::from([start]);
         let mut queue = VecDeque::from([start]);
@@ -257,7 +277,9 @@ impl GameMap {
             for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
                 let nb = (self.wrap_x(x + dx), y + dy);
                 if water(nb) && seen.insert(nb) {
-                    if seen.len() > civ3mapgen::lakes::LAKE_MAX { return seen.len(); }
+                    if seen.len() > civ3mapgen::lakes::LAKE_MAX {
+                        return seen.len();
+                    }
                     queue.push_back(nb);
                 }
             }
@@ -269,16 +291,19 @@ impl GameMap {
     /// the center-inclusive 3x3 neighborhood; a river on this tile also supplies water.
     pub fn fresh_water(&self, x: i32, y: i32) -> bool {
         self.get(x, y).is_some_and(|t| t.river != 0)
-            || std::iter::once((x, y)).chain(self.neighbors(x, y)).any(|p| {
-            let size = self.water_body_size(p);
-            size > 0 && size <= civ3mapgen::lakes::LAKE_MAX
-        })
+            || std::iter::once((x, y))
+                .chain(self.neighbors(x, y))
+                .any(|p| {
+                    let size = self.water_body_size(p);
+                    size > 0 && size <= civ3mapgen::lakes::LAKE_MAX
+                })
     }
 
     /// Shipyards need an adjacent water body larger than 20 tiles (0x4C05BB).
     pub fn coastal_site(&self, x: i32, y: i32) -> bool {
-        self.neighbors(x, y).into_iter().any(|p|
-            self.water_body_size(p) > civ3mapgen::lakes::LAKE_MAX)
+        self.neighbors(x, y)
+            .into_iter()
+            .any(|p| self.water_body_size(p) > civ3mapgen::lakes::LAKE_MAX)
     }
 
     /// The match's map: the file's own when it has one, else a random one
@@ -373,12 +398,12 @@ impl GameMap {
                     resource: None,
                     road: false,
                     irrigation: false,
-            river: 0,
+                    river: 0,
                     mine: false,
                     site: None,
-            fortress: false,
-            barricade: false,
-            forest_harvested: false,
+                    fortress: false,
+                    barricade: false,
+                    forest_harvested: false,
                     owner: None,
                 });
             }
@@ -415,7 +440,10 @@ impl GameMap {
             .flat_map(|y| (0..self.w).map(move |x| (x, y)))
             .filter(|&(x, y)| {
                 matches!(self.tiles[self.idx(x, y)].base, Base::Sea | Base::Ocean)
-                    && self.neighbors(x, y).iter().any(|&(nx, ny)| self.is_land(nx, ny))
+                    && self
+                        .neighbors(x, y)
+                        .iter()
+                        .any(|&(nx, ny)| self.is_land(nx, ny))
             })
             .map(|(x, y)| self.idx(x, y))
             .collect();
@@ -474,11 +502,17 @@ pub(crate) fn terrain_row(t: &Tile) -> usize {
 
 /// Food and shields from shipped TERR values, improvements and GOOD bonuses.
 pub fn yields(t: &Tile) -> (u8, u8) {
-    if t.base == Base::Ice { return (0, 0); }
+    if t.base == Base::Ice {
+        return (0, 0);
+    }
     let terrain = &crate::ruleset::TERRAINS[terrain_row(t)];
-    let (df, ds) = t.resource.map_or((0, 0), |id| crate::features::GOODS[id as usize].bonus);
-    (terrain.food + df + if t.irrigation { terrain.irrigation } else { 0 },
-     terrain.shields + ds + if t.mine { terrain.mining } else { 0 })
+    let (df, ds) = t
+        .resource
+        .map_or((0, 0), |id| crate::features::GOODS[id as usize].bonus);
+    (
+        terrain.food + df + if t.irrigation { terrain.irrigation } else { 0 },
+        terrain.shields + ds + if t.mine { terrain.mining } else { 0 },
+    )
 }
 
 /// Movement points are counted in thirds so roads can cost 1/3 MP.
@@ -521,9 +555,7 @@ pub fn world_to_tile(map: &GameMap, p: Vec2) -> Option<(i32, i32)> {
         let wx = map.wrap_x(cx);
         let mut c = tile_to_world(wx, cy);
         c.x += ((p.x - c.x) / period).round() * period;
-        if (p.x - c.x).abs() / (TILE_W / 2.0) + (p.y - c.y).abs() / (TILE_H / 2.0)
-            <= 1.0 + 1e-3
-        {
+        if (p.x - c.x).abs() / (TILE_W / 2.0) + (p.y - c.y).abs() / (TILE_H / 2.0) <= 1.0 + 1e-3 {
             return Some((wx, cy));
         }
     }
@@ -531,9 +563,10 @@ pub fn world_to_tile(map: &GameMap, p: Vec2) -> Option<(i32, i32)> {
 }
 
 fn hash2(x: i64, y: i64, seed: u64) -> f32 {
-    let mut h =
-        x.wrapping_mul(374761393).wrapping_add(y.wrapping_mul(668265263)) as u64
-            ^ seed.wrapping_mul(974634211);
+    let mut h = x
+        .wrapping_mul(374761393)
+        .wrapping_add(y.wrapping_mul(668265263)) as u64
+        ^ seed.wrapping_mul(974634211);
     h = h.wrapping_mul(1274126177);
     h ^= h >> 16;
     ((h & 0xffff) as f32) / 65535.0
@@ -605,14 +638,8 @@ mod tests {
         assert_eq!(yields(&tile(Base::Ocean, flat, bare)), (0, 0));
         assert_eq!(yields(&tile(Base::Grassland, flat, Cover::Jungle)), (1, 0));
         assert_eq!(yields(&tile(Base::Tundra, flat, Cover::Pine)), (1, 2));
-        assert_eq!(
-            yields(&tile(Base::Grassland, flat, Cover::Forest)),
-            (1, 2)
-        );
-        assert_eq!(
-            yields(&tile(Base::Grassland, Relief::Hill, bare)),
-            (1, 1)
-        );
+        assert_eq!(yields(&tile(Base::Grassland, flat, Cover::Forest)), (1, 2));
+        assert_eq!(yields(&tile(Base::Grassland, Relief::Hill, bare)), (1, 1));
         assert_eq!(
             yields(&tile(Base::Grassland, Relief::Mountain, bare)),
             (0, 1)
@@ -670,7 +697,9 @@ mod tests {
                     let t = &map.tiles[map.idx(x, y)];
                     if matches!(t.base, Base::Sea | Base::Ocean) {
                         assert!(
-                            !map.neighbors(x, y).iter().any(|&(nx, ny)| map.is_land(nx, ny)),
+                            !map.neighbors(x, y)
+                                .iter()
+                                .any(|&(nx, ny)| map.is_land(nx, ny)),
                             "seed {seed}: {:?} at ({x},{y}) touches land",
                             t.base
                         );
@@ -707,16 +736,12 @@ mod tests {
         let land = map
             .neighbors(sx, sy)
             .into_iter()
-            .find(|(x, y)| {
-                move_cost(map.get(*x, *y).unwrap()).is_some()
-            })
+            .find(|(x, y)| move_cost(map.get(*x, *y).unwrap()).is_some())
             .expect("start has a passable neighbor");
         assert_eq!(map.find_path((sx, sy), land).unwrap(), vec![land]);
         let ocean = (0..map.h)
             .flat_map(|y| (0..map.w).map(move |x| (x, y)))
-            .find(|(x, y)| {
-                matches!(map.get(*x, *y).map(|t| t.base), Some(Base::Ocean))
-            })
+            .find(|(x, y)| matches!(map.get(*x, *y).map(|t| t.base), Some(Base::Ocean)))
             .expect("map has ocean");
         assert_eq!(map.find_path((sx, sy), ocean), None);
     }
@@ -765,24 +790,38 @@ mod probe_tests {
         println!("start world=({:.0},{:.0})", s.x, s.y);
         let (mut hills, mut mtns) = (0, 0);
         for t in &map.tiles {
-            match t.relief { Relief::Hill => hills += 1, Relief::Mountain => mtns += 1, _ => {} }
+            match t.relief {
+                Relief::Hill => hills += 1,
+                Relief::Mountain => mtns += 1,
+                _ => {}
+            }
         }
         println!("relief hills={hills} mountains={mtns}");
         let mut lone = 0;
         let mut lone_by_base = std::collections::HashMap::new();
-        for y in 0..map.h { for x in 0..map.w {
-            let b = map.tiles[map.idx(x, y)].base;
-            let same = map.neighbors(x, y).iter()
-                .filter(|(nx, ny)| map.tiles[map.idx(*nx, *ny)].base == b).count();
-            if same == 0 { lone += 1; *lone_by_base.entry(format!("{b:?}")).or_insert(0) += 1; }
-        }}
+        for y in 0..map.h {
+            for x in 0..map.w {
+                let b = map.tiles[map.idx(x, y)].base;
+                let same = map
+                    .neighbors(x, y)
+                    .iter()
+                    .filter(|(nx, ny)| map.tiles[map.idx(*nx, *ny)].base == b)
+                    .count();
+                if same == 0 {
+                    lone += 1;
+                    *lone_by_base.entry(format!("{b:?}")).or_insert(0) += 1;
+                }
+            }
+        }
         println!("lone tiles (no same-base neighbor): {lone} {lone_by_base:?}");
         let mut first_mtn = None;
-        for y in 0..map.h { for x in 0..map.w {
-            if map.tiles[map.idx(x, y)].relief == Relief::Mountain && first_mtn.is_none() {
-                first_mtn = Some((x, y));
+        for y in 0..map.h {
+            for x in 0..map.w {
+                if map.tiles[map.idx(x, y)].relief == Relief::Mountain && first_mtn.is_none() {
+                    first_mtn = Some((x, y));
+                }
             }
-        }}
+        }
         if let Some((x, y)) = first_mtn {
             let w = tile_to_world(x, y);
             println!("first_mtn tile=({x},{y}) world=({:.0},{:.0})", w.x, w.y);

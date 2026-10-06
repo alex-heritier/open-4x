@@ -17,7 +17,7 @@ use bevy::prelude::*;
 
 use crate::advisors::Action;
 use crate::cities::City;
-use crate::civs::{civ_count, CIVS, is_ai};
+use crate::civs::{CIVS, civ_count, is_ai};
 use crate::diplomacy::{Diplomacy, people};
 use crate::features::{MessageBoard, post};
 use crate::leaders::LEADERS;
@@ -55,10 +55,18 @@ pub struct Built {
 /// What happened to the wonders between two looks.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Completed { great: bool, seen: Seen },
+    Completed {
+        great: bool,
+        seen: Seen,
+    },
     /// A great wonder's city changed hands.
-    Captured { from: usize, seen: Seen },
-    Lost { row: usize },
+    Captured {
+        from: usize,
+        seen: Seen,
+    },
+    Lost {
+        row: usize,
+    },
 }
 
 /// A wonder splash waiting for its owner.
@@ -90,7 +98,10 @@ impl Wonders {
     pub fn snapshot(&self) -> Saved {
         let mut small: Vec<_> = self.small.iter().copied().collect();
         small.sort();
-        Saved { built: self.built.clone(), small }
+        Saved {
+            built: self.built.clone(),
+            small,
+        }
     }
 
     /// The ledger as saved, with no splash waiting.
@@ -115,36 +126,62 @@ impl Wonders {
             self.primed = true;
             for s in now {
                 if is_great(s.row) {
-                    self.built.push(Built { row: s.row, civ: s.civ, city: s.city.clone(), x: s.x, y: s.y, turn: 0, lost: false });
+                    self.built.push(Built {
+                        row: s.row,
+                        civ: s.civ,
+                        city: s.city.clone(),
+                        x: s.x,
+                        y: s.y,
+                        turn: 0,
+                        lost: false,
+                    });
                 } else {
                     self.small.insert((s.row, s.civ));
                 }
             }
             return events;
         }
-        self.small.retain(|&(row, civ)| now.iter().any(|s| s.row == row && s.civ == civ));
+        self.small
+            .retain(|&(row, civ)| now.iter().any(|s| s.row == row && s.civ == civ));
         for s in now {
             if !is_great(s.row) {
                 if self.small.insert((s.row, s.civ)) {
-                    events.push(Event::Completed { great: false, seen: s.clone() });
+                    events.push(Event::Completed {
+                        great: false,
+                        seen: s.clone(),
+                    });
                 }
                 continue;
             }
             match self.built.iter_mut().find(|b| b.row == s.row) {
                 Some(b) if !b.lost => {
                     if b.civ != s.civ {
-                        events.push(Event::Captured { from: b.civ, seen: s.clone() });
+                        events.push(Event::Captured {
+                            from: b.civ,
+                            seen: s.clone(),
+                        });
                     }
                     (b.civ, b.city, b.x, b.y) = (s.civ, s.city.clone(), s.x, s.y);
                 }
                 found => {
                     // New, or standing again after its city was lost.
-                    let entry = Built { row: s.row, civ: s.civ, city: s.city.clone(), x: s.x, y: s.y, turn, lost: false };
+                    let entry = Built {
+                        row: s.row,
+                        civ: s.civ,
+                        city: s.city.clone(),
+                        x: s.x,
+                        y: s.y,
+                        turn,
+                        lost: false,
+                    };
                     match found {
                         Some(b) => *b = entry,
                         None => self.built.push(entry),
                     }
-                    events.push(Event::Completed { great: true, seen: s.clone() });
+                    events.push(Event::Completed {
+                        great: true,
+                        seen: s.clone(),
+                    });
                 }
             }
         }
@@ -177,10 +214,18 @@ fn standing<'a>(cities: impl Iterator<Item = &'a City>) -> Vec<Seen> {
     let mut now = vec![];
     for c in cities {
         for p in &c.buildings {
-            let Some(row) = p.building_row() else { continue };
+            let Some(row) = p.building_row() else {
+                continue;
+            };
             let b = roster::bldg(row);
             if b.is_great_wonder() || b.is_small_wonder() {
-                now.push(Seen { row, civ: c.civ, city: c.name.clone(), x: c.x, y: c.y });
+                now.push(Seen {
+                    row,
+                    civ: c.civ,
+                    city: c.name.clone(),
+                    x: c.x,
+                    y: c.y,
+                });
             }
         }
     }
@@ -189,7 +234,12 @@ fn standing<'a>(cities: impl Iterator<Item = &'a City>) -> Vec<Seen> {
 
 /// Watch the cities: queue a splash for a human's wonder, tell the humans of
 /// a rival's.
-pub fn track(turn: Res<Turn>, cities: Query<&City>, mut wonders: ResMut<Wonders>, mut board: ResMut<MessageBoard>) {
+pub fn track(
+    turn: Res<Turn>,
+    cities: Query<&City>,
+    mut wonders: ResMut<Wonders>,
+    mut board: ResMut<MessageBoard>,
+) {
     let now = standing(cities.iter());
     for event in wonders.update(&now, turn.0) {
         match event {
@@ -204,12 +254,25 @@ pub fn track(turn: Res<Turn>, cities: Query<&City>, mut wonders: ResMut<Wonders>
             Event::Captured { from, seen } => {
                 let wonder = roster::bldg(seen.row).name;
                 if !is_ai(seen.civ) {
-                    post(&mut board, format!("We captured {}; we now control {wonder}!", seen.city));
+                    post(
+                        &mut board,
+                        format!("We captured {}; we now control {wonder}!", seen.city),
+                    );
                 } else if !is_ai(from) {
-                    post(&mut board, format!("The {} have captured {} -- along with {wonder}!", people(seen.civ), seen.city));
+                    post(
+                        &mut board,
+                        format!(
+                            "The {} have captured {} -- along with {wonder}!",
+                            people(seen.civ),
+                            seen.city
+                        ),
+                    );
                 }
             }
-            Event::Lost { row } => post(&mut board, format!("{} is lost with its city.", roster::bldg(row).name)),
+            Event::Lost { row } => post(
+                &mut board,
+                format!("{} is lost with its city.", roster::bldg(row).name),
+            ),
         }
     }
 }
@@ -226,7 +289,12 @@ pub fn produced(seen: &Seen) -> String {
 
 /// `script.txt #WONDERSPLASH`.
 pub fn splash_text(seen: &Seen) -> String {
-    format!("{}, we have completed {} in {}.", LEADERS[seen.civ].title, roster::bldg(seen.row).name, seen.city)
+    format!(
+        "{}, we have completed {} in {}.",
+        LEADERS[seen.civ].title,
+        roster::bldg(seen.row).name,
+        seen.city
+    )
 }
 
 /// The cached splash picture (or thumbnail) of a wonder, when it has one.
@@ -244,12 +312,56 @@ const ART: (f32, f32, f32) = (351.0, 109.0, 320.0);
 pub fn splash(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, s: &Splash) {
     let seen = &s.seen;
     if let Some(path) = art_of(seen.row, false) {
-        ui.picture(stage, ImageNode::new(assets.load(path)), ART.0, ART.1, ART.2, ART.2);
+        ui.picture(
+            stage,
+            ImageNode::new(assets.load(path)),
+            ART.0,
+            ART.1,
+            ART.2,
+            ART.2,
+        );
     }
-    ui.picture(stage, ImageNode::new(assets.load("cache/wonders/frame.png")), 0.0, 0.0, 1024.0, 768.0);
-    ui.words(stage, 285.0, 450.0, 454.0, 90.0, splash_text(seen), 24.0, INK, true);
-    ui.button(stage, 300.0, 590.0, 200.0, 34.0, "Zoom to City.", 18.0, Action::Zoom(seen.x, seen.y), false);
-    ui.button(stage, 524.0, 590.0, 200.0, 34.0, "Sounds Good.", 18.0, Action::Close, false);
+    ui.picture(
+        stage,
+        ImageNode::new(assets.load("cache/wonders/frame.png")),
+        0.0,
+        0.0,
+        1024.0,
+        768.0,
+    );
+    ui.words(
+        stage,
+        285.0,
+        450.0,
+        454.0,
+        90.0,
+        splash_text(seen),
+        24.0,
+        INK,
+        true,
+    );
+    ui.button(
+        stage,
+        300.0,
+        590.0,
+        200.0,
+        34.0,
+        "Zoom to City.",
+        18.0,
+        Action::Zoom(seen.x, seen.y),
+        false,
+    );
+    ui.button(
+        stage,
+        524.0,
+        590.0,
+        200.0,
+        34.0,
+        "Sounds Good.",
+        18.0,
+        Action::Close,
+        false,
+    );
 }
 
 /// Play the wonder fanfare once as a splash comes up.
@@ -261,7 +373,9 @@ pub fn fanfare(
 ) {
     let up = advisors.screen == crate::advisors::Screen::Splash;
     if up && !*played {
-        commands.spawn(AudioPlayer::<AudioSource>(assets.load("cache/audio/ui/Wonder.wav")));
+        commands.spawn(AudioPlayer::<AudioSource>(
+            assets.load("cache/audio/ui/Wonder.wav"),
+        ));
     }
     *played = up;
 }
@@ -285,23 +399,48 @@ pub struct Card {
 
 /// The wonders the viewer can list: every great wonder built, then the ones
 /// under construction in the viewer's cities and in those of civs met.
-pub fn cards(wonders: &Wonders, cities: &[&City], diplomacy: &Diplomacy, viewer: usize) -> Vec<Card> {
+pub fn cards(
+    wonders: &Wonders,
+    cities: &[&City],
+    diplomacy: &Diplomacy,
+    viewer: usize,
+) -> Vec<Card> {
     let mut out: Vec<Card> = wonders
         .built
         .iter()
-        .map(|b| Card { row: b.row, civ: b.civ, city: b.city.clone(), x: b.x, y: b.y, turn: Some(b.turn), lost: b.lost })
+        .map(|b| Card {
+            row: b.row,
+            civ: b.civ,
+            city: b.city.clone(),
+            x: b.x,
+            y: b.y,
+            turn: Some(b.turn),
+            lost: b.lost,
+        })
         .collect();
     out.sort_by_key(|c| (c.turn, c.row));
     let mut building: Vec<Card> = vec![];
     for c in cities {
-        let Some(row) = c.production.building_row() else { continue };
+        let Some(row) = c.production.building_row() else {
+            continue;
+        };
         if !is_great(row) || !(c.civ == viewer || diplomacy.contact(viewer, c.civ)) {
             continue;
         }
-        if wonders.built.iter().any(|b| b.row == row) || building.iter().any(|b| b.row == row && b.civ == c.civ) {
+        if wonders.built.iter().any(|b| b.row == row)
+            || building.iter().any(|b| b.row == row && b.civ == c.civ)
+        {
             continue;
         }
-        building.push(Card { row, civ: c.civ, city: c.name.clone(), x: c.x, y: c.y, turn: None, lost: false });
+        building.push(Card {
+            row,
+            civ: c.civ,
+            city: c.name.clone(),
+            x: c.x,
+            y: c.y,
+            turn: None,
+            lost: false,
+        });
     }
     building.sort_by_key(|c| (c.row, c.civ));
     out.extend(building);
@@ -316,7 +455,10 @@ pub fn pages(n: usize) -> usize {
 /// Top left of the card in `slot` of a page: two columns, three rows, in the
 /// 914 x 645 field of `wonders_background.pcx` (x 56..969, y 69..713).
 fn slot_at(slot: usize) -> (f32, f32) {
-    (133.0 + 390.0 * (slot % 2) as f32, 79.0 + 212.0 * (slot / 2) as f32)
+    (
+        133.0 + 390.0 * (slot % 2) as f32,
+        79.0 + 212.0 * (slot / 2) as f32,
+    )
 }
 
 /// The eye button on `wondersEye.pcx`: three 66 x 47 states, stacked at x = 1.
@@ -324,18 +466,73 @@ fn eye_state(i: u32) -> Rect {
     Rect::new(1.0, (1 + 48 * i) as f32, 67.0, (48 + 48 * i) as f32)
 }
 
-pub fn window(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, cards: &[Card], page: usize) {
-    ui.picture(stage, ImageNode::new(assets.load("cache/wonders/window.png")), 0.0, 0.0, 1024.0, 768.0);
-    ui.words(stage, 174.0, 18.0, 682.0, 34.0, "WONDERS OF THE WORLD", 28.0, INK, true);
+pub fn window(
+    stage: &mut ChildSpawnerCommands,
+    ui: &Ui,
+    assets: &AssetServer,
+    cards: &[Card],
+    page: usize,
+) {
+    ui.picture(
+        stage,
+        ImageNode::new(assets.load("cache/wonders/window.png")),
+        0.0,
+        0.0,
+        1024.0,
+        768.0,
+    );
+    ui.words(
+        stage,
+        174.0,
+        18.0,
+        682.0,
+        34.0,
+        "WONDERS OF THE WORLD",
+        28.0,
+        INK,
+        true,
+    );
     let page = page.min(pages(cards.len()) - 1);
     if cards.is_empty() {
-        ui.words(stage, 133.0, 360.0, 760.0, 40.0, "No wonder has been built yet.", 22.0, INK, true);
+        ui.words(
+            stage,
+            133.0,
+            360.0,
+            760.0,
+            40.0,
+            "No wonder has been built yet.",
+            22.0,
+            INK,
+            true,
+        );
     }
-    for (i, card) in cards.iter().skip(page * PER_PAGE).take(PER_PAGE).enumerate() {
+    for (i, card) in cards
+        .iter()
+        .skip(page * PER_PAGE)
+        .take(PER_PAGE)
+        .enumerate()
+    {
         let (x, y) = slot_at(i);
         let name = roster::bldg(card.row).name;
-        ui.picture(stage, ImageNode::new(assets.load("cache/wonders/card.png")), x, y, 370.0, 200.0);
-        ui.words(stage, x + 12.0, y + 10.0, 146.0, 40.0, name, 17.0, INK, false);
+        ui.picture(
+            stage,
+            ImageNode::new(assets.load("cache/wonders/card.png")),
+            x,
+            y,
+            370.0,
+            200.0,
+        );
+        ui.words(
+            stage,
+            x + 12.0,
+            y + 10.0,
+            146.0,
+            40.0,
+            name,
+            17.0,
+            INK,
+            false,
+        );
         let when = match card.turn {
             _ if card.lost => "Destroyed".to_string(),
             Some(0) => "Before the game".to_string(),
@@ -343,37 +540,103 @@ pub fn window(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c
             None => "Under construction".to_string(),
         };
         let owner = if card.lost { "-" } else { CIVS[card.civ].name };
-        let place = if card.lost { "-".to_string() } else { card.city.clone() };
-        for (k, (label, value)) in [("Owned by:", owner.to_string()), ("Constructed in:", when), ("Located in:", place)]
-            .into_iter()
-            .enumerate()
+        let place = if card.lost {
+            "-".to_string()
+        } else {
+            card.city.clone()
+        };
+        for (k, (label, value)) in [
+            ("Owned by:", owner.to_string()),
+            ("Constructed in:", when),
+            ("Located in:", place),
+        ]
+        .into_iter()
+        .enumerate()
         {
             let top = y + 52.0 + 46.0 * k as f32;
             ui.words(stage, x + 12.0, top, 146.0, 18.0, label, 13.0, INK, false);
-            ui.words(stage, x + 12.0, top + 16.0, 146.0, 22.0, value, 16.0, if card.lost { WARN } else { INK }, false);
+            ui.words(
+                stage,
+                x + 12.0,
+                top + 16.0,
+                146.0,
+                22.0,
+                value,
+                16.0,
+                if card.lost { WARN } else { INK },
+                false,
+            );
         }
         let built = card.turn.is_some() && !card.lost;
         if let Some(path) = art_of(card.row, true).filter(|_| built) {
-            ui.picture(stage, ImageNode::new(assets.load(path)), x + 162.0, y + 47.0, 190.0, 132.0);
+            ui.picture(
+                stage,
+                ImageNode::new(assets.load(path)),
+                x + 162.0,
+                y + 47.0,
+                190.0,
+                132.0,
+            );
         }
         if !built {
             // Not built: the plate over the picture.
-            ui.picture(stage, ImageNode::new(assets.load("cache/wonders/card_hidden.png")), x, y, 370.0, 200.0);
+            ui.picture(
+                stage,
+                ImageNode::new(assets.load("cache/wonders/card_hidden.png")),
+                x,
+                y,
+                370.0,
+                200.0,
+            );
         } else {
             let mut eye = ImageNode::new(assets.load("cache/wonders/eye.png"));
             eye.rect = Some(eye_state(0));
-            stage
-                .spawn((Button, Action::Zoom(card.x, card.y), ui.st.rect(x + 286.0, y + 47.0, 66.0, 47.0), eye));
+            stage.spawn((
+                Button,
+                Action::Zoom(card.x, card.y),
+                ui.st.rect(x + 286.0, y + 47.0, 66.0, 47.0),
+                eye,
+            ));
         }
     }
     let n = pages(cards.len());
     if n > 1 {
-        ui.words(stage, 940.0, 150.0, 70.0, 20.0, format!("{}/{n}", page + 1), 14.0, INK, true);
+        ui.words(
+            stage,
+            940.0,
+            150.0,
+            70.0,
+            20.0,
+            format!("{}/{n}", page + 1),
+            14.0,
+            INK,
+            true,
+        );
         if page > 0 {
-            ui.button(stage, 980.0, 100.0, 36.0, 36.0, "^", 20.0, Action::Page(-1), false);
+            ui.button(
+                stage,
+                980.0,
+                100.0,
+                36.0,
+                36.0,
+                "^",
+                20.0,
+                Action::Page(-1),
+                false,
+            );
         }
         if page + 1 < n {
-            ui.button(stage, 980.0, 180.0, 36.0, 36.0, "v", 20.0, Action::Page(1), false);
+            ui.button(
+                stage,
+                980.0,
+                180.0,
+                36.0,
+                36.0,
+                "v",
+                20.0,
+                Action::Page(1),
+                false,
+            );
         }
     }
     crate::advisor_frame::close_box(stage, ui, assets, Action::Close);
@@ -385,7 +648,10 @@ mod tests {
     use crate::cities::Production;
 
     fn row_named(name: &str) -> usize {
-        roster::BLDGS.iter().position(|b| b.name == name).unwrap_or_else(|| panic!("no BLDG {name}"))
+        roster::BLDGS
+            .iter()
+            .position(|b| b.name == name)
+            .unwrap_or_else(|| panic!("no BLDG {name}"))
     }
 
     fn city(civ: usize, name: &str) -> City {
@@ -416,17 +682,38 @@ mod tests {
     }
 
     fn seen(name: &str, civ: usize, city: &str) -> Seen {
-        Seen { row: row_named(name), civ, city: city.into(), x: 3, y: 4 }
+        Seen {
+            row: row_named(name),
+            civ,
+            city: city.into(),
+            x: 3,
+            y: 4,
+        }
     }
 
     #[test]
     fn what_stands_at_the_first_look_was_always_there() {
         let mut w = Wonders::default();
-        let events = w.update(&[seen("The Pyramids", 0, "Kyoto"), seen("Heroic Epic", 1, "Rome")], 5);
+        let events = w.update(
+            &[
+                seen("The Pyramids", 0, "Kyoto"),
+                seen("Heroic Epic", 1, "Rome"),
+            ],
+            5,
+        );
         assert!(events.is_empty());
         assert_eq!(w.built.len(), 1);
         assert_eq!(w.built[0].turn, 0);
-        assert!(w.update(&[seen("The Pyramids", 0, "Kyoto"), seen("Heroic Epic", 1, "Rome")], 6).is_empty());
+        assert!(
+            w.update(
+                &[
+                    seen("The Pyramids", 0, "Kyoto"),
+                    seen("Heroic Epic", 1, "Rome")
+                ],
+                6
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -434,9 +721,21 @@ mod tests {
         let mut w = Wonders::default();
         w.update(&[], 1);
         let pyramids = seen("The Pyramids", 0, "Kyoto");
-        assert_eq!(w.update(std::slice::from_ref(&pyramids), 9), [Event::Completed { great: true, seen: pyramids.clone() }]);
-        assert!(w.update(std::slice::from_ref(&pyramids), 10).is_empty(), "no second announcement");
-        assert_eq!((w.built[0].civ, w.built[0].turn, w.built[0].city.as_str()), (0, 9, "Kyoto"));
+        assert_eq!(
+            w.update(std::slice::from_ref(&pyramids), 9),
+            [Event::Completed {
+                great: true,
+                seen: pyramids.clone()
+            }]
+        );
+        assert!(
+            w.update(std::slice::from_ref(&pyramids), 10).is_empty(),
+            "no second announcement"
+        );
+        assert_eq!(
+            (w.built[0].civ, w.built[0].turn, w.built[0].city.as_str()),
+            (0, 9, "Kyoto")
+        );
     }
 
     #[test]
@@ -445,10 +744,23 @@ mod tests {
         w.update(&[], 1);
         let epic = seen("Heroic Epic", 1, "Rome");
         let events = w.update(std::slice::from_ref(&epic), 2);
-        assert_eq!(events, [Event::Completed { great: false, seen: epic.clone() }]);
-        assert!(w.built.is_empty(), "small wonders are not in the ledger of the window");
+        assert_eq!(
+            events,
+            [Event::Completed {
+                great: false,
+                seen: epic.clone()
+            }]
+        );
+        assert!(
+            w.built.is_empty(),
+            "small wonders are not in the ledger of the window"
+        );
         let both = [epic.clone(), seen("Heroic Epic", 2, "Thebes")];
-        assert_eq!(w.update(&both, 3).len(), 1, "another civ's own Heroic Epic is news again");
+        assert_eq!(
+            w.update(&both, 3).len(),
+            1,
+            "another civ's own Heroic Epic is news again"
+        );
     }
 
     #[test]
@@ -457,9 +769,23 @@ mod tests {
         w.update(&[], 1);
         let a = seen("The Oracle", 1, "Rome");
         w.update(std::slice::from_ref(&a), 4);
-        let b = Seen { civ: 0, city: "Kyoto".into(), ..a.clone() };
-        assert_eq!(w.update(std::slice::from_ref(&b), 8), [Event::Captured { from: 1, seen: b.clone() }]);
-        assert_eq!((w.built[0].civ, w.built[0].turn), (0, 4), "the turn it was built stays");
+        let b = Seen {
+            civ: 0,
+            city: "Kyoto".into(),
+            ..a.clone()
+        };
+        assert_eq!(
+            w.update(std::slice::from_ref(&b), 8),
+            [Event::Captured {
+                from: 1,
+                seen: b.clone()
+            }]
+        );
+        assert_eq!(
+            (w.built[0].civ, w.built[0].turn),
+            (0, 4),
+            "the turn it was built stays"
+        );
         assert_eq!(w.update(&[], 9), [Event::Lost { row: a.row }]);
         assert!(w.built[0].lost);
         assert!(w.update(&[], 10).is_empty());
@@ -472,15 +798,30 @@ mod tests {
     fn the_wonders_in_the_cities_are_found_by_their_rows() {
         let row = row_named("The Colossus");
         let mut city = city(1, "Veii");
-        city.buildings = vec![Production::from_building_row(row_named("Temple")), Production::from_building_row(row)];
+        city.buildings = vec![
+            Production::from_building_row(row_named("Temple")),
+            Production::from_building_row(row),
+        ];
         let now = standing([&city].into_iter());
-        assert_eq!(now, [Seen { row, civ: 1, city: "Veii".into(), x: city.x, y: city.y }]);
+        assert_eq!(
+            now,
+            [Seen {
+                row,
+                civ: 1,
+                city: "Veii".into(),
+                x: city.x,
+                y: city.y
+            }]
+        );
     }
 
     #[test]
     fn the_texts_are_the_games() {
         let s = seen("The Great Library", 0, "Kyoto");
-        assert_eq!(splash_text(&s), "Shogun, we have completed The Great Library in Kyoto.");
+        assert_eq!(
+            splash_text(&s),
+            "Shogun, we have completed The Great Library in Kyoto."
+        );
         let r = seen("The Pyramids", 1, "Veii");
         assert_eq!(
             produced(&r),
@@ -497,8 +838,16 @@ mod tests {
         }
         // PediaIcons.txt names a splash for each great wonder; the small ones
         // (Forbidden Palace, ...) have none.
-        for (row, b) in roster::BLDGS.iter().enumerate().filter(|(_, b)| b.is_great_wonder()) {
-            assert!(art_of(row, false).is_some() && art_of(row, true).is_some(), "{}", b.name);
+        for (row, b) in roster::BLDGS
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.is_great_wonder())
+        {
+            assert!(
+                art_of(row, false).is_some() && art_of(row, true).is_some(),
+                "{}",
+                b.name
+            );
         }
     }
 
@@ -516,10 +865,17 @@ mod tests {
         let mut theirs = city(2, "Thebes");
         theirs.production = Production::from_building_row(row_named("The Colossus"));
         let list = cards(&w, &[&mine, &theirs], &d, 0);
-        let names: Vec<_> = list.iter().map(|c| (roster::bldg(c.row).name, c.turn)).collect();
+        let names: Vec<_> = list
+            .iter()
+            .map(|c| (roster::bldg(c.row).name, c.turn))
+            .collect();
         assert_eq!(
             names,
-            [("The Oracle", Some(3)), ("The Pyramids", Some(7)), ("The Great Library", None)],
+            [
+                ("The Oracle", Some(3)),
+                ("The Pyramids", Some(7)),
+                ("The Great Library", None)
+            ],
             "Egypt's Colossus is not listed: the civs have not met"
         );
         assert_eq!([pages(0), pages(6), pages(7), pages(13)], [1, 1, 2, 3]);
@@ -531,6 +887,9 @@ mod tests {
         assert_eq!(slot_at(1), (523.0, 79.0));
         assert_eq!(slot_at(5), (523.0, 503.0));
         let (x, y) = slot_at(5);
-        assert!(x + 370.0 <= 969.0 && y + 200.0 <= 713.0, "inside the field of the background");
+        assert!(
+            x + 370.0 <= 969.0 && y + 200.0 <= 713.0,
+            "inside the field of the background"
+        );
     }
 }

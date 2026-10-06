@@ -105,7 +105,8 @@ impl LeaderArt {
                 .iter()
                 .flatten()
                 .filter_map(|item| {
-                    let text = crate::web::read_text(format!("{CACHE}/{}/clip.json", item.key)).ok()?;
+                    let text =
+                        crate::web::read_text(format!("{CACHE}/{}/clip.json", item.key)).ok()?;
                     let mut clip: Clip = serde_json::from_str(&text).ok()?;
                     clip.dir = item.key.clone();
                     Some(clip)
@@ -117,7 +118,10 @@ impl LeaderArt {
         }
         #[cfg(target_arch = "wasm32")]
         crate::web::show_progress("leader art ready");
-        LeaderArt { clips, held: HashMap::new() }
+        LeaderArt {
+            clips,
+            held: HashMap::new(),
+        }
     }
 
     /// The clip of `civ` in `era` (the last one when the civ has fewer).
@@ -132,7 +136,10 @@ impl LeaderArt {
         let clip = self.clip(civ, era)?;
         let path = format!("{CACHE_URL}/{}/{}", clip.dir, clip.file);
         // One era of a civ at a time: an older sheet is let go.
-        let era = self.clips.get(&crate::civs::roster_index(civ)).map_or(0, |c| era.min(c.len() - 1));
+        let era = self
+            .clips
+            .get(&crate::civs::roster_index(civ))
+            .map_or(0, |c| era.min(c.len() - 1));
         self.held.retain(|&(c, e), _| c != civ || e == era);
         let handle = self.held.entry((civ, era)).or_insert_with(|| {
             assets.load_with_settings(path, |s: &mut ImageLoaderSettings| {
@@ -157,7 +164,13 @@ pub struct LeaderHead {
 
 /// A portrait node for `civ` in its era, showing the frame of the clock.
 /// `None` without the art.
-pub fn head(art: &mut LeaderArt, assets: &AssetServer, research: &Research, civ: usize, now_ms: u128) -> Option<(LeaderHead, ImageNode)> {
+pub fn head(
+    art: &mut LeaderArt,
+    assets: &AssetServer,
+    research: &Research,
+    civ: usize,
+    now_ms: u128,
+) -> Option<(LeaderHead, ImageNode)> {
     let era = era_of(research, civ);
     let sheet = art.sheet(assets, civ, era)?;
     let clip = art.clip(civ, era)?;
@@ -167,10 +180,16 @@ pub fn head(art: &mut LeaderArt, assets: &AssetServer, research: &Research, civ:
 }
 
 /// Advance every portrait on screen to the frame of the clock.
-pub fn animate(time: Res<Time<Real>>, art: Res<LeaderArt>, mut heads: Query<(&LeaderHead, &mut ImageNode)>) {
+pub fn animate(
+    time: Res<Time<Real>>,
+    art: Res<LeaderArt>,
+    mut heads: Query<(&LeaderHead, &mut ImageNode)>,
+) {
     let now = time.elapsed().as_millis();
     for (head, mut image) in &mut heads {
-        let Some(clip) = art.clip(head.civ, head.era) else { continue };
+        let Some(clip) = art.clip(head.civ, head.era) else {
+            continue;
+        };
         let cell = clip.cell(clip.frame_at(now));
         if image.rect != Some(cell) {
             image.rect = Some(cell);
@@ -198,11 +217,21 @@ mod tests {
         assert_eq!(pingpong(0, 1), 0);
         assert_eq!(pingpong(7, 0), 0);
         // The 121 frames of a clip: 240 ticks to come back to the start.
-        assert_eq!((pingpong(0, 121), pingpong(120, 121), pingpong(240, 121)), (0, 120, 0));
+        assert_eq!(
+            (pingpong(0, 121), pingpong(120, 121), pingpong(240, 121)),
+            (0, 120, 0)
+        );
     }
 
     fn clip() -> Clip {
-        Clip { file: "x.png".into(), dir: String::new(), frame: [200, 240], cols: 11, frames: 121, ms: 71 }
+        Clip {
+            file: "x.png".into(),
+            dir: String::new(),
+            frame: [200, 240],
+            cols: 11,
+            frames: 121,
+            ms: 71,
+        }
     }
 
     #[test]
@@ -210,7 +239,11 @@ mod tests {
         let c = clip();
         assert_eq!(c.cell(0), Rect::new(0.0, 0.0, 200.0, 240.0));
         assert_eq!(c.cell(11), Rect::new(0.0, 240.0, 200.0, 480.0));
-        assert_eq!(c.cell(120), Rect::new(2000.0, 2400.0, 2200.0, 2640.0), "frame 120 is the last of row 10");
+        assert_eq!(
+            c.cell(120),
+            Rect::new(2000.0, 2400.0, 2200.0, 2640.0),
+            "frame 120 is the last of row 10"
+        );
         assert_eq!(c.frame_at(0), 0);
         assert_eq!(c.frame_at(70), 0, "a frame stays up for 71 ms");
         assert_eq!(c.frame_at(71), 1);
@@ -221,8 +254,16 @@ mod tests {
     #[test]
     fn each_leader_speaks_a_text_set_of_their_own() {
         let sets: Vec<usize> = LEADERS.iter().map(|l| l.text_set).collect();
-        assert_eq!(sets, [8, 0, 1, 6], "Japan row 9, Rome 1, Egypt 2, China 7, each minus one");
-        assert!(LEADERS.iter().all(|l| l.text_set < crate::speech::TEXT_SETS));
+        assert_eq!(
+            sets,
+            [8, 0, 1, 6],
+            "Japan row 9, Rome 1, Egypt 2, China 7, each minus one"
+        );
+        assert!(
+            LEADERS
+                .iter()
+                .all(|l| l.text_set < crate::speech::TEXT_SETS)
+        );
     }
 
     #[test]
@@ -238,8 +279,15 @@ mod tests {
                 let path = format!("{CACHE}/{}/{}", clip.dir, clip.file);
                 let (w, h) = image_size(&path);
                 assert_eq!(w, clip.frame[0] * clip.cols, "{path}");
-                assert!(h >= clip.frame[1] * clip.frames.div_ceil(clip.cols), "{path}");
-                assert!((100..=130).contains(&clip.frames), "{path}: {} frames", clip.frames);
+                assert!(
+                    h >= clip.frame[1] * clip.frames.div_ceil(clip.cols),
+                    "{path}"
+                );
+                assert!(
+                    (100..=130).contains(&clip.frames),
+                    "{path}: {} frames",
+                    clip.frames
+                );
             }
         }
     }

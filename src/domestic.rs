@@ -20,12 +20,12 @@ use crate::features::{MessageBoard, post};
 use crate::map::GameMap;
 use crate::production_prompt::ProductionPrompts;
 use crate::realm::{self, GOVT_NAMES, Rate, Rates};
-use crate::rng::GameRng;
 use crate::research::{Research, tech_name};
+use crate::rng::GameRng;
 use crate::ruleset::TECH_NAMES;
 use crate::stage::{self, Stage, Ui};
-use bevy::window::PrimaryWindow;
 use crate::units::Unit;
+use bevy::window::PrimaryWindow;
 
 /// Whether the screen is up, and the revolution the player has asked for
 /// once and not yet confirmed.
@@ -146,20 +146,32 @@ pub fn spawn_button(mut commands: Commands, assets: Res<AssetServer>) {
     let font = assets.load("cache/fonts/lsans.ttf");
     commands
         .spawn((
-            Node { position_type: PositionType::Absolute, top: Val::Px(36.0), right: Val::Px(8.0), ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(36.0),
+                right: Val::Px(8.0),
+                ..default()
+            },
             GlobalZIndex(5),
         ))
         .with_children(|bar| {
             bar.spawn((
                 Button,
                 OpenButton,
-                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)), ..default() },
+                Node {
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                    ..default()
+                },
                 BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
             ))
             .with_children(|b| {
                 b.spawn((
                     Text::new("Domestic (F1)"),
-                    TextFont { font, font_size: 15.0, ..default() },
+                    TextFont {
+                        font,
+                        font_size: 15.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(1.0, 0.95, 0.7)),
                 ));
             });
@@ -174,7 +186,12 @@ pub fn open_button(
     advisors: Res<crate::advisors::Advisors>,
     mut domestic: ResMut<Domestic>,
 ) {
-    if human(&civs).is_none() || domestic.open || advisors.is_open() || prompts.blocks(civs.active) || view.0.is_some() {
+    if human(&civs).is_none()
+        || domestic.open
+        || advisors.is_open()
+        || prompts.blocks(civs.active)
+        || view.0.is_some()
+    {
         return;
     }
     if buttons.iter().any(|i| *i == Interaction::Pressed) {
@@ -245,9 +262,24 @@ pub struct Page {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn page(me: usize, map: &GameMap, cities: &[&City], owned: usize, gold: u32, domestic: &Domestic, research: Option<&Research>) -> Page {
+fn page(
+    me: usize,
+    map: &GameMap,
+    cities: &[&City],
+    owned: usize,
+    gold: u32,
+    domestic: &Domestic,
+    research: Option<&Research>,
+) -> Page {
     let (govt, anarchy_left, then, can) = realm::read(me, |r| {
-        (r.govt, r.anarchy, r.then, (0..exe::SHIPPED.len()).map(|g| r.can_adopt(g)).collect::<Vec<_>>())
+        (
+            r.govt,
+            r.anarchy,
+            r.then,
+            (0..exe::SHIPPED.len())
+                .map(|g| r.can_adopt(g))
+                .collect::<Vec<_>>(),
+        )
     });
     let books = economy::finance(map, cities.iter().copied(), owned);
     let mut p = Page {
@@ -267,7 +299,11 @@ fn page(me: usize, map: &GameMap, cities: &[&City], owned: usize, gold: u32, dom
     if let Some(r) = research {
         p.era = crate::tech_tree::era_of(r, me);
         if let Some(t) = r.target(me) {
-            p.research = format!("{} ({})", tech_name(t), crate::advisors::turns_text(r.turns(me, t)));
+            p.research = format!(
+                "{} ({})",
+                tech_name(t),
+                crate::advisors::turns_text(r.turns(me, t))
+            );
         }
     }
     if govt == exe::row::ANARCHY {
@@ -324,13 +360,22 @@ fn says(pg: &Page) -> String {
         return pg.note.clone();
     }
     if let Some((turns, then)) = &pg.anarchy {
-        return format!("Anarchy! {turns} more turn{} before {then}.", if *turns == 1 { "" } else { "s" });
+        return format!(
+            "Anarchy! {turns} more turn{} before {then}.",
+            if *turns == 1 { "" } else { "s" }
+        );
     }
     if let Some(c) = pg.cities.iter().find(|c| c.disorder) {
-        return format!("Civil disorder in {}! We must make our people content.", c.name);
+        return format!(
+            "Civil disorder in {}! We must make our people content.",
+            c.name
+        );
     }
     if pg.net < 0 {
-        return format!("We are losing {} gold a turn. Raise taxes, or our improvements will be sold.", -pg.net);
+        return format!(
+            "We are losing {} gold a turn. Raise taxes, or our improvements will be sold.",
+            -pg.net
+        );
     }
     if pg.cities.len() < 6 {
         return "Build more cities!".into();
@@ -360,18 +405,61 @@ const TRACK_W: f32 = 196.0;
 /// header pill; luxury, science and tax under the second.
 const COLUMNS: [f32; 6] = [260.0, 302.0, 344.0, 436.0, 486.0, 536.0];
 
-fn line(ui: &Ui, s: &mut ChildSpawnerCommands, x: f32, y: f32, w: f32, text: impl Into<String>, size: f32, color: Color, center: bool) {
+fn line(
+    ui: &Ui,
+    s: &mut ChildSpawnerCommands,
+    x: f32,
+    y: f32,
+    w: f32,
+    text: impl Into<String>,
+    size: f32,
+    color: Color,
+    center: bool,
+) {
     ui.words(s, x, y, w, size + 6.0, text, size, color, center);
 }
 
 /// One commerce slider: the knob at the rate and the -/+ under it.
-fn slider(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, which: Rate, tenths: u8, y: f32, knob: &str, below: bool) {
+fn slider(
+    s: &mut ChildSpawnerCommands,
+    ui: &Ui,
+    assets: &AssetServer,
+    which: Rate,
+    tenths: u8,
+    y: f32,
+    knob: &str,
+    below: bool,
+) {
     let x = TRACK_X + tenths as f32 / 10.0 * TRACK_W - 10.0;
     ui.picture(s, art(assets, knob), x, y - 13.0, 21.0, 27.0);
-    line(ui, s, 762.0, y - 8.0, 32.0, format!("{}%", tenths as u32 * 10), 11.0, Color::BLACK, true);
+    line(
+        ui,
+        s,
+        762.0,
+        y - 8.0,
+        32.0,
+        format!("{}%", tenths as u32 * 10),
+        11.0,
+        Color::BLACK,
+        true,
+    );
     let by = if below { y + 12.0 } else { y - 22.0 };
-    art_button(s, ui, assets, "less", (563.0, by + 2.0, 12.0, 8.0), Click::Less(which));
-    art_button(s, ui, assets, "more", (737.0, by, 12.0, 13.0), Click::More(which));
+    art_button(
+        s,
+        ui,
+        assets,
+        "less",
+        (563.0, by + 2.0, 12.0, 8.0),
+        Click::Less(which),
+    );
+    art_button(
+        s,
+        ui,
+        assets,
+        "more",
+        (737.0, by, 12.0, 13.0),
+        Click::More(which),
+    );
 }
 
 fn header(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer) {
@@ -387,14 +475,51 @@ fn header(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer) {
         ui.picture(s, city_icon(cell), COLUMNS[k] - 12.0, 251.0, 24.0, 24.0);
     }
     for (k, icon) in ["smiley", "flask", "coins"].into_iter().enumerate() {
-        ui.picture(s, art(assets, icon), COLUMNS[3 + k] - 10.0, 249.0, 21.0, 27.0);
+        ui.picture(
+            s,
+            art(assets, icon),
+            COLUMNS[3 + k] - 10.0,
+            249.0,
+            21.0,
+            27.0,
+        );
     }
-    line(ui, s, 660.0, 255.0, 135.0, "Population", 13.0, Color::BLACK, true);
-    line(ui, s, 870.0, 255.0, 100.0, "Producing", 13.0, Color::BLACK, true);
+    line(
+        ui,
+        s,
+        660.0,
+        255.0,
+        135.0,
+        "Population",
+        13.0,
+        Color::BLACK,
+        true,
+    );
+    line(
+        ui,
+        s,
+        870.0,
+        255.0,
+        100.0,
+        "Producing",
+        13.0,
+        Color::BLACK,
+        true,
+    );
 }
 
 fn city_row(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c: &CityLine, y: f32) {
-    line(ui, s, 110.0, y - 9.0, 130.0, c.name.clone(), 13.0, if c.disorder { WARN } else { Color::BLACK }, false);
+    line(
+        ui,
+        s,
+        110.0,
+        y - 9.0,
+        130.0,
+        c.name.clone(),
+        13.0,
+        if c.disorder { WARN } else { Color::BLACK },
+        false,
+    );
     let cols = [
         (format!("{:+}", c.surplus), Color::srgb(0.70, 0.22, 0.10)),
         (c.shields.to_string(), BLUE),
@@ -412,7 +537,11 @@ fn city_row(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c: &Cit
         .chain(std::iter::repeat_n("head_unhappy", c.unhappy as usize))
         .collect();
     let total = heads.len() + (c.entertainers + c.scientists + c.tax_collectors) as usize;
-    let step = if total == 0 { 30.0 } else { (240.0 / (total as f32 + 1.0)).min(30.0) };
+    let step = if total == 0 {
+        30.0
+    } else {
+        (240.0 / (total as f32 + 1.0)).min(30.0)
+    };
     let mut x = 607.0;
     for head in heads {
         ui.picture(s, art(assets, head), x, y - 19.0, 34.0, 34.0);
@@ -421,20 +550,50 @@ fn city_row(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, c: &Cit
     if c.entertainers + c.scientists + c.tax_collectors > 0 {
         x += step;
         for head in std::iter::repeat_n("cache/ui/entertainer.png", c.entertainers as usize)
-            .chain(std::iter::repeat_n("cache/ui/scientist.png", c.scientists as usize))
-            .chain(std::iter::repeat_n("cache/ui/tax_collector.png", c.tax_collectors as usize))
+            .chain(std::iter::repeat_n(
+                "cache/ui/scientist.png",
+                c.scientists as usize,
+            ))
+            .chain(std::iter::repeat_n(
+                "cache/ui/tax_collector.png",
+                c.tax_collectors as usize,
+            ))
         {
-            ui.picture(s, ImageNode::new(assets.load(head)), x, y - 19.0, 34.0, 34.0);
+            ui.picture(
+                s,
+                ImageNode::new(assets.load(head)),
+                x,
+                y - 19.0,
+                34.0,
+                34.0,
+            );
             x += step;
         }
     }
-    ui.picture(s, crate::tech_tree::item_icon(assets, c.producing), 872.0, y - 14.0, 28.0, 28.0);
+    ui.picture(
+        s,
+        crate::tech_tree::item_icon(assets, c.producing),
+        872.0,
+        y - 14.0,
+        28.0,
+        28.0,
+    );
     let turns = match c.turns {
         Some(1) => "(1 turn)".to_string(),
         Some(n) => format!("({n} turns)"),
         None => "(never)".into(),
     };
-    line(ui, s, 903.0, y - 14.0, 82.0, format!("{}\n{turns}", c.producing.name()), 10.0, BLUE, false);
+    line(
+        ui,
+        s,
+        903.0,
+        y - 14.0,
+        82.0,
+        format!("{}\n{turns}", c.producing.name()),
+        10.0,
+        BLUE,
+        false,
+    );
 }
 
 fn body(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, pg: &Page) {
@@ -456,11 +615,41 @@ fn body(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, pg: &Page) 
     .into_iter()
     .enumerate()
     {
-        line(ui, s, 80.0, 97.0 + 16.0 * k as f32, 160.0, text, 11.0, Color::BLACK, true);
+        line(
+            ui,
+            s,
+            80.0,
+            97.0 + 16.0 * k as f32,
+            160.0,
+            text,
+            11.0,
+            Color::BLACK,
+            true,
+        );
     }
-    line(ui, s, 250.0, 104.0, 120.0, format!("Income: {}", pg.from_cities), 13.0, GREEN, false);
+    line(
+        ui,
+        s,
+        250.0,
+        104.0,
+        120.0,
+        format!("Income: {}", pg.from_cities),
+        13.0,
+        GREEN,
+        false,
+    );
     let expenses = pg.sci + pg.lux + pg.corruption + pg.upkeep + pg.support;
-    line(ui, s, 250.0, 153.0, 120.0, format!("Expenses: {expenses}"), 13.0, ORANGE, false);
+    line(
+        ui,
+        s,
+        250.0,
+        153.0,
+        120.0,
+        format!("Expenses: {expenses}"),
+        13.0,
+        ORANGE,
+        false,
+    );
     for (k, (n, what)) in [
         (pg.sci, "Science"),
         (pg.lux, "Entertainment"),
@@ -472,29 +661,93 @@ fn body(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, pg: &Page) 
     .into_iter()
     .enumerate()
     {
-        line(ui, s, 384.0, 89.0 + 16.0 * k as f32, 160.0, format!("-{n}: {what}"), 11.0, Color::BLACK, false);
+        line(
+            ui,
+            s,
+            384.0,
+            89.0 + 16.0 * k as f32,
+            160.0,
+            format!("-{n}: {what}"),
+            11.0,
+            Color::BLACK,
+            false,
+        );
     }
-    line(ui, s, 80.0, 195.0, 160.0, format!("Treasury: {} Gold", pg.gold), 13.0, KHAKI, true);
+    line(
+        ui,
+        s,
+        80.0,
+        195.0,
+        160.0,
+        format!("Treasury: {} Gold", pg.gold),
+        13.0,
+        KHAKI,
+        true,
+    );
     let net_color = if pg.net < 0 { WARN } else { KHAKI };
-    line(ui, s, 245.0, 195.0, 115.0, format!("Net Gain:{:+}", pg.net), 13.0, net_color, true);
+    line(
+        ui,
+        s,
+        245.0,
+        195.0,
+        115.0,
+        format!("Net Gain:{:+}", pg.net),
+        13.0,
+        net_color,
+        true,
+    );
 
     // Science on the upper slider, luxury on the lower; taxes take the rest.
     if let Some(r) = pg.rates {
         slider(s, ui, assets, Rate::Sci, r.sci, 99.0, "flask", true);
         slider(s, ui, assets, Rate::Lux, r.lux, 146.0, "smiley", false);
     }
-    line(ui, s, 562.0, 166.0, 240.0, pg.research.clone(), 11.0, PURPLE, false);
-    line(ui, s, 557.0, 191.0, 90.0, "Government", 13.0, Color::BLACK, false);
+    line(
+        ui,
+        s,
+        562.0,
+        166.0,
+        240.0,
+        pg.research.clone(),
+        11.0,
+        PURPLE,
+        false,
+    );
+    line(
+        ui,
+        s,
+        557.0,
+        191.0,
+        90.0,
+        "Government",
+        13.0,
+        Color::BLACK,
+        false,
+    );
     let govt = match &pg.anarchy {
         Some((turns, _)) => format!("Anarchy ({turns})"),
         None => pg.govt.clone(),
     };
     govt_button(s, ui, assets, 187.0, govt, Click::Menu);
     if pg.menu {
-        let open = pg.governments.iter().filter(|(_, _, st)| *st == Standing::Open);
+        let open = pg
+            .governments
+            .iter()
+            .filter(|(_, _, st)| *st == Standing::Open);
         for (k, (g, name, _)) in open.enumerate() {
-            let label = if pg.armed == Some(*g) { format!("Confirm {name}") } else { name.clone() };
-            govt_button(s, ui, assets, 213.0 + 26.0 * k as f32, label, Click::Govt(*g));
+            let label = if pg.armed == Some(*g) {
+                format!("Confirm {name}")
+            } else {
+                name.clone()
+            };
+            govt_button(
+                s,
+                ui,
+                assets,
+                213.0 + 26.0 * k as f32,
+                label,
+                Click::Govt(*g),
+            );
         }
     }
 
@@ -503,27 +756,57 @@ fn body(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, pg: &Page) 
         city_row(s, ui, assets, c, ROW_Y + ROW_STEP * k as f32);
     }
     if pg.cities.is_empty() {
-        line(ui, s, 110.0, ROW_Y - 9.0, 300.0, "We have no cities yet.", 13.0, Color::BLACK, false);
+        line(
+            ui,
+            s,
+            110.0,
+            ROW_Y - 9.0,
+            300.0,
+            "We have no cities yet.",
+            13.0,
+            Color::BLACK,
+            false,
+        );
     }
     if pg.cities.len() > ROWS {
         for (stem, y, d) in [("scroll_up_0", 290.0, -1), ("scroll_down_0", 690.0, 1)] {
-            s.spawn((Button, Click::Scroll(d), ImageNode::new(assets.load(format!("cache/ui/{stem}.png"))), ui.st.rect(958.0, y, 18.0, 16.0)));
+            s.spawn((
+                Button,
+                Click::Scroll(d),
+                ImageNode::new(assets.load(format!("cache/ui/{stem}.png"))),
+                ui.st.rect(958.0, y, 18.0, 16.0),
+            ));
         }
     }
 }
 
-fn govt_button(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, y: f32, label: String, click: Click) {
+fn govt_button(
+    s: &mut ChildSpawnerCommands,
+    ui: &Ui,
+    assets: &AssetServer,
+    y: f32,
+    label: String,
+    click: Click,
+) {
     s.spawn((
         Button,
         advisor_frame::ArtButton("govt"),
         click,
         art(assets, "govt_0"),
-        Node { justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..ui.st.rect(650.0, y, 146.0, 26.0) },
+        Node {
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..ui.st.rect(650.0, y, 146.0, 26.0)
+        },
     ))
     .with_children(|b| {
         b.spawn((
             Text::new(label),
-            TextFont { font: ui.font.clone(), font_size: ui.st.font(13.0), ..default() },
+            TextFont {
+                font: ui.font.clone(),
+                font_size: ui.st.font(13.0),
+                ..default()
+            },
             TextColor(Color::BLACK),
         ));
     });
@@ -556,7 +839,15 @@ pub fn show(
     let me = civs.viewer();
     let mine: Vec<&City> = cities.iter().filter(|c| c.civ == me).collect();
     let owned = units.iter().filter(|u| u.civ == me).count();
-    let pg = page(me, &map, &mine, owned, treasury.0[me], &domestic, Some(&research));
+    let pg = page(
+        me,
+        &map,
+        &mine,
+        owned,
+        treasury.0[me],
+        &domestic,
+        Some(&research),
+    );
     let scale = stage::scale_of(&windows);
     if shown.as_ref().is_some_and(|(p, s)| *p == pg && *s == scale) {
         return;
@@ -568,7 +859,9 @@ pub fn show(
     let st = Stage(scale);
     let ui = Ui { font: &font, st };
     let root = stage::spawn(&mut commands, DomesticRoot, st, 0.0, 100);
-    commands.entity(root).with_children(|s| body(s, &ui, &assets, &pg));
+    commands
+        .entity(root)
+        .with_children(|s| body(s, &ui, &assets, &pg));
     *shown = Some((pg, scale));
 }
 
@@ -579,7 +872,10 @@ pub fn show(
 /// Move a tenth toward (`more`) or away from a rate, keeping the three at
 /// ten and under the government's cap.
 pub fn nudge(rates: Rates, which: Rate, more: bool, cap: u8) -> Option<Rates> {
-    let others: Vec<Rate> = [Rate::Tax, Rate::Sci, Rate::Lux].into_iter().filter(|r| *r != which).collect();
+    let others: Vec<Rate> = [Rate::Tax, Rate::Sci, Rate::Lux]
+        .into_iter()
+        .filter(|r| *r != which)
+        .collect();
     let get = |r: Rates, w: Rate| match w {
         Rate::Tax => r.tax,
         Rate::Sci => r.sci,
@@ -589,7 +885,9 @@ pub fn nudge(rates: Rates, which: Rate, more: bool, cap: u8) -> Option<Rates> {
     let mut order = others.clone();
     order.sort_by_key(|w| (matches!(w, Rate::Lux), std::cmp::Reverse(get(rates, *w))));
     if more {
-        order.iter().find_map(|&from| rates.shifted(from, which, cap))
+        order
+            .iter()
+            .find_map(|&from| rates.shifted(from, which, cap))
     } else {
         let mut give = others;
         give.sort_by_key(|w| (matches!(w, Rate::Lux), get(rates, *w)));
@@ -650,7 +948,10 @@ pub fn respond(
                 let text = if turns <= 1 {
                     format!("Revolution! Our people now live under {}.", GOVT_NAMES[*g])
                 } else {
-                    format!("Revolution! {turns} turns of Anarchy before {}.", GOVT_NAMES[*g])
+                    format!(
+                        "Revolution! {turns} turns of Anarchy before {}.",
+                        GOVT_NAMES[*g]
+                    )
                 };
                 post(&mut board, text);
                 domestic.close();
@@ -663,30 +964,87 @@ pub fn respond(
 mod tests {
     use super::*;
 
-    const R: Rates = Rates { tax: 5, sci: 5, lux: 0 };
+    const R: Rates = Rates {
+        tax: 5,
+        sci: 5,
+        lux: 0,
+    };
 
     #[test]
     fn more_science_takes_from_the_larger_other_rate() {
         let r = nudge(R, Rate::Sci, true, 10).unwrap();
-        assert_eq!(r, Rates { tax: 4, sci: 6, lux: 0 });
+        assert_eq!(
+            r,
+            Rates {
+                tax: 4,
+                sci: 6,
+                lux: 0
+            }
+        );
         // Taxes and luxury: the luxury rate takes from the larger of the two.
-        assert_eq!(nudge(R, Rate::Lux, true, 10), Some(Rates { tax: 4, sci: 5, lux: 1 }));
+        assert_eq!(
+            nudge(R, Rate::Lux, true, 10),
+            Some(Rates {
+                tax: 4,
+                sci: 5,
+                lux: 1
+            })
+        );
     }
 
     #[test]
     fn less_gives_the_tenth_to_the_smaller_other_rate_and_luxury_last() {
         // Less tax: the tenth goes to science unless luxury is smaller... but
         // luxury is the last resort, so science gets it.
-        assert_eq!(nudge(R, Rate::Tax, false, 10), Some(Rates { tax: 4, sci: 6, lux: 0 }));
-        let all_tax = Rates { tax: 10, sci: 0, lux: 0 };
-        assert_eq!(nudge(all_tax, Rate::Tax, false, 10), Some(Rates { tax: 9, sci: 1, lux: 0 }));
+        assert_eq!(
+            nudge(R, Rate::Tax, false, 10),
+            Some(Rates {
+                tax: 4,
+                sci: 6,
+                lux: 0
+            })
+        );
+        let all_tax = Rates {
+            tax: 10,
+            sci: 0,
+            lux: 0,
+        };
+        assert_eq!(
+            nudge(all_tax, Rate::Tax, false, 10),
+            Some(Rates {
+                tax: 9,
+                sci: 1,
+                lux: 0
+            })
+        );
     }
 
     #[test]
     fn the_cap_and_the_floor_hold() {
-        let capped = Rates { tax: 6, sci: 4, lux: 0 };
-        assert_eq!(nudge(capped, Rate::Tax, true, 6), None, "sixty percent is the cap");
-        assert_eq!(nudge(Rates { tax: 10, sci: 0, lux: 0 }, Rate::Sci, false, 10), None, "nothing to give");
+        let capped = Rates {
+            tax: 6,
+            sci: 4,
+            lux: 0,
+        };
+        assert_eq!(
+            nudge(capped, Rate::Tax, true, 6),
+            None,
+            "sixty percent is the cap"
+        );
+        assert_eq!(
+            nudge(
+                Rates {
+                    tax: 10,
+                    sci: 0,
+                    lux: 0
+                },
+                Rate::Sci,
+                false,
+                10
+            ),
+            None,
+            "nothing to give"
+        );
     }
 
     #[test]
@@ -694,13 +1052,27 @@ mod tests {
         realm::reset();
         let map = GameMap::generate();
         let pg = page(0, &map, &[], 0, 0, &Domestic::default(), None);
-        let monarchy = pg.governments.iter().find(|(g, ..)| *g == exe::row::MONARCHY).unwrap();
+        let monarchy = pg
+            .governments
+            .iter()
+            .find(|(g, ..)| *g == exe::row::MONARCHY)
+            .unwrap();
         assert!(matches!(monarchy.2, Standing::Locked(_)));
-        let despotism = pg.governments.iter().find(|(g, ..)| *g == exe::row::DESPOTISM).unwrap();
+        let despotism = pg
+            .governments
+            .iter()
+            .find(|(g, ..)| *g == exe::row::DESPOTISM)
+            .unwrap();
         assert_eq!(despotism.2, Standing::Current);
-        realm::write(0, |r| r.known |= 1 << exe::SHIPPED[exe::row::MONARCHY].prerequisite_tech);
+        realm::write(0, |r| {
+            r.known |= 1 << exe::SHIPPED[exe::row::MONARCHY].prerequisite_tech
+        });
         let pg = page(0, &map, &[], 0, 0, &Domestic::default(), None);
-        let monarchy = pg.governments.iter().find(|(g, ..)| *g == exe::row::MONARCHY).unwrap();
+        let monarchy = pg
+            .governments
+            .iter()
+            .find(|(g, ..)| *g == exe::row::MONARCHY)
+            .unwrap();
         assert_eq!(monarchy.2, Standing::Open);
     }
 }

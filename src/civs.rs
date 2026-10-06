@@ -60,7 +60,13 @@ pub fn players() -> Vec<usize> {
 
 /// How many civilizations are in the match (the barbarians are not).
 pub fn civ_count() -> usize {
-    with_players(|p| if p.is_empty() { DEFAULT_PLAYERS.len() } else { p.len() })
+    with_players(|p| {
+        if p.is_empty() {
+            DEFAULT_PLAYERS.len()
+        } else {
+            p.len()
+        }
+    })
 }
 
 /// The roster index of the civilization in `slot`.
@@ -111,7 +117,12 @@ fn pick_players(o: &crate::cli::Options) -> Vec<usize> {
         }
         found
     };
-    let mut picks = vec![o.civ.as_deref().and_then(|n| named(n, "--civ")).unwrap_or(DEFAULT_PLAYERS[0])];
+    let mut picks = vec![
+        o.civ
+            .as_deref()
+            .and_then(|n| named(n, "--civ"))
+            .unwrap_or(DEFAULT_PLAYERS[0]),
+    ];
     let total = match &o.opponents {
         Some(crate::cli::Opponents::Names(names)) => {
             picks.extend(names.iter().filter_map(|n| named(n, "--opponents")));
@@ -259,7 +270,9 @@ pub fn set_controllers() {
     } else if let Some(sc) = crate::scenario::scenario().filter(|s| !s.leads.is_empty()) {
         // The scenario's human players (or `--civ`) sit down; the rest are the computer.
         let civ = crate::cli::options().civ.as_deref();
-        if let Some(name) = civ && roster_index_named(name).is_none_or(|r| !sc.civs.contains(&r)) {
+        if let Some(name) = civ
+            && roster_index_named(name).is_none_or(|r| !sc.civs.contains(&r))
+        {
             warn!("--civ: {name} is not a player of this scenario");
         }
         sc.humans(civ).into_iter().fold(all, |m, h| m & !(1 << h))
@@ -372,7 +385,11 @@ pub fn check_elimination(
                 .any(|(_, u)| u.civ == civ && crate::roles::founds_cities(u.utype));
         // A founding or a capture lands over a frame or two; only a civ
         // that stays empty is gone.
-        strikes[civ] = if rooted { 0 } else { strikes[civ].saturating_add(1) };
+        strikes[civ] = if rooted {
+            0
+        } else {
+            strikes[civ].saturating_add(1)
+        };
         if strikes[civ] < 3 {
             continue;
         }
@@ -402,7 +419,11 @@ pub fn check_elimination(
 }
 
 /// The game is over when the turn limit has passed (`GAME.time_limit_turns`).
-pub fn check_time_limit(turn: Res<crate::units::Turn>, mut civs: ResMut<Civilizations>, mut board: ResMut<crate::features::MessageBoard>) {
+pub fn check_time_limit(
+    turn: Res<crate::units::Turn>,
+    mut civs: ResMut<Civilizations>,
+    mut board: ResMut<crate::features::MessageBoard>,
+) {
     if civs.outcome.is_none() && turn.0 > crate::scenario::settings().turn_limit {
         civs.outcome = Some(Outcome::TimeLimit);
         crate::features::post(&mut board, "The turn limit has been reached.".to_string());
@@ -472,10 +493,15 @@ pub fn check_domination(
         let in_play: [bool; CIV_CAP] = std::array::from_fn(|c| !civs.eliminated[c]);
         if let Some(winner) = domination(&tiles, &people, total_tiles, total_people, &in_play) {
             civs.outcome = Some(Outcome::Domination(winner));
-            crate::features::post(&mut board, format!("The {} dominate the world!", CIVS[winner].name));
+            crate::features::post(
+                &mut board,
+                format!("The {} dominate the world!", CIVS[winner].name),
+            );
             if std::env::var("CIV3_AI_LOG").is_ok() {
-                println!("ai: domination victory for the {} ({} of {} tiles, {} of {} people)",
-                    CIVS[winner].name, tiles[winner], total_tiles, people[winner], total_people);
+                println!(
+                    "ai: domination victory for the {} ({} of {} tiles, {} of {} people)",
+                    CIVS[winner].name, tiles[winner], total_tiles, people[winner], total_people
+                );
             }
         }
     }
@@ -505,18 +531,8 @@ pub fn focus_active_civ(
         .0
         .and_then(|e| units.get(e).ok())
         .map(|u| (u.x, u.y))
-        .or_else(|| {
-            cities
-                .iter()
-                .find(|c| c.civ == viewer)
-                .map(|c| (c.x, c.y))
-        })
-        .or_else(|| {
-            units
-                .iter()
-                .find(|u| u.civ == viewer)
-                .map(|u| (u.x, u.y))
-        });
+        .or_else(|| cities.iter().find(|c| c.civ == viewer).map(|c| (c.x, c.y)))
+        .or_else(|| units.iter().find(|u| u.civ == viewer).map(|u| (u.x, u.y)));
     if let (Some((x, y)), Ok(mut transform)) = (position, camera.single_mut()) {
         let world = crate::map::tile_to_world(x, y);
         transform.translation.x = world.x;
@@ -542,7 +558,10 @@ fn neighbor_offset(civ: usize, n: usize, map: &GameMap) -> (i32, i32) {
     }
     let radius = (7 + n as i32 / 2).min(map.h / 2 - 2).max(7);
     let angle = std::f32::consts::TAU * (civ - 1) as f32 / (n - 1) as f32 + 2.2;
-    ((radius as f32 * 1.3 * angle.cos()).round() as i32, (radius as f32 * angle.sin()).round() as i32)
+    (
+        (radius as f32 * 1.3 * angle.cos()).round() as i32,
+        (radius as f32 * angle.sin()).round() as i32,
+    )
 }
 
 /// Capital sites. The first civ keeps `map.start`; each other takes the open
@@ -556,31 +575,37 @@ pub fn starting_positions(map: &GameMap) -> Vec<(i32, i32)> {
     let n = civ_count();
     let mut starts = vec![map.start];
     let walkable = walkable_from(map, map.start);
-    let reach = if n <= 4 { START_RADIUS } else { START_RADIUS.max(7 + n as i32 / 2 + 3) };
+    let reach = if n <= 4 {
+        START_RADIUS
+    } else {
+        START_RADIUS.max(7 + n as i32 / 2 + 3)
+    };
     for civ in 1..n {
         let (dx, dy) = neighbor_offset(civ, n, map);
         let wanted = (map.start.0 + dx, map.start.1 + dy);
-        let site = [MIN_START_SPACING, 3, 2, 1].into_iter().find_map(|spacing| {
-            (0..map.h)
-                .flat_map(|y| (0..map.w).map(move |x| (x, y)))
-                .filter(|&(x, y)| {
-                    let t = &map.tiles[map.idx(x, y)];
-                    walkable[map.idx(x, y)]
-                        && !t.hut
-                        && !t.camp
-                        && crate::cities::can_found(map, &starts, x, y)
-                        && starts.iter().all(|&s| map.distance(s, (x, y)) >= spacing)
-                })
-                .min_by_key(|&site| {
-                    (
-                        map.distance(map.start, site) > reach,
-                        !map.tiles[map.idx(site.0, site.1)].good_start(),
-                        // King-move distance leaves ring-shaped ties that scan
-                        // order would break toward the north-west.
-                        straight_distance_sq(map, wanted, site),
-                    )
-                })
-        });
+        let site = [MIN_START_SPACING, 3, 2, 1]
+            .into_iter()
+            .find_map(|spacing| {
+                (0..map.h)
+                    .flat_map(|y| (0..map.w).map(move |x| (x, y)))
+                    .filter(|&(x, y)| {
+                        let t = &map.tiles[map.idx(x, y)];
+                        walkable[map.idx(x, y)]
+                            && !t.hut
+                            && !t.camp
+                            && crate::cities::can_found(map, &starts, x, y)
+                            && starts.iter().all(|&s| map.distance(s, (x, y)) >= spacing)
+                    })
+                    .min_by_key(|&site| {
+                        (
+                            map.distance(map.start, site) > reach,
+                            !map.tiles[map.idx(site.0, site.1)].good_start(),
+                            // King-move distance leaves ring-shaped ties that scan
+                            // order would break toward the north-west.
+                            straight_distance_sq(map, wanted, site),
+                        )
+                    })
+            });
         starts.push(site.expect("map must have room for all civilizations"));
     }
     starts
@@ -619,15 +644,39 @@ mod tests {
     fn domination_needs_both_shares_strictly_above_sixty_six_percent() {
         let play = [true; CIV_CAP];
         // 66 % of 3200 tiles is 2112: 2112 is not enough, 2113 is.
-        assert_eq!(domination(&[2112, 0, 0, 0], &[100, 0, 0, 0], 3200, 100, &play), None);
-        assert_eq!(domination(&[2113, 0, 0, 0], &[100, 0, 0, 0], 3200, 100, &play), Some(0));
+        assert_eq!(
+            domination(&[2112, 0, 0, 0], &[100, 0, 0, 0], 3200, 100, &play),
+            None
+        );
+        assert_eq!(
+            domination(&[2113, 0, 0, 0], &[100, 0, 0, 0], 3200, 100, &play),
+            Some(0)
+        );
         // Land without the people (or the people without the land) is not enough.
-        assert_eq!(domination(&[2200, 0, 0, 0], &[66, 34, 0, 0], 3200, 100, &play), None);
-        assert_eq!(domination(&[0, 0, 0, 2200], &[0, 0, 0, 67], 3200, 100, &play), Some(3));
+        assert_eq!(
+            domination(&[2200, 0, 0, 0], &[66, 34, 0, 0], 3200, 100, &play),
+            None
+        );
+        assert_eq!(
+            domination(&[0, 0, 0, 2200], &[0, 0, 0, 67], 3200, 100, &play),
+            Some(3)
+        );
         // Unowned ground and barbarian towns stay in the totals.
-        assert_eq!(domination(&[40, 0, 0, 0], &[40, 0, 0, 0], 100, 100, &play), None);
+        assert_eq!(
+            domination(&[40, 0, 0, 0], &[40, 0, 0, 0], 100, 100, &play),
+            None
+        );
         // An eliminated civ cannot win.
-        assert_eq!(domination(&[90, 0, 0, 0], &[90, 0, 0, 0], 100, 100, &[false, true, true, true]), None);
+        assert_eq!(
+            domination(
+                &[90, 0, 0, 0],
+                &[90, 0, 0, 0],
+                100,
+                100,
+                &[false, true, true, true]
+            ),
+            None
+        );
     }
 
     #[test]
@@ -654,12 +703,21 @@ mod tests {
             owner: None,
         };
         let mut app = App::new();
-        app.insert_resource(GameMap { w: 9, h: 9, tiles: vec![tile; 81], start: (4, 4), seed: 0 });
+        app.insert_resource(GameMap {
+            w: 9,
+            h: 9,
+            tiles: vec![tile; 81],
+            start: (4, 4),
+            seed: 0,
+        });
         app.init_resource::<Civilizations>();
         app.init_resource::<crate::features::MessageBoard>();
         app.add_message::<CivilizationEnded>();
         app.init_resource::<crate::cities::BorderKey>();
-        app.add_systems(Update, (crate::cities::update_borders, check_domination).chain());
+        app.add_systems(
+            Update,
+            (crate::cities::update_borders, check_domination).chain(),
+        );
         // A level-four border covers 61 of the 81 tiles, and the only people are ours.
         let mut city = crate::cities::City::new(0, "Edo", 4, 4);
         city.culture = 1000;
@@ -667,10 +725,17 @@ mod tests {
         app.world_mut().spawn(city);
         app.world_mut().write_message(CivilizationEnded(2));
         app.update();
-        assert_eq!(app.world().resource::<Civilizations>().outcome, None, "mid-round");
+        assert_eq!(
+            app.world().resource::<Civilizations>().outcome,
+            None,
+            "mid-round"
+        );
         app.world_mut().write_message(CivilizationEnded(3));
         app.update();
-        assert_eq!(app.world().resource::<Civilizations>().outcome, Some(Outcome::Domination(0)));
+        assert_eq!(
+            app.world().resource::<Civilizations>().outcome,
+            Some(Outcome::Domination(0))
+        );
     }
 
     #[test]
@@ -699,7 +764,11 @@ mod tests {
             assert!(!c.city_names.is_empty(), "{} has no city names", c.name);
             assert!(c.team_color <= 31, "{}: ntp{}", c.name, c.team_color);
             let l = &crate::ruleset::LEADER_ROSTER[i];
-            assert!(!l.name.is_empty() && !l.title.is_empty(), "{} has no ruler", c.name);
+            assert!(
+                !l.name.is_empty() && !l.title.is_empty(),
+                "{} has no ruler",
+                c.name
+            );
             assert!(l.text_set < crate::speech::TEXT_SETS, "{}", c.name);
         }
         // The barbarians are not in the roster, and the default match is the
@@ -709,24 +778,48 @@ mod tests {
     }
 
     fn options(args: &[&str]) -> crate::cli::Options {
-        crate::cli::parse(args.iter().copied(), &std::collections::HashMap::<&str, &str>::new()).unwrap()
+        crate::cli::parse(
+            args.iter().copied(),
+            &std::collections::HashMap::<&str, &str>::new(),
+        )
+        .unwrap()
     }
 
     #[test]
     fn opponents_set_how_many_civs_play() {
-        assert_eq!(pick_players(&options(&[])), [8, 0, 1, 6], "the default four");
+        assert_eq!(
+            pick_players(&options(&[])),
+            [8, 0, 1, 6],
+            "the default four"
+        );
         assert_eq!(pick_players(&options(&["--opponents", "1"])).len(), 2);
         let eight = pick_players(&options(&["--civ", "Rome", "--opponents", "7"]));
         assert_eq!(eight.len(), 8);
         assert_eq!(eight[0], roster_index_named("Rome").unwrap());
         let all = pick_players(&options(&["--opponents", "99"]));
-        assert_eq!(all.len(), MAX_CIVS, "31 civilizations and the barbarians fill the 32 slots");
+        assert_eq!(
+            all.len(),
+            MAX_CIVS,
+            "31 civilizations and the barbarians fill the 32 slots"
+        );
         let mut sorted = all.clone();
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), all.len(), "every chair a different civ");
-        let named = pick_players(&options(&["--civ", "Egypt", "--opponents", "Mongols,Greece"]));
-        assert_eq!(named, [1, roster_index_named("Mongols").unwrap(), roster_index_named("Greece").unwrap()]);
+        let named = pick_players(&options(&[
+            "--civ",
+            "Egypt",
+            "--opponents",
+            "Mongols,Greece",
+        ]));
+        assert_eq!(
+            named,
+            [
+                1,
+                roster_index_named("Mongols").unwrap(),
+                roster_index_named("Greece").unwrap()
+            ]
+        );
     }
 
     #[test]
@@ -737,15 +830,25 @@ mod tests {
         assert_eq!(CIVS.get(BARBARIANS).map(|c| c.name), None);
         set_ai_mask((1u32 << civ_count()) - 2);
         assert!(!is_ai(0) && is_ai(1) && is_ai(30) && is_ai(BARBARIANS));
-        let civs = Civilizations { active: 30, ..Default::default() };
-        assert_eq!(civs.next_active(), 0, "the round wraps after the last chair");
+        let civs = Civilizations {
+            active: 30,
+            ..Default::default()
+        };
+        assert_eq!(
+            civs.next_active(),
+            0,
+            "the round wraps after the last chair"
+        );
     }
 
     #[test]
     fn many_civs_all_get_distinct_starts() {
         let mut checked = 0;
         for civs in [6usize, 12, 31] {
-            set_players_for_test(&pick_players(&options(&["--opponents", &(civs - 1).to_string()])));
+            set_players_for_test(&pick_players(&options(&[
+                "--opponents",
+                &(civs - 1).to_string(),
+            ])));
             let map = GameMap::generate();
             let starts = starting_positions(&map);
             assert_eq!(starts.len(), civs);
@@ -763,7 +866,11 @@ mod tests {
     #[test]
     fn a_repeated_pick_takes_a_free_chair() {
         assert_eq!(distinct(vec![0, 0, 1, 1]), [0, 1, 2, 3]);
-        assert_eq!(distinct(vec![8, 0, 1, 6]), [8, 0, 1, 6], "distinct picks are kept");
+        assert_eq!(
+            distinct(vec![8, 0, 1, 6]),
+            [8, 0, 1, 6],
+            "distinct picks are kept"
+        );
         assert_eq!(distinct(vec![2, 2, 2, 2]), [2, 0, 1, 3]);
     }
 
@@ -896,14 +1003,20 @@ mod tests {
     #[test]
     fn the_game_ends_when_the_turn_limit_passes() {
         let mut app = App::new();
-        app.init_resource::<Civilizations>().init_resource::<crate::features::MessageBoard>();
+        app.init_resource::<Civilizations>()
+            .init_resource::<crate::features::MessageBoard>();
         app.insert_resource(crate::units::Turn(1));
         app.add_systems(Update, check_time_limit);
         app.update();
         assert_eq!(app.world().resource::<Civilizations>().outcome, None);
-        app.insert_resource(crate::units::Turn(crate::scenario::settings().turn_limit + 1));
+        app.insert_resource(crate::units::Turn(
+            crate::scenario::settings().turn_limit + 1,
+        ));
         app.update();
-        assert_eq!(app.world().resource::<Civilizations>().outcome, Some(Outcome::TimeLimit));
+        assert_eq!(
+            app.world().resource::<Civilizations>().outcome,
+            Some(Outcome::TimeLimit)
+        );
     }
 
     #[test]

@@ -42,10 +42,11 @@ pub fn leader_eligible(u: &Unit, loser_barbarian: bool) -> bool {
 /// doubled when the defender won.
 pub fn leader_die(civ: usize, defender_won: bool) -> u32 {
     let epic = crate::realm::read(civ, |r| {
-        crate::roster::BLDGS
-            .iter()
-            .enumerate()
-            .any(|(i, b)| b.small & 1 != 0 && b.other & oth::SMALL_WONDER != 0 && r.owned.get(i).copied().unwrap_or(0) > 0)
+        crate::roster::BLDGS.iter().enumerate().any(|(i, b)| {
+            b.small & 1 != 0
+                && b.other & oth::SMALL_WONDER != 0
+                && r.owned.get(i).copied().unwrap_or(0) > 0
+        })
     });
     let die = if epic { 12 } else { 16 };
     if defender_won { die * 2 } else { die }
@@ -79,7 +80,9 @@ pub fn join(army: &mut Unit, u: &Unit) {
 
 /// Whether a Leader on `tile` stands in one of its civ's cities.
 pub fn in_city<'a>(u: &Unit, cities: impl IntoIterator<Item = &'a City>) -> bool {
-    cities.into_iter().any(|c| c.civ == u.civ && (c.x, c.y) == (u.x, u.y))
+    cities
+        .into_iter()
+        .any(|c| c.civ == u.civ && (c.x, c.y) == (u.x, u.y))
 }
 
 /// The Leader completes the city's build: the box fills to its price.
@@ -92,14 +95,21 @@ mod tests {
     use super::*;
 
     fn soldier(t: UnitType, level: Level) -> Unit {
-        Unit { level, ..Unit::new(0, t, 3, 3) }
+        Unit {
+            level,
+            ..Unit::new(0, t, 3, 3)
+        }
     }
 
     #[test]
     fn an_army_averages_its_members_and_adds_a_sixth() {
         let mut army = Unit::new(0, UnitType::named("Army"), 3, 3);
         army.moves = army.allowance();
-        for t in [UnitType::named("Swordsman"), UnitType::named("Swordsman"), UnitType::named("Spearman")] {
+        for t in [
+            UnitType::named("Swordsman"),
+            UnitType::named("Swordsman"),
+            UnitType::named("Spearman"),
+        ] {
             let u = soldier(t, Level::Regular);
             assert!(can_join(&u, &army));
             join(&mut army, &u);
@@ -111,14 +121,23 @@ mod tests {
         // Three Regulars: 3 + 3 + 3 hit points.
         assert_eq!(army.max_hp(), 9);
         // Full at three.
-        assert!(!can_join(&soldier(UnitType::named("Warrior"), Level::Regular), &army));
+        assert!(!can_join(
+            &soldier(UnitType::named("Warrior"), Level::Regular),
+            &army
+        ));
     }
 
     #[test]
     fn an_army_moves_at_its_slowest_member_plus_one() {
         let mut army = Unit::new(0, UnitType::named("Army"), 3, 3);
-        join(&mut army, &soldier(UnitType::named("Horseman"), Level::Regular));
-        join(&mut army, &soldier(UnitType::named("Warrior"), Level::Regular));
+        join(
+            &mut army,
+            &soldier(UnitType::named("Horseman"), Level::Regular),
+        );
+        join(
+            &mut army,
+            &soldier(UnitType::named("Warrior"), Level::Regular),
+        );
         assert_eq!(army.allowance(), 2 * crate::map::MP);
     }
 
@@ -129,7 +148,10 @@ mod tests {
         assert!(!leader_eligible(&u, true));
         u.made_leader = true;
         assert!(!leader_eligible(&u, false));
-        assert!(!leader_eligible(&soldier(UnitType::named("Swordsman"), Level::Veteran), false));
+        assert!(!leader_eligible(
+            &soldier(UnitType::named("Swordsman"), Level::Veteran),
+            false
+        ));
         assert_eq!(leader_die(0, false), 16);
         assert_eq!(leader_die(0, true), 32);
     }
@@ -151,7 +173,10 @@ mod tests {
         app.world_mut().resource_mut::<crate::units::Selected>().0 = Some(e);
         app.world_mut().write_message(UnitCommand::ScienceAge);
         app.update();
-        assert!(app.world().get::<Unit>(e).is_some(), "military leader is not consumed");
+        assert!(
+            app.world().get::<Unit>(e).is_some(),
+            "military leader is not consumed"
+        );
         u.scientific_leader = true;
         u.moves = 0; // The native availability gate does not test movement.
         app.world_mut().entity_mut(e).insert(u);
@@ -176,7 +201,11 @@ mod tests {
         app.world_mut().write_message(UnitCommand::LeaderHurry);
         app.update();
         assert!(app.world().get::<Unit>(other).is_none());
-        let city = app.world_mut().query::<&City>().single(app.world()).unwrap();
+        let city = app
+            .world_mut()
+            .query::<&City>()
+            .single(app.world())
+            .unwrap();
         assert_eq!(city.shields, city.price(city.production));
     }
 
@@ -184,9 +213,13 @@ mod tests {
     fn computer_scientists_finish_a_wonder_then_start_an_age() {
         crate::civs::set_controllers();
         let mut app = App::new();
-        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.init_resource::<crate::civs::Civilizations>();
-        app.world_mut().resource_mut::<crate::civs::Civilizations>().active = 1;
+        app.world_mut()
+            .resource_mut::<crate::civs::Civilizations>()
+            .active = 1;
         app.insert_resource(crate::research::Research::new());
         app.insert_resource(crate::units::Turn(7));
         app.add_systems(Update, ai_science_leaders);
@@ -198,15 +231,26 @@ mod tests {
         let first = app.world_mut().spawn(scientist.clone()).id();
         app.update();
         assert!(app.world().get::<Unit>(first).is_none());
-        let city = app.world_mut().query::<&City>().single(app.world()).unwrap();
+        let city = app
+            .world_mut()
+            .query::<&City>()
+            .single(app.world())
+            .unwrap();
         assert_eq!(city.shields, city.price(city.production));
         let second = app.world_mut().spawn(scientist.clone()).id();
         app.update();
         assert!(app.world().get::<Unit>(second).is_none());
-        assert!(app.world().resource::<crate::research::Research>().science_age(1, 27));
+        assert!(
+            app.world()
+                .resource::<crate::research::Research>()
+                .science_age(1, 27)
+        );
         let third = app.world_mut().spawn(scientist).id();
         app.update();
-        assert!(app.world().get::<Unit>(third).is_some(), "another leader waits until the age expires");
+        assert!(
+            app.world().get::<Unit>(third).is_some(),
+            "another leader waits until the age expires"
+        );
     }
 }
 
@@ -217,7 +261,11 @@ use crate::features::{MessageBoard, post};
 
 /// An Army of `u`'s civ on its tile that `u` may join.
 pub fn joinable(u: &Unit, units: &[(Entity, Unit)]) -> Option<Entity> {
-    units.iter().filter(|(_, a)| can_join(u, a)).map(|(e, _)| *e).min()
+    units
+        .iter()
+        .filter(|(_, a)| can_join(u, a))
+        .map(|(e, _)| *e)
+        .min()
 }
 
 /// The Leader's two orders and Load into an Army.
@@ -243,7 +291,8 @@ pub fn commands(
         let u = u.clone();
         match cmd {
             UnitCommand::ScienceAge => {
-                if u.scientific_leader && cities.iter().any(|c| (c.x, c.y) == (u.x, u.y))
+                if u.scientific_leader
+                    && cities.iter().any(|c| (c.x, c.y) == (u.x, u.y))
                     && !research.science_age(u.civ, turn.0 as i32)
                 {
                     research.start_science_age(u.civ, turn.0 as i32);
@@ -253,33 +302,59 @@ pub fn commands(
                 }
             }
             UnitCommand::BuildArmy | UnitCommand::LeaderHurry if !in_city(&u, cities.iter()) => {
-                post(&mut board, "A Leader must be in one of our cities to do that.");
+                post(
+                    &mut board,
+                    "A Leader must be in one of our cities to do that.",
+                );
             }
             UnitCommand::BuildArmy => {
-                if u.scientific_leader { continue; }
+                if u.scientific_leader {
+                    continue;
+                }
                 commands.entity(e).despawn();
-                let a = crate::units::spawn_unit(&mut commands, &art, UnitType::named("Army"), u.x, u.y, u.civ);
-                commands.entity(a).entry::<Unit>().and_modify(|mut a| a.moves = 0);
+                let a = crate::units::spawn_unit(
+                    &mut commands,
+                    &art,
+                    UnitType::named("Army"),
+                    u.x,
+                    u.y,
+                    u.civ,
+                );
+                commands
+                    .entity(a)
+                    .entry::<Unit>()
+                    .and_modify(|mut a| a.moves = 0);
                 selected.0 = None;
                 post(&mut board, "Our Great Leader has formed an Army!");
             }
             UnitCommand::LeaderHurry => {
                 if let Some(mut c) = cities.iter_mut().find(|c| (c.x, c.y) == (u.x, u.y)) {
                     hurry(&mut c);
-                    post(&mut board, format!("Our Great Leader hurries the {} in {}!", c.production.name(), c.name));
+                    post(
+                        &mut board,
+                        format!(
+                            "Our Great Leader hurries the {} in {}!",
+                            c.production.name(),
+                            c.name
+                        ),
+                    );
                 }
                 commands.entity(e).despawn();
                 selected.0 = None;
             }
             UnitCommand::Load => {
-                let snapshot: Vec<(Entity, Unit)> = units.iter().map(|(e, u)| (e, u.clone())).collect();
+                let snapshot: Vec<(Entity, Unit)> =
+                    units.iter().map(|(e, u)| (e, u.clone())).collect();
                 if let Some(a) = joinable(&u, &snapshot)
                     && let Ok((_, mut army)) = units.get_mut(a)
                 {
                     join(&mut army, &u);
                     commands.entity(e).despawn();
                     selected.0 = None;
-                    post(&mut board, format!("Our {} joins the Army.", def(u.utype).name));
+                    post(
+                        &mut board,
+                        format!("Our {} joins the Army.", def(u.utype).name),
+                    );
                 }
             }
             _ => {}
@@ -298,14 +373,28 @@ pub fn ai_science_leaders(
     mut research: ResMut<crate::research::Research>,
 ) {
     let civ = civs.active;
-    if !crate::civs::is_ai(civ) || civs.outcome.is_some() { return; }
-    for (e, u) in units.iter().filter(|(_, u)| u.civ == civ && u.scientific_leader && u.carrier.is_none()) {
-        let Some(mut city) = cities.iter_mut().find(|c| c.civ == civ && (c.x, c.y) == (u.x, u.y)) else { continue };
-        if city.production.bldg().is_some_and(|b| b.is_great_wonder()) && city.shields < city.price(city.production) {
+    if !crate::civs::is_ai(civ) || civs.outcome.is_some() {
+        return;
+    }
+    for (e, u) in units
+        .iter()
+        .filter(|(_, u)| u.civ == civ && u.scientific_leader && u.carrier.is_none())
+    {
+        let Some(mut city) = cities
+            .iter_mut()
+            .find(|c| c.civ == civ && (c.x, c.y) == (u.x, u.y))
+        else {
+            continue;
+        };
+        if city.production.bldg().is_some_and(|b| b.is_great_wonder())
+            && city.shields < city.price(city.production)
+        {
             hurry(&mut city);
         } else if !research.science_age(civ, turn.0 as i32) {
             research.start_science_age(civ, turn.0 as i32);
-        } else { continue; }
+        } else {
+            continue;
+        }
         commands.entity(e).despawn();
     }
 }

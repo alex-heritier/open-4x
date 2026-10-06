@@ -14,9 +14,9 @@
 
 use std::sync::OnceLock;
 
+use civ3_biq::Biq;
 use civ3_biq::owner::Owner;
 use civ3_biq::sections::tile::{self as native, feature, overlay};
-use civ3_biq::Biq;
 
 use crate::boot::{Boot, World};
 use crate::map::{Base, Cover, GameMap, Relief, Tile};
@@ -149,12 +149,28 @@ impl Settings {
         use civ3_biq::sections::game::flags;
         let d = Settings::default();
         let custom = g.use_default_victory_conditions == 0;
-        let on = |bit: u32, default: bool| if custom { g.rules_flags & bit != 0 } else { default };
+        let on = |bit: u32, default: bool| {
+            if custom {
+                g.rules_flags & bit != 0
+            } else {
+                default
+            }
+        };
         let share = |v: i32| if v > 0 { v } else { 66 };
-        let limit = if g.time_limit_turns == 0 { 540 } else { g.time_limit_turns.clamp(1, 1000) };
-        for (name, bit) in [("space race", flags::SPACE_RACE), ("diplomatic", flags::DIPLOMATIC), ("cultural", flags::CULTURAL)] {
+        let limit = if g.time_limit_turns == 0 {
+            540
+        } else {
+            g.time_limit_turns.clamp(1, 1000)
+        };
+        for (name, bit) in [
+            ("space race", flags::SPACE_RACE),
+            ("diplomatic", flags::DIPLOMATIC),
+            ("cultural", flags::CULTURAL),
+        ] {
             if custom && g.rules_flags & bit != 0 {
-                bevy::log::warn!("the scenario enables the {name} victory, which open-4x does not play");
+                bevy::log::warn!(
+                    "the scenario enables the {name} victory, which open-4x does not play"
+                );
             }
         }
         Settings {
@@ -239,7 +255,10 @@ static INSTALLED: OnceLock<Installed> = OnceLock::new();
 /// The match's parameters (defaults before `install`, and in tests).
 pub fn setup() -> &'static Setup {
     static DEFAULT: OnceLock<Setup> = OnceLock::new();
-    INSTALLED.get().map(|i| &i.setup).unwrap_or_else(|| DEFAULT.get_or_init(Setup::default))
+    INSTALLED
+        .get()
+        .map(|i| &i.setup)
+        .unwrap_or_else(|| DEFAULT.get_or_init(Setup::default))
 }
 
 /// The scenario being played, if the file placed a world.
@@ -269,14 +288,19 @@ pub fn barbarian_activity() -> i32 {
 
 /// The clone grid size: the installed map's, else the random map's.
 pub fn map_dims() -> (i32, i32) {
-    file_map().map(|m| (m.w, m.h)).unwrap_or((setup().w, setup().h))
+    file_map()
+        .map(|m| (m.w, m.h))
+        .unwrap_or((setup().w, setup().h))
 }
 
 // ---------------------------------------------------------------- setup
 
 fn pick(value: &str, names: &[&str]) -> Option<usize> {
     let v = value.trim();
-    names.iter().position(|n| n.eq_ignore_ascii_case(v)).or_else(|| v.parse::<usize>().ok().filter(|&i| i < names.len()))
+    names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case(v))
+        .or_else(|| v.parse::<usize>().ok().filter(|&i| i < names.len()))
 }
 
 fn bad(flag: &str, value: &str, wanted: &str) -> String {
@@ -289,7 +313,9 @@ fn slot(flag: &str, value: &Option<String>, names: &[&str]) -> Result<Option<i32
     if v.trim().eq_ignore_ascii_case("random") {
         return Ok(Some(3));
     }
-    pick(v, names).map(|i| Some(i as i32)).ok_or_else(|| bad(flag, v, &names.join(", ")))
+    pick(v, names)
+        .map(|i| Some(i as i32))
+        .ok_or_else(|| bad(flag, v, &names.join(", ")))
 }
 
 /// Resolve the options and the file's `WCHR`/`GAME` into the match's setup.
@@ -307,11 +333,27 @@ pub fn setup_from(o: &crate::cli::Options, biq: Option<&Biq>) -> Result<Setup, S
         temperature: wchr.map_or(1, |w| w.temperature_selected),
         age: wchr.map_or(1, |w| w.age_selected),
     };
-    if let Some(v) = slot("--climate", &o.climate, &["arid", "normal", "wet"])? { raw.climate = v; }
-    if let Some(v) = slot("--land", &o.land, &["archipelago", "continents", "pangaea"])? { raw.landmass = v; }
-    if let Some(v) = slot("--temperature", &o.temperature, &["cool", "temperate", "warm"])? { raw.temperature = v; }
-    if let Some(v) = slot("--age", &o.age, &["3 billion", "4 billion", "5 billion"])
-        .or_else(|_| slot("--age", &o.age.as_ref().map(|a| format!("{a} billion")), &["3 billion", "4 billion", "5 billion"]))?
+    if let Some(v) = slot("--climate", &o.climate, &["arid", "normal", "wet"])? {
+        raw.climate = v;
+    }
+    if let Some(v) = slot("--land", &o.land, &["archipelago", "continents", "pangaea"])? {
+        raw.landmass = v;
+    }
+    if let Some(v) = slot(
+        "--temperature",
+        &o.temperature,
+        &["cool", "temperate", "warm"],
+    )? {
+        raw.temperature = v;
+    }
+    if let Some(v) =
+        slot("--age", &o.age, &["3 billion", "4 billion", "5 billion"]).or_else(|_| {
+            slot(
+                "--age",
+                &o.age.as_ref().map(|a| format!("{a} billion")),
+                &["3 billion", "4 billion", "5 billion"],
+            )
+        })?
     {
         raw.age = v;
     }
@@ -320,7 +362,13 @@ pub fn setup_from(o: &crate::cli::Options, biq: Option<&Biq>) -> Result<Setup, S
             3
         } else if let Some(i) = pick(v, &["low", "medium", "high", "very high", "highest"]) {
             i as i32
-        } else if let Some(i) = v.trim().trim_end_matches('%').parse::<i32>().ok().filter(|p| (50..=80).contains(p)) {
+        } else if let Some(i) = v
+            .trim()
+            .trim_end_matches('%')
+            .parse::<i32>()
+            .ok()
+            .filter(|p| (50..=80).contains(p))
+        {
             (i - 50) / 10
         } else {
             return Err(bad("--water", v, "low, medium, high or 0-4"));
@@ -332,13 +380,20 @@ pub fn setup_from(o: &crate::cli::Options, biq: Option<&Biq>) -> Result<Setup, S
         } else if let Some(i) = pick(v, &["none", "sedentary", "roaming", "restless", "raging"]) {
             i as i32 - 1
         } else {
-            return Err(bad("--barbarians", v, "none, sedentary, roaming, restless, raging"));
+            return Err(bad(
+                "--barbarians",
+                v,
+                "none, sedentary, roaming, restless, raging",
+            ));
         };
     }
     // The world size: a name or index of a `WSIZ` row.
     let names = crate::ruleset::SIZE_NAMES.to_vec();
     let standard = 2.min(names.len().saturating_sub(1));
-    let mut size = wchr.map(|w| w.world_size_index).filter(|&i| i >= 0 && (i as usize) < names.len()).map_or(standard, |i| i as usize);
+    let mut size = wchr
+        .map(|w| w.world_size_index)
+        .filter(|&i| i >= 0 && (i as usize) < names.len())
+        .map_or(standard, |i| i as usize);
     let sized = o.size.is_some() || wchr.is_some();
     if let Some(v) = &o.size {
         size = pick(v, &names).ok_or_else(|| bad("--size", v, &names.join(", ")))?;
@@ -348,7 +403,9 @@ pub fn setup_from(o: &crate::cli::Options, biq: Option<&Biq>) -> Result<Setup, S
     if sized && !names.is_empty() {
         // The clone's Standard world is its 80 x 60 grid; the other sizes
         // scale by their number of tiles.
-        let tiles = |i: usize| (crate::ruleset::SIZE_DIMS[i].0 / 2 * crate::ruleset::SIZE_DIMS[i].1).max(1) as f64;
+        let tiles = |i: usize| {
+            (crate::ruleset::SIZE_DIMS[i].0 / 2 * crate::ruleset::SIZE_DIMS[i].1).max(1) as f64
+        };
         let k = (tiles(size) / tiles(standard)).sqrt();
         s.w = ((w as f64 * k).round() as i32).max(16);
         s.h = ((h as f64 * k).round() as i32).max(12);
@@ -357,8 +414,10 @@ pub fn setup_from(o: &crate::cli::Options, biq: Option<&Biq>) -> Result<Setup, S
     // The difficulty: a `DIFF` row by name or index.
     let rules = crate::ruleset::get();
     s.difficulty = match &o.difficulty {
-        Some(v) => pick(v, &rules.difficulty_names).ok_or_else(|| bad("--difficulty", v, &rules.difficulty_names.join(", ")))?,
-        None => (rules.general.default_difficulty.max(0) as usize).min(rules.difficulty_names.len().saturating_sub(1)),
+        Some(v) => pick(v, &rules.difficulty_names)
+            .ok_or_else(|| bad("--difficulty", v, &rules.difficulty_names.join(", ")))?,
+        None => (rules.general.default_difficulty.max(0) as usize)
+            .min(rules.difficulty_names.len().saturating_sub(1)),
     };
     if let Some(g) = biq.and_then(|b| b.scenario.game.first()) {
         s.settings = Settings::from_game(g);
@@ -375,7 +434,9 @@ pub fn install(boot: &Boot) -> Result<(), String> {
     };
     let embedded;
     let biq = if let (None, World::Saved(save)) = (biq, &boot.world) {
-        embedded = save.embedded_biq().map_err(|e| format!("embedded scenario: {e}"))?;
+        embedded = save
+            .embedded_biq()
+            .map_err(|e| format!("embedded scenario: {e}"))?;
         Some(&embedded)
     } else {
         biq
@@ -383,7 +444,8 @@ pub fn install(boot: &Boot) -> Result<(), String> {
     let setup = setup_from(&boot.options, biq)?;
     let (scenario, map) = match (&boot.world, biq) {
         (World::Saved(save), _) => {
-            let (map, lattice) = map_from_save(save, setup.seed).ok_or("the saved game's map is malformed")?;
+            let (map, lattice) =
+                map_from_save(save, setup.seed).ok_or("the saved game's map is malformed")?;
             (Some(scenario_from_save(save, lattice)), Some(map))
         }
         (World::Map(_) | World::Scenario(_), Some(b)) => {
@@ -395,7 +457,11 @@ pub fn install(boot: &Boot) -> Result<(), String> {
         _ => (None, None),
     };
     // Tests and a second call keep the first.
-    let _ = INSTALLED.set(Installed { setup, scenario, map });
+    let _ = INSTALLED.set(Installed {
+        setup,
+        scenario,
+        map,
+    });
     Ok(())
 }
 
@@ -403,7 +469,11 @@ pub fn install(boot: &Boot) -> Result<(), String> {
 
 /// A native tile in the clone's terms. Terrains the clone does not model
 /// (Marsh, Volcano) become the closest it has.
-fn tile_of(t: &native::Tile, numbering: civ3_biq::sections::terr::TerrainNumbering, at: (i32, i32)) -> Tile {
+fn tile_of(
+    t: &native::Tile,
+    numbering: civ3_biq::sections::terr::TerrainNumbering,
+    at: (i32, i32),
+) -> Tile {
     let id = numbering.to_current(t.terrain_id());
     let sub = numbering.to_current(t.terrain_sub_class());
     let under = |s: u8| match s {
@@ -420,7 +490,11 @@ fn tile_of(t: &native::Tile, numbering: civ3_biq::sections::terr::TerrainNumberi
         3 => (Base::Tundra, Relief::Flat, Cover::Bare),
         5 => (under(sub), Relief::Hill, Cover::Bare),
         6 | 10 => (under(sub), Relief::Mountain, Cover::Bare),
-        7 => (under(sub), Relief::Flat, if pine { Cover::Pine } else { Cover::Forest }),
+        7 => (
+            under(sub),
+            Relief::Flat,
+            if pine { Cover::Pine } else { Cover::Forest },
+        ),
         8 => (under(sub), Relief::Flat, Cover::Jungle),
         9 => (Base::Grassland, Relief::Flat, Cover::Bare),
         11 => (Base::Coast, Relief::Flat, Cover::Bare),
@@ -437,7 +511,9 @@ fn tile_of(t: &native::Tile, numbering: civ3_biq::sections::terr::TerrainNumberi
         visible: false,
         hut: has(overlay::GOODY_HUT),
         camp: has(overlay::BARBARIAN_CAMP),
-        resource: t.resource_index().and_then(|r| crate::realm::good_id(r as i32)),
+        resource: t
+            .resource_index()
+            .and_then(|r| crate::realm::good_id(r as i32)),
         road: has(overlay::ROAD) || has(overlay::RAILROAD),
         irrigation: has(overlay::IRRIGATION),
         // The clone keeps the four edge directions (NE, SE, SW, NW).
@@ -477,7 +553,13 @@ fn ocean_tile() -> Tile {
 /// The file's map as a `GameMap`, and where the native lattice sits in it.
 pub fn map_from_biq(biq: &Biq, seed: u64) -> Option<(GameMap, Lattice)> {
     let view = biq.map_view()?;
-    Some(embed(view.width, view.height, view.numbering, view.iter(), seed))
+    Some(embed(
+        view.width,
+        view.height,
+        view.numbering,
+        view.iter(),
+        seed,
+    ))
 }
 
 /// The native cells, laid on the clone's grid with an ocean margin.
@@ -488,9 +570,18 @@ fn embed<T: std::borrow::Borrow<native::Tile>>(
     cells: impl Iterator<Item = ((i32, i32), T)>,
     seed: u64,
 ) -> (GameMap, Lattice) {
-    let lattice = Lattice { half_w: width / 2, rows: height };
+    let lattice = Lattice {
+        half_w: width / 2,
+        rows: height,
+    };
     let side = (width + height) / 2 + 2 * MARGIN;
-    let mut map = GameMap { w: side, h: side, tiles: vec![ocean_tile(); (side * side) as usize], start: (side / 2, side / 2), seed };
+    let mut map = GameMap {
+        w: side,
+        h: side,
+        tiles: vec![ocean_tile(); (side * side) as usize],
+        start: (side / 2, side / 2),
+        seed,
+    };
     for ((x, y), t) in cells {
         let (u, v) = lattice.to_clone(x, y);
         let i = map.idx(u, v);
@@ -506,32 +597,49 @@ pub fn map_from_save(save: &civ3_biq::Save, seed: u64) -> Option<(GameMap, Latti
     if w < 2 || h < 1 || save.map.tiles.len() != save.map.cell_count() {
         return None;
     }
-    let cells = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|(x, y)| (x + y) % 2 == 0).filter_map(|(x, y)| {
-        let t = save.map.tile(x as u32, y as u32)?;
-        Some(((x, y), native::Tile {
-            river_connection_mask: t.river_connection_mask(),
-            owner: t.owner(),
-            resource: t.resource(),
-            water_depth_byte: Some(6),
-            flags_0x28: Some(t.overlay_plane() as i32),
-            terrain_class: Some(t.terrain_word() as i32),
-            flags_0x30: Some(t.feature_plane() as i32),
-            ..native::Tile::default()
-        }))
-    });
-    Some(embed(w, h, civ3_biq::sections::terr::TerrainNumbering::Current, cells, seed))
+    let cells = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|(x, y)| (x + y) % 2 == 0)
+        .filter_map(|(x, y)| {
+            let t = save.map.tile(x as u32, y as u32)?;
+            Some((
+                (x, y),
+                native::Tile {
+                    river_connection_mask: t.river_connection_mask(),
+                    owner: t.owner(),
+                    resource: t.resource(),
+                    water_depth_byte: Some(6),
+                    flags_0x28: Some(t.overlay_plane() as i32),
+                    terrain_class: Some(t.terrain_word() as i32),
+                    flags_0x30: Some(t.feature_plane() as i32),
+                    ..native::Tile::default()
+                },
+            ))
+        });
+    Some(embed(
+        w,
+        h,
+        civ3_biq::sections::terr::TerrainNumbering::Current,
+        cells,
+        seed,
+    ))
 }
 
 // -------------------------------------------------------------- objects
 
 /// Roster index of a `RACE` row.
 pub fn roster_of_race(row: i32) -> Option<usize> {
-    crate::ruleset::RACE_ROSTER.iter().position(|r| r.race as i32 == row)
+    crate::ruleset::RACE_ROSTER
+        .iter()
+        .position(|r| r.race as i32 == row)
 }
 
 /// Each lead's roster index: its race, else the next one nobody plays.
 fn assign_civs(leads: &[Lead]) -> Vec<usize> {
-    let mut civs: Vec<Option<usize>> = leads.iter().map(|l| l.race.and_then(|r| roster_of_race(r as i32))).collect();
+    let mut civs: Vec<Option<usize>> = leads
+        .iter()
+        .map(|l| l.race.and_then(|r| roster_of_race(r as i32)))
+        .collect();
     for i in 0..civs.len() {
         if civs[..i].contains(&civs[i]) && civs[i].is_some() {
             civs[i] = None;
@@ -539,56 +647,125 @@ fn assign_civs(leads: &[Lead]) -> Vec<usize> {
     }
     let taken = civs.clone();
     let mut free = (0..crate::ruleset::CIV_ROSTER.len()).filter(|r| !taken.contains(&Some(*r)));
-    civs.into_iter().map(|c| c.or_else(|| free.next()).unwrap_or(0)).collect()
+    civs.into_iter()
+        .map(|c| c.or_else(|| free.next()).unwrap_or(0))
+        .collect()
 }
 
 fn objects_from_biq(biq: &Biq, lattice: Lattice, placed: bool) -> Scenario {
     use civ3_biq::sections::lead::{CIV_ANY, CIV_RANDOM};
     let at = |x: i32, y: i32| lattice.to_clone(x, y);
     let leads: Vec<Lead> = if placed {
-        biq.scenario.players.iter().take(crate::civs::MAX_CIVS).map(|p| Lead {
-            race: (p.civilization != CIV_ANY && p.civilization != CIV_RANDOM).then(|| p.civilization).filter(|&r| r >= 0).map(|r| r as usize),
-            human: p.human_player != 0,
-            gold: p.starting_treasury.max(0) as u32,
-            government: usize::try_from(p.government).ok(),
-            free_techs: if p.custom_civ_data != 0 { p.free_techs.clone() } else { vec![] },
-            starting_units: p.starting_units.iter().filter(|u| u.unit_type >= 0).map(|u| (u.unit_type as usize, u.count.max(1) as u32)).collect(),
-        }).collect()
+        biq.scenario
+            .players
+            .iter()
+            .take(crate::civs::MAX_CIVS)
+            .map(|p| Lead {
+                race: (p.civilization != CIV_ANY && p.civilization != CIV_RANDOM)
+                    .then(|| p.civilization)
+                    .filter(|&r| r >= 0)
+                    .map(|r| r as usize),
+                human: p.human_player != 0,
+                gold: p.starting_treasury.max(0) as u32,
+                government: usize::try_from(p.government).ok(),
+                free_techs: if p.custom_civ_data != 0 {
+                    p.free_techs.clone()
+                } else {
+                    vec![]
+                },
+                starting_units: p
+                    .starting_units
+                    .iter()
+                    .filter(|u| u.unit_type >= 0)
+                    .map(|u| (u.unit_type as usize, u.count.max(1) as u32))
+                    .collect(),
+            })
+            .collect()
     } else {
         vec![]
     };
     let nobody = |o: &Owner| matches!(o, Owner::Nobody);
-    let cities = biq.scenario.cities.iter().filter_map(|c| {
-        let owner = Owner::from_raw(c.owner_type, c.owner)?;
-        (placed && !nobody(&owner)).then(|| CityRow {
-            owner,
-            name: c.name.text().to_string(),
-            at: at(c.map_x, c.map_y),
-            size: c.size.clamp(1, 255) as u8,
-            buildings: c.starting_buildings.iter().filter_map(|&b| usize::try_from(b).ok()).collect(),
-            palace: c.has_palace != 0,
-            walls: c.has_walls != 0,
-            culture: c.culture,
+    let cities = biq
+        .scenario
+        .cities
+        .iter()
+        .filter_map(|c| {
+            let owner = Owner::from_raw(c.owner_type, c.owner)?;
+            (placed && !nobody(&owner)).then(|| CityRow {
+                owner,
+                name: c.name.text().to_string(),
+                at: at(c.map_x, c.map_y),
+                size: c.size.clamp(1, 255) as u8,
+                buildings: c
+                    .starting_buildings
+                    .iter()
+                    .filter_map(|&b| usize::try_from(b).ok())
+                    .collect(),
+                palace: c.has_palace != 0,
+                walls: c.has_walls != 0,
+                culture: c.culture,
+            })
         })
-    }).collect();
-    let units = biq.scenario.units.iter().filter_map(|u| {
-        let owner = Owner::from_raw(u.owner_type, u.owner)?;
-        (placed && !nobody(&owner) && u.unit_type >= 0).then(|| UnitRow { owner, damage: 0, fortified: false, utype: u.unit_type as usize, at: at(u.map_x, u.map_y), level: u.experience_level })
-    }).collect();
-    let colonies = biq.scenario.colonies.iter().filter_map(|c| {
-        let owner = Owner::from_raw(c.owner_type, c.owner)?;
-        (placed && !nobody(&owner)).then(|| ColonyRow { owner, kind: c.kind, at: at(c.map_x, c.map_y) })
-    }).collect();
-    let starts = biq.map.start_locations.iter().filter_map(|s| {
-        let owner = Owner::from_raw(s.owner_type, s.owner)?;
-        (!nobody(&owner)).then(|| StartRow { owner, at: at(s.map_x, s.map_y) })
-    }).collect();
-    Scenario { lattice, civs: assign_civs(&leads), leads, cities, units, colonies, starts, turn: 1 }
+        .collect();
+    let units = biq
+        .scenario
+        .units
+        .iter()
+        .filter_map(|u| {
+            let owner = Owner::from_raw(u.owner_type, u.owner)?;
+            (placed && !nobody(&owner) && u.unit_type >= 0).then(|| UnitRow {
+                owner,
+                damage: 0,
+                fortified: false,
+                utype: u.unit_type as usize,
+                at: at(u.map_x, u.map_y),
+                level: u.experience_level,
+            })
+        })
+        .collect();
+    let colonies = biq
+        .scenario
+        .colonies
+        .iter()
+        .filter_map(|c| {
+            let owner = Owner::from_raw(c.owner_type, c.owner)?;
+            (placed && !nobody(&owner)).then(|| ColonyRow {
+                owner,
+                kind: c.kind,
+                at: at(c.map_x, c.map_y),
+            })
+        })
+        .collect();
+    let starts = biq
+        .map
+        .start_locations
+        .iter()
+        .filter_map(|s| {
+            let owner = Owner::from_raw(s.owner_type, s.owner)?;
+            (!nobody(&owner)).then(|| StartRow {
+                owner,
+                at: at(s.map_x, s.map_y),
+            })
+        })
+        .collect();
+    Scenario {
+        lattice,
+        civs: assign_civs(&leads),
+        leads,
+        cities,
+        units,
+        colonies,
+        starts,
+        turn: 1,
+    }
 }
 
 /// Save slots playing civs, in chair order: slot 0 is the barbarians.
 pub fn save_used_slots(save: &civ3_biq::Save) -> Vec<usize> {
-    (1..save.players.len()).filter(|&k| save.players[k].in_use() && save.players[k].race() >= 0).take(crate::civs::MAX_CIVS).collect()
+    (1..save.players.len())
+        .filter(|&k| save.players[k].in_use() && save.players[k].race() >= 0)
+        .take(crate::civs::MAX_CIVS)
+        .collect()
 }
 
 /// The players, cities and units of a saved game. Slot 0 of a save is the
@@ -598,47 +775,82 @@ pub fn scenario_from_save(save: &civ3_biq::Save, lattice: Lattice) -> Scenario {
     use civ3_biq::owner::Owner;
     let used: Vec<usize> = save_used_slots(save);
     let ours = |k: u32| -> Option<Owner> {
-        if k == 0 { Some(Owner::BarbarianTribe(0)) } else { used.iter().position(|&u| u as u32 == k).map(|i| Owner::Player(i as i32)) }
-    };
-    let leads: Vec<Lead> = used.iter().map(|&k| {
-        let p = &save.players[k];
-        Lead {
-            race: usize::try_from(p.race()).ok(),
-            human: false,
-            gold: p.gold().max(0) as u32,
-            government: usize::try_from(p.government()).ok(),
-            free_techs: save.game.tech_known_by.iter().enumerate().filter(|(_, bits)| *bits >> k & 1 != 0).map(|(t, _)| t as i32).collect(),
-            starting_units: vec![],
+        if k == 0 {
+            Some(Owner::BarbarianTribe(0))
+        } else {
+            used.iter()
+                .position(|&u| u as u32 == k)
+                .map(|i| Owner::Player(i as i32))
         }
-    }).collect();
+    };
+    let leads: Vec<Lead> = used
+        .iter()
+        .map(|&k| {
+            let p = &save.players[k];
+            Lead {
+                race: usize::try_from(p.race()).ok(),
+                human: false,
+                gold: p.gold().max(0) as u32,
+                government: usize::try_from(p.government()).ok(),
+                free_techs: save
+                    .game
+                    .tech_known_by
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, bits)| *bits >> k & 1 != 0)
+                    .map(|(t, _)| t as i32)
+                    .collect(),
+                starting_units: vec![],
+            }
+        })
+        .collect();
     let at = |x: i32, y: i32| lattice.to_clone(x, y);
     let buildings = crate::roster::bldg_count();
-    let cities = save.cities.iter().filter_map(|c| {
-        let owner = ours(c.owner() as u32)?;
-        (c.owner() != 0).then(|| CityRow {
-            owner,
-            name: c.name(),
-            at: at(c.x() as i32, c.y() as i32),
-            size: c.size().clamp(1, 255) as u8,
-            // The improvement bit set: bit `i` is `BLDG` row `i`.
-            buildings: (0..buildings.min(c.bitm.0.len() * 8)).filter(|&i| c.bitm.0[i / 8] >> (i % 8) & 1 != 0).collect(),
-            palace: false,
-            walls: false,
-            culture: 0,
+    let cities = save
+        .cities
+        .iter()
+        .filter_map(|c| {
+            let owner = ours(c.owner() as u32)?;
+            (c.owner() != 0).then(|| CityRow {
+                owner,
+                name: c.name(),
+                at: at(c.x() as i32, c.y() as i32),
+                size: c.size().clamp(1, 255) as u8,
+                // The improvement bit set: bit `i` is `BLDG` row `i`.
+                buildings: (0..buildings.min(c.bitm.0.len() * 8))
+                    .filter(|&i| c.bitm.0[i / 8] >> (i % 8) & 1 != 0)
+                    .collect(),
+                palace: false,
+                walls: false,
+                culture: 0,
+            })
         })
-    }).collect();
-    let units = save.units.iter().filter_map(|u| {
-        let owner = ours(u.owner())?;
-        Some(UnitRow {
-            owner,
-            damage: u.damage() as i32,
-            fortified: u.order() == 1,
-            utype: u.unit_type() as usize,
-            at: at(u.x(), u.y()),
-            level: u.experience_level() as i32,
+        .collect();
+    let units = save
+        .units
+        .iter()
+        .filter_map(|u| {
+            let owner = ours(u.owner())?;
+            Some(UnitRow {
+                owner,
+                damage: u.damage() as i32,
+                fortified: u.order() == 1,
+                utype: u.unit_type() as usize,
+                at: at(u.x(), u.y()),
+                level: u.experience_level() as i32,
+            })
         })
-    }).collect();
-    Scenario { lattice, civs: assign_civs(&leads), leads, cities, units, colonies: vec![], starts: vec![], turn: save.game.turn().max(1) }
+        .collect();
+    Scenario {
+        lattice,
+        civs: assign_civs(&leads),
+        leads,
+        cities,
+        units,
+        colonies: vec![],
+        starts: vec![],
+        turn: save.game.turn().max(1),
+    }
 }
 
 /// The turn the match opens on.
@@ -670,22 +882,46 @@ impl Scenario {
         {
             return vec![slot];
         }
-        let marked: Vec<usize> = self.leads.iter().enumerate().filter(|(_, l)| l.human).map(|(i, _)| i).collect();
+        let marked: Vec<usize> = self
+            .leads
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.human)
+            .map(|(i, _)| i)
+            .collect();
         if marked.is_empty() { vec![0] } else { marked }
     }
 
     /// Where a slot starts when it has nothing placed: its `SLOC`, else its
     /// first city or unit.
     pub fn start_of(&self, slot: usize) -> Option<(i32, i32)> {
-        self.starts.iter().find(|s| self.slot_of(s.owner) == Some(slot)).map(|s| s.at)
-            .or_else(|| self.cities.iter().find(|c| self.slot_of(c.owner) == Some(slot)).map(|c| c.at))
-            .or_else(|| self.units.iter().find(|u| self.slot_of(u.owner) == Some(slot)).map(|u| u.at))
+        self.starts
+            .iter()
+            .find(|s| self.slot_of(s.owner) == Some(slot))
+            .map(|s| s.at)
+            .or_else(|| {
+                self.cities
+                    .iter()
+                    .find(|c| self.slot_of(c.owner) == Some(slot))
+                    .map(|c| c.at)
+            })
+            .or_else(|| {
+                self.units
+                    .iter()
+                    .find(|u| self.slot_of(u.owner) == Some(slot))
+                    .map(|u| u.at)
+            })
     }
 
     /// Whether the slot has a city or a unit on the map.
     pub fn has_objects(&self, slot: usize) -> bool {
-        self.cities.iter().any(|c| self.slot_of(c.owner) == Some(slot))
-            || self.units.iter().any(|u| self.slot_of(u.owner) == Some(slot))
+        self.cities
+            .iter()
+            .any(|c| self.slot_of(c.owner) == Some(slot))
+            || self
+                .units
+                .iter()
+                .any(|u| self.slot_of(u.owner) == Some(slot))
     }
 }
 
@@ -694,27 +930,40 @@ mod tests {
     use super::*;
 
     fn scenario_file(name: &str) -> Option<Biq> {
-        let root = std::env::var("CIV3_DIR").unwrap_or_else(|_| crate::cli::DEFAULT_CIV3_DIR.into());
-        let path = crate::install::resolve_in(std::path::Path::new(&root), &format!("Conquests/Conquests/{name}"))?;
+        let root =
+            std::env::var("CIV3_DIR").unwrap_or_else(|_| crate::cli::DEFAULT_CIV3_DIR.into());
+        let path = crate::install::resolve_in(
+            std::path::Path::new(&root),
+            &format!("Conquests/Conquests/{name}"),
+        )?;
         Biq::read_file(path).ok()
     }
 
     #[test]
     fn the_lattice_round_trips_and_keeps_neighbors_adjacent() {
-        let l = Lattice { half_w: 50, rows: 40 };
+        let l = Lattice {
+            half_w: 50,
+            rows: 40,
+        };
         for (x, y) in [(0, 0), (1, 1), (50, 20), (98, 40), (2, 98)] {
             let (u, v) = l.to_clone(x, y);
             assert_eq!(l.to_native(u, v), (x, y));
             for (dx, dy) in civ3_biq::sections::tile::river_connection::DELTAS {
                 let (nu, nv) = l.to_clone(x + dx, y + dy);
-                assert_eq!((nu - u).abs().max((nv - v).abs()), 1, "native step {dx},{dy} is one king move");
+                assert_eq!(
+                    (nu - u).abs().max((nv - v).abs()),
+                    1,
+                    "native step {dx},{dy} is one king move"
+                );
             }
         }
     }
 
     #[test]
     fn a_scenarios_map_players_and_objects_come_across() {
-        let Some(biq) = scenario_file("3 Fall of Rome.biq") else { return };
+        let Some(biq) = scenario_file("3 Fall of Rome.biq") else {
+            return;
+        };
         let (map, lattice) = map_from_biq(&biq, 1).expect("the scenario has a map");
         let view = biq.map_view().unwrap();
         // Every native tile lands on its own cell, water stays water.
@@ -726,12 +975,19 @@ mod tests {
         }
         assert!(land > 100);
         let sc = objects_from_biq(&biq, lattice, true);
-        assert_eq!(sc.leads.len(), biq.scenario.players.len().min(crate::civs::MAX_CIVS));
+        assert_eq!(
+            sc.leads.len(),
+            biq.scenario.players.len().min(crate::civs::MAX_CIVS)
+        );
         assert_eq!(sc.civs.len(), sc.leads.len());
         let mut distinct = sc.civs.clone();
         distinct.sort();
         distinct.dedup();
-        assert_eq!(distinct.len(), sc.civs.len(), "every lead plays a different civilization");
+        assert_eq!(
+            distinct.len(),
+            sc.civs.len(),
+            "every lead plays a different civilization"
+        );
         assert!(!sc.cities.is_empty() && !sc.units.is_empty());
         for c in &sc.cities {
             assert!(map.is_land(c.at.0, c.at.1), "{} stands on land", c.name);
@@ -742,24 +998,78 @@ mod tests {
 
     #[test]
     fn the_command_line_sets_the_random_map() {
-        let parse = |args: &[&str]| crate::cli::parse(args.iter().copied(), &std::collections::HashMap::<&str, &str>::new()).unwrap();
+        let parse = |args: &[&str]| {
+            crate::cli::parse(
+                args.iter().copied(),
+                &std::collections::HashMap::<&str, &str>::new(),
+            )
+            .unwrap()
+        };
         let s = setup_from(&parse(&[]), None).unwrap();
         assert_eq!((s.w, s.h, s.difficulty), (80, 60, 2));
-        assert_eq!((s.opts.climate, s.opts.landmass, s.opts.ocean, s.opts.temperature, s.opts.age, s.opts.barbarians), (1, 1, 1, 1, 1, 1));
-        let o = parse(&["--size", "Huge", "--land", "pangaea", "--water", "high", "--climate", "arid", "--temperature", "warm",
-            "--age", "3", "--barbarians", "raging", "--difficulty", "deity", "--seed", "7"]);
+        assert_eq!(
+            (
+                s.opts.climate,
+                s.opts.landmass,
+                s.opts.ocean,
+                s.opts.temperature,
+                s.opts.age,
+                s.opts.barbarians
+            ),
+            (1, 1, 1, 1, 1, 1)
+        );
+        let o = parse(&[
+            "--size",
+            "Huge",
+            "--land",
+            "pangaea",
+            "--water",
+            "high",
+            "--climate",
+            "arid",
+            "--temperature",
+            "warm",
+            "--age",
+            "3",
+            "--barbarians",
+            "raging",
+            "--difficulty",
+            "deity",
+            "--seed",
+            "7",
+        ]);
         let s = setup_from(&o, None).unwrap();
-        assert!(s.w > 80 && s.h > 60, "Huge is bigger than Standard: {}x{}", s.w, s.h);
-        assert_eq!((s.opts.landmass, s.opts.ocean, s.opts.climate, s.opts.temperature, s.opts.age, s.opts.barbarians), (2, 2, 0, 2, 0, 3));
+        assert!(
+            s.w > 80 && s.h > 60,
+            "Huge is bigger than Standard: {}x{}",
+            s.w,
+            s.h
+        );
+        assert_eq!(
+            (
+                s.opts.landmass,
+                s.opts.ocean,
+                s.opts.climate,
+                s.opts.temperature,
+                s.opts.age,
+                s.opts.barbarians
+            ),
+            (2, 2, 0, 2, 0, 3)
+        );
         assert_eq!(s.seed, 7);
-        assert_eq!(crate::ruleset::get().difficulty_names[s.difficulty], "Deity");
+        assert_eq!(
+            crate::ruleset::get().difficulty_names[s.difficulty],
+            "Deity"
+        );
         assert!(setup_from(&parse(&["--size", "Gigantic"]), None).is_err());
         assert!(setup_from(&parse(&["--land", "dry"]), None).is_err());
     }
 
     #[test]
     fn a_games_settings_come_from_its_game_row() {
-        let Some(biq) = scenario_file("9 WWII in the Pacific.biq") else { return };
+        let Some(biq) = scenario_file("9 WWII in the Pacific.biq") else {
+            return;
+        };
         let s = Settings::from_game(biq.scenario.game.first().unwrap());
         assert_eq!(s.base_unit, 1, "the Pacific counts months");
         assert_eq!(s.start_year, 1941);

@@ -40,7 +40,10 @@ impl Install {
 
     /// Every file `rel` along the search path, nearest first.
     pub fn resolve_all(&self, rel: &str) -> Vec<PathBuf> {
-        self.search.iter().filter_map(|root| resolve_in(root, rel)).collect()
+        self.search
+            .iter()
+            .filter_map(|root| resolve_in(root, rel))
+            .collect()
     }
 
     /// Whether the folder `rel` exists somewhere on the path.
@@ -66,9 +69,17 @@ impl Install {
     /// `GAME.search_folders` (semicolon separated, relative to the scenario).
     pub fn scenario_folders(file: &Path, search_folders: &str) -> Vec<PathBuf> {
         let dir = file.parent().map(Path::to_path_buf).unwrap_or_default();
-        let dir = if dir.as_os_str().is_empty() { PathBuf::from(".") } else { dir };
+        let dir = if dir.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            dir
+        };
         let mut out = vec![dir.clone()];
-        for f in search_folders.split(';').map(str::trim).filter(|f| !f.is_empty()) {
+        for f in search_folders
+            .split(';')
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+        {
             if let Some(p) = resolve_in(&dir, f) {
                 out.push(p);
             }
@@ -147,7 +158,12 @@ mod tests {
         assert!(hit.starts_with(d.join("Scenarios/X")), "{hit:?}");
         // Without the scenario's copy the Conquests one wins.
         let stock = Install::new(&d, vec![]);
-        assert!(stock.resolve("Art/Units/Warrior").unwrap().starts_with(d.join("Conquests")));
+        assert!(
+            stock
+                .resolve("Art/Units/Warrior")
+                .unwrap()
+                .starts_with(d.join("Conquests"))
+        );
         assert_eq!(inst.resolve_all("art/units/warrior").len(), 2);
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -163,15 +179,25 @@ mod tests {
         std::fs::write(rules.join("Art/Units/Warrior/Warrior.ini"), "install").unwrap();
         std::fs::write(assets.join("Art/Units/Warrior/Warrior.ini"), "override").unwrap();
         let options = crate::cli::parse(
-            ["--civ3", rules.to_str().unwrap(), "--assets", assets.to_str().unwrap()],
+            [
+                "--civ3",
+                rules.to_str().unwrap(),
+                "--assets",
+                assets.to_str().unwrap(),
+            ],
             &std::collections::HashMap::<&str, &str>::new(),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(options.civ3_dir(), rules);
         let install = Install::new(options.assets_dir(), vec![]);
         let picked = install.resolve("art/units/warrior/warrior.INI").unwrap();
         assert!(picked.starts_with(&assets));
         assert_eq!(std::fs::read_to_string(&picked).unwrap(), "override");
-        println!("--assets resolution: {} -> override; rules root {}", picked.display(), options.civ3_dir().display());
+        println!(
+            "--assets resolution: {} -> override; rules root {}",
+            picked.display(),
+            options.civ3_dir().display()
+        );
         let _ = std::fs::remove_dir_all(d);
     }
 

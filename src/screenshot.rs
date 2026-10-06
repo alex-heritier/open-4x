@@ -74,11 +74,7 @@ pub fn setup_shots(mut commands: Commands, mut shots: ResMut<Shots>) {
     // the exit message unread, so a run can hang after writing its shots.
     commands.insert_resource(WinitSettings::continuous());
     let mut frames: Vec<u32> = std::env::var("CIV3_SHOT_FRAME")
-        .map(|s| {
-            s.split(',')
-                .filter_map(|f| f.trim().parse().ok())
-                .collect()
-        })
+        .map(|s| s.split(',').filter_map(|f| f.trim().parse().ok()).collect())
         .unwrap_or_default();
     if frames.is_empty() {
         frames.push(DEFAULT_FRAME);
@@ -116,15 +112,15 @@ pub fn drive_shots(mut commands: Commands, mut shots: ResMut<Shots>) {
         shots.next += 1;
         let pending = shots.pending.clone();
         let keep = shots.keep;
-        commands
-            .spawn(Screenshot::primary_window())
-            .observe(move |shot: On<ScreenshotCaptured>| {
+        commands.spawn(Screenshot::primary_window()).observe(
+            move |shot: On<ScreenshotCaptured>| {
                 save_to_disk(&path)(shot);
                 println!("shot: wrote {}", path.display());
                 if !keep && pending.fetch_sub(1, Ordering::SeqCst) == 1 {
                     end_run(0);
                 }
-            });
+            },
+        );
     }
     if shots.keep || shots.next < shots.schedule.len() {
         return;
@@ -176,13 +172,22 @@ mod tests {
 
     #[test]
     fn placeholder_takes_every_frame() {
-        assert_eq!(shot_path("/tmp/a-{}.png", 7, 3), PathBuf::from("/tmp/a-7.png"));
-        assert_eq!(shot_path("/tmp/a-{}.png", 7, 1), PathBuf::from("/tmp/a-7.png"));
+        assert_eq!(
+            shot_path("/tmp/a-{}.png", 7, 3),
+            PathBuf::from("/tmp/a-7.png")
+        );
+        assert_eq!(
+            shot_path("/tmp/a-{}.png", 7, 1),
+            PathBuf::from("/tmp/a-7.png")
+        );
     }
 
     #[test]
     fn frame_list_gets_a_suffix_before_the_extension() {
-        assert_eq!(shot_path("/tmp/a.png", 40, 2), PathBuf::from("/tmp/a-40.png"));
+        assert_eq!(
+            shot_path("/tmp/a.png", 40, 2),
+            PathBuf::from("/tmp/a-40.png")
+        );
         assert_eq!(shot_path("/tmp/a", 40, 2), PathBuf::from("/tmp/a-40"));
     }
 }

@@ -277,12 +277,12 @@ pub fn terr_score(id: u8) -> u32 {
                 resource: None,
                 road: false,
                 irrigation: false,
-            river: 0,
+                river: 0,
                 mine: false,
                 site: None,
-            fortress: false,
-            barricade: false,
-            forest_harvested: false,
+                fortress: false,
+                barricade: false,
+                forest_harvested: false,
                 owner: None,
             };
             if suitable(id, &t) {
@@ -730,12 +730,17 @@ pub fn resolve_features(
             map.tiles[i].hut = false;
             let all_cities: Vec<&crate::cities::City> = cities.iter().map(|(_, c)| c).collect();
             let all_units: Vec<&crate::units::Unit> = units.iter().collect();
-            let walker = units.iter().find(|u| u.civ == civs.active && (u.x, u.y) == (x, y));
+            let walker = units
+                .iter()
+                .find(|u| u.civ == civs.active && (u.x, u.y) == (x, y));
             let civ = civs.active;
             let era = research.era(civ);
             let used = |t: usize| barbarians.tribe_used(t);
-            let build = |q: usize, t: crate::units::UnitType| crate::research::can_build(q, crate::cities::Production::from_unit(t));
-            let mut advance = |d: &mut crate::rng::MapRng| research.hut_advance(civ, d).map(|(t, _)| t);
+            let build = |q: usize, t: crate::units::UnitType| {
+                crate::research::can_build(q, crate::cities::Production::from_unit(t))
+            };
+            let mut advance =
+                |d: &mut crate::rng::MapRng| research.hut_advance(civ, d).map(|(t, _)| t);
             let snapshot = map.clone();
             let mut ctx = crate::huts::Context {
                 map: &snapshot,
@@ -763,7 +768,11 @@ pub fn resolve_features(
                 }
             }
             for &(t, conscript) in &got.units {
-                let level = if conscript { crate::combat::Level::Conscript } else { crate::combat::Level::Regular };
+                let level = if conscript {
+                    crate::combat::Level::Conscript
+                } else {
+                    crate::combat::Level::Regular
+                };
                 crate::units::spawn_unit_at_level(&mut commands, &art, t, x, y, civ, level);
             }
             for &(tx, ty) in &got.barbarians {
@@ -776,7 +785,9 @@ pub fn resolve_features(
                     crate::civs::BARBARIANS,
                     crate::combat::Level::Conscript,
                 );
-                commands.entity(e).insert(crate::barbarians::Tribe(got.tribe));
+                commands
+                    .entity(e)
+                    .insert(crate::barbarians::Tribe(got.tribe));
             }
             post(&mut board, crate::huts::message(&got, civ));
             if quiet.is_none() {

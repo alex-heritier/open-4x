@@ -5,9 +5,9 @@
 //! the already-converted cache from the web server and resolves source paths
 //! through the cache's request manifest.
 
-use std::path::Path;
 #[cfg(target_arch = "wasm32")]
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 #[cfg(target_arch = "wasm32")]
 use std::path::PathBuf;
 #[cfg(target_arch = "wasm32")]
@@ -73,7 +73,13 @@ fn promised(rel: &str) -> bool {
     let p = PROMISED.get_or_init(|| {
         let request = request();
         let keys = |kind: &str| -> Vec<String> {
-            request[kind].as_array().into_iter().flatten().filter_map(|i| i["key"].as_str()).map(str::to_string).collect()
+            request[kind]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|i| i["key"].as_str())
+                .map(str::to_string)
+                .collect()
         };
         let mut pictures = HashSet::new();
         for key in keys("wonders") {
@@ -86,15 +92,26 @@ fn promised(rel: &str) -> bool {
         Promised {
             pictures,
             units: keys("units").into_iter().collect(),
-            colors: request["team_colors"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect(),
+            colors: request["team_colors"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .collect(),
         }
     });
     if p.pictures.contains(rel) {
         return true;
     }
     // `<unit key>/<slot>_d<dir>_c<color>.png`
-    let Some((dir, file)) = rel.rsplit_once('/') else { return false };
-    let Some(color) = file.strip_suffix(".png").and_then(|f| f.rsplit_once("_c")).and_then(|(_, c)| c.parse::<u64>().ok()) else {
+    let Some((dir, file)) = rel.rsplit_once('/') else {
+        return false;
+    };
+    let Some(color) = file
+        .strip_suffix(".png")
+        .and_then(|f| f.rsplit_once("_c"))
+        .and_then(|(_, c)| c.parse::<u64>().ok())
+    else {
         return false;
     };
     p.units.contains(dir) && p.colors.contains(&color)
@@ -124,8 +141,10 @@ fn request() -> &'static Value {
     REQUEST.get_or_init(|| {
         #[cfg(target_arch = "wasm32")]
         {
-            serde_json::from_str(&read_text("assets/cache/request.json").expect("assets/cache/request.json"))
-                .expect("assets/cache/request.json parses")
+            serde_json::from_str(
+                &read_text("assets/cache/request.json").expect("assets/cache/request.json"),
+            )
+            .expect("assets/cache/request.json parses")
         }
     })
 }
@@ -148,13 +167,29 @@ fn catalog() -> &'static Catalog {
         let mut add = |path: String, kind: PathKind| {
             paths.entry(norm(&path)).or_insert(kind);
         };
-        add(format!("{root_text}/Conquests/Text/PediaIcons.txt"), PathKind::File);
+        add(
+            format!("{root_text}/Conquests/Text/PediaIcons.txt"),
+            PathKind::File,
+        );
         add(format!("{root_text}/Text/PediaIcons.txt"), PathKind::File);
-        for color in request["team_colors"].as_array().into_iter().flatten().filter_map(Value::as_u64) {
-            add(format!("{root_text}/Art/Units/Palettes/ntp{color:02}.pcx"), PathKind::File);
+        for color in request["team_colors"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_u64)
+        {
+            add(
+                format!("{root_text}/Art/Units/Palettes/ntp{color:02}.pcx"),
+                PathKind::File,
+            );
         }
         for unit in request["units"].as_array().into_iter().flatten() {
-            for dir in unit["dirs"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            for dir in unit["dirs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
                 add(dir.to_string(), PathKind::Dir);
             }
         }
@@ -165,12 +200,21 @@ fn catalog() -> &'static Catalog {
                 }
             }
         }
-        for pic in request["wonders"].as_array().into_iter().flatten().chain(request["techs"].as_array().into_iter().flatten()) {
+        for pic in request["wonders"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .chain(request["techs"].as_array().into_iter().flatten())
+        {
             if let Some(path) = pic["path"].as_str() {
                 add(path.to_string(), PathKind::File);
             }
         }
-        Catalog { root, search, paths }
+        Catalog {
+            root,
+            search,
+            paths,
+        }
     })
 }
 
@@ -182,13 +226,19 @@ pub fn stock_biq() -> &'static [u8] {
 #[cfg(target_arch = "wasm32")]
 pub fn install() -> crate::install::Install {
     let catalog = catalog();
-    crate::install::Install { root: catalog.root.clone(), search: catalog.search.clone() }
+    crate::install::Install {
+        root: catalog.root.clone(),
+        search: catalog.search.clone(),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn resolve(root: &Path, rel: &str) -> Option<PathBuf> {
     let full = format!("{}/{}", norm(&root.to_string_lossy()), norm(rel));
-    catalog().paths.contains_key(&full).then(|| PathBuf::from(full))
+    catalog()
+        .paths
+        .contains_key(&full)
+        .then(|| PathBuf::from(full))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -198,15 +248,22 @@ pub fn kind(path: &Path) -> Option<PathKind> {
 
 fn cache_url(path: &Path) -> Option<String> {
     let path = path.to_string_lossy().replace('\\', "/");
-    path.strip_prefix("assets/cache/").map(|rel| format!("assets/cache/{rel}"))
+    path.strip_prefix("assets/cache/")
+        .map(|rel| format!("assets/cache/{rel}"))
 }
 
 #[cfg(target_arch = "wasm32")]
 fn xhr(url: &str, binary: bool) -> std::io::Result<Vec<u8>> {
     let xhr = XmlHttpRequest::new().map_err(|e| std::io::Error::other(format!("{e:?}")))?;
-    xhr.open_with_async("GET", url, false).map_err(|e| std::io::Error::other(format!("{e:?}")))?;
-    xhr.send().map_err(|e| std::io::Error::other(format!("{e:?}")))?;
-    if xhr.status().map_err(|e| std::io::Error::other(format!("{e:?}")))? != 200 {
+    xhr.open_with_async("GET", url, false)
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+    xhr.send()
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+    if xhr
+        .status()
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?
+        != 200
+    {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, url));
     }
     if !binary {
@@ -216,7 +273,9 @@ fn xhr(url: &str, binary: bool) -> std::io::Result<Vec<u8>> {
             .unwrap_or_default()
             .into_bytes());
     }
-    let response = xhr.response().map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+    let response = xhr
+        .response()
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
     let array = js_sys::Uint8Array::new(&response);
     Ok(array.to_vec())
 }
@@ -230,7 +289,12 @@ pub fn read_text(path: impl AsRef<Path>) -> std::io::Result<String> {
     let path = path.as_ref();
     #[cfg(target_arch = "wasm32")]
     {
-        if path.to_string_lossy().replace('\\', "/").to_ascii_lowercase().ends_with("text/pediaicons.txt") {
+        if path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase()
+            .ends_with("text/pediaicons.txt")
+        {
             return Ok(PEDIA.to_string());
         }
     }
@@ -246,7 +310,10 @@ pub fn read_bytes(path: impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
     let path = path.as_ref();
     #[cfg(target_arch = "wasm32")]
     {
-        let normalized = path.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+        let normalized = path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
         if normalized.ends_with("text/pediaicons.txt") {
             return Ok(PEDIA.as_bytes().to_vec());
         }
@@ -259,7 +326,9 @@ pub fn read_bytes(path: impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
 }
 
 pub fn cache_exists(path: impl AsRef<Path>) -> bool {
-    let Some(url) = cache_url(path.as_ref()) else { return false };
+    let Some(url) = cache_url(path.as_ref()) else {
+        return false;
+    };
     #[cfg(target_arch = "wasm32")]
     {
         // What the request lists is converted in full; only a file it does
@@ -267,7 +336,9 @@ pub fn cache_exists(path: impl AsRef<Path>) -> bool {
         if url.strip_prefix("assets/cache/").is_some_and(promised) {
             return true;
         }
-        let Ok(xhr) = XmlHttpRequest::new() else { return false };
+        let Ok(xhr) = XmlHttpRequest::new() else {
+            return false;
+        };
         if xhr.open_with_async("HEAD", &url, false).is_err() || xhr.send().is_err() {
             return false;
         }

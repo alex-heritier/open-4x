@@ -27,7 +27,9 @@ impl MapRng {
     /// Fresh stage generator: `water_level + K` per the binary.
     #[inline]
     pub fn new(seed: u32) -> Self {
-        MapRng { inner: civ3mapgen::rng::Rng::new(seed) }
+        MapRng {
+            inner: civ3mapgen::rng::Rng::new(seed),
+        }
     }
 
     /// The state, for a saved game (`new` takes it back).
@@ -88,10 +90,7 @@ impl GameRng {
     /// One `rand()` draw, range `0..32768`.
     #[inline]
     pub fn draw(&mut self) -> u32 {
-        self.state = self
-            .state
-            .wrapping_mul(0x343FD)
-            .wrapping_add(0x269EC3);
+        self.state = self.state.wrapping_mul(0x343FD).wrapping_add(0x269EC3);
         (self.state >> 16) & 0x7FFF
     }
 

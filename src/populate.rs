@@ -37,7 +37,9 @@ pub fn populate(
     mut treasury: ResMut<Treasury>,
     mut selected: ResMut<Selected>,
 ) {
-    let Some(sc) = scenario::scenario() else { return };
+    let Some(sc) = scenario::scenario() else {
+        return;
+    };
     place_leads(sc, &mut treasury);
     let mut placed: Vec<City> = vec![];
     let mut skipped = 0;
@@ -62,7 +64,11 @@ pub fn populate(
             ..City::new(slot, row.name.clone(), x, y)
         };
         city.citizens = crate::citizens::new_pool(slot, row.size.max(1));
-        let mut rows: Vec<Production> = row.buildings.iter().map(|&b| Production((crate::roster::unit_count() + b) as u16)).collect();
+        let mut rows: Vec<Production> = row
+            .buildings
+            .iter()
+            .map(|&b| Production((crate::roster::unit_count() + b) as u16))
+            .collect();
         if let Some(p) = crate::roles::palace().filter(|_| row.palace) {
             rows.push(p);
         }
@@ -78,7 +84,10 @@ pub fn populate(
     }
     let human = (0..civ_count()).find(|&c| !is_ai(c)).unwrap_or(0);
     for row in &sc.units {
-        let Some(slot) = sc.slot_of(row.owner).filter(|&s| s < civ_count() || s == BARBARIANS) else {
+        let Some(slot) = sc
+            .slot_of(row.owner)
+            .filter(|&s| s < civ_count() || s == BARBARIANS)
+        else {
             skipped += 1;
             continue;
         };
@@ -93,23 +102,41 @@ pub fn populate(
         } else {
             spawn_unit_at_level(&mut commands, &art, t, x, y, slot, level_of(row.level))
         };
-        commands.entity(e).entry::<crate::units::Unit>().and_modify({
-            let (damage, fortified) = (row.damage, row.fortified);
-            move |mut u| {
-                u.damage = damage;
-                u.fortified = fortified;
-            }
-        });
+        commands
+            .entity(e)
+            .entry::<crate::units::Unit>()
+            .and_modify({
+                let (damage, fortified) = (row.damage, row.fortified);
+                move |mut u| {
+                    u.damage = damage;
+                    u.fortified = fortified;
+                }
+            });
         if slot == human && selected.0.is_none() {
             selected.0 = Some(e);
         }
     }
-    for (slot, lead) in sc.leads.iter().enumerate().filter(|(s, _)| *s < civ_count() && !sc.has_objects(*s)) {
-        let Some((x, y)) = sc.start_of(slot) else { continue };
+    for (slot, lead) in sc
+        .leads
+        .iter()
+        .enumerate()
+        .filter(|(s, _)| *s < civ_count() && !sc.has_objects(*s))
+    {
+        let Some((x, y)) = sc.start_of(slot) else {
+            continue;
+        };
         for &(utype, n) in &lead.starting_units {
             for _ in 0..n.min(20) {
                 if utype < crate::roster::unit_count() {
-                    spawn_unit_at_level(&mut commands, &art, crate::units::UnitType(utype as u16), x, y, slot, Level::Regular);
+                    spawn_unit_at_level(
+                        &mut commands,
+                        &art,
+                        crate::units::UnitType(utype as u16),
+                        x,
+                        y,
+                        slot,
+                        Level::Regular,
+                    );
                 }
             }
         }
@@ -119,14 +146,26 @@ pub fn populate(
     if skipped > 0 {
         warn!("scenario: {skipped} city or unit rows could not be placed and were skipped");
     }
-    info!("scenario: {} cities, {} units placed", placed.len(), sc.units.len());
+    info!(
+        "scenario: {} cities, {} units placed",
+        placed.len(),
+        sc.units.len()
+    );
 }
 
 /// Governments and gold of each lead.
 fn place_leads(sc: &Scenario, treasury: &mut Treasury) {
-    for (slot, lead) in sc.leads.iter().enumerate().filter(|(s, _)| *s < civ_count()) {
+    for (slot, lead) in sc
+        .leads
+        .iter()
+        .enumerate()
+        .filter(|(s, _)| *s < civ_count())
+    {
         treasury.0[slot] = lead.gold;
-        if let Some(g) = lead.government.filter(|&g| g < civ3mapgen::government::SHIPPED.len()) {
+        if let Some(g) = lead
+            .government
+            .filter(|&g| g < civ3mapgen::government::SHIPPED.len())
+        {
             crate::realm::write(slot, |r| r.adopt(g));
         }
     }

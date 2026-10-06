@@ -24,19 +24,30 @@ pub const MASONRY: i32 = 1;
 pub fn can_fortress(map: &GameMap, has_city: bool, x: i32, y: i32) -> bool {
     !has_city
         && map.is_land(x, y)
-        && map.get(x, y).is_some_and(|t| fort_terrain(t) && !t.fortress)
+        && map
+            .get(x, y)
+            .is_some_and(|t| fort_terrain(t) && !t.fortress)
 }
 
 /// Shipped TERR gates for the terrain classes represented by this map.
-fn fort_terrain(t: &Tile) -> bool { !matches!(t.base, Base::Ice | Base::Coast | Base::Sea | Base::Ocean) }
+fn fort_terrain(t: &Tile) -> bool {
+    !matches!(t.base, Base::Ice | Base::Coast | Base::Sea | Base::Ocean)
+}
 
 pub fn can_barricade(map: &GameMap, has_city: bool, x: i32, y: i32) -> bool {
-    !has_city && map.get(x, y).is_some_and(|t| fort_terrain(t) && t.fortress && !t.barricade)
+    !has_city
+        && map
+            .get(x, y)
+            .is_some_and(|t| fort_terrain(t) && t.fortress && !t.barricade)
 }
 
 pub fn can_outpost(map: &GameMap, civ: usize, has_city: bool, x: i32, y: i32) -> bool {
-    !has_city && map.get(x, y).is_some_and(|t| fort_terrain(t)
-        && t.owner.is_none_or(|o| o as usize == civ) && !matches!(t.site, Some(Site::Outpost(_))))
+    !has_city
+        && map.get(x, y).is_some_and(|t| {
+            fort_terrain(t)
+                && t.owner.is_none_or(|o| o as usize == civ)
+                && !matches!(t.site, Some(Site::Outpost(_)))
+        })
 }
 
 pub fn sight(t: &Tile) -> i32 {
@@ -51,7 +62,11 @@ pub fn sight(t: &Tile) -> i32 {
     }
 }
 
-pub fn owner(site: Site) -> usize { match site { Site::Colony(c) | Site::Outpost(c) => c as usize } }
+pub fn owner(site: Site) -> usize {
+    match site {
+        Site::Colony(c) | Site::Outpost(c) => c as usize,
+    }
+}
 
 /// City founding, foreign cultural ownership and foreign entry remove colony
 /// objects (`colonies.md` 7). No war check belongs to the destroyer itself.
@@ -73,8 +88,13 @@ pub fn remove_overrun(
             let civ = owner(site);
             let p = (i as i32 % w, i as i32 / w);
             (cities.iter().any(|c| (c.x, c.y) == p)
-                || t.owner.is_some_and(|o| match site { Site::Colony(_) => true, Site::Outpost(_) => o as usize != civ })
-                || units.iter().any(|u| u.carrier.is_none() && (u.x, u.y) == p && u.civ != civ))
+                || t.owner.is_some_and(|o| match site {
+                    Site::Colony(_) => true,
+                    Site::Outpost(_) => o as usize != civ,
+                })
+                || units
+                    .iter()
+                    .any(|u| u.carrier.is_none() && (u.x, u.y) == p && u.civ != civ))
             .then_some(i)
         })
         .collect();
@@ -157,13 +177,23 @@ mod tests {
         assert!(!can_barricade(&map, false, x, y));
         map.tiles[i].fortress = true;
         assert!(can_barricade(&map, false, x, y));
-        crate::improvements::apply_work(&mut map.tiles[i], crate::improvements::WorkAction::Barricade);
+        crate::improvements::apply_work(
+            &mut map.tiles[i],
+            crate::improvements::WorkAction::Barricade,
+        );
         assert!(map.tiles[i].fortress && map.tiles[i].barricade);
         assert!(!can_barricade(&map, false, x, y));
-        assert_eq!(civ3mapgen::combat::Structure::from_overlay(true, true), civ3mapgen::combat::Structure::Fortress);
+        assert_eq!(
+            civ3mapgen::combat::Structure::from_overlay(true, true),
+            civ3mapgen::combat::Structure::Fortress
+        );
         map.tiles[i].site = Some(Site::Outpost(1));
         assert!(!can_outpost(&map, 1, false, x, y));
-        for (relief, radius) in [(crate::map::Relief::Flat, 1), (crate::map::Relief::Hill, 2), (crate::map::Relief::Mountain, 3)] {
+        for (relief, radius) in [
+            (crate::map::Relief::Flat, 1),
+            (crate::map::Relief::Hill, 2),
+            (crate::map::Relief::Mountain, 3),
+        ] {
             map.tiles[i].relief = relief;
             assert_eq!(sight(&map.tiles[i]), radius);
         }
@@ -204,7 +234,11 @@ mod tests {
         assert!(colony_refusal(&map, |_| false, false, false, x, y).is_some());
         assert_eq!(colony_refusal(&map, |_| true, false, false, x, y), None);
         map.tiles[i].fortress = true;
-        assert_eq!(ok(&map, false, false), None, "a fortress can share a colony tile");
+        assert_eq!(
+            ok(&map, false, false),
+            None,
+            "a fortress can share a colony tile"
+        );
     }
 
     #[test]
@@ -215,12 +249,19 @@ mod tests {
         assert!(map.tiles[i].road);
         let diamonds = map.tiles[i].resource.unwrap();
         let free = |_: i32, _: i32| None;
-        assert_eq!(colony_goods(&map, 1, &free).collect::<Vec<_>>(), vec![diamonds]);
+        assert_eq!(
+            colony_goods(&map, 1, &free).collect::<Vec<_>>(),
+            vec![diamonds]
+        );
         assert_eq!(colony_goods(&map, 0, &free).count(), 0, "nobody else's");
         let rival = |_: i32, _: i32| Some(2);
         assert_eq!(colony_goods(&map, 1, &rival).count(), 0, "a rival's border");
         let own = |_: i32, _: i32| Some(1);
-        assert_eq!(colony_goods(&map, 1, &own).count(), 1, "its own border is fine");
+        assert_eq!(
+            colony_goods(&map, 1, &own).count(),
+            1,
+            "its own border is fine"
+        );
     }
 
     #[test]

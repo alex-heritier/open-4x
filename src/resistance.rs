@@ -80,17 +80,42 @@ impl Nations {
 }
 
 fn ids(city: &City) -> Vec<usize> {
-    city.citizens.slots().iter().enumerate().filter(|(_, c)| c.is_some()).map(|(i, _)| i).collect()
+    city.citizens
+        .slots()
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.is_some())
+        .map(|(i, _)| i)
+        .collect()
 }
 
-fn reroll(c: &mut Citizen, initial: bool, owner: usize, n: &Nations, rng: &mut crate::rng::MapRng) -> bool {
-    native::reroll(c, initial, &CULT, &GOVT_RESISTANCE, |race| n.standing(owner, race), |m| rng.below(m as u32))
+fn reroll(
+    c: &mut Citizen,
+    initial: bool,
+    owner: usize,
+    n: &Nations,
+    rng: &mut crate::rng::MapRng,
+) -> bool {
+    native::reroll(
+        c,
+        initial,
+        &CULT,
+        &GOVT_RESISTANCE,
+        |race| n.standing(owner, race),
+        |m| rng.below(m as u32),
+    )
 }
 
 /// `0x4BB090` after a capture by `captor` (the city's new owner): returns
 /// how many citizens resist, the `RESISTERS` count. A culture conversion
 /// only marks the pending race and rolls nothing.
-pub fn seed(city: &mut City, captor: usize, convert: bool, n: &Nations, rng: &mut crate::rng::MapRng) -> i32 {
+pub fn seed(
+    city: &mut City,
+    captor: usize,
+    convert: bool,
+    n: &Nations,
+    rng: &mut crate::rng::MapRng,
+) -> i32 {
     let race = crate::civs::roster_index(captor) as i32;
     let mut resisting = 0;
     for i in ids(city) {
@@ -105,7 +130,12 @@ pub fn seed(city: &mut City, captor: usize, convert: bool, n: &Nations, rng: &mu
 
 /// Resisting citizens (`0x4BB2A0(city; -1)`).
 pub fn resisters(city: &City) -> i32 {
-    city.citizens.slots().iter().flatten().filter(|c| c.resister).count() as i32
+    city.citizens
+        .slots()
+        .iter()
+        .flatten()
+        .filter(|c| c.resister)
+        .count() as i32
 }
 
 /// What a city's resistance step reports to its owner.
@@ -121,14 +151,26 @@ pub enum Notice {
 
 /// Sequencer steps 5 and 6 (`0x4BE970`): every citizen's nationality drift,
 /// then resistance quelling by `police` units on the tile.
-pub fn city_step(city: &mut City, police: i32, n: &Nations, rng: &mut crate::rng::MapRng) -> Vec<Notice> {
+pub fn city_step(
+    city: &mut City,
+    police: i32,
+    n: &Nations,
+    rng: &mut crate::rng::MapRng,
+) -> Vec<Notice> {
     let owner = city.civ;
     let mut out = vec![];
     let mut assimilated = 0;
     for i in ids(city) {
         let c = city.citizens.get_mut(i).unwrap();
         let other = civ_of_race(c.race).map_or(0, |s| n.rating[s]);
-        if native::drift(c, n.turn, n.rating[owner], other, GOVT_ASSIMILATION[n.govt[owner]], |m| rng.below(m as u32)) {
+        if native::drift(
+            c,
+            n.turn,
+            n.rating[owner],
+            other,
+            GOVT_ASSIMILATION[n.govt[owner]],
+            |m| rng.below(m as u32),
+        ) {
             assimilated += 1;
         }
     }
@@ -139,7 +181,10 @@ pub fn city_step(city: &mut City, police: i32, n: &Nations, rng: &mut crate::rng
     let quelling = police * DIFF_QUELLED[crate::scenario::difficulty()];
     if before > 0 && quelling > 0 {
         let slots = ids(city);
-        let mut pool: Vec<Citizen> = slots.iter().map(|&i| city.citizens.slots()[i].clone().unwrap()).collect();
+        let mut pool: Vec<Citizen> = slots
+            .iter()
+            .map(|&i| city.citizens.slots()[i].clone().unwrap())
+            .collect();
         let quelled = {
             let mut refs: Vec<&mut Citizen> = pool.iter_mut().collect();
             native::quell(&mut refs, quelling, |c| reroll(c, false, owner, n, rng))
@@ -194,8 +239,22 @@ mod tests {
         assert_eq!(n, want);
         assert_eq!(rng.state(), expect.state(), "one draw per foreign citizen");
         assert_eq!(resisters(&city), want);
-        assert!(city.citizens.slots().iter().flatten().all(|c| c.pending_race == crate::civs::roster_index(0) as i32 && c.pending_turn == 40));
-        assert!(city.citizens.slots().iter().flatten().filter(|c| c.resister).all(|c| c.work == 0 && c.job == 0));
+        assert!(
+            city.citizens
+                .slots()
+                .iter()
+                .flatten()
+                .all(|c| c.pending_race == crate::civs::roster_index(0) as i32
+                    && c.pending_turn == 40)
+        );
+        assert!(
+            city.citizens
+                .slots()
+                .iter()
+                .flatten()
+                .filter(|c| c.resister)
+                .all(|c| c.work == 0 && c.job == 0)
+        );
     }
 
     #[test]

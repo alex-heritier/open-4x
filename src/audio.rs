@@ -106,10 +106,7 @@ pub fn start_peace_music(commands: &mut Commands, audio: &mut GameAudio) {
         commands.entity(e).despawn();
     }
     let e = commands
-        .spawn((
-            AudioPlayer(audio.peace.clone()),
-            PlaybackSettings::LOOP,
-        ))
+        .spawn((AudioPlayer(audio.peace.clone()), PlaybackSettings::LOOP))
         .id();
     audio.music = Some(e);
 }

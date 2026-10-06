@@ -19,9 +19,9 @@ use crate::units::{self, Selected, TurnEnded, Unit};
 pub struct Hovered(pub Option<(i32, i32)>);
 
 /// How long the left button must stay down on a tile before the move
-/// preview appears. Civ3 waits about this long; a quicker click still
-/// orders the move, it just never draws the route.
-pub const HOLD_SECS: f32 = 0.3;
+/// preview appears. Civ3 draws the path from the press, so there is no
+/// wait: a click still orders on release, it just barely shows the route.
+pub const HOLD_SECS: f32 = 0.0;
 
 /// Destination the route is drawn for, or None for no preview. Civ3 shows
 /// the path and the destination tile only while the Go-to command is armed
@@ -38,6 +38,28 @@ pub(crate) struct Hold {
     /// A press started while a unit was selected.
     armed: bool,
     secs: f32,
+}
+
+/// Where the current left press began, if map input was live then: a
+/// release only orders when its press started on the map, so a click
+/// whose press closes a modal (or lands on a UI button) never also
+/// selects a unit or orders a move on the release.
+#[derive(Resource, Default)]
+pub struct MapPress(pub Option<(i32, i32)>);
+
+/// Remember whether the press started on the map. This runs under the
+/// same gates as `orders`, so a press while a modal is up records
+/// nothing; the splash counts as not the map, since the press dismisses
+/// it and the release must not order behind the title screen.
+pub fn track_press(
+    buttons: Res<ButtonInput<MouseButton>>,
+    hovered: Res<Hovered>,
+    splash: Res<SplashUp>,
+    mut press: ResMut<MapPress>,
+) {
+    if buttons.just_pressed(MouseButton::Left) {
+        press.0 = if splash.0 { None } else { hovered.0 };
+    }
 }
 
 pub fn camera_control(
@@ -189,7 +211,13 @@ pub fn hold_preview(
     }
 }
 
-fn move_order(map: &GameMap, units: &mut Query<(Entity, &mut Unit)>, s: Entity, dest: (i32, i32), ports: &[(i32, i32)]) {
+fn move_order(
+    map: &GameMap,
+    units: &mut Query<(Entity, &mut Unit)>,
+    s: Entity,
+    dest: (i32, i32),
+    ports: &[(i32, i32)],
+) {
     let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
     if let Ok((_, mut u)) = units.get_mut(s) {
         crate::naval::order_move(map, &mut u, dest, ports, &snapshot);
@@ -265,9 +293,7 @@ mod tests {
         let mut app = app(true);
         press(&mut app);
         app.update();
-        // Still under the delay: Civ3 waits before it draws the path.
-        assert_eq!(preview(&app), None);
-        wait(&mut app, HOLD_SECS + 0.05);
+        // Civ3 draws the path from the press, with no hold delay.
         assert_eq!(preview(&app), Some((12, 12)));
     }
 
@@ -286,7 +312,7 @@ mod tests {
     fn the_preview_follows_the_pointer_while_held() {
         let mut app = app(true);
         press(&mut app);
-        wait(&mut app, HOLD_SECS + 0.05);
+        app.update();
         assert_eq!(preview(&app), Some((12, 12)));
         // Sliding to another tile while the button is still down aims there.
         app.world_mut().resource_mut::<Hovered>().0 = Some((11, 13));
@@ -318,6 +344,40 @@ mod tests {
         app.update();
         assert_eq!(preview(&app), None);
     }
+
+    fn press_app(hovered: Option<(i32, i32)>, splash: bool) -> App {
+        let mut app = App::new();
+        app.insert_resource(Hovered(hovered));
+        app.insert_resource(crate::splash::SplashUp(splash));
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.init_resource::<MapPress>();
+        app.add_systems(Update, track_press);
+        app
+    }
+
+    #[test]
+    fn a_press_on_a_tile_arms_its_release() {
+        let mut app = press_app(Some((12, 12)), false);
+        press(&mut app);
+        app.update();
+        assert_eq!(app.world().resource::<MapPress>().0, Some((12, 12)));
+    }
+
+    #[test]
+    fn a_press_over_ui_arms_nothing() {
+        let mut app = press_app(None, false);
+        press(&mut app);
+        app.update();
+        assert_eq!(app.world().resource::<MapPress>().0, None);
+    }
+
+    #[test]
+    fn a_press_on_the_splash_arms_nothing() {
+        let mut app = press_app(Some((12, 12)), true);
+        press(&mut app);
+        app.update();
+        assert_eq!(app.world().resource::<MapPress>().0, None);
+    }
 }
 
 fn order_with_sfx(
@@ -344,6 +404,7 @@ pub struct Targeting<'w> {
     goto: ResMut<'w, GotoMode>,
     bombard: ResMut<'w, crate::bombard::TargetMode>,
     shots: MessageWriter<'w, crate::bombard::Order>,
+    press: ResMut<'w, MapPress>,
 }
 
 pub fn orders(
@@ -364,7 +425,11 @@ pub fn orders(
     mut targeting: Targeting,
     mut cmds: MessageWriter<UnitCommand>,
 ) {
-    let ports: Vec<_> = cities.iter().filter(|(_, c)| c.civ == civs.active && c.coastal).map(|(_, c)| (c.x, c.y)).collect();
+    let ports: Vec<_> = cities
+        .iter()
+        .filter(|(_, c)| c.civ == civs.active && c.coastal)
+        .map(|(_, c)| (c.x, c.y))
+        .collect();
     if view.0.is_some() || splash.0 {
         return;
     }
@@ -372,7 +437,9 @@ pub fn orders(
         targeting.goto.0 = false;
         targeting.bombard.0 = None;
     }
-    if targeting.bombard.0 != selected.0 { targeting.bombard.0 = None; }
+    if targeting.bombard.0 != selected.0 {
+        targeting.bombard.0 = None;
+    }
     for c in key_commands(&keys) {
         cmds.write(c);
     }
@@ -390,10 +457,16 @@ pub fn orders(
             audio::sfx(&mut commands, &audio, "City View");
         }
     }
-    if buttons.just_released(MouseButton::Left) {
+    // The release only orders when its press began on the map: the press
+    // that closes a modal lands on map tiles on the way up, and without
+    // this the same click would also select or move the selected unit.
+    if buttons.just_released(MouseButton::Left) && targeting.press.0.take().is_some() {
         if let Some((x, y)) = hovered.0 {
             if let Some(attacker) = targeting.bombard.0.take() {
-                targeting.shots.write(crate::bombard::Order { attacker, to: (x, y) });
+                targeting.shots.write(crate::bombard::Order {
+                    attacker,
+                    to: (x, y),
+                });
                 return;
             }
             if targeting.goto.0 {

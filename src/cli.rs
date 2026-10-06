@@ -171,7 +171,11 @@ where
             "--barbarians" => o.barbarians = Some(value(&mut args)?),
             "--seed" => {
                 let v = value(&mut args)?;
-                o.seed = Some(v.trim().parse().map_err(|_| format!("--seed: {v:?} is not a number"))?);
+                o.seed = Some(
+                    v.trim()
+                        .parse()
+                        .map_err(|_| format!("--seed: {v:?} is not a number"))?,
+                );
             }
             _ => return Err(format!("unknown option {flag}\n\n{USAGE}")),
         }
@@ -181,7 +185,11 @@ where
 }
 
 fn split_names(list: &str) -> Vec<String> {
-    list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect()
+    list.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 impl Options {
@@ -191,15 +199,24 @@ impl Options {
             self.seed = env.get("MAP_SEED").and_then(|s| s.trim().parse().ok());
         }
         if self.civ3.is_none() {
-            self.civ3 = env.get("CIV3_DIR").or_else(|| env.get("CIV3_GOG")).map(PathBuf::from);
+            self.civ3 = env
+                .get("CIV3_DIR")
+                .or_else(|| env.get("CIV3_GOG"))
+                .map(PathBuf::from);
         }
         if self.assets.is_none() {
             self.assets = env.get("CIV3_ASSETS").map(PathBuf::from);
         }
         // `CIV3_CIVS` lists the human first; `CIV3_PLAYER` then overrides the human.
-        let listed = env.get("CIV3_CIVS").map(|l| split_names(&l)).unwrap_or_default();
+        let listed = env
+            .get("CIV3_CIVS")
+            .map(|l| split_names(&l))
+            .unwrap_or_default();
         if self.civ.is_none() {
-            self.civ = env.get("CIV3_PLAYER").map(|s| s.trim().to_string()).or_else(|| listed.first().cloned());
+            self.civ = env
+                .get("CIV3_PLAYER")
+                .map(|s| s.trim().to_string())
+                .or_else(|| listed.first().cloned());
         }
         if self.opponents.is_none() && listed.len() > 1 {
             self.opponents = Some(Opponents::Names(listed[1..].to_vec()));
@@ -218,7 +235,9 @@ impl Options {
 
     /// The file to play: the named one, else the stock `conquests.biq`.
     pub fn file_or_default(&self) -> PathBuf {
-        self.file.clone().unwrap_or_else(|| self.civ3_dir().join("Conquests").join("conquests.biq"))
+        self.file
+            .clone()
+            .unwrap_or_else(|| self.civ3_dir().join("Conquests").join("conquests.biq"))
     }
 
     /// `.sav` is a saved game, anything else a BIQ.
@@ -228,7 +247,12 @@ impl Options {
 }
 
 pub fn kind_of(path: &Path) -> FileKind {
-    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("sav") => FileKind::Sav,
         _ => FileKind::Biq,
     }
@@ -288,13 +312,34 @@ mod tests {
     #[test]
     fn opponent_names() {
         let o = p(&["--opponents", "Egypt, China"]).unwrap();
-        assert_eq!(o.opponents, Some(Opponents::Names(vec!["Egypt".into(), "China".into()])));
+        assert_eq!(
+            o.opponents,
+            Some(Opponents::Names(vec!["Egypt".into(), "China".into()]))
+        );
     }
 
     #[test]
     fn the_world_flags() {
-        let o = p(&["x.biq", "--size", "Huge", "--land", "Pangaea", "--water", "60%", "--climate", "Wet",
-            "--temperature", "Warm", "--age", "5 Billion", "--barbarians", "Raging", "--difficulty", "Deity"]).unwrap();
+        let o = p(&[
+            "x.biq",
+            "--size",
+            "Huge",
+            "--land",
+            "Pangaea",
+            "--water",
+            "60%",
+            "--climate",
+            "Wet",
+            "--temperature",
+            "Warm",
+            "--age",
+            "5 Billion",
+            "--barbarians",
+            "Raging",
+            "--difficulty",
+            "Deity",
+        ])
+        .unwrap();
         assert_eq!(o.size.as_deref(), Some("Huge"));
         assert_eq!(o.land.as_deref(), Some("Pangaea"));
         assert_eq!(o.water.as_deref(), Some("60%"));
@@ -315,10 +360,18 @@ mod tests {
         let o = parse(["--seed", "5"], &env).unwrap();
         assert_eq!(o.seed, Some(5));
         assert_eq!(o.civ.as_deref(), Some("Rome"));
-        assert_eq!(o.opponents, Some(Opponents::Names(vec!["Egypt".into(), "China".into()])));
+        assert_eq!(
+            o.opponents,
+            Some(Opponents::Names(vec!["Egypt".into(), "China".into()]))
+        );
         assert_eq!(o.civ3_dir(), PathBuf::from("/opt/civ3"));
         assert_eq!(o.assets_dir(), o.civ3_dir());
-        let env: HashMap<&str, &str> = HashMap::from([("CIV3_PLAYER", "Japan"), ("CIV3_DIR", "/a"), ("CIV3_GOG", "/b"), ("CIV3_ASSETS", "/art")]);
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("CIV3_PLAYER", "Japan"),
+            ("CIV3_DIR", "/a"),
+            ("CIV3_GOG", "/b"),
+            ("CIV3_ASSETS", "/art"),
+        ]);
         let o = parse::<_, &str>([], &env).unwrap();
         assert_eq!(o.civ.as_deref(), Some("Japan"));
         assert_eq!(o.civ3_dir(), PathBuf::from("/a"));
@@ -327,17 +380,28 @@ mod tests {
         assert_eq!(o.civ.as_deref(), Some("Rome"));
         assert_eq!(o.civ3_dir(), PathBuf::from("/c"));
         assert_eq!(o.assets_dir(), PathBuf::from("/stub"));
-        assert_eq!(p(&["--civ3", "/custom"]).unwrap().assets_dir(), PathBuf::from("/custom"));
+        assert_eq!(
+            p(&["--civ3", "/custom"]).unwrap().assets_dir(),
+            PathBuf::from("/custom")
+        );
         assert_eq!(p(&[]).unwrap().assets_dir(), p(&[]).unwrap().civ3_dir());
     }
 
     #[test]
     fn bad_command_lines() {
-        assert!(p(&["--nope"]).unwrap_err().contains("unknown option --nope"));
+        assert!(
+            p(&["--nope"])
+                .unwrap_err()
+                .contains("unknown option --nope")
+        );
         assert!(p(&["--seed"]).unwrap_err().contains("needs a value"));
         assert!(p(&["--assets"]).unwrap_err().contains("needs a value"));
         assert!(p(&["--seed", "x"]).unwrap_err().contains("not a number"));
-        assert!(p(&["a.biq", "b.biq"]).unwrap_err().contains("more than one file"));
+        assert!(
+            p(&["a.biq", "b.biq"])
+                .unwrap_err()
+                .contains("more than one file")
+        );
         assert_eq!(p(&["--help"]).unwrap_err(), USAGE);
     }
 }

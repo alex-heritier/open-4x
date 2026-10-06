@@ -20,7 +20,9 @@ pub fn scale_for(width: f32, height: f32) -> f32 {
 
 /// The scale for the primary window (1 without one, as in tests).
 pub fn scale_of(windows: &Query<&Window, With<PrimaryWindow>>) -> f32 {
-    windows.single().map_or(1.0, |w| scale_for(w.width(), w.height()))
+    windows
+        .single()
+        .map_or(1.0, |w| scale_for(w.width(), w.height()))
 }
 
 /// One scale, applied to every length of a screen.
@@ -67,25 +69,63 @@ pub struct Ui<'a> {
 
 impl Ui<'_> {
     /// A picture of the art at `(x, y)` of the stage, `w` x `h` big.
-    pub fn picture(&self, parent: &mut ChildSpawnerCommands, image: ImageNode, x: f32, y: f32, w: f32, h: f32) -> Entity {
+    pub fn picture(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        image: ImageNode,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    ) -> Entity {
         parent.spawn((self.st.rect(x, y, w, h), image)).id()
     }
 
     /// Words in a box of the art; `center` centers every line.
     #[allow(clippy::too_many_arguments)]
-    pub fn words(&self, parent: &mut ChildSpawnerCommands, x: f32, y: f32, w: f32, h: f32, s: impl Into<String>, size: f32, color: Color, center: bool) {
+    pub fn words(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: impl Into<String>,
+        size: f32,
+        color: Color,
+        center: bool,
+    ) {
         parent.spawn((
             self.st.rect(x, y, w, h),
             Text::new(s),
-            TextFont { font: self.font.clone(), font_size: self.st.font(size), ..default() },
+            TextFont {
+                font: self.font.clone(),
+                font_size: self.st.font(size),
+                ..default()
+            },
             TextColor(color),
-            TextLayout::new_with_justify(if center { Justify::Center } else { Justify::Left }),
+            TextLayout::new_with_justify(if center {
+                Justify::Center
+            } else {
+                Justify::Left
+            }),
         ));
     }
 
     /// A button of the art with `action` on it; `on` washes it green.
     #[allow(clippy::too_many_arguments)]
-    pub fn button<A: Component>(&self, parent: &mut ChildSpawnerCommands, x: f32, y: f32, w: f32, h: f32, label: impl Into<String>, size: f32, action: A, on: bool) {
+    pub fn button<A: Component>(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        label: impl Into<String>,
+        size: f32,
+        action: A,
+        on: bool,
+    ) {
         parent
             .spawn((
                 Button,
@@ -102,7 +142,11 @@ impl Ui<'_> {
             .with_children(|b| {
                 b.spawn((
                     Text::new(label),
-                    TextFont { font: self.font.clone(), font_size: self.st.font(size), ..default() },
+                    TextFont {
+                        font: self.font.clone(),
+                        font_size: self.st.font(size),
+                        ..default()
+                    },
                     TextColor(LABEL),
                     TextLayout::new_with_justify(Justify::Center),
                 ));
@@ -112,9 +156,19 @@ impl Ui<'_> {
 
 /// A full-window root that dims the game and centers the stage inside it.
 /// Returns the stage node's id; the screen's children go under it.
-pub fn spawn<M: Component>(commands: &mut Commands, marker: M, stage: Stage, dim: f32, z: i32) -> Entity {
+pub fn spawn<M: Component>(
+    commands: &mut Commands,
+    marker: M,
+    stage: Stage,
+    dim: f32,
+    z: i32,
+) -> Entity {
     let inner = commands
-        .spawn(Node { width: stage.px(WIDTH), height: stage.px(HEIGHT), ..default() })
+        .spawn(Node {
+            width: stage.px(WIDTH),
+            height: stage.px(HEIGHT),
+            ..default()
+        })
         .id();
     commands
         .spawn((
@@ -140,7 +194,11 @@ mod tests {
     #[test]
     fn the_stage_fits_the_window_and_never_grows() {
         assert_eq!(scale_for(1024.0, 768.0), 1.0);
-        assert_eq!(scale_for(1280.0, 800.0), 1.0, "the default window shows the art whole");
+        assert_eq!(
+            scale_for(1280.0, 800.0),
+            1.0,
+            "the default window shows the art whole"
+        );
         assert_eq!(scale_for(2560.0, 1600.0), 1.0, "the art is not enlarged");
         assert_eq!(scale_for(512.0, 768.0), 0.5, "the narrow side decides");
         assert_eq!(scale_for(1024.0, 384.0), 0.5);

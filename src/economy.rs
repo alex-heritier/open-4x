@@ -51,8 +51,14 @@ pub fn granary_keep(size: u8) -> u8 {
 pub fn unit_support_cost(civ: usize, sizes: &[u8], units: usize) -> u32 {
     let classes = sizes.iter().map(|&s| i32::from(size_class(s)));
     let terms = crate::realm::govt(civ).support(classes);
-    civ3mapgen::economy::unit_support_charge(sizes.len() as i32, units as i32, 0, terms.free, terms.per_unit)
-        .max(0) as u32
+    civ3mapgen::economy::unit_support_charge(
+        sizes.len() as i32,
+        units as i32,
+        0,
+        terms.free,
+        terms.per_unit,
+    )
+    .max(0) as u32
 }
 
 /// Gold of upkeep a city's improvements cost each turn (none in Anarchy).
@@ -150,7 +156,11 @@ pub fn sale_price(civ: usize, improvement: Production) -> u32 {
 fn keep_rank(t: UnitType) -> (u16, bool, usize) {
     let r = t.row();
     if r.playable {
-        (Production::from_unit(t).cost(), r.attack == 0 && r.defense == 0, t.0 as usize)
+        (
+            Production::from_unit(t).cost(),
+            r.attack == 0 && r.defense == 0,
+            t.0 as usize,
+        )
     } else {
         (u16::MAX, true, usize::MAX)
     }
@@ -320,7 +330,8 @@ mod tests {
             }
         }
         a.buildings.push(Production::named("Temple"));
-        b.buildings.extend([Production::named("Barracks"), Production::named("Granary")]);
+        b.buildings
+            .extend([Production::named("Barracks"), Production::named("Granary")]);
         let f = finance(&map, [&a, &b], 9);
         assert_eq!(f.tax, 2);
         assert_eq!(f.upkeep, 3);
@@ -352,7 +363,10 @@ mod tests {
     #[test]
     fn at_equal_price_a_warrior_goes_before_a_worker_whatever_the_ids() {
         for (warrior, worker) in [(1u32, 9u32), (9, 1)] {
-            let units = [(worker, UnitType::named("Worker")), (warrior, UnitType::named("Warrior"))];
+            let units = [
+                (worker, UnitType::named("Worker")),
+                (warrior, UnitType::named("Warrior")),
+            ];
             assert_eq!(
                 disband_pick(units),
                 Some((warrior, UnitType::named("Warrior"))),
@@ -361,7 +375,10 @@ mod tests {
         }
         // With no Warrior left the Worker is next, ahead of the Scout that
         // costs the same but is listed after it.
-        let rest = [(2u32, UnitType::named("Scout")), (7, UnitType::named("Worker"))];
+        let rest = [
+            (2u32, UnitType::named("Scout")),
+            (7, UnitType::named("Worker")),
+        ];
         assert_eq!(disband_pick(rest), Some((7, UnitType::named("Worker"))));
     }
 

@@ -251,9 +251,9 @@ cursor is the destination marker, so it only appears while a route is
 being aimed.
 `input::MovePreview` is the single source for that: the armed Go-to
 command previews under the pointer, and otherwise only a press held on a
-tile for `input::HOLD_SECS` (0.3 s) does — a quick click still just
-orders the move, and the preview follows the pointer while the button is
-down. The left button never pans the map, as in Civ3: panning is W/A/S/D
+tile does — the path draws from the press, a quick click still just
+orders the move on release, and the preview follows the pointer while the
+button is down. The left button never pans the map, as in Civ3: panning is W/A/S/D
 and the wheel zoom (`input::camera_control`). The route line and the end
 marker (`units::selection_gizmo`) and the "path N steps, M
 turns" readout (`ui::update_hover_label`) both follow the preview, so
@@ -262,8 +262,11 @@ they show for Go-to, for the held press, and never for a hover.
 Deviations to revisit: Civ3 also draws the selected unit's readout (moves
 left, home city) in its bottom-right box, which the clone already labels
 with the unit and its turns; the ring has no civ color, matching the
-game's white ellipse; the hold delay is a guess (0.3 s) set by feel; the
-ring's 4 dark notches are part of the FLC's frame and are left as drawn.
+game's white ellipse; the ring's 4 dark notches are part of the FLC's
+frame and are left as drawn. Steps last one RUN cycle at the art's FLC
+speed (`units::step_duration`), and a release only orders when its press
+began on the map (`input::MapPress`), so clicks that close a modal never
+also move the selected unit.
 Verified: `cargo test` 92/92 (7 hold/preview and 2 ring tests), `cargo build`
 clean, unattended captures of the plain selection, the held preview, the
 move after release and the armed Go-to preview, plus a live cliclick

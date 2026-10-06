@@ -131,16 +131,15 @@ pub fn update_hover_label(
             // while a Go-to or a held press is being aimed, not on a hover.
             if preview.0 == Some((x, y)) {
                 if let Some(u) = selected.0.and_then(|s| units.get(s).ok().map(|(_, u)| u)) {
-                    let ports: Vec<_> = cities.iter().filter(|c| c.civ == u.civ && c.coastal).map(|c| (c.x, c.y)).collect();
+                    let ports: Vec<_> = cities
+                        .iter()
+                        .filter(|c| c.civ == u.civ && c.coastal)
+                        .map(|c| (c.x, c.y))
+                        .collect();
                     let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
                     match crate::naval::route(&map, u, (x, y), &ports, &snapshot) {
                         Some(p) => {
-                            let extra = units::path_turns(
-                                &map,
-                                u,
-                                &p,
-                                &ports,
-                            );
+                            let extra = units::path_turns(&map, u, &p, &ports);
                             parts.push(format!(
                                 "path {} steps, {}",
                                 p.len(),
@@ -187,7 +186,6 @@ pub fn update_message_label(
         text.0.clear();
     }
 }
-
 
 /// Show the verdict once the game is decided.
 pub fn update_game_over(

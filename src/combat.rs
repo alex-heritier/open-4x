@@ -25,14 +25,16 @@ use crate::features::{MessageBoard, post};
 use crate::map::*;
 use crate::production_prompt::ProductionPrompts;
 use crate::rng::MapRng;
-use crate::units::{Unit, UnitAnim, UnitArt, UnitType, def, spawn_unit, step_to};
+use crate::units::{Unit, UnitAnim, UnitArt, UnitType, def, spawn_unit, step_duration, step_to};
 
 // ---------------------------------------------------------------------------
 // Experience, hit points, healing
 // ---------------------------------------------------------------------------
 
 /// Experience level, the row of `EXPR` in `conquests.biq`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub enum Level {
     /// The lowest `EXPR` row; nothing demotes a unit yet.
     #[allow(dead_code)]
@@ -91,7 +93,9 @@ pub enum Rest {
 /// Where `u` is resting: in one of its own cities, with or without Barracks.
 pub fn rest_of<'a>(u: &Unit, mut cities: impl Iterator<Item = &'a City>) -> Rest {
     match cities.find(|c| c.civ == u.civ && (c.x, c.y) == (u.x, u.y)) {
-        Some(c) if crate::citycalc::has_flag(c, crate::roster::imp::VETERAN_GROUND_UNITS) => Rest::Barracks,
+        Some(c) if crate::citycalc::has_flag(c, crate::roster::imp::VETERAN_GROUND_UNITS) => {
+            Rest::Barracks
+        }
         Some(_) => Rest::City,
         None => Rest::Field,
     }
@@ -137,7 +141,11 @@ impl Hold {
     /// A city with no defensive improvements.
     #[cfg(test)]
     pub fn bare(size: u8) -> Hold {
-        Hold { size, resisters: 0, building_pct: 0 }
+        Hold {
+            size,
+            resisters: 0,
+            building_pct: 0,
+        }
     }
 
     pub fn of(city: &City) -> Hold {
@@ -155,7 +163,12 @@ impl Hold {
         Hold {
             size: city.size(),
             resisters: crate::resistance::resisters(city),
-            building_pct: exe::city_building_bonus(i32::from(city.size()), false, &list, &exe::Rules::CONQUESTS),
+            building_pct: exe::city_building_bonus(
+                i32::from(city.size()),
+                false,
+                &list,
+                &exe::Rules::CONQUESTS,
+            ),
         }
     }
 }
@@ -187,12 +200,19 @@ pub fn defense_pct(map: &GameMap, d: &Unit, hold: Option<Hold>) -> i32 {
 /// 4.5): its difficulty's `DIFF +0x64`, plus 100 with the Great Wall.
 fn barbarian_term(att: &Unit, dfn: &Unit, for_attacker: bool) -> i32 {
     use crate::civs::is_barbarian;
-    let (me, them) = if for_attacker { (att.civ, dfn.civ) } else { (dfn.civ, att.civ) };
+    let (me, them) = if for_attacker {
+        (att.civ, dfn.civ)
+    } else {
+        (dfn.civ, att.civ)
+    };
     if !is_barbarian(them) || is_barbarian(me) {
         return 0;
     }
     let wall = crate::naval::wonders(me) & crate::roster::wonder::DOUBLE_VS_BARBARIANS != 0;
-    exe::barbarian_term(exe::DIFF_VS_BARBARIAN_PCT[crate::scenario::difficulty()], wall)
+    exe::barbarian_term(
+        exe::DIFF_VS_BARBARIAN_PCT[crate::scenario::difficulty()],
+        wall,
+    )
 }
 
 pub fn round_odds(map: &GameMap, att: &Unit, dfn: &Unit, hold: Option<Hold>) -> i32 {
@@ -207,13 +227,22 @@ pub fn round_odds(map: &GameMap, att: &Unit, dfn: &Unit, hold: Option<Hold>) -> 
             status_bit2: att.attacked,
             ability_blitz: def(att.utype).abilities & crate::roster::ability::BLITZ != 0,
             land_unit: def(att.utype).class == 0,
-            target_is_water: map.get(dfn.x, dfn.y).is_some_and(|t| crate::improvements::is_water_base(t.base)),
-            origin_is_water: map.get(att.x, att.y).is_some_and(|t| crate::improvements::is_water_base(t.base)),
+            target_is_water: map
+                .get(dfn.x, dfn.y)
+                .is_some_and(|t| crate::improvements::is_water_base(t.base)),
+            origin_is_water: map
+                .get(att.x, att.y)
+                .is_some_and(|t| crate::improvements::is_water_base(t.base)),
         }) + barb_att,
         def_strength: exe::defense_strength(&[], dfn.defense(), false),
         def_army_bonus: dfn.army_bonus(true),
-        def_pct: defense_pct(map, dfn, hold) + barb_def
-            + if crate::rivers::crossed(map, (dfn.x, dfn.y), (att.x, att.y)) { exe::Rules::CONQUESTS.river_pct } else { 0 },
+        def_pct: defense_pct(map, dfn, hold)
+            + barb_def
+            + if crate::rivers::crossed(map, (dfn.x, dfn.y), (att.x, att.y)) {
+                exe::Rules::CONQUESTS.river_pct
+            } else {
+                0
+            },
     })
     .expect("an attacker has attack above 0")
 }
@@ -286,8 +315,13 @@ fn retreat_tile<'a>(
     mut cities: impl Iterator<Item = &'a City>,
 ) -> Option<(i32, i32)> {
     let mut dx = (dfn.x - att.x).rem_euclid(map.w);
-    if dx > map.w / 2 { dx -= map.w; }
-    let to = (map.wrap_x(dfn.x + dx.signum()), dfn.y + (dfn.y - att.y).signum());
+    if dx > map.w / 2 {
+        dx -= map.w;
+    }
+    let to = (
+        map.wrap_x(dfn.x + dx.signum()),
+        dfn.y + (dfn.y - att.y).signum(),
+    );
     if crate::units::entry_cost(map, dfn, (dfn.x, dfn.y), to, &[]).is_none()
         || units.any(|u| (u.x, u.y) == to && u.civ != dfn.civ)
         || cities.any(|c| (c.x, c.y) == to && c.civ != dfn.civ)
@@ -502,30 +536,48 @@ struct SupportShot {
 }
 
 fn domain(t: UnitType) -> exe::Domain {
-    match def(t).class { 1 => exe::Domain::Sea, 2 => exe::Domain::Air, _ => exe::Domain::Land }
+    match def(t).class {
+        1 => exe::Domain::Sea,
+        2 => exe::Domain::Air,
+        _ => exe::Domain::Land,
+    }
 }
 
 /// `0x4A1AE0`: one supporting shooter, excluding the actual defender.
-pub(crate) fn supporting_shooter(att: &Unit, defender: Entity, stack: &[(Entity, Unit)]) -> Option<Entity> {
+pub(crate) fn supporting_shooter(
+    att: &Unit,
+    defender: Entity,
+    stack: &[(Entity, Unit)],
+) -> Option<Entity> {
     let victim = domain(att.utype);
     if !exe::defensive_bombard_victim_ok(victim, def(att.utype).defense, att.hp()) {
         return None;
     }
-    let candidates: Vec<_> = stack.iter().map(|(e, u)| exe::ShooterCandidate {
-        is_defender: *e == defender, carried_by_defender: u.carrier.is_some(),
-        domain: domain(u.utype), bombard_strength: def(u.utype).bombard,
-        has_ability_3: def(u.utype).abilities & (1 << 3) != 0,
-        already_fired: u.defensive_fired,
-    }).collect();
+    let candidates: Vec<_> = stack
+        .iter()
+        .map(|(e, u)| exe::ShooterCandidate {
+            is_defender: *e == defender,
+            carried_by_defender: u.carrier.is_some(),
+            domain: domain(u.utype),
+            bombard_strength: def(u.utype).bombard,
+            has_ability_3: def(u.utype).abilities & (1 << 3) != 0,
+            already_fired: u.defensive_fired,
+        })
+        .collect();
     exe::pick_defensive_shooter(victim, &candidates).map(|i| stack[i].0)
 }
 
 pub(crate) fn support_odds(shooter: &Unit, victim: &Unit) -> i32 {
     // Raw bombard mode has no terrain, tile or fortification terms.
     exe::defender_round_odds(&exe::OddsInput {
-        att_strength: def(shooter.utype).bombard, att_army_bonus: 0, att_pct: 0,
-        def_strength: def(victim.utype).defense, def_army_bonus: 0, def_pct: 0,
-    }).expect("supporting shooter has positive bombard strength")
+        att_strength: def(shooter.utype).bombard,
+        att_army_bonus: 0,
+        att_pct: 0,
+        def_strength: def(victim.utype).defense,
+        def_army_bonus: 0,
+        def_pct: 0,
+    })
+    .expect("supporting shooter has positive bombard strength")
 }
 
 pub struct Sequence {
@@ -596,7 +648,9 @@ impl Realm<'_, '_> {
             // transfer, so food retention sees the old owner's Granary.
             city.lose_population(1, None, rng);
         }
-        let lost = crate::flip::transfer(&mut city, by, was_capital, true, false, || rng.below(4) == 0);
+        let lost = crate::flip::transfer(&mut city, by, was_capital, true, false, || {
+            rng.below(4) == 0
+        });
         let _ = lost;
         drop(city);
         // `0x4BB090`: the foreigners may resist the new owner. City counts
@@ -612,7 +666,10 @@ impl Realm<'_, '_> {
         let resisting = crate::resistance::seed(&mut city, by, false, &nations, rng);
         if by == viewer {
             let mut text = if shrank {
-                format!("We captured {}! Some of its citizens were killed.", city.name)
+                format!(
+                    "We captured {}! Some of its citizens were killed.",
+                    city.name
+                )
             } else {
                 format!("We captured {}!", city.name)
             };
@@ -622,7 +679,11 @@ impl Realm<'_, '_> {
                     " There {} {} {} in {}. We should garrison {} with strong units to quell the resistance.",
                     if resisting == 1 { "is" } else { "are" },
                     resisting,
-                    if resisting == 1 { "resister" } else { "resisters" },
+                    if resisting == 1 {
+                        "resister"
+                    } else {
+                        "resisters"
+                    },
                     city.name,
                     city.name,
                 );
@@ -653,13 +714,24 @@ impl Realm<'_, '_> {
     /// The caller removes the raider.
     fn raid(&mut self, e: Entity, rng: &mut MapRng) {
         use civ3mapgen::capture::{RaidLoss, raid_loot, raid_loss};
-        let cities_owned = |civ: usize, q: &Query<(Entity, &mut City)>| q.iter().filter(|(_, c)| c.civ == civ).count() as i32;
-        let Ok((_, city)) = self.cities.get(e) else { return };
+        let cities_owned = |civ: usize, q: &Query<(Entity, &mut City)>| {
+            q.iter().filter(|(_, c)| c.civ == civ).count() as i32
+        };
+        let Ok((_, city)) = self.cities.get(e) else {
+            return;
+        };
         let owner = city.civ;
         let n = cities_owned(owner, &self.cities).max(1);
         let walls = crate::economy::size_class(city.size()) == 0 && walls_row(city).is_some();
-        let loss = raid_loss(walls, i32::from(city.shields), i32::from(city.nationals(owner)), self.treasury.0[owner] as i32);
-        let Ok((_, mut city)) = self.cities.get_mut(e) else { return };
+        let loss = raid_loss(
+            walls,
+            i32::from(city.shields),
+            i32::from(city.nationals(owner)),
+            self.treasury.0[owner] as i32,
+        );
+        let Ok((_, mut city)) = self.cities.get_mut(e) else {
+            return;
+        };
         let text = match loss {
             RaidLoss::Walls => {
                 if let Some(i) = walls_row(&city) {
@@ -669,7 +741,11 @@ impl Realm<'_, '_> {
             }
             RaidLoss::Stock => {
                 city.shields = 0;
-                format!("Barbarians raid {}! Our work on {} has been destroyed!", city.name, city.production.name())
+                format!(
+                    "Barbarians raid {}! Our work on {} has been destroyed!",
+                    city.name,
+                    city.production.name()
+                )
             }
             RaidLoss::Citizen => {
                 // `0x4BA230(B, 1, race, 0)`: only an owner's national dies.
@@ -773,7 +849,14 @@ fn begin_round(seq: &mut Sequence, art: &UnitArt, units: &mut Query<(Entity, &mu
 }
 
 fn begin_support(seq: &mut Sequence, art: &UnitArt, units: &mut Query<(Entity, &mut Unit)>) {
-    let Kind::Fight { defender, support: Some(shot), .. } = &seq.kind else { return };
+    let Kind::Fight {
+        defender,
+        support: Some(shot),
+        ..
+    } = &seq.kind
+    else {
+        return;
+    };
     let mut beat = (BARE_ROUND, Vec::new());
     play(units, seq.attacker, "DEFAULT", true);
     play(units, *defender, "DEFAULT", true);
@@ -814,7 +897,10 @@ fn begin_finale(seq: &mut Sequence, art: &UnitArt, units: &mut Query<(Entity, &m
         Kind::Fight {
             defender, outcome, ..
         } => {
-            if matches!(outcome, exe::Outcome::AttackerRetreated | exe::Outcome::DefenderRetreated) {
+            if matches!(
+                outcome,
+                exe::Outcome::AttackerRetreated | exe::Outcome::DefenderRetreated
+            ) {
                 play(units, seq.attacker, "DEFAULT", true);
                 play(units, *defender, "DEFAULT", true);
             } else {
@@ -887,8 +973,12 @@ pub fn start_attacks(
         } else {
             "Non-combat units may not attack."
         })
-    } else if def(att.utype).class == 0 && map.get(at.0, at.1).is_some_and(|t| !crate::improvements::is_water_base(t.base))
-        && crate::units::entry_cost(&map, &att, from, at, &[]).is_none() {
+    } else if def(att.utype).class == 0
+        && map
+            .get(at.0, at.1)
+            .is_some_and(|t| !crate::improvements::is_water_base(t.base))
+        && crate::units::entry_cost(&map, &att, from, at, &[]).is_none()
+    {
         Some("This unit cannot enter that terrain.")
     } else if !crate::naval::can_attack_from(&map, &att) {
         Some("This unit cannot attack from water.")
@@ -921,7 +1011,7 @@ pub fn start_attacks(
         if let Ok((_, mut u)) = units.get_mut(order.attacker) {
             u.moves -= cost.min(u.moves);
             u.rested = false;
-            advance_attacker(&map, &mut u, at);
+            advance_attacker(&map, &art, &mut u, at);
         }
         realm.conquer(city, att.civ, &mut rng.0);
         return;
@@ -933,7 +1023,8 @@ pub fn start_attacks(
             let support = supporting_shooter(&att, d, &stack).map(|e| {
                 let shooter = &stack.iter().find(|(entity, _)| *entity == e).unwrap().1;
                 let mut hp = fighter(&att);
-                let result = exe::defensive_bombard(rng.0.reference(), support_odds(shooter, &att), &mut hp);
+                let result =
+                    exe::defensive_bombard(rng.0.reference(), support_odds(shooter, &att), &mut hp);
                 // The melee dice must start with the shot's damage already
                 // accounted for. Playback applies that damage at the blow.
                 att.damage = hp.damage;
@@ -956,9 +1047,24 @@ pub fn start_attacks(
                 &exe::Rules::CONQUESTS,
             );
             let retreat_to = if flags.defender {
-                retreat_tile(&map, &att, dfn, units.iter().map(|(_, u)| u), realm.cities.iter().map(|(_, c)| c))
-            } else { None };
-            let (rounds, outcome) = roll_duel(&mut rng.0, odds, fighter(&att), fighter(dfn), flags, retreat_to.is_some());
+                retreat_tile(
+                    &map,
+                    &att,
+                    dfn,
+                    units.iter().map(|(_, u)| u),
+                    realm.cities.iter().map(|(_, c)| c),
+                )
+            } else {
+                None
+            };
+            let (rounds, outcome) = roll_duel(
+                &mut rng.0,
+                odds,
+                fighter(&att),
+                fighter(dfn),
+                flags,
+                retreat_to.is_some(),
+            );
             Kind::Fight {
                 defender: d,
                 support,
@@ -991,7 +1097,9 @@ pub fn start_attacks(
     for (e, _) in &stack {
         if let Ok((_, mut u)) = units.get_mut(*e) {
             // `0x4A56F1` preserves the fortified order when attacked.
-            if u.sentry { u.fortified = false; }
+            if u.sentry {
+                u.fortified = false;
+            }
             u.sentry = false;
             u.facing = face(&map, at, from);
         }
@@ -1011,7 +1119,9 @@ pub fn start_attacks(
         },
     };
     match seq.kind {
-        Kind::Fight { support: Some(_), .. } => begin_support(&mut seq, &art, &mut units),
+        Kind::Fight {
+            support: Some(_), ..
+        } => begin_support(&mut seq, &art, &mut units),
         Kind::Fight { .. } => begin_round(&mut seq, &art, &mut units),
         Kind::Capture { .. } => begin_finale(&mut seq, &art, &mut units),
     }
@@ -1079,20 +1189,33 @@ pub fn run_combat(
     });
     match seq.phase {
         Phase::Support => {
-            let Kind::Fight { support: Some(shot), .. } = &seq.kind else { return };
+            let Kind::Fight {
+                support: Some(shot),
+                ..
+            } = &seq.kind
+            else {
+                return;
+            };
             if !seq.struck && seq.t >= seq.dur * STRIKE_AT {
                 let shooter_civ = units.get(shot.shooter).ok().map(|(_, u)| u.civ);
                 if let Ok((_, mut u)) = units.get_mut(seq.attacker) {
-                    if shot.result.hit { u.damage += 1; }
+                    if shot.result.hit {
+                        u.damage += 1;
+                    }
                     if let Some(shooter_civ) = shooter_civ {
                         if shot.result.left_at_one_hp {
                             realm.diplomacy.note_attack(shooter_civ, 1 << u.civ);
                             realm.diplomacy.incident(shooter_civ, u.civ, 1);
                         }
                         if u.civ == realm.civs.viewer() || shooter_civ == realm.civs.viewer() {
-                            post(&mut realm.board, if shot.result.hit {
-                                "Defensive bombardment hit the attacker."
-                            } else { "Defensive bombardment missed." });
+                            post(
+                                &mut realm.board,
+                                if shot.result.hit {
+                                    "Defensive bombardment hit the attacker."
+                                } else {
+                                    "Defensive bombardment missed."
+                                },
+                            );
                         }
                     }
                 }
@@ -1145,7 +1268,15 @@ pub fn run_combat(
                 return;
             }
             let seq = active.0.take().expect("just borrowed");
-            resolve(seq, &map, &mut commands, &art, &mut rng.0, &mut units, &mut realm);
+            resolve(
+                seq,
+                &map,
+                &mut commands,
+                &art,
+                &mut rng.0,
+                &mut units,
+                &mut realm,
+            );
         }
     }
 }
@@ -1173,9 +1304,16 @@ fn resolve(
             alone,
             ..
         } => {
-            if matches!(outcome, exe::Outcome::AttackerRetreated | exe::Outcome::DefenderRetreated) {
+            if matches!(
+                outcome,
+                exe::Outcome::AttackerRetreated | exe::Outcome::DefenderRetreated
+            ) {
                 let to = units.get(defender).map(|(_, u)| (u.x, u.y)).ok();
-                let retreater = if outcome == exe::Outcome::AttackerRetreated { seq.attacker } else { defender };
+                let retreater = if outcome == exe::Outcome::AttackerRetreated {
+                    seq.attacker
+                } else {
+                    defender
+                };
                 for e in [seq.attacker, defender] {
                     if let Ok((_, mut u)) = units.get_mut(e) {
                         u.anim = UnitAnim::Idle { t: 0.0 };
@@ -1187,15 +1325,23 @@ fn resolve(
                             u.auto = false;
                             u.work = None;
                             if outcome == exe::Outcome::DefenderRetreated {
-                                let (x, y) = retreat_to.expect("a defender retreats only with an escape tile");
-                                step_to(&mut u, x, y);
+                                let (x, y) = retreat_to
+                                    .expect("a defender retreats only with an escape tile");
+                                let pace = step_duration(art, u.utype, u.civ);
+                                step_to(&mut u, x, y, pace);
                             }
                             if u.civ == realm.civs.viewer() {
-                                post(&mut realm.board, format!("Our {} has retreated!", def(u.utype).name));
+                                post(
+                                    &mut realm.board,
+                                    format!("Our {} has retreated!", def(u.utype).name),
+                                );
                             }
                         } else if e == seq.attacker && alone {
                             // As with a killed lone defender, occupy the emptied tile.
-                            if let Some((x, y)) = to { step_to(&mut u, x, y); }
+                            if let Some((x, y)) = to {
+                                let pace = step_duration(art, u.utype, u.civ);
+                                step_to(&mut u, x, y, pace);
+                            }
                         }
                     }
                 }
@@ -1219,8 +1365,14 @@ fn resolve(
             }
             // The melee callers kill only the loser (0x4A63EF / 0x4A6EF2).
             // 0x5BBBC0 recursively removes cargo, not ordinary tile occupants.
-            let loser_barbarian = units.get(loser).is_ok_and(|(_, u)| crate::civs::is_barbarian(u.civ));
-            let leaders: Vec<usize> = units.iter().filter(|(_, u)| u.utype == crate::roles::leader()).map(|(_, u)| u.civ).collect();
+            let loser_barbarian = units
+                .get(loser)
+                .is_ok_and(|(_, u)| crate::civs::is_barbarian(u.civ));
+            let leaders: Vec<usize> = units
+                .iter()
+                .filter(|(_, u)| u.utype == crate::roles::leader())
+                .map(|(_, u)| u.civ)
+                .collect();
             let leader_alive = |civ: usize| leaders.contains(&civ);
             if let Ok((_, w)) = units.get(winner)
                 && crate::golden::unit_triggers(w.utype, loser_barbarian, w.civ)
@@ -1243,13 +1395,16 @@ fn resolve(
                     let (civ, x, y) = (u.civ, u.x, u.y);
                     spawn_unit(commands, art, crate::roles::leader(), x, y, civ);
                     if civ == realm.civs.viewer() {
-                        post(&mut realm.board, format!("Our victorious {name} has produced a Great Leader!"));
+                        post(
+                            &mut realm.board,
+                            format!("Our victorious {name} has produced a Great Leader!"),
+                        );
                     }
                 }
                 // Alone on its tile, the beaten defender leaves it to the
                 // winner (`MANUAL`); a stack or a city has to be walked into.
                 if let (true, true, Some((x, y))) = (attacker_won, alone, to) {
-                    advance_attacker(&map, &mut u, (x, y));
+                    advance_attacker(&map, art, &mut u, (x, y));
                 }
             }
         }
@@ -1276,10 +1431,10 @@ fn resolve(
                     commands.entity(v).despawn();
                     for _ in 0..2 {
                         let w = spawn_unit(commands, art, crate::roles::captured(), x, y, att_civ);
-                        commands
-                            .entity(w)
-                            .entry::<Unit>()
-                            .and_modify(move |mut u| { u.moves = 0; u.nationality = nationality; });
+                        commands.entity(w).entry::<Unit>().and_modify(move |mut u| {
+                            u.moves = 0;
+                            u.nationality = nationality;
+                        });
                     }
                     continue;
                 }
@@ -1304,8 +1459,14 @@ fn resolve(
                 post(
                     &mut realm.board,
                     match taken.as_slice() {
-                        [(name, ..)] => format!("Our {name} was captured by the {}!", crate::civs::name(att_civ)),
-                        _ => format!("Our units were captured by the {}!", crate::civs::name(att_civ)),
+                        [(name, ..)] => format!(
+                            "Our {name} was captured by the {}!",
+                            crate::civs::name(att_civ)
+                        ),
+                        _ => format!(
+                            "Our units were captured by the {}!",
+                            crate::civs::name(att_civ)
+                        ),
                     },
                 );
             }
@@ -1313,7 +1474,7 @@ fn resolve(
             if let Ok((_, mut u)) = units.get_mut(seq.attacker) {
                 u.anim = UnitAnim::Idle { t: 0.0 };
                 if let (false, Some((_, x, y))) = (raid, taken.first()) {
-                    advance_attacker(&map, &mut u, (*x, *y));
+                    advance_attacker(&map, art, &mut u, (*x, *y));
                 }
             }
             if let Some(city) = city {
@@ -1327,14 +1488,19 @@ fn resolve(
 }
 
 /// Successful shore attacks use the mover's landing cost (0x5B94D0).
-fn advance_attacker(map: &GameMap, u: &mut Unit, to: (i32, i32)) {
+fn advance_attacker(map: &GameMap, art: &UnitArt, u: &mut Unit, to: (i32, i32)) {
     if def(u.utype).class == 0
-        && map.get(u.x, u.y).is_some_and(|t| crate::improvements::is_water_base(t.base))
-        && map.get(to.0, to.1).is_some_and(|t| !crate::improvements::is_water_base(t.base))
+        && map
+            .get(u.x, u.y)
+            .is_some_and(|t| crate::improvements::is_water_base(t.base))
+        && map
+            .get(to.0, to.1)
+            .is_some_and(|t| !crate::improvements::is_water_base(t.base))
     {
         u.moves = 0;
     }
-    step_to(u, to.0, to.1);
+    let pace = step_duration(art, u.utype, u.civ);
+    step_to(u, to.0, to.1, pace);
 }
 
 #[cfg(test)]
@@ -1534,10 +1700,26 @@ mod tests {
             for odds in [200, 512, 900] {
                 for defender_can_step_back in [false, true] {
                     for (a_type, d_type, city) in [
-                        (UnitType::named("Horseman"), UnitType::named("Warrior"), false),
-                        (UnitType::named("Warrior"), UnitType::named("Horseman"), false),
-                        (UnitType::named("Horseman"), UnitType::named("Horseman"), false),
-                        (UnitType::named("Warrior"), UnitType::named("Horseman"), true),
+                        (
+                            UnitType::named("Horseman"),
+                            UnitType::named("Warrior"),
+                            false,
+                        ),
+                        (
+                            UnitType::named("Warrior"),
+                            UnitType::named("Horseman"),
+                            false,
+                        ),
+                        (
+                            UnitType::named("Horseman"),
+                            UnitType::named("Horseman"),
+                            false,
+                        ),
+                        (
+                            UnitType::named("Warrior"),
+                            UnitType::named("Horseman"),
+                            true,
+                        ),
                     ] {
                         let mut att = Unit::new(0, a_type, 1, 1);
                         let mut dfn = Unit::new(1, d_type, 2, 1);
@@ -1545,24 +1727,45 @@ mod tests {
                         att.damage = 1;
                         dfn.level = Level::Veteran;
                         let flags = exe::RetreatFlags::new(
-                            i32::from(def(a_type).moves * MP), i32::from(def(d_type).moves * MP),
-                            city, &exe::Rules::CONQUESTS,
+                            i32::from(def(a_type).moves * MP),
+                            i32::from(def(d_type).moves * MP),
+                            city,
+                            &exe::Rules::CONQUESTS,
                         );
                         let (mut a, mut d) = (fighter(&att), fighter(&dfn));
                         let mut mine = MapRng::new(seed);
                         let mut theirs = Rng::new(seed);
-                        let (rounds, actual) = roll_duel(&mut mine, odds, a, d, flags, defender_can_step_back);
-                        let expected = exe::duel(&mut theirs, odds, &mut a, &mut d, flags, defender_can_step_back);
+                        let (rounds, actual) =
+                            roll_duel(&mut mine, odds, a, d, flags, defender_can_step_back);
+                        let expected = exe::duel(
+                            &mut theirs,
+                            odds,
+                            &mut a,
+                            &mut d,
+                            flags,
+                            defender_can_step_back,
+                        );
                         let hits = rounds.iter().filter(|&&r| r).count() as i32;
-                        assert_eq!((a.damage, d.damage), (att.damage + rounds.len() as i32 - hits, dfn.damage + hits));
+                        assert_eq!(
+                            (a.damage, d.damage),
+                            (att.damage + rounds.len() as i32 - hits, dfn.damage + hits)
+                        );
                         assert_eq!(actual, expected);
-                        assert_eq!(mine.below(1024), theirs.below(1024), "retreat dice sequence differs");
+                        assert_eq!(
+                            mine.below(1024),
+                            theirs.below(1024),
+                            "retreat dice sequence differs"
+                        );
                         outcomes.insert(actual as u8);
                     }
                 }
             }
         }
-        assert_eq!(outcomes.len(), 4, "both deaths and both retreats were exercised");
+        assert_eq!(
+            outcomes.len(),
+            4,
+            "both deaths and both retreats were exercised"
+        );
     }
 
     #[test]
@@ -1649,7 +1852,14 @@ mod tests {
         let mut town = city_at(1, 2, 1, 4);
         assert_eq!(Hold::of(&town).building_pct, 0);
         town.buildings.push(Production::named("Walls"));
-        assert_eq!(Hold::of(&town), Hold { size: 4, resisters: 0, building_pct: 50 });
+        assert_eq!(
+            Hold::of(&town),
+            Hold {
+                size: 4,
+                resisters: 0,
+                building_pct: 50
+            }
+        );
         // Above a town they stop counting (`BLDG +0x98`), Civil Defense does not.
         let mut city = city_at(1, 2, 1, 9);
         city.buildings.push(Production::named("Walls"));
@@ -1658,14 +1868,18 @@ mod tests {
         assert_eq!(Hold::of(&city).building_pct, 50);
         // The best bonus counts, not the sum.
         let mut both = city_at(1, 2, 1, 4);
-        both.buildings.extend([Production::named("Walls"), Production::named("Civil Defense")]);
+        both.buildings.extend([
+            Production::named("Walls"),
+            Production::named("Civil Defense"),
+        ]);
         assert_eq!(Hold::of(&both).building_pct, 50);
         // And the odds follow: walls make the defender likelier to win a round.
         let map = GameMap::generate();
         let att = warrior(0, 1, 1);
         let d = warrior(1, 2, 1);
         assert!(
-            round_odds(&map, &att, &d, Some(Hold::of(&town))) > round_odds(&map, &att, &d, Some(Hold::bare(4)))
+            round_odds(&map, &att, &d, Some(Hold::of(&town)))
+                > round_odds(&map, &att, &d, Some(Hold::bare(4)))
         );
     }
 
@@ -1821,18 +2035,27 @@ mod tests {
                 port.coastal = true;
                 app.world_mut().spawn(port);
             }
-            let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 1, 1)).id();
+            let ship = app
+                .world_mut()
+                .spawn(Unit::new(0, UnitType::named("Galley"), 1, 1))
+                .id();
             let mut cargo = warrior(0, 1, 1);
             cargo.carrier = Some(ship);
             let a = app.world_mut().spawn(cargo).id();
-            let worker = app.world_mut().spawn(Unit::new(1, UnitType::named("Worker"), 2, 1)).id();
+            let worker = app
+                .world_mut()
+                .spawn(Unit::new(1, UnitType::named("Worker"), 2, 1))
+                .id();
             attack(&mut app, a, (2, 1));
             settle(&mut app);
             let u = unit(&app, a).unwrap();
             if water {
                 assert_eq!((u.x, u.y, u.moves, u.carrier), (1, 1, MP, Some(ship)));
                 assert_eq!(unit(&app, worker).unwrap().civ, 1);
-                assert_eq!(app.world().resource::<MessageBoard>().text, "This unit cannot attack from water.");
+                assert_eq!(
+                    app.world().resource::<MessageBoard>().text,
+                    "This unit cannot attack from water."
+                );
             } else {
                 assert_eq!((u.x, u.y, u.moves, u.carrier), (2, 1, 0, None));
                 assert_eq!(unit(&app, worker).unwrap().civ, 0);
@@ -1850,7 +2073,10 @@ mod tests {
             let i = map.idx(1, 1);
             map.tiles[i].base = Base::Coast;
             drop(map);
-            let ship = app.world_mut().spawn(Unit::new(0, UnitType::named("Galley"), 1, 1)).id();
+            let ship = app
+                .world_mut()
+                .spawn(Unit::new(0, UnitType::named("Galley"), 1, 1))
+                .id();
             let mut u = Unit::new(0, marine, 1, 1);
             u.carrier = Some(ship);
             u.attacked = attacked;
@@ -1886,11 +2112,26 @@ mod tests {
             app.world_mut().spawn(City::new(1, "Rome", 2, 1));
             let mut reference = civ3mapgen::rng::Rng::new(seed);
             let mut hp = fighter(&att);
-            let shot = exe::defensive_bombard(&mut reference, support_odds(&shooter, &att), &mut hp);
-            let odds = round_odds(app.world().resource::<GameMap>(), &att, &dfn, Some(Hold::bare(1)));
+            let shot =
+                exe::defensive_bombard(&mut reference, support_odds(&shooter, &att), &mut hp);
+            let odds = round_odds(
+                app.world().resource::<GameMap>(),
+                &att,
+                &dfn,
+                Some(Hold::bare(1)),
+            );
             let mut def_hp = fighter(&dfn);
-            let expected = exe::duel(&mut reference, odds, &mut hp, &mut def_hp,
-                exe::RetreatFlags { attacker: false, defender: false }, false);
+            let expected = exe::duel(
+                &mut reference,
+                odds,
+                &mut hp,
+                &mut def_hp,
+                exe::RetreatFlags {
+                    attacker: false,
+                    defender: false,
+                },
+                false,
+            );
             attack(&mut app, a, (2, 1));
             app.update();
             let seq = app.world().resource::<ActiveCombat>().0.as_ref().unwrap();
@@ -1898,15 +2139,30 @@ mod tests {
             assert!(matches!(seq.kind, Kind::Fight { outcome, .. } if outcome == expected));
             let mut actual_rng = app.world().resource::<CombatRng>().0;
             assert_eq!(actual_rng.below(1024), reference.below(1024));
-            assert_eq!(unit(&app, a).unwrap().damage, 0, "the shot is not applied before its animation");
-            assert!(unit(&app, s).unwrap().defensive_fired, "a miss also uses the shot");
-            app.world_mut().resource_mut::<Time>().advance_by(Duration::from_secs_f32(0.3));
+            assert_eq!(
+                unit(&app, a).unwrap().damage,
+                0,
+                "the shot is not applied before its animation"
+            );
+            assert!(
+                unit(&app, s).unwrap().defensive_fired,
+                "a miss also uses the shot"
+            );
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(0.3));
             app.update();
-            assert_eq!(unit(&app, a).unwrap().damage, i32::from(shot.hit), "only the support shot has landed");
+            assert_eq!(
+                unit(&app, a).unwrap().damage,
+                i32::from(shot.hit),
+                "only the support shot has landed"
+            );
             hits += i32::from(shot.hit);
             app.insert_resource(CombatSpeed(1000.0));
             settle(&mut app);
-            if let Some(u) = unit(&app, a) { assert_eq!(u.damage, hp.damage); }
+            if let Some(u) = unit(&app, a) {
+                assert_eq!(u.damage, hp.damage);
+            }
             if let Some(u) = unit(&app, d) {
                 assert_eq!(u.damage, def_hp.damage);
                 assert!(u.fortified, "attacks preserve the fortified order");
@@ -1938,7 +2194,11 @@ mod tests {
         stack[2].1.defensive_fired = false;
         let mut hurt = att;
         hurt.damage = 2;
-        assert_eq!(supporting_shooter(&hurt, defender, &stack), None, "a shot never kills a land attacker");
+        assert_eq!(
+            supporting_shooter(&hurt, defender, &stack),
+            None,
+            "a shot never kills a land attacker"
+        );
     }
 
     #[test]
@@ -1950,17 +2210,29 @@ mod tests {
             dfn.level = Level::Elite;
             dfn.utype = UnitType::named("Spearman");
             app.world_mut().spawn(dfn);
-            let s = app.world_mut().spawn(Unit::new(1, UnitType::named("Catapult"), 2, 1)).id();
+            let s = app
+                .world_mut()
+                .spawn(Unit::new(1, UnitType::named("Catapult"), 2, 1))
+                .id();
             app.world_mut().spawn(City::new(1, "Rome", 2, 1));
             attack(&mut app, a, (2, 1));
             settle(&mut app);
             assert!(unit(&app, s).unwrap().defensive_fired);
             // Ensure the stack is defended even when the first defender died.
-            app.world_mut().spawn(Unit::new(1, UnitType::named("Spearman"), 2, 1));
+            app.world_mut()
+                .spawn(Unit::new(1, UnitType::named("Spearman"), 2, 1));
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
             attack(&mut app, a, (2, 1));
             app.update();
-            assert!(app.world().resource::<ActiveCombat>().0.as_ref().unwrap().phase == Phase::Round);
+            assert!(
+                app.world()
+                    .resource::<ActiveCombat>()
+                    .0
+                    .as_ref()
+                    .unwrap()
+                    .phase
+                    == Phase::Round
+            );
             settle(&mut app);
         }
     }
@@ -1973,34 +2245,74 @@ mod tests {
                 let mut app = arena(seed);
                 let fast = UnitType::named("Horseman");
                 let slow = UnitType::named("Warrior");
-                let (a_type, d_type) = if attacker_fast { (fast, slow) } else { (slow, fast) };
+                let (a_type, d_type) = if attacker_fast {
+                    (fast, slow)
+                } else {
+                    (slow, fast)
+                };
                 let a = app.world_mut().spawn(Unit::new(0, a_type, 1, 1)).id();
                 let d = app.world_mut().spawn(Unit::new(1, d_type, 2, 1)).id();
-                let bystander = app.world_mut().spawn(Unit::new(1, UnitType::named("Worker"), 2, 1)).id();
+                let bystander = app
+                    .world_mut()
+                    .spawn(Unit::new(1, UnitType::named("Worker"), 2, 1))
+                    .id();
                 attack(&mut app, a, (2, 1));
                 app.update();
                 let seq = app.world().resource::<ActiveCombat>().0.as_ref().unwrap();
-                let Kind::Fight { outcome, .. } = seq.kind else { panic!("expected a duel") };
-                let want = if attacker_fast { exe::Outcome::AttackerRetreated } else { exe::Outcome::DefenderRetreated };
-                if outcome != want { continue; }
+                let Kind::Fight { outcome, .. } = seq.kind else {
+                    panic!("expected a duel")
+                };
+                let want = if attacker_fast {
+                    exe::Outcome::AttackerRetreated
+                } else {
+                    exe::Outcome::DefenderRetreated
+                };
+                if outcome != want {
+                    continue;
+                }
                 retreats += 1;
                 // Stop at the finale so the test checks playback as well as resolution.
                 for _ in 0..100 {
-                    app.world_mut().resource_mut::<Time>().advance_by(Duration::from_millis(50));
+                    app.world_mut()
+                        .resource_mut::<Time>()
+                        .advance_by(Duration::from_millis(50));
                     app.update();
-                    if app.world().resource::<ActiveCombat>().0.as_ref().unwrap().phase == Phase::Finale { break; }
+                    if app
+                        .world()
+                        .resource::<ActiveCombat>()
+                        .0
+                        .as_ref()
+                        .unwrap()
+                        .phase
+                        == Phase::Finale
+                    {
+                        break;
+                    }
                 }
                 for e in [a, d] {
-                    assert!(matches!(unit(&app, e).unwrap().anim, UnitAnim::Held { slot: "DEFAULT", .. }));
+                    assert!(matches!(
+                        unit(&app, e).unwrap().anim,
+                        UnitAnim::Held {
+                            slot: "DEFAULT",
+                            ..
+                        }
+                    ));
                 }
                 settle(&mut app);
                 let (att, dfn) = (unit(&app, a).unwrap(), unit(&app, d).unwrap());
                 assert_eq!((att.level, dfn.level), (Level::Regular, Level::Regular));
-                assert_eq!((att.x, att.y), (1, 1), "the bystander still occupies the defended tile");
+                assert_eq!(
+                    (att.x, att.y),
+                    (1, 1),
+                    "the bystander still occupies the defended tile"
+                );
                 let escaped = if attacker_fast { &att } else { &dfn };
                 assert_eq!((escaped.hp(), escaped.moves), (1, 0));
                 assert_eq!((dfn.x, dfn.y), if attacker_fast { (2, 1) } else { (3, 1) });
-                assert!(unit(&app, bystander).is_some(), "a retreat never kills the stack");
+                assert!(
+                    unit(&app, bystander).is_some(),
+                    "a retreat never kills the stack"
+                );
             }
             assert!(retreats > 0, "both kinds of retreat must play through");
         }
@@ -2012,11 +2324,22 @@ mod tests {
         for seed in 0..40 {
             let mut app = arena(seed);
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
-            let d = app.world_mut().spawn(Unit::new(1, UnitType::named("Horseman"), 2, 1)).id();
+            let d = app
+                .world_mut()
+                .spawn(Unit::new(1, UnitType::named("Horseman"), 2, 1))
+                .id();
             attack(&mut app, a, (2, 1));
             app.update();
             let seq = app.world().resource::<ActiveCombat>().0.as_ref().unwrap();
-            if !matches!(seq.kind, Kind::Fight { outcome: exe::Outcome::DefenderRetreated, .. }) { continue; }
+            if !matches!(
+                seq.kind,
+                Kind::Fight {
+                    outcome: exe::Outcome::DefenderRetreated,
+                    ..
+                }
+            ) {
+                continue;
+            }
             settle(&mut app);
             retreats += 1;
             let (att, dfn) = (unit(&app, a).unwrap(), unit(&app, d).unwrap());
@@ -2031,9 +2354,16 @@ mod tests {
         for seed in 0..40 {
             for condition in ["city", "blocked", "fast attacker"] {
                 let mut app = arena(seed);
-                let a_type = if condition == "fast attacker" { UnitType::named("Horseman") } else { UnitType::named("Warrior") };
+                let a_type = if condition == "fast attacker" {
+                    UnitType::named("Horseman")
+                } else {
+                    UnitType::named("Warrior")
+                };
                 let a = app.world_mut().spawn(Unit::new(0, a_type, 1, 1)).id();
-                let d = app.world_mut().spawn(Unit::new(1, UnitType::named("Horseman"), 2, 1)).id();
+                let d = app
+                    .world_mut()
+                    .spawn(Unit::new(1, UnitType::named("Horseman"), 2, 1))
+                    .id();
                 if condition == "city" {
                     app.world_mut().spawn(City::new(1, "Rome", 2, 1));
                 } else if condition == "blocked" {
@@ -2042,9 +2372,16 @@ mod tests {
                 attack(&mut app, a, (2, 1));
                 app.update();
                 let seq = app.world().resource::<ActiveCombat>().0.as_ref().unwrap();
-                assert!(matches!(seq.kind, Kind::Fight {
-                    outcome: exe::Outcome::AttackerWon | exe::Outcome::DefenderWon, ..
-                }), "{condition} seed {seed}");
+                assert!(
+                    matches!(
+                        seq.kind,
+                        Kind::Fight {
+                            outcome: exe::Outcome::AttackerWon | exe::Outcome::DefenderWon,
+                            ..
+                        }
+                    ),
+                    "{condition} seed {seed}"
+                );
                 settle(&mut app);
                 assert!(unit(&app, a).is_some() != unit(&app, d).is_some());
             }
@@ -2056,19 +2393,50 @@ mod tests {
         let mut map = grass();
         let att = warrior(0, 4, 1);
         let dfn = Unit::new(1, UnitType::named("Horseman"), 5, 1);
-        assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()), Some((0, 1)));
+        assert_eq!(
+            retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()),
+            Some((0, 1))
+        );
         let friendly = warrior(1, 0, 1);
-        assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::once(&friendly), std::iter::empty()), Some((0, 1)));
+        assert_eq!(
+            retreat_tile(
+                &map,
+                &att,
+                &dfn,
+                std::iter::once(&friendly),
+                std::iter::empty()
+            ),
+            Some((0, 1))
+        );
         let foreign = warrior(2, 0, 1);
-        assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::once(&foreign), std::iter::empty()), None);
+        assert_eq!(
+            retreat_tile(
+                &map,
+                &att,
+                &dfn,
+                std::iter::once(&foreign),
+                std::iter::empty()
+            ),
+            None
+        );
         let city = City::new(2, "Rome", 0, 1);
-        assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::once(&city)), None);
+        assert_eq!(
+            retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::once(&city)),
+            None
+        );
         let i = map.idx(0, 1);
         map.tiles[i].base = Base::Ocean;
-        assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()), None);
+        assert_eq!(
+            retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()),
+            None
+        );
         let att = warrior(0, 1, 1);
         let dfn = Unit::new(1, UnitType::named("Horseman"), 1, 0);
-        assert_eq!(retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()), None, "no escape off the map's pole");
+        assert_eq!(
+            retreat_tile(&map, &att, &dfn, std::iter::empty(), std::iter::empty()),
+            None,
+            "no escape off the map's pole"
+        );
     }
 
     #[test]
@@ -2135,7 +2503,11 @@ mod tests {
                         assert!(
                             matches!(
                                 u.anim,
-                                UnitAnim::Held { slot: "ATTACK1", looped: true, .. }
+                                UnitAnim::Held {
+                                    slot: "ATTACK1",
+                                    looped: true,
+                                    ..
+                                }
                             ),
                             "seed {seed}: a fighter stopped swinging"
                         );
@@ -2171,7 +2543,11 @@ mod tests {
 
     #[test]
     fn losing_a_defender_preserves_other_units_on_its_tile() {
-        for bystander in [UnitType::named("Warrior"), UnitType::named("Worker"), UnitType::named("Catapult")] {
+        for bystander in [
+            UnitType::named("Warrior"),
+            UnitType::named("Worker"),
+            UnitType::named("Catapult"),
+        ] {
             let mut proved = false;
             for seed in 0..60 {
                 let mut app = arena(seed);
@@ -2202,10 +2578,15 @@ mod tests {
             let mut app = arena(seed);
             let a = app.world_mut().spawn(warrior(0, 1, 1)).id();
             let d = app.world_mut().spawn(warrior(1, 2, 1)).id();
-            let w = app.world_mut().spawn(Unit::new(1, UnitType::named("Worker"), 2, 1)).id();
+            let w = app
+                .world_mut()
+                .spawn(Unit::new(1, UnitType::named("Worker"), 2, 1))
+                .id();
             attack(&mut app, a, (2, 1));
             settle(&mut app);
-            if unit(&app, a).is_none() { continue; }
+            if unit(&app, a).is_none() {
+                continue;
+            }
             assert!(unit(&app, d).is_none());
             assert_eq!(unit(&app, w).unwrap().civ, 1);
             // Give the winner another turn's move into the now undefended tile.
@@ -2247,7 +2628,13 @@ mod tests {
             .query::<&Unit>()
             .iter(app.world())
             .filter(|u| u.civ == 0 && u.utype == UnitType::named("Worker"))
-            .inspect(|u| assert_eq!(u.nationality, crate::civs::roster_index(1), "settler captives retain their nationality too"))
+            .inspect(|u| {
+                assert_eq!(
+                    u.nationality,
+                    crate::civs::roster_index(1),
+                    "settler captives retain their nationality too"
+                )
+            })
             .count();
         assert_eq!(workers, 3); // the captured Worker plus two from the Settler
         let u = unit(&app, a).unwrap();
@@ -2316,7 +2703,10 @@ mod tests {
         // `combat.md` 14.2: shields above 10 are lost first, the city keeps
         // its owner and the raider is removed.
         let mut app = arena(1);
-        let a = app.world_mut().spawn(warrior(crate::civs::BARBARIANS, 1, 1)).id();
+        let a = app
+            .world_mut()
+            .spawn(warrior(crate::civs::BARBARIANS, 1, 1))
+            .id();
         let mut c = city_at(1, 2, 1, 4);
         c.shields = 15;
         let city = app.world_mut().spawn(c).id();
@@ -2326,14 +2716,20 @@ mod tests {
         assert_eq!((c.civ, c.size(), c.shields), (1, 4, 0));
         assert!(unit(&app, a).is_none());
         // Next: no stock, so a citizen dies.
-        let a = app.world_mut().spawn(warrior(crate::civs::BARBARIANS, 1, 1)).id();
+        let a = app
+            .world_mut()
+            .spawn(warrior(crate::civs::BARBARIANS, 1, 1))
+            .id();
         attack(&mut app, a, (2, 1));
         app.update();
         assert_eq!(app.world().get::<City>(city).unwrap().size(), 3);
         // A size-1 city with gold loses its treasury share.
         app.world_mut().get_mut::<City>(city).unwrap().set_size(1);
         app.world_mut().resource_mut::<crate::cities::Treasury>().0[1] = 30;
-        let a = app.world_mut().spawn(warrior(crate::civs::BARBARIANS, 1, 1)).id();
+        let a = app
+            .world_mut()
+            .spawn(warrior(crate::civs::BARBARIANS, 1, 1))
+            .id();
         attack(&mut app, a, (2, 1));
         app.update();
         assert_eq!(app.world().resource::<crate::cities::Treasury>().0[1], 0);
@@ -2347,7 +2743,9 @@ mod tests {
         let even = round_odds(&map, &civ, &warrior(1, 2, 1), None);
         // Regent: +200% on the attacker's side lowers the defender's odds.
         assert!(round_odds(&map, &civ, &barb, None) < even);
-        assert!(round_odds(&map, &barb, &civ, None) > round_odds(&map, &warrior(1, 1, 1), &civ, None));
+        assert!(
+            round_odds(&map, &barb, &civ, None) > round_odds(&map, &warrior(1, 1, 1), &civ, None)
+        );
     }
 
     #[test]
@@ -2453,19 +2851,43 @@ mod tests {
         // initial resistance, Despotism against Despotism adds nothing.
         let n = crate::resistance::resisters(&c);
         assert!(n >= 1, "90% each: at least one of nine resists");
-        assert!(c.citizens.slots().iter().flatten().all(|z| z.pending_race == crate::civs::roster_index(0) as i32));
-        assert!(c.citizens.slots().iter().flatten().filter(|z| z.resister).all(|z| z.work == 0 && z.job == 0));
+        assert!(
+            c.citizens
+                .slots()
+                .iter()
+                .flatten()
+                .all(|z| z.pending_race == crate::civs::roster_index(0) as i32)
+        );
+        assert!(
+            c.citizens
+                .slots()
+                .iter()
+                .flatten()
+                .filter(|z| z.resister)
+                .all(|z| z.work == 0 && z.job == 0)
+        );
         assert_eq!(Hold::of(&c).resisters, n);
         let text = &app.world().resource::<MessageBoard>().text;
         assert!(text.contains("resister"), "{text}");
         // A resisting city has no size bonus, an otherwise identical one does.
         let map = app.world().resource::<GameMap>();
         let d = warrior(0, 2, 1);
-        let calm = Hold { resisters: 0, ..Hold::of(&c) };
+        let calm = Hold {
+            resisters: 0,
+            ..Hold::of(&c)
+        };
         assert!(defense_pct(map, &d, Some(Hold::of(&c))) < defense_pct(map, &d, Some(calm)));
         let t = crate::citycalc::totals(map, &c);
         assert_eq!(t.eaten, 2 * (9 - n));
-        assert!(matches!(crate::hurry::quote(&c, civ3mapgen::government::hurry::PAY, 9999, crate::hurry::Buyer::Human), Err(crate::hurry::Refusal::Resistance)));
+        assert!(matches!(
+            crate::hurry::quote(
+                &c,
+                civ3mapgen::government::hurry::PAY,
+                9999,
+                crate::hurry::Buyer::Human
+            ),
+            Err(crate::hurry::Refusal::Resistance)
+        ));
     }
 
     #[test]
@@ -2506,6 +2928,7 @@ mod tests {
         app.init_resource::<crate::cities::Treasury>();
         app.add_message::<AttackOrder>();
         app.init_resource::<crate::unit_picker::UnitPicker>();
+        app.insert_resource(art());
         app.add_systems(Update, drive_movement);
         let mut w = warrior(0, 1, 1);
         w.path = [(2, 1)].into();
@@ -2516,9 +2939,15 @@ mod tests {
         let u = unit(&app, a).unwrap();
         assert_eq!((u.x, u.y, u.moves), (1, 1, 3));
         assert!(u.path.is_empty());
-        let ask = app.world().resource::<crate::diplomacy::Diplomacy>().war_ask;
+        let ask = app
+            .world()
+            .resource::<crate::diplomacy::Diplomacy>()
+            .war_ask;
         // Every chair is a human's here, so the question is asked.
-        assert_eq!(ask.map(|q| (q.attacker, q.to, q.target)), Some((a, (2, 1), 1)));
+        assert_eq!(
+            ask.map(|q| (q.attacker, q.to, q.target)),
+            Some((a, (2, 1), 1))
+        );
     }
 
     #[test]
@@ -2530,6 +2959,7 @@ mod tests {
         app.insert_resource(at_war());
         app.add_message::<AttackOrder>();
         app.init_resource::<crate::unit_picker::UnitPicker>();
+        app.insert_resource(art());
         app.add_systems(Update, drive_movement);
         let mut w = warrior(0, 1, 1);
         w.path = [(2, 1)].into();
@@ -2554,6 +2984,7 @@ mod tests {
         app.insert_resource(at_war());
         app.add_message::<AttackOrder>();
         app.init_resource::<crate::unit_picker::UnitPicker>();
+        app.insert_resource(art());
         app.add_systems(Update, drive_movement);
         let mut w = warrior(0, 1, 1);
         w.path = [(2, 1), (3, 1)].into();

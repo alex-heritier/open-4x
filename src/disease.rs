@@ -9,7 +9,9 @@ use civ3mapgen::disease as exe;
 pub fn step(map: &GameMap, city: &mut City, rng: &mut MapRng) -> Option<Option<usize>> {
     if city.diseased {
         let lost = city.size() > 1;
-        if lost { city.lose_population(1, None, rng); }
+        if lost {
+            city.lose_population(1, None, rng);
+        }
         if exe::recovers(i32::from(city.size()), |n| rng.reference().below(n)) {
             city.diseased = false;
         }
@@ -19,12 +21,15 @@ pub fn step(map: &GameMap, city: &mut City, rng: &mut MapRng) -> Option<Option<u
     let mut worked = city.worked(map);
     worked.insert((city.x, city.y));
     for (x, y) in worked {
-        if let Some(t) = map.get(x, y) { counts[crate::map::terrain_row(t)] += 1; }
+        if let Some(t) = map.get(x, y) {
+            counts[crate::map::terrain_row(t)] += 1;
+        }
     }
     let terrains: [exe::Terrain; 14] = std::array::from_fn(|i| crate::ruleset::TERRAINS[i].disease);
     let cured = crate::realm::read(city.civ, |r| r.knows(exe::CURE_TECH));
-    let terrain = exe::infection(i32::from(city.size()), &counts, &terrains, cured,
-        |n| rng.reference().below(n))?;
+    let terrain = exe::infection(i32::from(city.size()), &counts, &terrains, cured, |n| {
+        rng.reference().below(n)
+    })?;
     city.diseased = true;
     city.lose_population(1, None, rng);
     Some(Some(terrain))
@@ -38,7 +43,12 @@ mod tests {
     fn setup() -> (GameMap, City) {
         crate::realm::reset();
         let mut map = GameMap::generate();
-        for t in &mut map.tiles { t.base = Base::Plains; t.cover = Cover::Bare; t.relief = Relief::Flat; t.river = 0; }
+        for t in &mut map.tiles {
+            t.base = Base::Plains;
+            t.cover = Cover::Bare;
+            t.relief = Relief::Flat;
+            t.river = 0;
+        }
         let mut city = City::new(0, "Town", 5, 5);
         city.set_size(4);
         (map, city)
@@ -47,7 +57,8 @@ mod tests {
     #[test]
     fn infection_counts_center_and_worked_tiles_and_removes_a_native_victim() {
         let (mut map, mut city) = setup();
-        let i = map.idx(5, 5); map.tiles[i].cover = Cover::Jungle;
+        let i = map.idx(5, 5);
+        map.tiles[i].cover = Cover::Jungle;
         city.set_specialists(vec![crate::cities::Specialist::Scientist; 4]);
         let mut rng = MapRng::new(0);
         assert_eq!(step(&map, &mut city, &mut rng), Some(Some(8)));
@@ -55,18 +66,26 @@ mod tests {
         assert_eq!(city.size(), 3);
         assert_eq!(city.specialists().len(), 3);
         assert_eq!(rng.state(), 3_554_416_254, "infection, then victim draw");
-        let victim = city.citizens.slots().iter().position(Option::is_none).unwrap();
+        let victim = city
+            .citizens
+            .slots()
+            .iter()
+            .position(Option::is_none)
+            .unwrap();
         assert_eq!(victim, 2);
     }
 
     #[test]
     fn unworked_disease_tiles_do_not_draw_and_writing_cures_only_flood_plain() {
         let (mut map, mut city) = setup();
-        let i = map.idx(6, 5); map.tiles[i].cover = Cover::Jungle;
+        let i = map.idx(6, 5);
+        map.tiles[i].cover = Cover::Jungle;
         let mut rng = MapRng::new(0);
         assert_eq!(step(&map, &mut city, &mut rng), None);
         assert_eq!(rng.state(), 0);
-        let i = map.idx(5, 5); map.tiles[i].base = Base::Desert; map.tiles[i].river = 2;
+        let i = map.idx(5, 5);
+        map.tiles[i].base = Base::Desert;
+        map.tiles[i].river = 2;
         crate::realm::write(0, |r| r.known |= 1 << exe::CURE_TECH);
         assert_eq!(step(&map, &mut city, &mut rng), None);
         assert_eq!(rng.state(), 0);
@@ -104,18 +123,40 @@ mod tests {
         city.food = 10;
         city.production = crate::cities::Production::named("Settler");
         city.shields = city.price(city.production);
-        let events = crate::cities::process_city_turn(&map, &mut city,
-            &std::collections::HashSet::new(), &mut MapRng::new(1));
-        assert!(matches!(events.first(), Some(crate::cities::CityEvent::Disease(None))));
+        let events = crate::cities::process_city_turn(
+            &map,
+            &mut city,
+            &std::collections::HashSet::new(),
+            &mut MapRng::new(1),
+        );
+        assert!(matches!(
+            events.first(),
+            Some(crate::cities::CityEvent::Disease(None))
+        ));
         assert_eq!(city.size(), 2);
-        assert!(!events.iter().any(|e| matches!(e, crate::cities::CityEvent::Completed(..))));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, crate::cities::CityEvent::Completed(..)))
+        );
 
         city.food = 0;
         city.diseased = true;
-        let events = crate::cities::process_city_turn(&map, &mut city,
-            &std::collections::HashSet::new(), &mut MapRng::new(1));
+        let events = crate::cities::process_city_turn(
+            &map,
+            &mut city,
+            &std::collections::HashSet::new(),
+            &mut MapRng::new(1),
+        );
         assert_eq!(city.size(), 1);
-        assert_eq!(city.food, 0, "one citizen is fed by the center after the loss");
-        assert!(!events.iter().any(|e| matches!(e, crate::cities::CityEvent::Starved)));
+        assert_eq!(
+            city.food, 0,
+            "one citizen is fed by the center after the loss"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, crate::cities::CityEvent::Starved))
+        );
     }
 }

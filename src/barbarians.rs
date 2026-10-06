@@ -46,15 +46,82 @@ pub const SIGHT: i32 = 8;
 /// RACE row 0's tribe names: five culture groups of fifteen, then the
 /// default "Barbarian" (section 1.4).
 pub const TRIBES: [&str; 76] = [
-    "Chanca", "Lupaca", "Cherokee", "Anasazi", "Teoihuacan", "Olmec", "Zapotec", "Chehalis", "Chinook",
-    "Apache", "Illinois", "Inuit", "Navajo", "Carib", "Saxon", "Vandal", "Goth", "Angle", "Magyar",
-    "Khazak", "Iberian", "Bulgar", "Alemanni", "Burgundian", "Gepid", "Hun", "Jute", "Marcomanni",
-    "Seljuk", "Phoenician", "Estruscan", "Illuryian", "Thracian", "Phrygian", "Gaul", "Minoan",
-    "Mycenian", "Cimmerian", "Ligurian", "Numidian", "Patzinal", "Sarmatian", "Scythian", "Suren",
-    "Assyrian", "Harappan", "Mauryan", "Parthian", "Harappan", "Nubian", "Sarbadar", "Bactrian",
-    "Circassian", "Cuman", "Hurrian", "Kassite", "Bantu", "Khoisan", "Libyan", "Shangian", "Yayoi",
-    "Zhou", "Ainu", "Polynesian", "Aryan", "Avar", "Ghuzz", "Hsung-Nu", "Kushans", "Yue-Chi", "Sakae",
-    "Uzbek", "Tartar", "Toltec", "Kushite", "Barbarian",
+    "Chanca",
+    "Lupaca",
+    "Cherokee",
+    "Anasazi",
+    "Teoihuacan",
+    "Olmec",
+    "Zapotec",
+    "Chehalis",
+    "Chinook",
+    "Apache",
+    "Illinois",
+    "Inuit",
+    "Navajo",
+    "Carib",
+    "Saxon",
+    "Vandal",
+    "Goth",
+    "Angle",
+    "Magyar",
+    "Khazak",
+    "Iberian",
+    "Bulgar",
+    "Alemanni",
+    "Burgundian",
+    "Gepid",
+    "Hun",
+    "Jute",
+    "Marcomanni",
+    "Seljuk",
+    "Phoenician",
+    "Estruscan",
+    "Illuryian",
+    "Thracian",
+    "Phrygian",
+    "Gaul",
+    "Minoan",
+    "Mycenian",
+    "Cimmerian",
+    "Ligurian",
+    "Numidian",
+    "Patzinal",
+    "Sarmatian",
+    "Scythian",
+    "Suren",
+    "Assyrian",
+    "Harappan",
+    "Mauryan",
+    "Parthian",
+    "Harappan",
+    "Nubian",
+    "Sarbadar",
+    "Bactrian",
+    "Circassian",
+    "Cuman",
+    "Hurrian",
+    "Kassite",
+    "Bantu",
+    "Khoisan",
+    "Libyan",
+    "Shangian",
+    "Yayoi",
+    "Zhou",
+    "Ainu",
+    "Polynesian",
+    "Aryan",
+    "Avar",
+    "Ghuzz",
+    "Hsung-Nu",
+    "Kushans",
+    "Yue-Chi",
+    "Sakae",
+    "Uzbek",
+    "Tartar",
+    "Toltec",
+    "Kushite",
+    "Barbarian",
 ];
 
 /// The default tribe.
@@ -105,7 +172,10 @@ impl Barbarians {
     pub fn snapshot(&self) -> Saved {
         let mut camps: Vec<_> = self.camps.iter().map(|(&at, &t)| (at, t)).collect();
         camps.sort();
-        Saved { used: self.used.to_vec(), camps }
+        Saved {
+            used: self.used.to_vec(),
+            camps,
+        }
     }
 
     /// Back to a quiet start with the saved camps.
@@ -175,7 +245,15 @@ pub fn uprising(
     let snapshot: Vec<(Entity, Unit)> = units.iter().map(|(e, u)| (e, u.clone())).collect();
     let existing = map.tiles.iter().filter(|t| t.camp).count() as i32;
     for _ in 0..(n() - existing - 1).max(0) {
-        found_camp(&mut commands, &art, &mut map, &mut barb, &mut rng, &refs, &snapshot);
+        found_camp(
+            &mut commands,
+            &art,
+            &mut map,
+            &mut barb,
+            &mut rng,
+            &refs,
+            &snapshot,
+        );
     }
     let camps: Vec<(i32, i32)> = (0..map.h)
         .flat_map(|y| (0..map.w).map(move |x| (x, y)))
@@ -183,7 +261,13 @@ pub fn uprising(
         .collect();
     for &tile in &camps {
         for _ in 0..8 * activity() {
-            spawn(&mut commands, &art, crate::roles::barbarian_advanced(), tile, barb.tribe_at(tile));
+            spawn(
+                &mut commands,
+                &art,
+                crate::roles::barbarian_advanced(),
+                tile,
+                barb.tribe_at(tile),
+            );
         }
     }
     // SUMMARY_BARBARIAN_EXPLOSION_CITY: the human's city nearest a camp.
@@ -191,11 +275,18 @@ pub fn uprising(
     let map = &*map;
     let near = camps
         .iter()
-        .flat_map(|&t| refs.iter().filter(|c| c.civ == viewer).map(move |c| (map.distance(t, (c.x, c.y)), c.name.clone())))
+        .flat_map(|&t| {
+            refs.iter()
+                .filter(|c| c.civ == viewer)
+                .map(move |c| (map.distance(t, (c.x, c.y)), c.name.clone()))
+        })
         .filter(|(d, _)| *d < 10)
         .min();
     if let Some((_, name)) = near {
-        crate::features::post(&mut board, format!("We have heard reports of a massive barbarian uprising near {name}!"));
+        crate::features::post(
+            &mut board,
+            format!("We have heard reports of a massive barbarian uprising near {name}!"),
+        );
     }
 }
 
@@ -240,22 +331,51 @@ pub fn site_radii(w: i32, h: i32) -> (i32, i32) {
     (a + 1, b + 2)
 }
 
-pub(crate) fn spawn(commands: &mut Commands, art: &UnitArt, t: UnitType, tile: (i32, i32), tribe: u8) -> Entity {
-    let e = crate::units::spawn_unit_at_level(commands, art, t, tile.0, tile.1, BARBARIANS, Level::Conscript);
+pub(crate) fn spawn(
+    commands: &mut Commands,
+    art: &UnitArt,
+    t: UnitType,
+    tile: (i32, i32),
+    tribe: u8,
+) -> Entity {
+    let e = crate::units::spawn_unit_at_level(
+        commands,
+        art,
+        t,
+        tile.0,
+        tile.1,
+        BARBARIANS,
+        Level::Conscript,
+    );
     commands.entity(e).insert(Tribe(tribe));
     e
 }
 
 /// Section 7: every camp on the new map gets the default tribe and two
 /// basic units.
-pub fn setup_camps(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>, mut barb: ResMut<Barbarians>) {
+pub fn setup_camps(
+    mut commands: Commands,
+    map: Res<GameMap>,
+    art: Res<UnitArt>,
+    mut barb: ResMut<Barbarians>,
+) {
     for y in 0..map.h {
         for x in 0..map.w {
             if map.tiles[map.idx(x, y)].camp {
                 barb.camps.insert((x, y), DEFAULT_TRIBE);
                 // A scenario places its own barbarians.
-                for _ in 0..if crate::scenario::scenario().is_some() { 0 } else { 2 } {
-                    spawn(&mut commands, &art, crate::roles::barbarian_basic(), (x, y), DEFAULT_TRIBE);
+                for _ in 0..if crate::scenario::scenario().is_some() {
+                    0
+                } else {
+                    2
+                } {
+                    spawn(
+                        &mut commands,
+                        &art,
+                        crate::roles::barbarian_basic(),
+                        (x, y),
+                        DEFAULT_TRIBE,
+                    );
                 }
             }
         }
@@ -327,12 +447,17 @@ fn found_camp(
     for _ in 0..t / 16 {
         let r = rng.0.below(t) as i32;
         let (x, y) = (r % map.w, r / map.w);
-        if y == 0 || y >= map.h - 1 || !site_ok(map, &labels, &sizes, &owners, cities, units, (x, y)) {
+        if y == 0
+            || y >= map.h - 1
+            || !site_ok(map, &labels, &sizes, &owners, cities, units, (x, y))
+        {
             continue;
         }
         // No civilization's soldier within the 5x5 block (`0x56D340`).
         if units.iter().any(|(_, u)| {
-            !is_barbarian(u.civ) && map.distance((u.x, u.y), (x, y)) <= 2 && def(u.utype).attack + def(u.utype).defense > 0
+            !is_barbarian(u.civ)
+                && map.distance((u.x, u.y), (x, y)) <= 2
+                && def(u.utype).attack + def(u.utype).defense > 0
         }) {
             continue;
         }
@@ -344,7 +469,9 @@ fn found_camp(
             .min_by_key(|c| map.distance((c.x, c.y), (x, y)))?;
         let i = map.idx(x, y);
         map.tiles[i].camp = true;
-        let group = crate::civs::RACES.get(near.civ).map_or(0, |r| r.culture_group as usize);
+        let group = crate::civs::RACES
+            .get(near.civ)
+            .map_or(0, |r| r.culture_group as usize);
         let s = rng.0.below(15);
         let tribe = pick_tribe(&barb.used, group, s as u32);
         if let Some(u) = barb.used.get_mut(tribe as usize) {
@@ -352,7 +479,13 @@ fn found_camp(
         }
         barb.camps.insert((x, y), tribe);
         for _ in 0..2 {
-            spawn(commands, art, crate::roles::barbarian_basic(), (x, y), tribe);
+            spawn(
+                commands,
+                art,
+                crate::roles::barbarian_basic(),
+                (x, y),
+                tribe,
+            );
         }
         return Some((x, y));
     }
@@ -380,7 +513,9 @@ fn spawn_round(
         .filter(|(_, u)| is_barbarian(u.civ) && def(u.utype).class == 0)
         .count() as i32;
     let mut camps = 0;
-    let tiles: Vec<(i32, i32)> = (0..map.h).flat_map(|y| (0..map.w).map(move |x| (x, y))).collect();
+    let tiles: Vec<(i32, i32)> = (0..map.h)
+        .flat_map(|y| (0..map.w).map(move |x| (x, y)))
+        .collect();
     for tile in tiles {
         if !map.tiles[map.idx(tile.0, tile.1)].camp {
             continue;
@@ -388,9 +523,15 @@ fn spawn_round(
         camps += 1;
         if land < land_cap() && rng.0.below(8) == 0 {
             // The factory refuses a tile another civ's unit stands on.
-            let blocked = units.iter().any(|(_, u)| (u.x, u.y) == tile && !is_barbarian(u.civ));
+            let blocked = units
+                .iter()
+                .any(|(_, u)| (u.x, u.y) == tile && !is_barbarian(u.civ));
             if !blocked {
-                let t = if many { crate::roles::barbarian_advanced() } else { crate::roles::barbarian_basic() };
+                let t = if many {
+                    crate::roles::barbarian_advanced()
+                } else {
+                    crate::roles::barbarian_basic()
+                };
                 spawn(commands, art, t, tile, barb.tribe_at(tile));
                 land += 1;
             }
@@ -407,19 +548,32 @@ fn spawn_round(
 }
 
 /// Where a barbarian goes this turn (HYPOTHESIS, module docs).
-fn order(map: &GameMap, u: &Unit, cities: &[&City], units: &[(Entity, Unit)]) -> Option<Vec<(i32, i32)>> {
+fn order(
+    map: &GameMap,
+    u: &Unit,
+    cities: &[&City],
+    units: &[(Entity, Unit)],
+) -> Option<Vec<(i32, i32)>> {
     if def(u.utype).attack == 0 {
         return None;
     }
     let on_camp = map.get(u.x, u.y).is_some_and(|t| t.camp);
-    let mates = units.iter().filter(|(_, o)| is_barbarian(o.civ) && (o.x, o.y) == (u.x, u.y)).count();
+    let mates = units
+        .iter()
+        .filter(|(_, o)| is_barbarian(o.civ) && (o.x, o.y) == (u.x, u.y))
+        .count();
     if on_camp && mates <= 1 {
         return None;
     }
     let prey = cities
         .iter()
         .map(|c| (c.x, c.y))
-        .chain(units.iter().filter(|(_, o)| !is_barbarian(o.civ) && o.carrier.is_none()).map(|(_, o)| (o.x, o.y)))
+        .chain(
+            units
+                .iter()
+                .filter(|(_, o)| !is_barbarian(o.civ) && o.carrier.is_none())
+                .map(|(_, o)| (o.x, o.y)),
+        )
         .filter(|&p| map.distance(p, (u.x, u.y)) <= SIGHT && map.is_land(p.0, p.1))
         .min_by_key(|&p| (map.distance(p, (u.x, u.y)), p));
     let target = prey?;
@@ -447,7 +601,15 @@ pub fn play(
     let snapshot: Vec<(Entity, Unit)> = units.iter().map(|(e, u)| (e, u.clone())).collect();
     if !barb.spawned {
         barb.spawned = true;
-        spawn_round(&mut commands, &art, &mut map, &mut barb, &mut rng, &city_refs, &snapshot);
+        spawn_round(
+            &mut commands,
+            &art,
+            &mut map,
+            &mut barb,
+            &mut rng,
+            &city_refs,
+            &snapshot,
+        );
         if std::env::var("CIV3_AI_LOG").is_ok() {
             println!(
                 "barbarians: {} camps, {} units, {} world cities",

@@ -64,11 +64,13 @@ impl Network {
 
 /// Build `p`'s network.
 pub fn components(map: &GameMap, nodes: &[Node], v: &View) -> Network {
-    let city_at: HashMap<(i32, i32), usize> = nodes.iter().enumerate().map(|(i, n)| (n.at, i)).collect();
+    let city_at: HashMap<(i32, i32), usize> =
+        nodes.iter().enumerate().map(|(i, n)| (n.at, i)).collect();
     let road_for = |x: i32, y: i32| {
         let Some(t) = map.get(x, y) else { return false };
         (t.road || city_at.contains_key(&(x, y)))
-            && t.owner.is_none_or(|o| o as usize == v.p || !(v.at_war)(v.p, o as usize))
+            && t.owner
+                .is_none_or(|o| o as usize == v.p || !(v.at_war)(v.p, o as usize))
     };
     // Pass 0: road labels, the first city in order names its component.
     let mut label: HashMap<(i32, i32), usize> = HashMap::new();
@@ -120,7 +122,11 @@ pub fn components(map: &GameMap, nodes: &[Node], v: &View) -> Network {
     let ports: Vec<Vec<u32>> = nodes
         .iter()
         .map(|n| {
-            let mut ids: Vec<u32> = map.neighbors(n.at.0, n.at.1).into_iter().filter_map(|(x, y)| sea.get(&(x, y)).copied()).collect();
+            let mut ids: Vec<u32> = map
+                .neighbors(n.at.0, n.at.1)
+                .into_iter()
+                .filter_map(|(x, y)| sea.get(&(x, y)).copied())
+                .collect();
             ids.sort_unstable();
             ids.dedup();
             ids
@@ -129,7 +135,11 @@ pub fn components(map: &GameMap, nodes: &[Node], v: &View) -> Network {
     for i in 0..nodes.len() {
         for j in i + 1..nodes.len() {
             let (a, b) = (&nodes[i], &nodes[j]);
-            if a.water && b.water && !(v.at_war)(a.owner, b.owner) && ports[i].iter().any(|w| ports[j].contains(w)) {
+            if a.water
+                && b.water
+                && !(v.at_war)(a.owner, b.owner)
+                && ports[i].iter().any(|w| ports[j].contains(w))
+            {
                 union(&mut parent, i, j);
             }
         }
@@ -187,11 +197,22 @@ mod tests {
     }
 
     fn node(at: (i32, i32)) -> Node {
-        Node { at, owner: 0, water: false, air: false }
+        Node {
+            at,
+            owner: 0,
+            water: false,
+            air: false,
+        }
     }
 
     fn view<'a>(war: &'a dyn Fn(usize, usize) -> bool) -> View<'a> {
-        View { p: 0, at_war: war, sea: false, ocean: false, seen: &|_, _| true }
+        View {
+            p: 0,
+            at_war: war,
+            sea: false,
+            ocean: false,
+            seen: &|_, _| true,
+        }
     }
 
     #[test]

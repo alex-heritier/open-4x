@@ -38,9 +38,9 @@ pub fn blocks(
         return false;
     }
     let in_zone = |p: (i32, i32)| {
-        zones
-            .iter()
-            .any(|&(c, x, y)| c != civ && (x, y) != p && map.distance(p, (x, y)) <= 1 && at_war(civ, c))
+        zones.iter().any(|&(c, x, y)| {
+            c != civ && (x, y) != p && map.distance(p, (x, y)) <= 1 && at_war(civ, c)
+        })
     };
     in_zone(from) && in_zone(to)
 }
@@ -70,14 +70,39 @@ mod tests {
     fn a_friend_peace_and_ones_own_zone_lift_it() {
         let m = map();
         let zones = [(1, 10, 10)];
-        assert!(!blocks(&m, 0, (9, 10), (9, 11), &zones, |_, _| true, true), "a friendly stack or city");
-        assert!(!blocks(&m, 0, (9, 10), (9, 11), &zones, |_, _| false, false), "no war");
-        assert!(!blocks(&m, 1, (9, 10), (9, 11), &zones, |_, _| true, false), "its own zone");
+        assert!(
+            !blocks(&m, 0, (9, 10), (9, 11), &zones, |_, _| true, true),
+            "a friendly stack or city"
+        );
+        assert!(
+            !blocks(&m, 0, (9, 10), (9, 11), &zones, |_, _| false, false),
+            "no war"
+        );
+        assert!(
+            !blocks(&m, 1, (9, 10), (9, 11), &zones, |_, _| true, false),
+            "its own zone"
+        );
         // Two enemies: either one's zone binds both ends of the step.
         let zones = [(1, 10, 10), (2, 12, 10)];
         assert!(blocks(&m, 0, (11, 9), (11, 10), &zones, |_, _| true, false));
         // Peace with one of them leaves the other's zone.
-        assert!(blocks(&m, 0, (11, 9), (11, 10), &zones, |_, c| c == 2, false));
-        assert!(!blocks(&m, 0, (11, 9), (11, 10), &zones, |_, c| c == 3, false));
+        assert!(blocks(
+            &m,
+            0,
+            (11, 9),
+            (11, 10),
+            &zones,
+            |_, c| c == 2,
+            false
+        ));
+        assert!(!blocks(
+            &m,
+            0,
+            (11, 9),
+            (11, 10),
+            &zones,
+            |_, c| c == 3,
+            false
+        ));
     }
 }

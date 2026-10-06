@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::barbarians::{self, Barbarians, Tribe};
 use crate::cities::{self, Capital, City, CityNamesUsed, Treasury};
-use crate::civs::{CIV_CAP, civ_count, Civilizations, Outcome};
+use crate::civs::{CIV_CAP, Civilizations, Outcome, civ_count};
 use crate::diplomacy::{self, Diplomacy};
 use crate::features::{MessageBoard, post};
 use crate::flip::Flips;
@@ -39,7 +39,9 @@ pub enum Command {
 
 /// Where the quick save lives.
 pub fn path() -> std::path::PathBuf {
-    std::env::var("CIV3_SAVE").map(Into::into).unwrap_or_else(|_| "saves/quicksave.json".into())
+    std::env::var("CIV3_SAVE")
+        .map(Into::into)
+        .unwrap_or_else(|_| "saves/quicksave.json".into())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -110,20 +112,31 @@ impl Save {
     /// The game as it stands.
     pub fn capture(world: &mut World) -> Save {
         let mut q = world.query::<(Entity, &City)>();
-        let mut city_list: Vec<(Entity, City)> = q.iter(world).map(|(e, c)| (e, c.clone())).collect();
+        let mut city_list: Vec<(Entity, City)> =
+            q.iter(world).map(|(e, c)| (e, c.clone())).collect();
         // The world's iteration order is an accident; the file should not be.
         city_list.sort_by_key(|(_, c)| (c.founded, c.civ, c.x, c.y));
         let mut q = world.query::<(Entity, &Unit, Option<&Tribe>)>();
-        let mut unit_list: Vec<(Entity, Unit, Option<u8>)> =
-            q.iter(world).map(|(e, u, t)| (e, u.clone(), t.map(|t| t.0))).collect();
+        let mut unit_list: Vec<(Entity, Unit, Option<u8>)> = q
+            .iter(world)
+            .map(|(e, u, t)| (e, u.clone(), t.map(|t| t.0)))
+            .collect();
         unit_list.sort_by_key(|(e, u, _)| (u.civ, u.x, u.y, u.utype.0, e.to_bits()));
         let unit_at = |e: Entity| unit_list.iter().position(|(o, _, _)| *o == e);
         let units = unit_list
             .iter()
-            .map(|(_, u, tribe)| UnitSave { unit: u.clone(), carrier: u.carrier.and_then(unit_at), tribe: *tribe })
+            .map(|(_, u, tribe)| UnitSave {
+                unit: u.clone(),
+                carrier: u.carrier.and_then(unit_at),
+                tribe: *tribe,
+            })
             .collect();
         let capital_res = world.resource::<Capital>();
-        let capital = capital_res.0.iter().map(|c| c.and_then(|e| city_list.iter().position(|(o, _)| *o == e))).collect();
+        let capital = capital_res
+            .0
+            .iter()
+            .map(|c| c.and_then(|e| city_list.iter().position(|(o, _)| *o == e)))
+            .collect();
         let map = world.resource::<GameMap>();
         let civs = world.resource::<Civilizations>();
         Save {
@@ -150,7 +163,9 @@ impl Save {
             },
             research: world.resource::<Research>().snapshot(),
             diplomacy: world.resource::<Diplomacy>().snapshot(),
-            realms: (0..civ_count()).map(|c| realm::read(c, |r| r.snapshot())).collect(),
+            realms: (0..civ_count())
+                .map(|c| realm::read(c, |r| r.snapshot()))
+                .collect(),
             wonders: world.resource::<Wonders>().snapshot(),
             barbarians: world.resource::<Barbarians>().snapshot(),
             game_rng: world.resource::<rng::GameRng>().state(),
@@ -169,21 +184,41 @@ impl Save {
         if (self.seed, self.width, self.height) != (map.seed, map.w, map.h) {
             return Err("saved on a different map".into());
         }
-        let per_slot = [self.names.len(), self.treasury.len(), self.flips.len(), self.capital.len(), self.civs.eliminated.len()];
-        if self.tiles.len() != map.tiles.len() || per_slot.iter().any(|&n| n != CIV_CAP) || self.realms.len() != civ_count() {
+        let per_slot = [
+            self.names.len(),
+            self.treasury.len(),
+            self.flips.len(),
+            self.capital.len(),
+            self.civs.eliminated.len(),
+        ];
+        if self.tiles.len() != map.tiles.len()
+            || per_slot.iter().any(|&n| n != CIV_CAP)
+            || self.realms.len() != civ_count()
+        {
             return Err("the save does not fit this game".into());
         }
         if self.civs.active >= civ_count() || self.civs.last_human >= civ_count() {
             return Err("the save names a civilization that does not exist".into());
         }
-        if self.exploration.seen.iter().any(|s| s.len() != map.tiles.len())
+        if self
+            .exploration
+            .seen
+            .iter()
+            .any(|s| s.len() != map.tiles.len())
             || self.exploration.viewer.is_some_and(|c| c >= civ_count())
         {
             return Err("the exploration history does not fit this map".into());
         }
         if self.cities.iter().any(|c| c.civ >= civ_count())
-            || self.units.iter().any(|u| (u.unit.civ >= civ_count() && u.unit.civ != crate::civs::BARBARIANS) || u.carrier.is_some_and(|i| i >= self.units.len()))
-            || self.capital.iter().flatten().any(|&i| i >= self.cities.len())
+            || self.units.iter().any(|u| {
+                (u.unit.civ >= civ_count() && u.unit.civ != crate::civs::BARBARIANS)
+                    || u.carrier.is_some_and(|i| i >= self.units.len())
+            })
+            || self
+                .capital
+                .iter()
+                .flatten()
+                .any(|&i| i >= self.cities.len())
         {
             return Err("the save names something that does not exist".into());
         }
@@ -212,7 +247,15 @@ impl Save {
 
         // The old cast goes: cities, units and everything drawn for them.
         let mut doomed: Vec<Entity> = vec![];
-        let mut q = world.query_filtered::<Entity, Or<(With<City>, With<Unit>, With<cities::CitySprite>, With<cities::CityLabelBack>, With<crate::production_prompt::PromptRoot>, With<crate::build_switch::SwitchRoot>, With<crate::abandon::AbandonRoot>)>>();
+        let mut q = world.query_filtered::<Entity, Or<(
+            With<City>,
+            With<Unit>,
+            With<cities::CitySprite>,
+            With<cities::CityLabelBack>,
+            With<crate::production_prompt::PromptRoot>,
+            With<crate::build_switch::SwitchRoot>,
+            With<crate::abandon::AbandonRoot>,
+        )>>();
         doomed.extend(q.iter(world));
         for e in doomed {
             if let Ok(e) = world.get_entity_mut(e) {
@@ -229,7 +272,11 @@ impl Save {
         for e in pickers {
             world.despawn(e);
         }
-        let mut q = world.query_filtered::<Entity, Or<(With<crate::advisors::AdvisorRoot>, With<crate::domestic::DomesticRoot>, With<cities::CityScreenRoot>)>>();
+        let mut q = world.query_filtered::<Entity, Or<(
+            With<crate::advisors::AdvisorRoot>,
+            With<crate::domestic::DomesticRoot>,
+            With<cities::CityScreenRoot>,
+        )>>();
         let panels: Vec<Entity> = q.iter(world).collect();
         for e in panels {
             world.despawn(e);
@@ -257,7 +304,9 @@ impl Save {
         });
         world.insert_resource(CityNamesUsed(std::array::from_fn(|i| self.names[i])));
         world.insert_resource(Treasury(std::array::from_fn(|i| self.treasury[i])));
-        world.insert_resource(Flips { empire: std::array::from_fn(|i| self.flips[i]) });
+        world.insert_resource(Flips {
+            empire: std::array::from_fn(|i| self.flips[i]),
+        });
         world.resource_mut::<Wonders>().restore(&self.wonders);
         world.resource_mut::<Barbarians>().restore(&self.barbarians);
         world.insert_resource(rng::GameRng::new(self.game_rng));
@@ -298,7 +347,17 @@ impl Save {
                 city_ids.push(e);
                 let is_capital = self.capital[city.civ] == Some(i);
                 if let (Some(art), Some(assets), Some(star)) = (city_art, assets, star) {
-                    cities::spawn_city_visuals(&mut commands, art, assets, star, map, e, city, is_capital, viewer);
+                    cities::spawn_city_visuals(
+                        &mut commands,
+                        art,
+                        assets,
+                        star,
+                        map,
+                        e,
+                        city,
+                        is_capital,
+                        viewer,
+                    );
                 }
             }
             let unit_art = world.get_resource::<crate::units::UnitArt>();
@@ -306,7 +365,15 @@ impl Save {
             for saved in &self.units {
                 let u = &saved.unit;
                 let e = match unit_art {
-                    Some(art) => crate::units::spawn_unit_at_level(&mut commands, art, u.utype, u.x, u.y, u.civ, u.level),
+                    Some(art) => crate::units::spawn_unit_at_level(
+                        &mut commands,
+                        art,
+                        u.utype,
+                        u.x,
+                        u.y,
+                        u.civ,
+                        u.level,
+                    ),
                     None => commands.spawn_empty().id(),
                 };
                 unit_ids.push(e);
@@ -323,11 +390,15 @@ impl Save {
         };
         queue.apply(world);
         let _ = unit_ids;
-        world.insert_resource(Capital(std::array::from_fn(|i| self.capital[i].map(|c| city_ids[c]))));
+        world.insert_resource(Capital(std::array::from_fn(|i| {
+            self.capital[i].map(|c| city_ids[c])
+        })));
         if world.contains_resource::<crate::features::FeatureArt>() {
             let _ = world.run_system_cached(crate::features::spawn_features);
         }
-        if world.contains_resource::<crate::tiles::TileArt>() && world.contains_resource::<AssetServer>() {
+        if world.contains_resource::<crate::tiles::TileArt>()
+            && world.contains_resource::<AssetServer>()
+        {
             let _ = world.run_system_cached(crate::render::spawn_terrain);
         }
         Ok(())
@@ -348,7 +419,8 @@ pub fn keys(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<Command>) {
 pub fn run(world: &mut World) {
     let requests: Vec<Command> = world.resource_mut::<Messages<Command>>().drain().collect();
     for request in requests {
-        let busy = world.resource::<crate::combat::ActiveCombat>().0.is_some() || world.resource::<Barbarians>().phase;
+        let busy = world.resource::<crate::combat::ActiveCombat>().0.is_some()
+            || world.resource::<Barbarians>().phase;
         let note = if busy {
             "Wait for the fighting to end.".to_string()
         } else {
@@ -429,7 +501,10 @@ mod tests {
         let mut city = City::new(0, "Kyoto", start.0, start.1);
         city.set_size(4);
         city.diseased = true;
-        city.set_specialists(vec![cities::Specialist::Scientist, cities::Specialist::TaxCollector]);
+        city.set_specialists(vec![
+            cities::Specialist::Scientist,
+            cities::Specialist::TaxCollector,
+        ]);
         city.lose_population(1, None, &mut w.resource_mut::<crate::combat::CombatRng>().0);
         assert!(city.citizens.slots().iter().any(Option::is_none));
         city.shields = 12;
@@ -438,7 +513,9 @@ mod tests {
         let capital = w.spawn(city).id();
         w.spawn(City::new(1, "Memphis", start.0 + 5, start.1));
         w.resource_mut::<Capital>().0[0] = Some(capital);
-        let ship = w.spawn(Unit::new(0, UnitType::named("Settler"), start.0, start.1)).id();
+        let ship = w
+            .spawn(Unit::new(0, UnitType::named("Settler"), start.0, start.1))
+            .id();
         let mut cargo = Unit::new(0, UnitType::named("Warrior"), start.0, start.1);
         cargo.carrier = Some(ship);
         cargo.fortified = true;
@@ -447,9 +524,20 @@ mod tests {
         w.spawn(cargo);
         let mut worker = Unit::new(1, UnitType::named("Worker"), start.0 + 1, start.1);
         worker.civ = 0;
-        worker.work = Some(crate::improvements::Work { action: crate::improvements::WorkAction::Mine, progress: 7 });
+        worker.work = Some(crate::improvements::Work {
+            action: crate::improvements::WorkAction::Mine,
+            progress: 7,
+        });
         w.spawn(worker);
-        w.spawn((Unit::new(crate::civs::BARBARIANS, UnitType::named("Warrior"), start.0 + 2, start.1), Tribe(3)));
+        w.spawn((
+            Unit::new(
+                crate::civs::BARBARIANS,
+                UnitType::named("Warrior"),
+                start.0 + 2,
+                start.1,
+            ),
+            Tribe(3),
+        ));
         w.resource_mut::<Turn>().0 = 42;
         w.resource_mut::<Treasury>().0[0] = 321;
         w.resource_mut::<Civilizations>().eliminated[2] = true;
@@ -494,18 +582,29 @@ mod tests {
         choice_city.shields = 30;
         let choice_entity = w.spawn(choice_city).id();
         w.resource_scope(|w, mut choice: Mut<crate::build_switch::BuildSwitch>| {
-            choice.request(choice_entity, &mut w.get_mut::<City>(choice_entity).unwrap(), Production::named("Worker"));
+            choice.request(
+                choice_entity,
+                &mut w.get_mut::<City>(choice_entity).unwrap(),
+                Production::named("Worker"),
+            );
         });
-        assert!(w.resource::<crate::build_switch::BuildSwitch>().is_pending());
+        assert!(
+            w.resource::<crate::build_switch::BuildSwitch>()
+                .is_pending()
+        );
         let stale_switch = w.spawn(crate::build_switch::SwitchRoot).id();
         w.init_resource::<crate::abandon::Abandon>();
         let old_city = w.get::<City>(choice_entity).unwrap().clone();
-        w.resource_mut::<crate::abandon::Abandon>().push(choice_entity, &old_city);
+        w.resource_mut::<crate::abandon::Abandon>()
+            .push(choice_entity, &old_city);
         let stale_abandon = w.spawn(crate::abandon::AbandonRoot(choice_entity)).id();
         save.apply(w).unwrap();
         assert!(!w.resource::<crate::advisors::Advisors>().is_open());
         assert!(w.get_entity(stale_panel).is_err());
-        assert!(!w.resource::<crate::build_switch::BuildSwitch>().is_pending());
+        assert!(
+            !w.resource::<crate::build_switch::BuildSwitch>()
+                .is_pending()
+        );
         assert!(w.get_entity(stale_switch).is_err());
         assert!(!w.resource::<crate::abandon::Abandon>().blocks(0));
         assert!(w.get_entity(stale_abandon).is_err());
@@ -521,12 +620,25 @@ mod tests {
         let mut q = w.query::<(Entity, &Unit)>();
         let units: Vec<(Entity, Unit)> = q.iter(w).map(|(e, u)| (e, u.clone())).collect();
         assert_eq!(units.len(), 4, "the stray scout is gone");
-        let worker = units.iter().find(|(_, u)| u.utype == UnitType::named("Worker")).unwrap();
+        let worker = units
+            .iter()
+            .find(|(_, u)| u.utype == UnitType::named("Worker"))
+            .unwrap();
         assert_eq!(worker.1.nationality, crate::civs::roster_index(1));
         assert_eq!(worker.1.work.unwrap().progress, 7);
-        let cargo = units.iter().find(|(_, u)| u.utype == UnitType::named("Warrior") && u.civ == 0).unwrap();
-        let ship = units.iter().find(|(_, u)| u.utype == UnitType::named("Settler")).unwrap();
-        assert_eq!(cargo.1.carrier, Some(ship.0), "the passenger is aboard the same ship");
+        let cargo = units
+            .iter()
+            .find(|(_, u)| u.utype == UnitType::named("Warrior") && u.civ == 0)
+            .unwrap();
+        let ship = units
+            .iter()
+            .find(|(_, u)| u.utype == UnitType::named("Settler"))
+            .unwrap();
+        assert_eq!(
+            cargo.1.carrier,
+            Some(ship.0),
+            "the passenger is aboard the same ship"
+        );
         assert!(cargo.1.scientific_leader);
         assert!(w.resource::<Research>().science_age(0, 62));
         assert!(!w.resource::<Research>().science_age(0, 63));
@@ -548,7 +660,11 @@ mod tests {
         save.research.pop();
         let words = w.resource::<Research>().snapshot();
         assert!(save.apply(w).is_err());
-        assert_eq!(w.resource::<Research>().snapshot(), words, "a refused load changes nothing");
+        assert_eq!(
+            w.resource::<Research>().snapshot(),
+            words,
+            "a refused load changes nothing"
+        );
     }
 
     #[test]
@@ -568,12 +684,19 @@ mod tests {
     fn loading_an_older_game_relocks_units_unlocked_after_the_save() {
         let mut app = app();
         let w = app.world_mut();
-        let bronze = crate::ruleset::TECH_NAMES.iter().position(|&t| t == "Bronze Working").unwrap() as i32;
+        let bronze = crate::ruleset::TECH_NAMES
+            .iter()
+            .position(|&t| t == "Bronze Working")
+            .unwrap() as i32;
         let save = Save::capture(w);
-        w.resource_mut::<Research>().award(0, bronze, &mut rng::MapRng::new(7));
+        w.resource_mut::<Research>()
+            .award(0, bronze, &mut rng::MapRng::new(7));
         assert!(crate::research::can_build(0, Production::named("Spearman")));
         save.apply(w).unwrap();
-        assert!(!crate::research::can_build(0, Production::named("Spearman")));
+        assert!(!crate::research::can_build(
+            0,
+            Production::named("Spearman")
+        ));
     }
 
     #[test]
@@ -601,7 +724,10 @@ mod tests {
         app.update();
         let map = app.world().resource::<GameMap>();
         assert!(map.tiles[30].seen);
-        assert!(!map.tiles[31].seen, "another civ's discoveries remain private");
+        assert!(
+            !map.tiles[31].seen,
+            "another civ's discoveries remain private"
+        );
 
         // Starting a fresh process has no previous system-local fog memory.
         let mut fresh = self::app();

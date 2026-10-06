@@ -113,7 +113,14 @@ pub fn resolve(rs: &Ruleset) -> Roles {
         barbarian_advanced: slot(g.advanced_barbarian_unit, nu),
         barbarian_sea: slot(g.barbarian_sea_unit, nu),
         captured,
-        guard: cheapest_unit(u, |r| r.class == 0 && r.tech < 0 && r.attack > 0 && r.pop_cost == 0 && r.worker == 0 && r.resources == [-1; 3]),
+        guard: cheapest_unit(u, |r| {
+            r.class == 0
+                && r.tech < 0
+                && r.attack > 0
+                && r.pop_cost == 0
+                && r.worker == 0
+                && r.resources == [-1; 3]
+        }),
         ferry: cheapest_unit(u, |r| r.class == 1 && r.capacity > 0 && r.pop_cost == 0),
         palace: b.iter().position(|x| x.flags & imp::CENTER_OF_EMPIRE != 0),
         forbidden_palace: small_wonder(&|x| x.small & SMALL_REDUCES_CORRUPTION != 0),
@@ -174,11 +181,17 @@ pub fn barbarian_basic() -> UnitType {
 }
 /// The barbarians' mounted soldier.
 pub fn barbarian_advanced() -> UnitType {
-    unit(get().barbarian_advanced.or(get().barbarian_basic), "advanced barbarian")
+    unit(
+        get().barbarian_advanced.or(get().barbarian_basic),
+        "advanced barbarian",
+    )
 }
 /// The barbarians' ship.
 pub fn barbarian_sea() -> Option<UnitType> {
-    get().barbarian_sea.or(get().ferry).map(|i| UnitType(i as u16))
+    get()
+        .barbarian_sea
+        .or(get().ferry)
+        .map(|i| UnitType(i as u16))
 }
 /// The ship the AI ferries settlers with.
 pub fn ferry() -> Option<Production> {
@@ -273,7 +286,13 @@ mod tests {
     use super::*;
 
     fn name_of(rs: &Ruleset, role: Option<usize>, unit: bool) -> &'static str {
-        role.map_or("-", |i| if unit { rs.units[i].name } else { rs.bldgs[i].name })
+        role.map_or("-", |i| {
+            if unit {
+                rs.units[i].name
+            } else {
+                rs.bldgs[i].name
+            }
+        })
     }
 
     /// In `conquests.biq` every role lands on the row a player would name.

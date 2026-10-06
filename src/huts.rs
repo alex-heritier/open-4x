@@ -87,7 +87,10 @@ pub fn gold(round: u32) -> u32 {
 /// Section 6.3: a free tribe name of the civ's culture group, never marked.
 pub fn tribe(dice: &mut MapRng, used: &dyn Fn(usize) -> bool, group: usize) -> u8 {
     let r = dice.below(15) as usize;
-    (0..15).map(|j| 15 * group + (r + j) % 15).find(|&i| !used(i)).map_or(75, |i| i as u8)
+    (0..15)
+        .map(|j| 15 * group + (r + j) % 15)
+        .find(|&i| !used(i))
+        .map_or(75, |i| i as u8)
 }
 
 /// Section 6.4, `chooseHutUnit`: a mercenary type, or `None`.
@@ -106,7 +109,11 @@ pub fn choose_unit(
     let mut cur = dice.below(n as u32) as usize;
     for _ in 0..n {
         let r = crate::roster::unit(cur);
-        let tech_era = if r.tech < 0 { 0 } else { crate::ruleset::TECH_TREE[r.tech as usize].0 };
+        let tech_era = if r.tech < 0 {
+            0
+        } else {
+            crate::ruleset::TECH_TREE[r.tech as usize].0
+        };
         let ok = r.abilities & 1 == 0
             && r.races & 1 != 0
             && r.races & (1 << race) != 0
@@ -122,7 +129,16 @@ pub fn choose_unit(
 }
 
 /// Ring 1 in Civ3's spiral order (`0x5E6E50`, `n = 1..8`).
-pub const RING: [(i32, i32); 8] = [(1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1)];
+pub const RING: [(i32, i32); 8] = [
+    (1, -1),
+    (1, 0),
+    (1, 1),
+    (0, 1),
+    (-1, 1),
+    (-1, 0),
+    (-1, -1),
+    (0, -1),
+];
 
 /// The spiral offsets `n = 1..76`: rings 1 to 3, then the first 28 of
 /// ring 4, each ring starting at its north-east corner and turning
@@ -192,8 +208,12 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
     let traits = crate::cities::traits(ctx.civ);
     let expansionist = traits & EXPANSIONIST != 0;
     let idx = row(ctx.difficulty, expansionist);
-    let group = crate::civs::RACES.get(ctx.civ).map_or(0, |r| r.culture_group as usize);
-    let race = crate::civs::RACES.get(ctx.civ).map_or(0, |r| r.race as usize);
+    let group = crate::civs::RACES
+        .get(ctx.civ)
+        .map_or(0, |r| r.culture_group as usize);
+    let race = crate::civs::RACES
+        .get(ctx.civ)
+        .map_or(0, |r| r.race as usize);
     let map = ctx.map;
     let (x, y) = ctx.tile;
     let land = crate::realm::continents(map);
@@ -210,7 +230,11 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
     let mine = ctx.cities.iter().filter(|c| c.civ == ctx.civ).count() as i32;
     let average_ok = mine <= ctx.cities.len() as i32 / ctx.players.max(1);
     let mut out = Pop::default();
-    let mut o = if ctx.unit.is_none() { Outcome::City } else { outcome(dice.below(20) as i32, idx) };
+    let mut o = if ctx.unit.is_none() {
+        Outcome::City
+    } else {
+        outcome(dice.below(20) as i32, idx)
+    };
     loop {
         let done = match o {
             Outcome::Gold => {
@@ -237,8 +261,18 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
             Outcome::City => false,
             Outcome::Nothing => true,
             Outcome::Settlers => {
-                let settling = ctx.units.iter().filter(|u| u.civ == ctx.civ && u.utype == crate::roles::settler()).count()
-                    + ctx.cities.iter().filter(|c| c.civ == ctx.civ && c.production.unit() == Some(crate::roles::settler())).count();
+                let settling = ctx
+                    .units
+                    .iter()
+                    .filter(|u| u.civ == ctx.civ && u.utype == crate::roles::settler())
+                    .count()
+                    + ctx
+                        .cities
+                        .iter()
+                        .filter(|c| {
+                            c.civ == ctx.civ && c.production.unit() == Some(crate::roles::settler())
+                        })
+                        .count();
                 if settling == 0 && average_ok {
                     out.units.push((crate::roles::settler(), false));
                     true
@@ -250,7 +284,11 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
                 let have = |row: usize| -> i32 {
                     (0..ctx.players as usize)
                         .map(|q| {
-                            let live = ctx.units.iter().filter(|u| u.civ == q && u.utype.0 as usize == row).count() as i32;
+                            let live = ctx
+                                .units
+                                .iter()
+                                .filter(|u| u.civ == q && u.utype.0 as usize == row)
+                                .count() as i32;
                             if live > 0 {
                                 live
                             } else {
@@ -259,7 +297,9 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
                         })
                         .sum()
                 };
-                let water = map.get(x, y).is_some_and(|t| crate::improvements::is_water_base(t.base));
+                let water = map
+                    .get(x, y)
+                    .is_some_and(|t| crate::improvements::is_water_base(t.base));
                 match choose_unit(dice, race, ctx.era, water, ctx.players, &have) {
                     Some(t) => {
                         out.units.push((t, true));
@@ -282,8 +322,13 @@ pub fn pop(ctx: &mut Context, dice: &mut MapRng) -> Pop {
                 }
             }
             Outcome::Barbarians => {
-                let soldiers = ctx.units.iter().any(|u| u.civ == ctx.civ && def(u.utype).attack > 0);
-                let explorer = ctx.unit.is_some_and(|u| def(u.utype).abilities & (1 << 4) != 0);
+                let soldiers = ctx
+                    .units
+                    .iter()
+                    .any(|u| u.civ == ctx.civ && def(u.utype).attack > 0);
+                let explorer = ctx
+                    .unit
+                    .is_some_and(|u| def(u.utype).abilities & (1 << 4) != 0);
                 if expansionist || near <= 1 || mine == 0 || !soldiers || explorer {
                     false
                 } else {
@@ -378,7 +423,12 @@ mod tests {
         let s = spiral76();
         assert_eq!(s.len(), 76);
         assert_eq!(&s[..8], &RING);
-        assert_eq!(s.iter().filter(|(dx, dy)| dx.abs().max(dy.abs()) <= 3).count(), 48);
+        assert_eq!(
+            s.iter()
+                .filter(|(dx, dy)| dx.abs().max(dy.abs()) <= 3)
+                .count(),
+            48
+        );
     }
 
     #[test]
@@ -386,7 +436,11 @@ mod tests {
         let mut dice = MapRng::new(7);
         for _ in 0..50 {
             let t = choose_unit(&mut dice, 9, 0, false, 4, &|_| 4).unwrap();
-            assert!(t == UnitType::named("Warrior") || t == UnitType::named("Horseman"), "{}", def(t).name);
+            assert!(
+                t == UnitType::named("Warrior") || t == UnitType::named("Horseman"),
+                "{}",
+                def(t).name
+            );
         }
         assert_eq!(choose_unit(&mut dice, 9, 1, false, 4, &|_| 4), None);
     }

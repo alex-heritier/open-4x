@@ -170,7 +170,9 @@ pub fn get() -> &'static Ruleset {
     #[cfg(test)]
     return RULESET.get_or_init(|| Box::leak(Box::new(test_ruleset())));
     #[cfg(not(test))]
-    return RULESET.get().expect("no ruleset installed: load a .biq first (ruleset::install)");
+    return RULESET
+        .get()
+        .expect("no ruleset installed: load a .biq first (ruleset::install)");
 }
 
 #[cfg(test)]
@@ -181,7 +183,12 @@ fn test_ruleset() -> Ruleset {
     let install = Install::new(root, vec![]);
     let path = install
         .resolve("Conquests/conquests.biq")
-        .unwrap_or_else(|| panic!("tests need the Civ3 install ({}): set CIV3_DIR", install.root.display()));
+        .unwrap_or_else(|| {
+            panic!(
+                "tests need the Civ3 install ({}): set CIV3_DIR",
+                install.root.display()
+            )
+        });
     let biq = Biq::read_file(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     build(&biq, &install)
 }
@@ -295,7 +302,13 @@ pub fn rules() -> Rules {
         techs: r
             .techs
             .iter()
-            .map(|&(cost, era, prereq, flags, flavors)| TechRow { cost, era, prereq, flags, flavors })
+            .map(|&(cost, era, prereq, flags, flavors)| TechRow {
+                cost,
+                era,
+                prereq,
+                flags,
+                flavors,
+            })
             .collect(),
         future_tech_cost: r.general.future_tech_cost,
         max_research_turns: r.general.max_research_time,
@@ -312,24 +325,34 @@ pub fn tables() -> Tables {
         units: r
             .prto
             .iter()
-            .map(|&(required_tech, available_to_civs, ai_strategies, needs_resource)| AiUnitRow {
-                required_tech,
-                available_to_civs,
-                ai_strategies,
-                needs_resource,
-            })
+            .map(
+                |&(required_tech, available_to_civs, ai_strategies, needs_resource)| AiUnitRow {
+                    required_tech,
+                    available_to_civs,
+                    ai_strategies,
+                    needs_resource,
+                },
+            )
             .collect(),
         govt_prerequisite: r.govt.clone(),
         bldgs: r
             .bldg_rows
             .iter()
-            .map(|&(required_advance, spaceship_part, improvement_flags, other_characteristics, flavors)| BldgRow {
-                required_advance,
-                spaceship_part,
-                improvement_flags,
-                other_characteristics,
-                flavors,
-            })
+            .map(
+                |&(
+                    required_advance,
+                    spaceship_part,
+                    improvement_flags,
+                    other_characteristics,
+                    flavors,
+                )| BldgRow {
+                    required_advance,
+                    spaceship_part,
+                    improvement_flags,
+                    other_characteristics,
+                    flavors,
+                },
+            )
             .collect(),
         ctzn_prerequisite: r.ctzn.clone(),
         flavors: r.flavors.clone(),
@@ -379,7 +402,9 @@ const BLDG_PLAYABLE: &[&str] = &[
 pub fn pedia_icons(install: &Install) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for path in install.resolve_all("Text/PediaIcons.txt") {
-        let Ok(bytes) = crate::web::read_bytes(&path) else { continue };
+        let Ok(bytes) = crate::web::read_bytes(&path) else {
+            continue;
+        };
         let text = String::from_utf8_lossy(&bytes);
         let mut key: Option<String> = None;
         for line in text.lines() {
@@ -400,8 +425,12 @@ pub fn pedia_icons(install: &Install) -> HashMap<String, String> {
 /// color city badges, borders and the unit tint share. The VGA palette is the
 /// last 768 bytes of a 256-color PCX.
 fn team_rgb(install: &Install, n: i32) -> (u8, u8, u8) {
-    let Some(path) = install.resolve(&format!("Art/Units/Palettes/ntp{n:02}.pcx")) else { return (128, 128, 128) };
-    let Ok(bytes) = crate::web::read_bytes(path) else { return (128, 128, 128) };
+    let Some(path) = install.resolve(&format!("Art/Units/Palettes/ntp{n:02}.pcx")) else {
+        return (128, 128, 128);
+    };
+    let Ok(bytes) = crate::web::read_bytes(path) else {
+        return (128, 128, 128);
+    };
     if bytes.len() < 768 {
         return (128, 128, 128);
     }
@@ -434,20 +463,31 @@ fn civ_color_override(name: &str) -> Option<(u8, u8, u8)> {
 /// The `Art/Units` folder of a unit: the `#ANIMNAME_<civilopedia entry>` of
 /// `PediaIcons.txt`, for an entry with era variants (`..._ERAS_<era>`) the
 /// first era's, when the folder exists somewhere on the search path.
-fn art_dir(install: &Install, pedia: &HashMap<String, String>, entry: &str, first_era: &str) -> Option<String> {
+fn art_dir(
+    install: &Install,
+    pedia: &HashMap<String, String>,
+    entry: &str,
+    first_era: &str,
+) -> Option<String> {
     let entry = entry.trim();
     let key = format!("animname_{}", entry.to_ascii_lowercase());
     let era_key = format!("{key}_{}", first_era.trim().to_ascii_lowercase());
     let name = pedia.get(&key).or_else(|| pedia.get(&era_key))?;
     // The folder's own spelling: references and file names disagree in case.
-    let dir = install.resolve(&format!("Art/Units/{name}")).filter(|p| install.is_dir(p))?;
+    let dir = install
+        .resolve(&format!("Art/Units/{name}"))
+        .filter(|p| install.is_dir(p))?;
     dir.file_name().map(|f| f.to_string_lossy().into_owned())
 }
 
 /// Build the ruleset of `biq`, resolving art through `install`.
 pub fn build(biq: &Biq, install: &Install) -> Ruleset {
     let r = &biq.rules;
-    let g = r.general_rules.first().cloned().unwrap_or_else(|| panic!("the rules have no RULE row"));
+    let g = r
+        .general_rules
+        .first()
+        .cloned()
+        .unwrap_or_else(|| panic!("the rules have no RULE row"));
     let general = General {
         future_tech_cost: g.future_tech_cost,
         max_research_time: g.max_research_time,
@@ -471,18 +511,35 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
         starting_treasury: g.starting_treasury,
     };
     if r.techs.len() > 128 {
-        eprintln!("warning: {} advances; the game tracks the first 128", r.techs.len());
+        eprintln!(
+            "warning: {} advances; the game tracks the first 128",
+            r.techs.len()
+        );
     }
     let mask = |pred: &dyn Fn(u32) -> bool| -> u128 {
-        r.techs.iter().enumerate().filter(|(i, t)| *i < 128 && pred(t.flags as u32)).fold(0, |bits, (i, _)| bits | (1u128 << i))
+        r.techs
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| *i < 128 && pred(t.flags as u32))
+            .fold(0, |bits, (i, _)| bits | (1u128 << i))
     };
 
     let pedia = pedia_icons(install);
-    let first_era = r.eras.first().map(|e| e.civilopedia_entry.text().to_string()).unwrap_or_default();
+    let first_era = r
+        .eras
+        .first()
+        .map(|e| e.civilopedia_entry.text().to_string())
+        .unwrap_or_default();
     // The roster is every `RACE` row but the barbarians (the one with
     // `civilization_index == 0`). Roster index `i` is `RACE` row `i + 1`.
-    let roster: Vec<&_> = r.civilizations.iter().filter(|c| c.civilization_index != 0).collect();
-    let our_mask: u32 = (0..roster.len()).fold(0u32, |a, i| a | (1u32.checked_shl(i as u32 + 1).unwrap_or(0)));
+    let roster: Vec<&_> = r
+        .civilizations
+        .iter()
+        .filter(|c| c.civilization_index != 0)
+        .collect();
+    let our_mask: u32 = (0..roster.len()).fold(0u32, |a, i| {
+        a | (1u32.checked_shl(i as u32 + 1).unwrap_or(0))
+    });
 
     let units: Vec<UnitRow> = r
         .unit_types
@@ -492,17 +549,29 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
             let name = u.name.text().to_string();
             let art = art_dir(install, &pedia, &u.civilopedia_entry.text(), &first_era);
             let abil = u.abilities;
-            let excluded = abil & (ab::KING | ab::FLAG_UNIT | ab::CRUISE_MISSILE | ab::NUCLEAR_WEAPON | ab::TACTICAL_MISSILE) != 0;
+            let excluded = abil
+                & (ab::KING
+                    | ab::FLAG_UNIT
+                    | ab::CRUISE_MISSILE
+                    | ab::NUCLEAR_WEAPON
+                    | ab::TACTICAL_MISSILE)
+                != 0;
             // Nobody builds the units a wonder hands out (`races` is empty), but
             // they have to exist as units.
             let produced = r.buildings.iter().any(|b| b.unit_produced == i as i32);
             let playable = u.alt_strategy_of == -1
                 && !excluded
-                && ((u.available_to_civs as u32) & our_mask != 0 || i as i32 == general.scout_unit || produced)
+                && ((u.available_to_civs as u32) & our_mask != 0
+                    || i as i32 == general.scout_unit
+                    || produced)
                 && art.is_some();
             UnitRow {
                 name: leak(&name),
-                art: if playable { leak(art.as_deref().unwrap_or("")) } else { "" },
+                art: if playable {
+                    leak(art.as_deref().unwrap_or(""))
+                } else {
+                    ""
+                },
                 icon: u.icon,
                 attack: u.attack,
                 defense: u.defense,
@@ -513,7 +582,11 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
                 pop_cost: u.population_cost,
                 tech: u.required_tech,
                 upgrade_to: u.upgrade_to,
-                resources: [u.required_resource_1, u.required_resource_2, u.required_resource_3],
+                resources: [
+                    u.required_resource_1,
+                    u.required_resource_2,
+                    u.required_resource_3,
+                ],
                 abilities: abil,
                 special: u.special_actions,
                 worker: u.worker_actions,
@@ -540,7 +613,8 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
         .map(|b| {
             let name = b.name.text().to_string();
             let wonder = b.other_characteristics as u32 & oc::WONDER != 0;
-            let playable = BLDG_PLAYABLE.contains(&name.as_str()) || wonder && !BLDG_NOT_PLAYABLE.contains(&name.as_str());
+            let playable = BLDG_PLAYABLE.contains(&name.as_str())
+                || wonder && !BLDG_NOT_PLAYABLE.contains(&name.as_str());
             BldgDef {
                 name: leak(&name),
                 cost: b.cost,
@@ -576,7 +650,8 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
         .iter()
         .map(|c| {
             let name = c.civilization_name.text().to_string();
-            let (rr, gg, bb) = civ_color_override(&name).unwrap_or_else(|| team_rgb(install, c.default_color));
+            let (rr, gg, bb) =
+                civ_color_override(&name).unwrap_or_else(|| team_rgb(install, c.default_color));
             let cities: Vec<&'static str> = c
                 .city_names
                 .iter()
@@ -597,7 +672,11 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
     let leader_roster = roster
         .iter()
         .enumerate()
-        .map(|(i, c)| Leader { name: leak(&*c.leader_name.text()), title: leak(&*c.title.text()), text_set: i })
+        .map(|(i, c)| Leader {
+            name: leak(&*c.leader_name.text()),
+            title: leak(&*c.title.text()),
+            text_set: i,
+        })
         .collect();
     let race_roster = roster
         .iter()
@@ -643,14 +722,38 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
         units,
         bldgs,
         tech_names: r.techs.iter().map(|t| leak(&*t.name.text())).collect(),
-        techs: r.techs.iter().map(|t| (t.cost, t.era, t.prerequisites, t.flags, t.flavors)).collect(),
-        tech_tree: r.techs.iter().map(|t| (t.era, t.icon, t.tree_x, t.tree_y)).collect(),
+        techs: r
+            .techs
+            .iter()
+            .map(|t| (t.cost, t.era, t.prerequisites, t.flags, t.flavors))
+            .collect(),
+        tech_tree: r
+            .techs
+            .iter()
+            .map(|t| (t.era, t.icon, t.tree_x, t.tree_y))
+            .collect(),
         era_names: r.eras.iter().map(|e| leak(&*e.name.text())).collect(),
-        difficulty_names: r.difficulties.iter().map(|d| leak(&*d.name.text())).collect(),
+        difficulty_names: r
+            .difficulties
+            .iter()
+            .map(|d| leak(&*d.name.text()))
+            .collect(),
         difficulty_cost_factor: r.difficulties.iter().map(|d| d.cost_factor).collect(),
-        difficulty_corruption: r.difficulties.iter().map(|d| d.corruption_percent).collect(),
-        difficulty_quelled: r.difficulties.iter().map(|d| d.citizens_quelled_by_military).collect(),
-        size_names: r.world_sizes.iter().map(|d| leak(&*d.name.text())).collect(),
+        difficulty_corruption: r
+            .difficulties
+            .iter()
+            .map(|d| d.corruption_percent)
+            .collect(),
+        difficulty_quelled: r
+            .difficulties
+            .iter()
+            .map(|d| d.citizens_quelled_by_military)
+            .collect(),
+        size_names: r
+            .world_sizes
+            .iter()
+            .map(|d| leak(&*d.name.text()))
+            .collect(),
         size_dims: r.world_sizes.iter().map(|d| (d.width, d.height)).collect(),
         world_tech_rate: r.world_sizes.iter().map(|d| d.tech_rate).collect(),
         work_needed: r.worker_jobs.iter().map(|j| j.turns_to_complete).collect(),
@@ -664,17 +767,38 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
         cult: r
             .cultures
             .iter()
-            .map(|c| (c.culture_ratio_percent, c.resistance_initial_percent, c.resistance_continued_percent))
+            .map(|c| {
+                (
+                    c.culture_ratio_percent,
+                    c.resistance_initial_percent,
+                    c.resistance_continued_percent,
+                )
+            })
             .collect(),
-        govt_assimilation: r.governments.iter().map(|g| g.assimilation_chance).collect(),
-        govt_resistance: r.governments.iter().map(|g| g.vs.iter().map(|v| v.resistance_modifier).collect()).collect(),
+        govt_assimilation: r
+            .governments
+            .iter()
+            .map(|g| g.assimilation_chance)
+            .collect(),
+        govt_resistance: r
+            .governments
+            .iter()
+            .map(|g| g.vs.iter().map(|v| v.resistance_modifier).collect())
+            .collect(),
         ctzn: r.citizens.iter().map(|j| j.prerequisite).collect(),
         prto: r
             .unit_types
             .iter()
             .map(|u| {
-                let res = u.required_resource_1 != -1 || u.required_resource_2 != -1 || u.required_resource_3 != -1;
-                (u.required_tech, u.available_to_civs as u32, u.ai_strategies, res)
+                let res = u.required_resource_1 != -1
+                    || u.required_resource_2 != -1
+                    || u.required_resource_3 != -1;
+                (
+                    u.required_tech,
+                    u.available_to_civs as u32,
+                    u.ai_strategies,
+                    res,
+                )
             })
             .collect(),
         bldg_rows: r
@@ -712,7 +836,10 @@ fn set_sights(mut units: Vec<UnitRow>, alt_strategy_of: &[i32]) -> Vec<UnitRow> 
     for (i, u) in units.iter().enumerate() {
         if u.ai & EXPLORE != 0 {
             explorers[i] = true;
-            if let Some(&of) = alt_strategy_of.get(i).filter(|&&o| o >= 0 && (o as usize) < explorers.len()) {
+            if let Some(&of) = alt_strategy_of
+                .get(i)
+                .filter(|&&o| o >= 0 && (o as usize) < explorers.len())
+            {
                 explorers[of as usize] = true;
             }
         }

@@ -14,7 +14,9 @@ use crate::render::{RevealAll, sprite_z};
 /// A unit type: a `PRTO` row of the rules in play (see `roster.rs`). Game
 /// logic reaches the rows it means through `roles` or the row's own fields,
 /// never by name.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct UnitType(pub u16);
 
 impl std::fmt::Debug for UnitType {
@@ -37,7 +39,10 @@ impl UnitType {
     }
 
     pub fn find(name: &str) -> Option<UnitType> {
-        crate::roster::UNITS.iter().position(|u| u.name.eq_ignore_ascii_case(name.trim())).map(|i| UnitType(i as u16))
+        crate::roster::UNITS
+            .iter()
+            .position(|u| u.name.eq_ignore_ascii_case(name.trim()))
+            .map(|i| UnitType(i as u16))
     }
 
     /// The type's `PRTO` row.
@@ -90,7 +95,10 @@ impl Strips {
         Self {
             server: Some(server.clone()),
             base,
-            teams: colors.iter().map(|_| std::array::from_fn(|_| OnceLock::new())).collect(),
+            teams: colors
+                .iter()
+                .map(|_| std::array::from_fn(|_| OnceLock::new()))
+                .collect(),
             colors,
             plain: std::array::from_fn(|_| OnceLock::new()),
         }
@@ -99,18 +107,27 @@ impl Strips {
     /// Strips that load nothing: every picture is the default image (tests).
     #[cfg(test)]
     pub fn blank() -> Self {
-        Self { server: None, base: String::new(), colors: vec![], plain: std::array::from_fn(|_| OnceLock::new()), teams: vec![] }
+        Self {
+            server: None,
+            base: String::new(),
+            colors: vec![],
+            plain: std::array::from_fn(|_| OnceLock::new()),
+            teams: vec![],
+        }
     }
 
     fn load(&self, file: String) -> Handle<Image> {
-        self.server.as_ref().map_or_else(Handle::default, |s| s.load(file))
+        self.server
+            .as_ref()
+            .map_or_else(Handle::default, |s| s.load(file))
     }
 
     /// The strip for facing `dir` in `civ`'s colors; the first call asks for
     /// the file.
     pub fn get(&self, dir: usize, civ: usize) -> &Handle<Image> {
         match self.colors.get(civ) {
-            Some(color) => self.teams[civ][dir].get_or_init(|| self.load(format!("{}_d{dir}_c{color}.png", self.base))),
+            Some(color) => self.teams[civ][dir]
+                .get_or_init(|| self.load(format!("{}_d{dir}_c{color}.png", self.base))),
             None => self.plain[dir].get_or_init(|| self.load(format!("{}_d{dir}.png", self.base))),
         }
     }
@@ -161,7 +178,11 @@ impl Clip {
     /// last frame.
     pub fn frame_at(&self, t: f32, looped: bool) -> usize {
         let f = (t.max(0.0) * 1000.0 / self.ms) as usize;
-        if looped { f % self.frames } else { f.min(self.frames - 1) }
+        if looped {
+            f % self.frames
+        } else {
+            f.min(self.frames - 1)
+        }
     }
 }
 
@@ -192,7 +213,9 @@ impl Default for UnitArt {
     fn default() -> Self {
         Self {
             server: None,
-            sets: (0..crate::roster::unit_count() * ERA_NAMES.len()).map(|_| OnceLock::new()).collect(),
+            sets: (0..crate::roster::unit_count() * ERA_NAMES.len())
+                .map(|_| OnceLock::new())
+                .collect(),
             eras: Default::default(),
         }
     }
@@ -200,7 +223,10 @@ impl Default for UnitArt {
 
 impl UnitArt {
     pub fn load(asset_server: &AssetServer) -> Self {
-        Self { server: Some(asset_server.clone()), ..Self::default() }
+        Self {
+            server: Some(asset_server.clone()),
+            ..Self::default()
+        }
     }
 
     /// Install a clip set by hand (tests).
@@ -224,7 +250,12 @@ impl UnitArt {
                 feet: [0; 8],
                 sounds: vec![],
             };
-            art.insert(t, UnitClipSet { clips: HashMap::from([("DEFAULT".to_string(), clip)]) });
+            art.insert(
+                t,
+                UnitClipSet {
+                    clips: HashMap::from([("DEFAULT".to_string(), clip)]),
+                },
+            );
         }
         art
     }
@@ -232,7 +263,12 @@ impl UnitArt {
     /// The clips of an installed set (tests).
     #[cfg(test)]
     pub fn clips_mut(&mut self, t: UnitType) -> &mut HashMap<String, Clip> {
-        &mut self.sets[t.0 as usize].get_mut().unwrap().as_mut().unwrap().clips
+        &mut self.sets[t.0 as usize]
+            .get_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .clips
     }
 
     fn read(asset_server: &AssetServer, t: UnitType, variant: usize) -> Option<UnitClipSet> {
@@ -242,7 +278,10 @@ impl UnitArt {
         }
         let era_dir = art.replace(ERA_NAMES[0], ERA_NAMES[variant]);
         let Some(dir) = crate::ruleset::get().art.unit_key(&era_dir) else {
-            warn!("{}: no art folder {era_dir:?} on the Civ3 search path", def(t).name);
+            warn!(
+                "{}: no art folder {era_dir:?} on the Civ3 search path",
+                def(t).name
+            );
             return None;
         };
         let palette = team_colors();
@@ -267,7 +306,11 @@ impl UnitArt {
             clips.insert(
                 slot,
                 Clip {
-                    strips: Strips::new(asset_server, base, if tinted { palette.to_vec() } else { vec![] }),
+                    strips: Strips::new(
+                        asset_server,
+                        base,
+                        if tinted { palette.to_vec() } else { vec![] },
+                    ),
                     frame_w: e.frame[0] as f32,
                     frame_h: e.frame[1] as f32,
                     frames: e.frames,
@@ -287,15 +330,23 @@ impl UnitArt {
     }
 
     fn set(&self, t: UnitType, variant: usize) -> Option<&UnitClipSet> {
-        let variant = if has_era_art(t) { variant.min(ERA_NAMES.len() - 1) } else { 0 };
+        let variant = if has_era_art(t) {
+            variant.min(ERA_NAMES.len() - 1)
+        } else {
+            0
+        };
         let own = self.sets[variant * crate::roster::unit_count() + t.0 as usize]
             .get_or_init(|| self.server.as_ref().and_then(|s| Self::read(s, t, variant)))
             .as_ref();
         // A unit of the file without art (a scenario's flag or leader unit,
         // a unit no civ may build) is drawn as the first unit that has some.
         own.or_else(|| {
-            let stand_in = crate::roster::UNITS.iter().position(|u| u.playable && !u.art.is_empty())?;
-            (stand_in != t.0 as usize).then(|| self.set(UnitType(stand_in as u16), 0)).flatten()
+            let stand_in = crate::roster::UNITS
+                .iter()
+                .position(|u| u.playable && !u.art.is_empty())?;
+            (stand_in != t.0 as usize)
+                .then(|| self.set(UnitType(stand_in as u16), 0))
+                .flatten()
         })
     }
 
@@ -307,7 +358,9 @@ impl UnitArt {
     }
 
     fn variant(&self, civ: usize) -> usize {
-        self.eras.get(civ).map_or(0, |e| e.load(std::sync::atomic::Ordering::Relaxed) as usize)
+        self.eras
+            .get(civ)
+            .map_or(0, |e| e.load(std::sync::atomic::Ordering::Relaxed) as usize)
     }
 
     /// A clip of the type's first (Ancient) art.
@@ -392,7 +445,11 @@ impl Unit {
     pub fn new(civ: usize, utype: UnitType, x: i32, y: i32) -> Self {
         Unit {
             civ,
-            nationality: if civ < crate::civs::civ_count() { crate::civs::roster_index(civ) } else { usize::MAX },
+            nationality: if civ < crate::civs::civ_count() {
+                crate::civs::roster_index(civ)
+            } else {
+                usize::MAX
+            },
             carrier: None,
             utype,
             x,
@@ -422,9 +479,11 @@ impl Unit {
     /// shared prototype (`0x5BC6D0`) supplies ability 0. Mixed Armies do not.
     fn wheeled(&self) -> bool {
         let wheeled = |t| def(t).abilities & crate::roster::ability::WHEELED != 0;
-        wheeled(self.utype) || (def(self.utype).abilities & crate::roster::ability::ARMY != 0
-            && self.members.first().is_some_and(|&(t, _)|
-                wheeled(t) && self.members.iter().all(|&(other, _)| other == t)))
+        wheeled(self.utype)
+            || (def(self.utype).abilities & crate::roster::ability::ARMY != 0
+                && self.members.first().is_some_and(|&(t, _)| {
+                    wheeled(t) && self.members.iter().all(|&(other, _)| other == t)
+                }))
     }
 
     /// `0x5BE5B0`: an army with members has their hit points summed.
@@ -432,7 +491,11 @@ impl Unit {
         if self.members.is_empty() {
             return crate::combat::max_hp(self.level, def(self.utype).hp_bonus);
         }
-        let sum: i32 = self.members.iter().map(|&(t, l)| crate::combat::max_hp(l, def(t).hp_bonus)).sum();
+        let sum: i32 = self
+            .members
+            .iter()
+            .map(|&(t, l)| crate::combat::max_hp(l, def(t).hp_bonus))
+            .sum();
         (sum + def(self.utype).hp_bonus).max(1)
     }
 
@@ -456,14 +519,29 @@ impl Unit {
 
     /// `0x5BCAE0`: an army adds a sixth of its members' summed strength.
     pub fn army_bonus(&self, defending: bool) -> i32 {
-        let sum: i32 = self.members.iter().map(|&(t, _)| if defending { def(t).defense } else { def(t).attack }).sum();
+        let sum: i32 = self
+            .members
+            .iter()
+            .map(|&(t, _)| {
+                if defending {
+                    def(t).defense
+                } else {
+                    def(t).attack
+                }
+            })
+            .sum();
         sum / 6
     }
 
     /// `0x5BE470`: an army moves at its slowest member's speed plus one;
     /// anyone else at its own allowance.
     pub fn allowance(&self) -> u8 {
-        match self.members.iter().map(|&(t, _)| crate::naval::moves(t, self.civ)).min() {
+        match self
+            .members
+            .iter()
+            .map(|&(t, _)| crate::naval::moves(t, self.civ))
+            .min()
+        {
             Some(m) if def(self.utype).abilities & crate::roster::ability::ARMY != 0 => m + MP,
             _ => crate::naval::moves(self.utype, self.civ),
         }
@@ -596,10 +674,14 @@ pub fn spawn_party(mut commands: Commands, map: Res<GameMap>, art: Res<UnitArt>)
     } else {
         vec![]
     };
-    let human = (0..crate::civs::civ_count()).find(|&c| !crate::civs::is_ai(c)).unwrap_or(0);
+    let human = (0..crate::civs::civ_count())
+        .find(|&c| !crate::civs::is_ai(c))
+        .unwrap_or(0);
     let mut first = None;
     for civ in (0..sited.len()).filter(|&c| needs(c)) {
-        let Some((sx, sy)) = sited[civ].or_else(|| picked.get(civ).copied()) else { continue };
+        let Some((sx, sy)) = sited[civ].or_else(|| picked.get(civ).copied()) else {
+            continue;
+        };
         for (i, t) in party.iter().enumerate() {
             let e = spawn_unit(&mut commands, &art, *t, sx, sy, civ);
             if civ == human && i == 0 {
@@ -616,22 +698,42 @@ pub fn bridges(civ: usize) -> bool {
 }
 
 /// Sea units enter water or a friendly port; land units use terrain and roads.
-pub fn entry_cost(map: &GameMap, u: &Unit, from: (i32, i32), to: (i32, i32), ports: &[(i32, i32)]) -> Option<u8> {
+pub fn entry_cost(
+    map: &GameMap,
+    u: &Unit,
+    from: (i32, i32),
+    to: (i32, i32),
+    ports: &[(i32, i32)],
+) -> Option<u8> {
     let t = map.get(to.0, to.1)?;
     if def(u.utype).class == 1 {
-        (matches!(t.base, Base::Coast | Base::Sea | Base::Ocean) || ports.contains(&to)).then_some(MP)
+        (matches!(t.base, Base::Coast | Base::Sea | Base::Ocean) || ports.contains(&to))
+            .then_some(MP)
     } else {
         let origin = map.get(from.0, from.1)?;
         let terrain = &crate::ruleset::TERRAINS[crate::map::terrain_row(t)];
         if !civ3mapgen::movement::land_terrain_allowed(
-            terrain.impassable, terrain.impassable_wheeled, u.wheeled(), origin.road, t.road,
-        ) { return None; }
+            terrain.impassable,
+            terrain.impassable_wheeled,
+            u.wheeled(),
+            origin.road,
+            t.road,
+        ) {
+            return None;
+        }
         map.land_cost(from, to, bridges(u.civ))
     }
 }
 
-pub fn route(map: &GameMap, u: &Unit, dest: (i32, i32), ports: &[(i32, i32)]) -> Option<Vec<(i32, i32)>> {
-    map.find_path_by((u.x, u.y), dest, |from, to| entry_cost(map, u, from, to, ports))
+pub fn route(
+    map: &GameMap,
+    u: &Unit,
+    dest: (i32, i32),
+    ports: &[(i32, i32)],
+) -> Option<Vec<(i32, i32)>> {
+    map.find_path_by((u.x, u.y), dest, |from, to| {
+        entry_cost(map, u, from, to, ports)
+    })
 }
 
 pub fn order_move(map: &GameMap, u: &mut Unit, dest: (i32, i32), ports: &[(i32, i32)]) {
@@ -770,6 +872,7 @@ pub fn end_turn_units(
 
 pub fn drive_movement(
     map: Res<GameMap>,
+    art: Res<UnitArt>,
     mut picker: ResMut<crate::unit_picker::UnitPicker>,
     civs: Res<crate::civs::Civilizations>,
     cities: Query<&crate::cities::City>,
@@ -778,9 +881,15 @@ pub fn drive_movement(
     mut units: Query<(Entity, &mut Unit)>,
     barbarians: Option<Res<crate::barbarians::Barbarians>>,
 ) {
-    if picker.unload.is_some() { return; }
+    if picker.unload.is_some() {
+        return;
+    }
     // During the barbarian phase only barbarians move.
-    let mover = if barbarians.is_some_and(|b| b.phase) { crate::civs::BARBARIANS } else { civs.active };
+    let mover = if barbarians.is_some_and(|b| b.phase) {
+        crate::civs::BARBARIANS
+    } else {
+        civs.active
+    };
     // Which civs have units on each tile: a step onto a tile held by
     // another civ is an attack, not a move, and only against a civ at war.
     let mut snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
@@ -791,7 +900,9 @@ pub fn drive_movement(
     // A question whose unit has since been given other orders is dropped.
     if let Some(ask) = &diplomacy.board_ask
         && !ask.load
-        && !units.get(ask.unit).is_ok_and(|(_, u)| u.path.front() == Some(&ask.at))
+        && !units
+            .get(ask.unit)
+            .is_ok_and(|(_, u)| u.path.front() == Some(&ask.at))
     {
         diplomacy.board_ask = None;
     }
@@ -822,8 +933,12 @@ pub fn drive_movement(
         };
         // Native mover stage 2 (0x5B91EC) keeps the ship offshore and
         // forwards the intended land tile to the passenger dialog.
-        if def(u.utype).class == 1 && map.get(nx, ny).is_some_and(|t| !crate::improvements::is_water_base(t.base))
-            && !cities.iter().any(|c| (c.x, c.y) == (nx, ny)) {
+        if def(u.utype).class == 1
+            && map
+                .get(nx, ny)
+                .is_some_and(|t| !crate::improvements::is_water_base(t.base))
+            && !cities.iter().any(|c| (c.x, c.y) == (nx, ny))
+        {
             u.path.clear();
             if snapshot.iter().any(|(_, cargo)| cargo.carrier == Some(e)) {
                 picker.unload = Some(e);
@@ -833,18 +948,28 @@ pub fn drive_movement(
         }
         // Recheck before dispatching an attack: roads may have been pillaged
         // since this path was planned. Embarkation has its own water gate.
-        if def(u.utype).class == 0 && map.get(nx, ny).is_some_and(|t| !crate::improvements::is_water_base(t.base))
-            && entry_cost(&map, &u, (u.x, u.y), (nx, ny), &[]).is_none() {
+        if def(u.utype).class == 0
+            && map
+                .get(nx, ny)
+                .is_some_and(|t| !crate::improvements::is_water_base(t.base))
+            && entry_cost(&map, &u, (u.x, u.y), (nx, ny), &[]).is_none()
+        {
             u.path.clear();
             u.exploring = false;
             continue;
         }
         let mut others = held.get(&(nx, ny)).copied().unwrap_or(0) & !(1 << u.civ);
-        if let Some(c) = cities.iter().find(|c| (c.x, c.y) == (nx, ny) && c.civ != u.civ) {
+        if let Some(c) = cities
+            .iter()
+            .find(|c| (c.x, c.y) == (nx, ny) && c.civ != u.civ)
+        {
             others |= 1 << c.civ;
         }
         if others != 0 {
-            if !crate::naval::can_attack_from(&map, &u) { u.path.clear(); continue; }
+            if !crate::naval::can_attack_from(&map, &u) {
+                u.path.clear();
+                continue;
+            }
             // Routes stop short of another civ; only the last step attacks,
             // and only a civ at war: a human is asked whether to declare it.
             if u.path.len() == 1 {
@@ -860,8 +985,11 @@ pub fn drive_movement(
                     }
                     Some(target) => {
                         if !crate::civs::is_ai(u.civ) && diplomacy.war_ask.is_none() {
-                            diplomacy.war_ask =
-                                Some(crate::diplomacy::WarAsk { attacker: e, to: (nx, ny), target });
+                            diplomacy.war_ask = Some(crate::diplomacy::WarAsk {
+                                attacker: e,
+                                to: (nx, ny),
+                                target,
+                            });
                         }
                     }
                 }
@@ -870,14 +998,31 @@ pub fn drive_movement(
             u.exploring = false;
             continue;
         }
-        let ports: Vec<_> = cities.iter().filter(|c| c.civ == u.civ && c.coastal).map(|c| (c.x, c.y)).collect();
-        let boarding = def(u.utype).class == 0 && map.get(nx, ny).is_some_and(|t| crate::improvements::is_water_base(t.base));
+        let ports: Vec<_> = cities
+            .iter()
+            .filter(|c| c.civ == u.civ && c.coastal)
+            .map(|c| (c.x, c.y))
+            .collect();
+        let boarding = def(u.utype).class == 0
+            && map
+                .get(nx, ny)
+                .is_some_and(|t| crate::improvements::is_water_base(t.base));
         // A zone of control holds a land unit that would slip from one
         // enemy zone into the next (`zoc.rs`).
         if !boarding && crate::zoc::bound(&u) {
             let friendly = held.get(&(nx, ny)).is_some_and(|m| m & (1 << u.civ) != 0)
-                || cities.iter().any(|c| (c.x, c.y) == (nx, ny) && c.civ == u.civ);
-            if crate::zoc::blocks(&map, u.civ, (u.x, u.y), (nx, ny), &zones, |a, b| diplomacy.at_war(a, b), friendly) {
+                || cities
+                    .iter()
+                    .any(|c| (c.x, c.y) == (nx, ny) && c.civ == u.civ);
+            if crate::zoc::blocks(
+                &map,
+                u.civ,
+                (u.x, u.y),
+                (nx, ny),
+                &zones,
+                |a, b| diplomacy.at_war(a, b),
+                friendly,
+            ) {
                 u.path.clear();
                 u.exploring = false;
                 continue;
@@ -885,7 +1030,14 @@ pub fn drive_movement(
         }
         // Several ships on the tile: a human chooses (`0x5C5F70`, SELECT_TRANSPORT).
         let carrier = if boarding {
-            match crate::naval::choose_carrier(e, &u, (nx, ny), &snapshot, &mut diplomacy.board_ask, false) {
+            match crate::naval::choose_carrier(
+                e,
+                &u,
+                (nx, ny),
+                &snapshot,
+                &mut diplomacy.board_ask,
+                false,
+            ) {
                 crate::naval::Boarding::Ship(ship) => Some(ship),
                 crate::naval::Boarding::None => None,
                 crate::naval::Boarding::Asking => continue,
@@ -893,7 +1045,11 @@ pub fn drive_movement(
         } else {
             None
         };
-        let cost = if boarding { carrier.map(|_| MP) } else { entry_cost(&map, &u, (u.x, u.y), (nx, ny), &ports) };
+        let cost = if boarding {
+            carrier.map(|_| MP)
+        } else {
+            entry_cost(&map, &u, (u.x, u.y), (nx, ny), &ports)
+        };
         let Some(cost) = cost else {
             u.path.clear();
             continue;
@@ -902,11 +1058,17 @@ pub fn drive_movement(
         // when the tile costs more than it has.
         u.moves -= cost.min(u.moves);
         // Native mover 0x5B94D0: a land unit leaving water spends its turn.
-        if def(u.utype).class == 0 && map.get(u.x, u.y).is_some_and(|t| crate::improvements::is_water_base(t.base)) && !boarding {
+        if def(u.utype).class == 0
+            && map
+                .get(u.x, u.y)
+                .is_some_and(|t| crate::improvements::is_water_base(t.base))
+            && !boarding
+        {
             u.moves = 0;
         }
         let from = (u.x, u.y);
-        step_to(&mut u, nx, ny);
+        let pace = step_duration(&art, u.utype, u.civ);
+        step_to(&mut u, nx, ny, pace);
         u.carrier = carrier;
         if boarding {
             u.sentry = true;
@@ -915,7 +1077,9 @@ pub fn drive_movement(
             u.auto = false;
             u.work = None;
         }
-        if let Some((_, old)) = snapshot.iter_mut().find(|(id, _)| *id == e) { *old = u.clone(); }
+        if let Some((_, old)) = snapshot.iter_mut().find(|(id, _)| *id == e) {
+            *old = u.clone();
+        }
         // The computer's moves out of the human's sight are not worth
         // watching: they hop, so its turn does not drag.
         let lit = |(x, y): (i32, i32)| map.get(x, y).is_some_and(|t| t.visible);
@@ -930,7 +1094,9 @@ pub fn drive_movement(
         if let Some(ship) = picker.unload.take() {
             let shore = picker.shore.take();
             for (_, mut u) in &mut units {
-                if u.carrier == Some(ship) { crate::naval::disembark(&map, &mut u, shore); }
+                if u.carrier == Some(ship) {
+                    crate::naval::disembark(&map, &mut u, shore);
+                }
             }
         }
     }
@@ -940,11 +1106,15 @@ pub fn drive_movement(
 const HIDDEN_STEP_DUR: f32 = 0.03;
 
 /// Walk `u` onto the adjacent tile: face it, take the tile and start the
-/// stepping animation. Movement points are the caller's business.
-pub fn step_to(u: &mut Unit, nx: i32, ny: i32) {
+/// stepping animation. Movement points are the caller's business. The
+/// step lasts one walk cycle at the art's own speed (`step_duration`),
+/// so legs swing at their drawn rate instead of a fixed hurry.
+pub fn step_to(u: &mut Unit, nx: i32, ny: i32, dur: f32) {
     // Native setPosition 0x5BD5A8: leaving the carrier tile detaches cargo.
     // Boarding movement assigns the new carrier after the step commits.
-    if (u.x, u.y) != (nx, ny) { u.carrier = None; }
+    if (u.x, u.y) != (nx, ny) {
+        u.carrier = None;
+    }
     u.facing = facing_for_step(nx - u.x, ny - u.y);
     let from = tile_to_world(u.x, u.y);
     let to = tile_to_world(nx, ny);
@@ -957,8 +1127,15 @@ pub fn step_to(u: &mut Unit, nx: i32, ny: i32) {
         from,
         to,
         t: 0.0,
-        dur: STEP_DUR,
+        dur,
     };
+}
+
+/// Seconds one step takes: the unit's RUN cycle at its FLC speed, the
+/// way Civ3 paces a tile per stride loop. Units without walk art keep
+/// the old fixed beat.
+pub fn step_duration(art: &UnitArt, utype: UnitType, civ: usize) -> f32 {
+    art.clip_for(utype, civ, "RUN").map(|c| c.duration()).unwrap_or(STEP_DUR)
 }
 
 pub fn advance_anims(
@@ -1036,7 +1213,11 @@ pub fn sync_art_eras(art: Res<UnitArt>, research: Res<crate::research::Research>
     }
 }
 
-pub fn animate_units(art: Res<UnitArt>, images: Res<Assets<Image>>, mut q: Query<(&Unit, &mut Sprite, &mut Anchor)>) {
+pub fn animate_units(
+    art: Res<UnitArt>,
+    images: Res<Assets<Image>>,
+    mut q: Query<(&Unit, &mut Sprite, &mut Anchor)>,
+) {
     for (u, mut sprite, mut anchor) in q.iter_mut() {
         let (slot, t, fps, looped) = match u.anim {
             UnitAnim::Idle { t } => {
@@ -1049,7 +1230,15 @@ pub fn animate_units(art: Res<UnitArt>, images: Res<Assets<Image>>, mut q: Query
                 } else if u.fortified {
                     match art.clip_for(u.utype, u.civ, "FORTIFY") {
                         Some(clip) => {
-                            show(&art, &images, u, clip, clip.frames - 1, &mut sprite, &mut anchor);
+                            show(
+                                &art,
+                                &images,
+                                u,
+                                clip,
+                                clip.frames - 1,
+                                &mut sprite,
+                                &mut anchor,
+                            );
                             continue;
                         }
                         None => ("DEFAULT", t, 8.0, true),
@@ -1072,11 +1261,21 @@ pub fn animate_units(art: Res<UnitArt>, images: Res<Assets<Image>>, mut q: Query
             UnitAnim::OneShot { slot, t } => (slot, t, 12.0, false),
             UnitAnim::Held { slot, t, looped } => {
                 // Combat clips run at their FLC speed.
-                let clip = art.clip_for(u.utype, u.civ, slot).or_else(|| art.clip_for(u.utype, u.civ, "DEFAULT"));
+                let clip = art
+                    .clip_for(u.utype, u.civ, slot)
+                    .or_else(|| art.clip_for(u.utype, u.civ, "DEFAULT"));
                 let Some(clip) = clip else {
                     continue;
                 };
-                show(&art, &images, u, clip, clip.frame_at(t, looped), &mut sprite, &mut anchor);
+                show(
+                    &art,
+                    &images,
+                    u,
+                    clip,
+                    clip.frame_at(t, looped),
+                    &mut sprite,
+                    &mut anchor,
+                );
                 continue;
             }
         };
@@ -1113,8 +1312,12 @@ pub fn seed_exploration_from_save(
     mut explored: ResMut<Exploration>,
     civs: Res<crate::civs::Civilizations>,
 ) {
-    let crate::boot::World::Saved(save) = &boot.world else { return };
-    let Some(sc) = crate::scenario::scenario() else { return };
+    let crate::boot::World::Saved(save) = &boot.world else {
+        return;
+    };
+    let Some(sc) = crate::scenario::scenario() else {
+        return;
+    };
     let used = crate::scenario::save_used_slots(save);
     if used.is_empty() {
         return;
@@ -1126,7 +1329,9 @@ pub fn seed_exploration_from_save(
             if (x + y) % 2 != 0 {
                 continue;
             }
-            let Some(t) = save.map.tile(x as u32, y as u32) else { continue };
+            let Some(t) = save.map.tile(x as u32, y as u32) else {
+                continue;
+            };
             let (u, v) = sc.lattice.to_clone(x, y);
             if u < 0 || v < 0 || u >= map.w || v >= map.h {
                 continue;
@@ -1151,7 +1356,14 @@ pub fn seed_exploration_from_save(
         }
     }
     explored.viewer = Some(viewer);
-    info!("exploration: {} of {} tiles remembered", memories.get(viewer).map(|m| m.iter().filter(|&&s| s).count()).unwrap_or(0), map.tiles.len());
+    info!(
+        "exploration: {} of {} tiles remembered",
+        memories
+            .get(viewer)
+            .map(|m| m.iter().filter(|&&s| s).count())
+            .unwrap_or(0),
+        map.tiles.len()
+    );
 }
 
 impl Exploration {
@@ -1226,15 +1438,25 @@ pub fn refresh_visibility(
         }
     }
     // Colony objects see independently of units (`colonies.md` 4.1).
-    let structures: Vec<_> = map.tiles.iter().enumerate().filter_map(|(i, t)| {
-        t.site.filter(|s| crate::sites::owner(*s) == viewer)
-            .map(|_| ((i as i32 % map.w, i as i32 / map.w), crate::sites::sight(t)))
-    }).collect();
+    let structures: Vec<_> = map
+        .tiles
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            t.site
+                .filter(|s| crate::sites::owner(*s) == viewer)
+                .map(|_| ((i as i32 % map.w, i as i32 / map.w), crate::sites::sight(t)))
+        })
+        .collect();
     for ((x, y), r) in structures {
-        for dy in -r..=r { for dx in -r..=r {
-            if !(0..map.h).contains(&(y + dy)) { continue; }
-            lit[map.idx(map.wrap_x(x + dx), y + dy)] = true;
-        } }
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if !(0..map.h).contains(&(y + dy)) {
+                    continue;
+                }
+                lit[map.idx(map.wrap_x(x + dx), y + dy)] = true;
+            }
+        }
     }
     // Cities light their workable radius, as in Civ3.
     for c in cities.iter() {
@@ -1248,7 +1470,11 @@ pub fn refresh_visibility(
         }
     }
     // A tile is visible exactly when lit, and seen once it has been lit.
-    let stale = map.tiles.iter().zip(lit.iter()).any(|(t, &l)| t.visible != l || (l && !t.seen));
+    let stale = map
+        .tiles
+        .iter()
+        .zip(lit.iter())
+        .any(|(t, &l)| t.visible != l || (l && !t.seen));
     if stale {
         for (t, &l) in map.tiles.iter_mut().zip(lit.iter()) {
             t.visible = l;
@@ -1317,7 +1543,13 @@ pub fn selectable(u: &Unit) -> bool {
 /// A unit "requires attention": it can act and has no standing order
 /// (fortify, sentry, explore, a worker job or a go-to route).
 pub fn needs_orders(u: &Unit) -> bool {
-    selectable(u) && u.carrier.is_none() && !u.fortified && !u.exploring && !u.auto && u.work.is_none() && u.path.is_empty()
+    selectable(u)
+        && u.carrier.is_none()
+        && !u.fortified
+        && !u.exploring
+        && !u.auto
+        && u.work.is_none()
+        && u.path.is_empty()
 }
 
 /// Keep the selection while the unit can still act (or is still walking a
@@ -1336,7 +1568,10 @@ pub fn auto_select(
     }
     if let Some((_, u)) = selected.0.and_then(|s| units.get(s).ok()) {
         *last_pos = (u.x, u.y);
-        if u.civ == civs.active && (needs_orders(u) || (selectable(u) && (!u.path.is_empty() || (u.carrier.is_some() && !u.sentry)))) {
+        if u.civ == civs.active
+            && (needs_orders(u)
+                || (selectable(u) && (!u.path.is_empty() || (u.carrier.is_some() && !u.sentry))))
+        {
             return;
         }
     }
@@ -1383,15 +1618,28 @@ mod tests {
             t.river = 0;
             t.road = false;
         }
-        for x in 10..=12 { let i = map.idx(x, 10); map.tiles[i].base = Base::Grassland; }
+        for x in 10..=12 {
+            let i = map.idx(x, 10);
+            map.tiles[i].base = Base::Grassland;
+        }
         let middle = map.idx(11, 10);
         let start = map.idx(10, 10);
         let worker = Unit::new(0, UnitType::named("Worker"), 10, 10);
         for cover in [Cover::Bare, Cover::Jungle] {
             map.tiles[middle].cover = cover;
-            map.tiles[middle].relief = if cover == Cover::Bare { Relief::Mountain } else { Relief::Flat };
-            assert_eq!(entry_cost(&map, &worker, (10, 10), (11, 10), &[]), Some(3 * MP));
-            assert_eq!(route(&map, &worker, (12, 10), &[]), Some(vec![(11, 10), (12, 10)]));
+            map.tiles[middle].relief = if cover == Cover::Bare {
+                Relief::Mountain
+            } else {
+                Relief::Flat
+            };
+            assert_eq!(
+                entry_cost(&map, &worker, (10, 10), (11, 10), &[]),
+                Some(3 * MP)
+            );
+            assert_eq!(
+                route(&map, &worker, (12, 10), &[]),
+                Some(vec![(11, 10), (12, 10)])
+            );
             for kind in [UnitType::named("Chariot"), UnitType::named("Catapult")] {
                 let wheeled = Unit::new(0, kind, 10, 10);
                 assert_eq!(route(&map, &wheeled, (12, 10), &[]), None);
@@ -1406,7 +1654,15 @@ mod tests {
             }
         }
         map.tiles[middle].cover = Cover::Forest;
-        assert!(route(&map, &Unit::new(0, UnitType::named("Chariot"), 10, 10), (12, 10), &[]).is_some());
+        assert!(
+            route(
+                &map,
+                &Unit::new(0, UnitType::named("Chariot"), 10, 10),
+                (12, 10),
+                &[]
+            )
+            .is_some()
+        );
     }
 
     #[test]
@@ -1417,10 +1673,16 @@ mod tests {
         map.tiles[i].relief = Relief::Mountain;
         map.tiles[i].road = false;
         let mut army = Unit::new(0, UnitType::named("Army"), 10, 10);
-        army.members = vec![(UnitType::named("Chariot"), Level::Regular), (UnitType::named("Chariot"), Level::Veteran)];
+        army.members = vec![
+            (UnitType::named("Chariot"), Level::Regular),
+            (UnitType::named("Chariot"), Level::Veteran),
+        ];
         assert_eq!(entry_cost(&map, &army, (10, 10), (11, 10), &[]), None);
         army.members[1].0 = UnitType::named("Warrior");
-        assert_eq!(entry_cost(&map, &army, (10, 10), (11, 10), &[]), Some(3 * MP));
+        assert_eq!(
+            entry_cost(&map, &army, (10, 10), (11, 10), &[]),
+            Some(3 * MP)
+        );
     }
 
     #[test]
@@ -1488,7 +1750,12 @@ mod tests {
                 def(UnitType::named("Scout")).moves * MP
             );
             assert_eq!(app.world().resource::<Selected>().0, None);
-            assert!(!app.world().get::<Unit>(ids[incoming]).unwrap().defensive_fired);
+            assert!(
+                !app.world()
+                    .get::<Unit>(ids[incoming])
+                    .unwrap()
+                    .defensive_fired
+            );
             if incoming != 0 {
                 assert_eq!(app.world().get::<Unit>(ids[0]).unwrap().moves, 0);
                 assert!(app.world().get::<Unit>(ids[0]).unwrap().defensive_fired);
@@ -1549,7 +1816,11 @@ mod tests {
         app.init_resource::<Flags>();
         app.add_systems(
             Update,
-            (refresh_visibility, |map: Res<GameMap>, mut flags: ResMut<Flags>| flags.0.push(map.is_changed())).chain(),
+            (
+                refresh_visibility,
+                |map: Res<GameMap>, mut flags: ResMut<Flags>| flags.0.push(map.is_changed()),
+            )
+                .chain(),
         );
         let scout = app.world_mut().spawn(scout_at(x, y)).id();
         for _ in 0..3 {
@@ -1557,7 +1828,14 @@ mod tests {
         }
         // Frame 0 lights the map; the next two have nothing to change.
         assert_eq!(app.world().resource::<Flags>().0, [true, false, false]);
-        let lit = |app: &App| app.world().resource::<GameMap>().tiles.iter().filter(|t| t.visible).count();
+        let lit = |app: &App| {
+            app.world()
+                .resource::<GameMap>()
+                .tiles
+                .iter()
+                .filter(|t| t.visible)
+                .count()
+        };
         let before = lit(&app);
         // One step east: the lit area shifts, so the map is written once.
         app.world_mut().get_mut::<Unit>(scout).unwrap().x += 1;
@@ -1600,15 +1878,21 @@ mod tests {
         map.tiles[origin].river = crate::rivers::EAST;
         let worker = Unit::new(0, UnitType::named("Worker"), 10, 10);
         assert_eq!(entry_cost(&map, &worker, (10, 10), (11, 10), &[]), Some(MP));
-        assert_eq!(route(&map, &worker, (11, 10), &[]), Some(vec![(10, 9), (11, 10)]));
+        assert_eq!(
+            route(&map, &worker, (11, 10), &[]),
+            Some(vec![(10, 9), (11, 10)])
+        );
         assert_eq!(path_turns(&map, &worker, &[(11, 10), (12, 10)], &[]), 1);
         let run = |map: GameMap| {
             let mut app = App::new();
-            app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+            app.edit_schedule(Update, |s| {
+                s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+            });
             app.insert_resource(map);
             app.init_resource::<crate::unit_picker::UnitPicker>();
             app.init_resource::<crate::civs::Civilizations>();
             app.init_resource::<crate::diplomacy::Diplomacy>();
+            app.insert_resource(UnitArt::blank());
             app.add_message::<crate::combat::AttackOrder>();
             app.add_systems(Update, drive_movement);
             let mut u = Unit::new(0, UnitType::named("Chariot"), 10, 10);
@@ -1625,11 +1909,39 @@ mod tests {
         assert_eq!(run(map.clone()), 2 * MP - 1);
         // Bridges belong to the moving civilization, not the road owner.
         let foreign = Unit::new(1, UnitType::named("Worker"), 10, 10);
-        assert_eq!(entry_cost(&map, &foreign, (10, 10), (11, 10), &[]), Some(MP));
+        assert_eq!(
+            entry_cost(&map, &foreign, (10, 10), (11, 10), &[]),
+            Some(MP)
+        );
         let mountain = map.idx(11, 10);
         map.tiles[mountain].relief = Relief::Mountain;
-        assert_eq!(entry_cost(&map, &foreign, (10, 10), (11, 10), &[]), Some(3 * MP));
+        assert_eq!(
+            entry_cost(&map, &foreign, (10, 10), (11, 10), &[]),
+            Some(3 * MP)
+        );
         assert_eq!(entry_cost(&map, &worker, (10, 10), (11, 10), &[]), Some(1));
+    }
+
+    #[test]
+    fn steps_last_one_walk_cycle_at_art_speed() {
+        let mut art = UnitArt::blank();
+        let t = UnitType::named("Warrior");
+        // No walk art: the old fixed beat.
+        assert_eq!(step_duration(&art, t, 0), STEP_DUR);
+        art.clips_mut(t).insert(
+            "RUN".to_string(),
+            Clip {
+                strips: Strips::blank(),
+                frame_w: 40.0,
+                frame_h: 40.0,
+                frames: 11,
+                ms: 66.0,
+                feet: [0; 8],
+                sounds: vec![],
+            },
+        );
+        // One stride loop per tile, at the FLC's own rate.
+        assert!((step_duration(&art, t, 0) - 0.726).abs() < 1e-6);
     }
 
     #[test]
@@ -1645,14 +1957,27 @@ mod tests {
             map.tiles[i].cover = Cover::Bare;
             map.tiles[i].river = 0;
         }
-        let hills = path_turns(&map, &Unit::new(0, UnitType::named("Worker"), sx, sy), &run[1..], &[]);
+        let hills = path_turns(
+            &map,
+            &Unit::new(0, UnitType::named("Worker"), sx, sy),
+            &run[1..],
+            &[],
+        );
         assert!(hills >= 2, "three hills take a 1-MP unit three turns");
         for &(x, y) in &run {
             let i = map.idx(x, y);
             map.tiles[i].road = true;
         }
         // 3 road steps cost 3 thirds: one MP, arriving this turn
-        assert_eq!(path_turns(&map, &Unit::new(0, UnitType::named("Worker"), sx, sy), &run[1..], &[]), 0);
+        assert_eq!(
+            path_turns(
+                &map,
+                &Unit::new(0, UnitType::named("Worker"), sx, sy),
+                &run[1..],
+                &[]
+            ),
+            0
+        );
         let path = map.find_path((sx, sy), run[3]).unwrap();
         assert_eq!(path.len(), 3);
         assert_eq!(fmt_moves(4), "1 1/3");
@@ -1724,11 +2049,41 @@ mod tests {
                 .iter()
                 .map(|&(x, y)| map.get(x, y).and_then(move_cost).unwrap() as u32)
                 .sum();
-            assert!(path_turns(&map, &Unit::new(0, UnitType::named("Worker"), sx, sy), &path, &[]) >= 2 || costs > 3);
-            assert_eq!(path_turns(&map, &Unit { moves: 0, ..Unit::new(0, UnitType::named("Worker"), sx, sy) }, &[], &[]), 0);
+            assert!(
+                path_turns(
+                    &map,
+                    &Unit::new(0, UnitType::named("Worker"), sx, sy),
+                    &path,
+                    &[]
+                ) >= 2
+                    || costs > 3
+            );
+            assert_eq!(
+                path_turns(
+                    &map,
+                    &Unit {
+                        moves: 0,
+                        ..Unit::new(0, UnitType::named("Worker"), sx, sy)
+                    },
+                    &[],
+                    &[]
+                ),
+                0
+            );
         }
         // a full-move unit with nothing left waits a turn for a 1-step path
-        assert_eq!(path_turns(&map, &Unit { moves: 0, ..Unit::new(0, UnitType::named("Worker"), sx, sy) }, &[(sx + 1, sy)], &[]), 1);
+        assert_eq!(
+            path_turns(
+                &map,
+                &Unit {
+                    moves: 0,
+                    ..Unit::new(0, UnitType::named("Worker"), sx, sy)
+                },
+                &[(sx + 1, sy)],
+                &[]
+            ),
+            1
+        );
     }
 
     fn ring_app(selected: Selected) -> (App, Entity, Entity) {
@@ -1904,7 +2259,11 @@ pub fn selection_gizmo(
     if dest == (u.x, u.y) {
         return;
     }
-    let ports: Vec<_> = cities.iter().filter(|c| c.civ == u.civ && c.coastal).map(|c| (c.x, c.y)).collect();
+    let ports: Vec<_> = cities
+        .iter()
+        .filter(|c| c.civ == u.civ && c.coastal)
+        .map(|c| (c.x, c.y))
+        .collect();
     let snapshot: Vec<_> = units.iter().map(|(e, u)| (e, u.clone())).collect();
     if let Some(p) = crate::naval::route(&map, u, dest, &ports, &snapshot) {
         let mut prev = tile_to_world(u.x, u.y);

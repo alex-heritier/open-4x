@@ -66,7 +66,14 @@ pub struct Who<'a> {
 
 impl Who<'_> {
     pub fn between(ai: usize, player: usize) -> Who<'static> {
-        Who { ai, player, third: None, give: "something", get: "something", city: "our lands" }
+        Who {
+            ai,
+            player,
+            third: None,
+            give: "something",
+            get: "something",
+            city: "our lands",
+        }
     }
 }
 
@@ -84,32 +91,56 @@ impl Speech {
     /// request that startup need not wait for. Empty (every `say` is `None`)
     /// when it is missing.
     pub fn load() -> Speech {
-        Speech { sets: Default::default(), from_file: true }
+        Speech {
+            sets: Default::default(),
+            from_file: true,
+        }
     }
 
     /// Sets from text already in hand.
     #[cfg(test)]
     pub fn parse(text: &str) -> Speech {
-        Speech { sets: parse_sets(text).into(), from_file: false }
+        Speech {
+            sets: parse_sets(text).into(),
+            from_file: false,
+        }
     }
 
     fn sets(&self) -> &HashMap<String, Set> {
-        self.sets.get_or_init(|| match self.from_file.then(|| crate::web::read_text(PATH)) {
-            Some(Ok(text)) => parse_sets(&text),
-            _ => HashMap::new(),
-        })
+        self.sets.get_or_init(
+            || match self.from_file.then(|| crate::web::read_text(PATH)) {
+                Some(Ok(text)) => parse_sets(&text),
+                _ => HashMap::new(),
+            },
+        )
     }
 
     /// The line of block `key` that the leader of `ai` says, in the tone of
     /// `power` (0 weaker, 1 level, 2 stronger than the player) and `mood`
     /// (0 friendly .. 2 hostile); `roll` picks among the phrasings.
-    pub fn say(&self, key: &str, power: usize, mood: usize, roll: usize, who: &Who) -> Option<String> {
+    pub fn say(
+        &self,
+        key: &str,
+        power: usize,
+        mood: usize,
+        roll: usize,
+        who: &Who,
+    ) -> Option<String> {
         let set = self.sets().get(key)?;
         let n = |on: bool| if on { TONES } else { 1 };
-        let civ = if set.by_civ { LEADERS[who.ai].text_set } else { 0 };
-        let p = if set.by_power { power.min(TONES - 1) } else { 0 };
+        let civ = if set.by_civ {
+            LEADERS[who.ai].text_set
+        } else {
+            0
+        };
+        let p = if set.by_power {
+            power.min(TONES - 1)
+        } else {
+            0
+        };
         let m = if set.by_mood { mood.min(TONES - 1) } else { 0 };
-        let at = ((civ * n(set.by_power) + p) * n(set.by_mood) + m) * set.random + roll % set.random;
+        let at =
+            ((civ * n(set.by_power) + p) * n(set.by_mood) + m) * set.random + roll % set.random;
         Some(fill(set, set.lines.get(at)?, who))
     }
 }
@@ -135,7 +166,14 @@ fn parse_sets(text: &str) -> HashMap<String, Set> {
                 _ => {
                     let name = word.to_string();
                     let vars = comments.iter().filter_map(|c| var_note(c)).collect();
-                    sets.insert(name.clone(), Set { random: 1, vars, ..Set::default() });
+                    sets.insert(
+                        name.clone(),
+                        Set {
+                            random: 1,
+                            vars,
+                            ..Set::default()
+                        },
+                    );
                     current = Some(name);
                     comments.clear();
                 }
@@ -173,7 +211,10 @@ enum Owner {
 }
 
 fn owner(desc: &str) -> Owner {
-    if ["enemy", "embargo", "stabbed", "communications"].iter().any(|w| desc.contains(w)) {
+    if ["enemy", "embargo", "stabbed", "communications"]
+        .iter()
+        .any(|w| desc.contains(w))
+    {
         Owner::Third
     } else if desc.contains("player") {
         Owner::Player
@@ -189,7 +230,9 @@ fn fill(set: &Set, line: &str, who: &Who) -> String {
     while let Some(at) = rest.find('$') {
         out.push_str(&rest[..at]);
         rest = &rest[at + 1..];
-        let name_len = rest.find(|c: char| !c.is_ascii_uppercase()).unwrap_or(rest.len());
+        let name_len = rest
+            .find(|c: char| !c.is_ascii_uppercase())
+            .unwrap_or(rest.len());
         let name = &rest[..name_len];
         let digit = rest[name_len..].chars().next().and_then(|c| c.to_digit(10));
         if name.is_empty() {
@@ -198,7 +241,11 @@ fn fill(set: &Set, line: &str, who: &Who) -> String {
         }
         rest = &rest[name_len + digit.map_or(0, |_| 1)..];
         let desc = digit
-            .and_then(|d| set.vars.iter().find(|(n, k, _)| n == name && u32::from(*k) == d))
+            .and_then(|d| {
+                set.vars
+                    .iter()
+                    .find(|(n, k, _)| n == name && u32::from(*k) == d)
+            })
             .map_or("", |(_, _, d)| d.as_str());
         out.push_str(&value(name, desc, who));
     }
@@ -289,8 +336,14 @@ mod tests {
         assert!(hello.by_civ && !hello.by_power && !hello.by_mood);
         assert_eq!(hello.lines.len(), 2);
         let war = &s.sets()["WAR"];
-        assert_eq!((war.by_civ, war.by_power, war.random, war.lines.len()), (false, true, 2, 6));
-        assert_eq!(war.lines[4], "Strong one, $PLAYER0, and $CIVNAME3.", "curly quotes come off too");
+        assert_eq!(
+            (war.by_civ, war.by_power, war.random, war.lines.len()),
+            (false, true, 2, 6)
+        );
+        assert_eq!(
+            war.lines[4], "Strong one, $PLAYER0, and $CIVNAME3.",
+            "curly quotes come off too"
+        );
         assert_eq!(war.expected(), 6);
     }
 
@@ -300,24 +353,44 @@ mod tests {
         // Japan (human, 0) listens to Rome (1): "$CIVADJ2" is the player's people.
         let mut who = Who::between(1, 0);
         let hello = s.say("HELLO", 0, 0, 0, &who).unwrap();
-        assert!(hello.starts_with("I, Caesar, of Rome, greet the Japanese"), "{hello}");
+        assert!(
+            hello.starts_with("I, Caesar, of Rome, greet the Japanese"),
+            "{hello}"
+        );
         who.third = Some(2);
-        assert_eq!(s.say("WAR", 2, 0, 0, &who).unwrap(), "Strong one, Tokugawa, and Egypt.");
-        assert_eq!(s.say("WAR", 0, 0, 3, &who).unwrap(), "Weak two.", "the roll wraps over the phrasings");
+        assert_eq!(
+            s.say("WAR", 2, 0, 0, &who).unwrap(),
+            "Strong one, Tokugawa, and Egypt."
+        );
+        assert_eq!(
+            s.say("WAR", 0, 0, 3, &who).unwrap(),
+            "Weak two.",
+            "the roll wraps over the phrasings"
+        );
         assert_eq!(s.say("WAR", 1, 0, 1, &who).unwrap(), "Level two.");
-        assert_eq!(s.say("WAR", 9, 0, 1, &who).unwrap(), "Strong two.", "tones saturate");
+        assert_eq!(
+            s.say("WAR", 9, 0, 1, &who).unwrap(),
+            "Strong two.",
+            "tones saturate"
+        );
         assert!(s.say("NOPE", 0, 0, 0, &who).is_none());
     }
 
     #[test]
     fn a_dollar_that_names_nothing_stays_and_unnoted_names_default_to_their_owner() {
         let s = Speech::parse("#X\n#random 1\n\"Pay $5 to $AI9 and $PLAYER0\"\n");
-        assert_eq!(s.say("X", 0, 0, 0, &Who::between(2, 0)).unwrap(), "Pay $5 to Cleopatra and Tokugawa");
+        assert_eq!(
+            s.say("X", 0, 0, 0, &Who::between(2, 0)).unwrap(),
+            "Pay $5 to Cleopatra and Tokugawa"
+        );
     }
 
     #[test]
     fn tones_follow_strength_and_attitude() {
-        assert_eq!([power_tone(5, 10), power_tone(10, 10), power_tone(20, 10)], [0, 1, 2]);
+        assert_eq!(
+            [power_tone(5, 10), power_tone(10, 10), power_tone(20, 10)],
+            [0, 1, 2]
+        );
         assert_eq!([0, 1, 2, 3, 4].map(mood_tone), [0, 0, 1, 2, 2]);
     }
 
@@ -353,7 +426,9 @@ mod tests {
         };
         for ai in 0..civ_count() {
             let human = (ai + 1) % civ_count();
-            let said = s.say("AIFIRSTCONTACT", 0, 0, 0, &Who::between(ai, human)).unwrap();
+            let said = s
+                .say("AIFIRSTCONTACT", 0, 0, 0, &Who::between(ai, human))
+                .unwrap();
             assert!(said.contains(LEADERS[ai].name), "{ai}: {said}");
             assert!(!said.contains('$'), "{said}");
         }

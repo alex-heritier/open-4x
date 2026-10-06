@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use civ3mapgen::government as exe;
 
 use crate::cities::{City, territory};
-use crate::civs::{CIV_CAP, civ_count, CivilizationEnded};
+use crate::civs::{CIV_CAP, CivilizationEnded, civ_count};
 use crate::diplomacy::Diplomacy;
 use crate::features::{MessageBoard, post};
 use crate::map::GameMap;
@@ -39,7 +39,9 @@ pub fn scan(
     let mut abroad = [false; CIV_CAP];
     let mut at_home = [false; CIV_CAP];
     for u in units.iter().filter(|u| military(u) && u.civ < civ_count()) {
-        let Some(owner) = owner_of(u.x, u.y) else { continue };
+        let Some(owner) = owner_of(u.x, u.y) else {
+            continue;
+        };
         if u.civ == civ && owner != civ {
             abroad[owner] = true;
         } else if u.civ != civ && owner == civ {
@@ -82,14 +84,23 @@ pub fn end_turn(
             // The score refuses a government this tired of war, so the pick
             // is never the one that just fell.
             let current = realm::read(civ, |r| r.govt);
-            let then = crate::govern::choose_government(civ, &mine, us.iter().filter(|u| u.civ == civ).count())
-                .filter(|&g| g != current)
-                .unwrap_or(exe::row::DESPOTISM);
+            let then = crate::govern::choose_government(
+                civ,
+                &mine,
+                us.iter().filter(|u| u.civ == civ).count(),
+            )
+            .filter(|&g| g != current)
+            .unwrap_or(exe::row::DESPOTISM);
             crate::govern::revolt(civ, then, &mut dice);
-            if !crate::civs::is_ai(civ) || (0..civ_count()).any(|h| !crate::civs::is_ai(h) && diplomacy.contact(h, civ)) {
+            if !crate::civs::is_ai(civ)
+                || (0..civ_count()).any(|h| !crate::civs::is_ai(h) && diplomacy.contact(h, civ))
+            {
                 post(
                     &mut board,
-                    format!("War weariness has toppled the government of the {}!", crate::civs::CIVS[civ].name),
+                    format!(
+                        "War weariness has toppled the government of the {}!",
+                        crate::civs::CIVS[civ].name
+                    ),
                 );
             }
         }
@@ -133,7 +144,12 @@ mod tests {
         for (turn, want) in [16, 31, 46].into_iter().enumerate() {
             hit.update_weariness(0, &none, &none, false);
             calm.update_weariness(0, &none, &none, false);
-            assert_eq!((hit.weariness(0, 1), calm.weariness(0, 1)), (want, 0), "turn {}", turn + 1);
+            assert_eq!(
+                (hit.weariness(0, 1), calm.weariness(0, 1)),
+                (want, 0),
+                "turn {}",
+                turn + 1
+            );
         }
         hit.make_peace(0, 1);
         let before = hit.weariness(0, 1);
@@ -162,14 +178,19 @@ mod tests {
         let mut city = City::new(0, "Kyoto", 3, 3);
         city.set_size(6);
         let map = crate::map::GameMap::generate();
-        for tile in crate::cities::radius_tiles(&map, 3, 3).into_iter().take(6) { city.work_tile(&map, tile); }
+        for tile in crate::cities::radius_tiles(&map, 3, 3).into_iter().take(6) {
+            city.work_tile(&map, tile);
+        }
         let calm = crate::citycalc::moods(&city, 0);
         realm::write(0, |r| {
             r.adopt(exe::row::DEMOCRACY);
             r.war_counters = vec![130];
         });
         let tired = crate::citycalc::moods(&city, 0);
-        assert!(tired.unhappy > calm.unhappy, "130 against a Democracy: {tired:?} vs {calm:?}");
+        assert!(
+            tired.unhappy > calm.unhappy,
+            "130 against a Democracy: {tired:?} vs {calm:?}"
+        );
         realm::write(0, |r| r.adopt(exe::row::DESPOTISM));
         assert_eq!(crate::citycalc::moods(&city, 0).unhappy, calm.unhappy);
     }

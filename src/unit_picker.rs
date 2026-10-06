@@ -84,8 +84,10 @@ pub fn update(
                         }
                     } else if let Ok((_, mut u)) = units.get_mut(row.0) {
                         let unloading = picker.unload.is_some() && u.carrier == picker.unload;
-                        if u.civ == civs.active && (unloading || (picker.unload.is_none() && units::selectable(&u)))
-                            && (!unloading || crate::naval::disembark(&map, &mut u, picker.shore)) {
+                        if u.civ == civs.active
+                            && (unloading || (picker.unload.is_none() && units::selectable(&u)))
+                            && (!unloading || crate::naval::disembark(&map, &mut u, picker.shore))
+                        {
                             u.fortified = false;
                             u.sentry = false;
                             u.exploring = false;
@@ -111,7 +113,10 @@ pub fn update(
     if picker.unload.is_none() && !buttons.just_pressed(MouseButton::Right) {
         return;
     }
-    let at = picker.unload.and_then(|e| units.get(e).ok().map(|(_, u)| (u.x, u.y))).or(hovered.0);
+    let at = picker
+        .unload
+        .and_then(|e| units.get(e).ok().map(|(_, u)| (u.x, u.y)))
+        .or(hovered.0);
     let Some((x, y)) = at else {
         picker.unload = None;
         picker.shore = None;
@@ -119,8 +124,11 @@ pub fn update(
     };
     let mut stack: Vec<_> = units
         .iter()
-        .filter(|(_, u)| u.civ == civs.active && (u.x, u.y) == (x, y)
-            && picker.unload.is_none_or(|ship| u.carrier == Some(ship)))
+        .filter(|(_, u)| {
+            u.civ == civs.active
+                && (u.x, u.y) == (x, y)
+                && picker.unload.is_none_or(|ship| u.carrier == Some(ship))
+        })
         .collect();
     if stack.is_empty() {
         picker.unload = None;
@@ -137,7 +145,8 @@ pub fn update(
     preview.0 = None;
     picker.owner = civs.active;
     let width = 300.0_f32.min(window.width());
-    let height = (36.0 + (stack.len() + usize::from(picker.unload.is_some())) as f32 * 28.0).min(window.height() * 0.75);
+    let height = (36.0 + (stack.len() + usize::from(picker.unload.is_some())) as f32 * 28.0)
+        .min(window.height() * 0.75);
     let pos = window
         .cursor_position()
         .unwrap_or(Vec2::new(window.width() / 2.0, window.height() / 2.0));
@@ -172,7 +181,11 @@ pub fn update(
             ))
             .with_children(|panel| {
                 panel.spawn((
-                    Text::new(if picker.unload.is_some() { "Disembark" } else { "Select Unit" }),
+                    Text::new(if picker.unload.is_some() {
+                        "Disembark"
+                    } else {
+                        "Select Unit"
+                    }),
                     TextFont {
                         font: font.clone(),
                         font_size: 16.0,
@@ -193,14 +206,33 @@ pub fn update(
                     ))
                     .with_children(|list| {
                         if let Some(ship) = picker.unload {
-                            list.spawn((Button, PickerRow(ship), Node {
-                                min_height: Val::Px(28.0), flex_shrink: 0.0,
-                                padding: UiRect::axes(Val::Px(4.0), Val::Px(3.0)), ..default()
-                            }, BackgroundColor(Color::NONE)))
-                                .with_child((Text::new("Unload all"), TextFont { font: font.clone(), font_size: 15.0, ..default() }, TextColor(Color::BLACK)));
+                            list.spawn((
+                                Button,
+                                PickerRow(ship),
+                                Node {
+                                    min_height: Val::Px(28.0),
+                                    flex_shrink: 0.0,
+                                    padding: UiRect::axes(Val::Px(4.0), Val::Px(3.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::NONE),
+                            ))
+                            .with_child((
+                                Text::new("Unload all"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 15.0,
+                                    ..default()
+                                },
+                                TextColor(Color::BLACK),
+                            ));
                         }
                         for (e, u) in &stack {
-                            let enabled = if picker.unload.is_some() { picker.shore.is_none() || u.moves > 0 } else { units::selectable(u) };
+                            let enabled = if picker.unload.is_some() {
+                                picker.shore.is_none() || u.moves > 0
+                            } else {
+                                units::selectable(u)
+                            };
                             let state = if u.fortified {
                                 " · Fortified"
                             } else if u.sentry {
@@ -223,7 +255,11 @@ pub fn update(
                                 row.spawn((
                                     Text::new(format!(
                                         "{}  ({}/{} moves){}",
-                                        if u.scientific_leader { "Scientific Leader" } else { units::def(u.utype).name },
+                                        if u.scientific_leader {
+                                            "Scientific Leader"
+                                        } else {
+                                            units::def(u.utype).name
+                                        },
                                         units::fmt_moves(u.moves),
                                         units::def(u.utype).moves,
                                         state
@@ -290,6 +326,7 @@ mod tests {
         app.init_resource::<MovePreview>();
         app.init_resource::<CityView>();
         app.init_resource::<ProductionPrompts>();
+        app.init_resource::<crate::input::MapPress>();
         app.insert_resource(SplashUp(false));
         app.insert_resource(Hovered(Some((10, 10))));
         app.insert_resource(crate::map::GameMap::generate());
@@ -336,6 +373,7 @@ mod tests {
             Update,
             (
                 update,
+                crate::input::track_press,
                 crate::input::orders.run_if(inactive),
                 units::auto_select,
             )
@@ -355,25 +393,46 @@ mod tests {
     #[test]
     fn bombard_key_then_target_click_fires_without_ordering_a_move() {
         let (mut app, a, _) = app();
-        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.world_mut().get_mut::<Unit>(a).unwrap().utype = UnitType::named("Catapult");
         app.world_mut().resource_mut::<Selected>().0 = Some(a);
         let mut diplomacy = crate::diplomacy::Diplomacy::new();
-        diplomacy.declare(&crate::diplomacy::Facts::even(), 0, 1, 0, &mut crate::features::MessageBoard::default());
+        diplomacy.declare(
+            &crate::diplomacy::Facts::even(),
+            0,
+            1,
+            0,
+            &mut crate::features::MessageBoard::default(),
+        );
         app.insert_resource(diplomacy);
         app.insert_resource(crate::combat::CombatRng(crate::rng::MapRng::new(1)));
         app.init_resource::<crate::features::MessageBoard>();
-        app.add_systems(Update, (crate::bombard::arm, crate::bombard::resolve).chain().after(crate::input::orders));
-        app.world_mut().spawn(Unit::new(1, UnitType::named("Spearman"), 11, 10));
+        app.add_systems(
+            Update,
+            (crate::bombard::arm, crate::bombard::resolve)
+                .chain()
+                .after(crate::input::orders),
+        );
+        app.world_mut()
+            .spawn(Unit::new(1, UnitType::named("Spearman"), 11, 10));
         {
             let mut map = app.world_mut().resource_mut::<crate::map::GameMap>();
             let i = map.idx(11, 10);
             map.tiles[i].visible = true;
         }
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyB);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyB);
         app.update();
-        assert_eq!(app.world().resource::<crate::bombard::TargetMode>().0, Some(a));
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        assert_eq!(
+            app.world().resource::<crate::bombard::TargetMode>().0,
+            Some(a)
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
         app.world_mut().resource_mut::<Hovered>().0 = Some((11, 10));
         left_click(&mut app);
         let u = app.world().get::<Unit>(a).unwrap();
@@ -402,6 +461,45 @@ mod tests {
         app.world_mut().get_mut::<Unit>(warrior).unwrap().moves = 0;
         left_click(&mut app);
         assert_eq!(app.world().resource::<Selected>().0, Some(worker));
+    }
+
+    #[test]
+    fn a_release_whose_press_began_off_the_map_orders_nothing() {
+        let (mut app, warrior, _) = app();
+        app.world_mut().resource_mut::<Selected>().0 = Some(warrior);
+        // Flat grass beside the warrior, so a leaked release would
+        // definitely find its move: the press began on a modal and armed
+        // nothing, so the release must leave the unit standing.
+        {
+            let mut map = app.world_mut().resource_mut::<crate::map::GameMap>();
+            for (x, y) in [(10, 10), (11, 10)] {
+                let i = map.idx(x, y);
+                map.tiles[i].base = crate::map::Base::Grassland;
+            }
+            app.world_mut().resource_mut::<Hovered>().0 = Some((11, 10));
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::input::MapPress>()
+            .0 = None;
+        // End the press frame by hand (see NOTE below): the game clears
+        // `just_pressed` every frame, test apps do not.
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+        app.update();
+        // NOTE: test apps never clear `just_pressed` (no input plugin),
+        // so the press frame is ended by hand; the game clears it every
+        // frame, and `track_press` would otherwise re-arm on the release.
+        let u = app.world().get::<Unit>(warrior).unwrap();
+        assert_eq!((u.x, u.y), (10, 10));
+        assert!(u.path.is_empty());
     }
 
     #[test]
@@ -441,14 +539,22 @@ mod tests {
             let (mut app, ship, worker) = app();
             {
                 let mut map = app.world_mut().resource_mut::<crate::map::GameMap>();
-                for t in &mut map.tiles { t.base = crate::map::Base::Grassland; }
+                for t in &mut map.tiles {
+                    t.base = crate::map::Base::Grassland;
+                }
                 let i = map.idx(10, 10);
                 map.tiles[i].base = crate::map::Base::Coast;
             }
             app.insert_resource(crate::diplomacy::Diplomacy::new());
             app.init_resource::<crate::cities::Treasury>();
             app.add_message::<crate::combat::AttackOrder>();
-            app.add_systems(Update, (units::drive_movement, crate::naval::sync_cargo).chain().after(update));
+            app.insert_resource(crate::units::UnitArt::blank());
+            app.add_systems(
+                Update,
+                (units::drive_movement, crate::naval::sync_cargo)
+                    .chain()
+                    .after(update),
+            );
             {
                 let mut u = app.world_mut().get_mut::<Unit>(worker).unwrap();
                 u.carrier = Some(ship);
@@ -463,7 +569,12 @@ mod tests {
             exhausted.moves = 0;
             let exhausted = app.world_mut().spawn(exhausted).id();
             let map = app.world().resource::<crate::map::GameMap>().clone();
-            let snapshot: Vec<_> = app.world_mut().query::<(Entity, &Unit)>().iter(app.world()).map(|(e, u)| (e, u.clone())).collect();
+            let snapshot: Vec<_> = app
+                .world_mut()
+                .query::<(Entity, &Unit)>()
+                .iter(app.world())
+                .map(|(e, u)| (e, u.clone()))
+                .collect();
             {
                 let mut u = app.world_mut().get_mut::<Unit>(ship).unwrap();
                 u.utype = UnitType::named("Galley");
@@ -477,19 +588,40 @@ mod tests {
             assert!(app.world().resource::<UnitPicker>().root.is_some());
             if let Some(all) = choice {
                 let target = if all { ship } else { worker };
-                let row = app.world_mut().query::<(Entity, &PickerRow)>().iter(app.world()).find(|(_, row)| row.0 == target).unwrap().0;
+                let row = app
+                    .world_mut()
+                    .query::<(Entity, &PickerRow)>()
+                    .iter(app.world())
+                    .find(|(_, row)| row.0 == target)
+                    .unwrap()
+                    .0;
                 *app.world_mut().get_mut::<Interaction>(row).unwrap() = Interaction::Pressed;
             } else {
-                app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::Escape);
             }
             app.update();
             let u = app.world().get::<Unit>(ship).unwrap();
             assert_eq!((u.x, u.y, u.moves), (10, 10, 9));
             assert!(u.path.is_empty());
-            for (cargo, landed) in [(worker, choice.is_some()), (other, choice == Some(true)), (exhausted, false)] {
+            for (cargo, landed) in [
+                (worker, choice.is_some()),
+                (other, choice == Some(true)),
+                (exhausted, false),
+            ] {
                 let u = app.world().get::<Unit>(cargo).unwrap();
-                assert_eq!((u.x, u.y, u.carrier), if landed { (11, 10, None) } else { (10, 10, Some(ship)) });
-                if landed { assert_eq!(u.moves, 0); }
+                assert_eq!(
+                    (u.x, u.y, u.carrier),
+                    if landed {
+                        (11, 10, None)
+                    } else {
+                        (10, 10, Some(ship))
+                    }
+                );
+                if landed {
+                    assert_eq!(u.moves, 0);
+                }
             }
             assert!(app.world().resource::<UnitPicker>().unload.is_none());
             assert!(app.world().resource::<UnitPicker>().shore.is_none());
@@ -522,13 +654,25 @@ mod tests {
                 open(&mut app);
             }
             assert!(app.world().resource::<UnitPicker>().root.is_some());
-            let rows: Vec<_> = app.world_mut().query::<(Entity, &PickerRow)>().iter(app.world()).map(|(e, row)| (e, row.0)).collect();
+            let rows: Vec<_> = app
+                .world_mut()
+                .query::<(Entity, &PickerRow)>()
+                .iter(app.world())
+                .map(|(e, row)| (e, row.0))
+                .collect();
             assert_eq!(rows.len(), 3);
             let row = rows.iter().find(|(_, u)| *u == worker).unwrap().0;
             *app.world_mut().get_mut::<Interaction>(row).unwrap() = Interaction::Pressed;
             app.update();
             let u = app.world().get::<Unit>(worker).unwrap();
-            assert_eq!((u.carrier, u.moves, u.sentry), (if in_port { None } else { Some(ship) }, if in_port { 0 } else { 3 }, false));
+            assert_eq!(
+                (u.carrier, u.moves, u.sentry),
+                (
+                    if in_port { None } else { Some(ship) },
+                    if in_port { 0 } else { 3 },
+                    false
+                )
+            );
             assert_eq!(app.world().get::<Unit>(other).unwrap().carrier, Some(ship));
             assert!(app.world().resource::<UnitPicker>().root.is_none());
             assert!(app.world().resource::<UnitPicker>().unload.is_none());

@@ -10,8 +10,8 @@
 
 use bevy::prelude::*;
 use civ3_biq::Save;
-use civ3_biq::sections::tile::{feature, overlay};
 use civ3_biq::sav::{City as SavCity, Tile as SavTile, Unit as SavUnit};
+use civ3_biq::sections::tile::{feature, overlay};
 
 use crate::barbarians::Tribe;
 use crate::boot::{Boot, World as BootWorld};
@@ -35,7 +35,11 @@ impl Frame {
     fn of(map: &GameMap) -> Frame {
         if let Some(sc) = crate::scenario::scenario() {
             let l = sc.lattice;
-            return Frame { dims: (2 * l.half_w, l.rows), to_native: Box::new(move |u, v| l.to_native(u, v)), to_clone: Box::new(move |x, y| l.to_clone(x, y)) };
+            return Frame {
+                dims: (2 * l.half_w, l.rows),
+                to_native: Box::new(move |u, v| l.to_native(u, v)),
+                to_clone: Box::new(move |x, y| l.to_clone(x, y)),
+            };
         }
         let (w, h) = (map.w, map.h);
         let off = h + (h & 1);
@@ -55,7 +59,10 @@ fn good_row(id: u8) -> i32 {
         "Diamonds" => "Gems",
         n => n,
     };
-    crate::ruleset::GOOD_NAMES.iter().position(|g| *g == name).map_or(-1, |i| i as i32)
+    crate::ruleset::GOOD_NAMES
+        .iter()
+        .position(|g| *g == name)
+        .map_or(-1, |i| i as i32)
 }
 
 /// `TERR` row and secondary class of a tile, in the numbering saves use.
@@ -96,7 +103,11 @@ fn put_tile(dst: &mut SavTile, t: &Tile) {
         }
     }
     dst.set_overlay_plane(over);
-    dst.set_feature_plane(if t.cover == Cover::Pine { feature::PINE_FOREST } else { 0 });
+    dst.set_feature_plane(if t.cover == Cover::Pine {
+        feature::PINE_FOREST
+    } else {
+        0
+    });
     dst.set_river_connection_mask(t.river & 0xAA);
     dst.set_resource(t.resource.map_or(-1, good_row));
     dst.set_owner(t.owner.map_or(0, |c| c + 1));
@@ -122,7 +133,9 @@ fn embedded(boot: &Boot) -> Result<Vec<u8>, String> {
 
 /// The game as a `Save`.
 pub fn capture(world: &mut World) -> Result<Save, String> {
-    let boot = world.get_resource::<Boot>().ok_or("no game file to embed")?;
+    let boot = world
+        .get_resource::<Boot>()
+        .ok_or("no game file to embed")?;
     let biq = embedded(boot)?;
     build(world, biq)
 }
@@ -156,7 +169,11 @@ fn build(world: &mut World, biq: Vec<u8>) -> Result<Save, String> {
     }
 
     // Cities, in a fixed order so ids are stable.
-    let mut cities: Vec<(Entity, City)> = world.query::<(Entity, &City)>().iter(world).map(|(e, c)| (e, c.clone())).collect();
+    let mut cities: Vec<(Entity, City)> = world
+        .query::<(Entity, &City)>()
+        .iter(world)
+        .map(|(e, c)| (e, c.clone()))
+        .collect();
     cities.sort_by_key(|(_, c)| (c.civ, c.founded, c.name.clone()));
     let capital = world.resource::<Capital>().0;
     let nbld = save.counts.buildings;
@@ -166,27 +183,64 @@ fn build(world: &mut World, biq: Vec<u8>) -> Result<Save, String> {
             continue;
         }
         let (x, y) = (frame.to_native)(c.x, c.y);
-        let built: Vec<usize> = c.buildings.iter().chain(c.gifts.iter()).filter_map(|p| (p.index() >= unit_rows).then(|| p.index() - unit_rows)).filter(|&b| b < nbld).collect();
+        let built: Vec<usize> = c
+            .buildings
+            .iter()
+            .chain(c.gifts.iter())
+            .filter_map(|p| (p.index() >= unit_rows).then(|| p.index() - unit_rows))
+            .filter(|&b| b < nbld)
+            .collect();
         for &b in &built {
-            if crate::roster::bldg(b).other & (crate::roster::oth::WONDER | crate::roster::oth::SMALL_WONDER) != 0 {
+            if crate::roster::bldg(b).other
+                & (crate::roster::oth::WONDER | crate::roster::oth::SMALL_WONDER)
+                != 0
+            {
                 save.game.wonder_city[b] = id as u32;
                 save.game.wonder_built[b] = 1;
             }
         }
         let counts = save.counts;
-        save.add_city(SavCity::new(id as u32, x as u16, y as u16, (c.civ + 1) as u8, &c.name, c.size() as u32, &built, &counts));
+        save.add_city(SavCity::new(
+            id as u32,
+            x as u16,
+            y as u16,
+            (c.civ + 1) as u8,
+            &c.name,
+            c.size() as u32,
+            &built,
+            &counts,
+        ));
         if capital[c.civ] == Some(*e) {
             save.players[c.civ + 1].set_capital_city(id as i32);
         }
     }
 
     // Units.
-    let mut units: Vec<(usize, Unit)> = world.query::<(&Unit, Option<&Tribe>)>().iter(world).map(|(u, _)| (u.civ, u.clone())).collect();
+    let mut units: Vec<(usize, Unit)> = world
+        .query::<(&Unit, Option<&Tribe>)>()
+        .iter(world)
+        .map(|(u, _)| (u.civ, u.clone()))
+        .collect();
     units.sort_by_key(|(civ, u)| (*civ, u.utype.0, u.x, u.y));
     for (id, (civ, u)) in units.iter().enumerate() {
-        let owner = if *civ == BARBARIANS { 0 } else if *civ < players { civ + 1 } else { continue };
+        let owner = if *civ == BARBARIANS {
+            0
+        } else if *civ < players {
+            civ + 1
+        } else {
+            continue;
+        };
         let (x, y) = (frame.to_native)(u.x, u.y);
-        save.add_unit(SavUnit::new(id as u32, x, y, owner as u32, u.utype.0 as u32, level_index(u.level), u.damage.max(0) as u32, u32::from(u.fortified)));
+        save.add_unit(SavUnit::new(
+            id as u32,
+            x,
+            y,
+            owner as u32,
+            u.utype.0 as u32,
+            level_index(u.level),
+            u.damage.max(0) as u32,
+            u32::from(u.fortified),
+        ));
     }
 
     // The map: every native cell takes the clone's tile there.
@@ -222,7 +276,8 @@ fn build(world: &mut World, biq: Vec<u8>) -> Result<Save, String> {
 pub fn write(world: &mut World, json: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let path = json.with_extension("SAV");
     let save = capture(world)?;
-    save.write_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    save.write_file(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -260,7 +315,15 @@ mod tests {
         warrior.fortified = true;
         warrior.level = Level::Veteran;
         w.spawn(warrior);
-        w.spawn((Unit::new(BARBARIANS, UnitType::named("Warrior"), starts[1].0, starts[1].1 + 2), Tribe(0)));
+        w.spawn((
+            Unit::new(
+                BARBARIANS,
+                UnitType::named("Warrior"),
+                starts[1].0,
+                starts[1].1 + 2,
+            ),
+            Tribe(0),
+        ));
         w.resource_mut::<Treasury>().0[0] = 321;
         w.resource_mut::<GameMap>().tiles[map.idx(starts[0].0, starts[0].1 + 1)].road = true;
 
@@ -281,16 +344,37 @@ mod tests {
         assert_eq!(sc.leads[0].gold, 321);
         let kyoto = sc.cities.iter().find(|c| c.name == "Kyoto").expect("Kyoto");
         assert_eq!(kyoto.size, 4);
-        assert!(kyoto.buildings.contains(&(Production::named("Temple").index() - crate::roster::unit_count())));
+        assert!(
+            kyoto
+                .buildings
+                .contains(&(Production::named("Temple").index() - crate::roster::unit_count()))
+        );
         assert_eq!(sc.slot_of(kyoto.owner), Some(0));
-        assert!(map2.is_land(kyoto.at.0, kyoto.at.1), "the city stands on land");
+        assert!(
+            map2.is_land(kyoto.at.0, kyoto.at.1),
+            "the city stands on land"
+        );
         let veteran = sc.units.iter().find(|u| u.level == 2).expect("the veteran");
         assert_eq!((veteran.damage, veteran.fortified), (1, true));
-        assert!(sc.units.iter().any(|u| sc.slot_of(u.owner) == Some(BARBARIANS)));
+        assert!(
+            sc.units
+                .iter()
+                .any(|u| sc.slot_of(u.owner) == Some(BARBARIANS))
+        );
         // The land is the land, and the road is where it was.
-        let land = |m: &GameMap| m.tiles.iter().filter(|t| !matches!(t.base, Base::Ocean | Base::Sea | Base::Coast)).count();
+        let land = |m: &GameMap| {
+            m.tiles
+                .iter()
+                .filter(|t| !matches!(t.base, Base::Ocean | Base::Sea | Base::Coast))
+                .count()
+        };
         let original = w.resource::<GameMap>();
-        assert!(land(&map2) >= land(original) * 9 / 10, "{} of {} land tiles", land(&map2), land(original));
+        assert!(
+            land(&map2) >= land(original) * 9 / 10,
+            "{} of {} land tiles",
+            land(&map2),
+            land(original)
+        );
         assert!(map2.tiles.iter().any(|t| t.road));
     }
 }

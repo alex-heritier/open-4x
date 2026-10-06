@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use civ3mapgen::capture::{AcceptFacts, Wonder, ai_accepts_city};
 
 use crate::cities::{self, Capital, City, Production, radius_tiles, territory};
-use crate::civs::{CIV_CAP, civ_count, CivilizationEnded, is_ai};
+use crate::civs::{CIV_CAP, CivilizationEnded, civ_count, is_ai};
 use crate::combat::CombatRng;
 use crate::diplomacy::{ConvertAsk, Diplomacy};
 use crate::features::{MessageBoard, post};
@@ -114,7 +114,9 @@ pub fn dist(map: &GameMap, a: (i32, i32), b: (i32, i32)) -> i32 {
 fn ordinary(p: Production) -> bool {
     p.bldg().is_some_and(|b| {
         b.other & (oth::WONDER | oth::SMALL_WONDER) == 0
-            && b.flags & (imp::CENTER_OF_EMPIRE | imp::ALLOWS_SIZE_LEVEL_2 | imp::ALLOWS_SIZE_LEVEL_3) == 0
+            && b.flags
+                & (imp::CENTER_OF_EMPIRE | imp::ALLOWS_SIZE_LEVEL_2 | imp::ALLOWS_SIZE_LEVEL_3)
+                == 0
     })
 }
 
@@ -218,8 +220,13 @@ pub fn test_city(
             .count() as i32;
         let mut s = strength(&Contender {
             nationals: nationals(city, j),
-            resisters: city.citizens.slots().iter().flatten()
-                .filter(|c| c.resister && c.race == crate::civs::roster_index(j) as i32).count() as i32,
+            resisters: city
+                .citizens
+                .slots()
+                .iter()
+                .flatten()
+                .filter(|c| c.resister && c.race == crate::civs::roster_index(j) as i32)
+                .count() as i32,
             tiles,
             disorder: city.unrest > 0,
             celebrating: false,
@@ -272,7 +279,22 @@ pub fn run(
     {
         diplomacy.convert_ask = None;
         if yes {
-            convert(&mut commands, &map, ask.city, ask.to, &mut cities, &mut units, &capital, &art, &mut rng, &mut board, &mut prompts, &mut view, &civs, &diplomacy);
+            convert(
+                &mut commands,
+                &map,
+                ask.city,
+                ask.to,
+                &mut cities,
+                &mut units,
+                &capital,
+                &art,
+                &mut rng,
+                &mut board,
+                &mut prompts,
+                &mut view,
+                &civs,
+                &diplomacy,
+            );
         } else if let Ok((_, c)) = cities.get(ask.city) {
             post(&mut board, format!("We rebuffed the rebels of {}.", c.name));
         }
@@ -290,10 +312,16 @@ pub fn run(
             }
         }
         // The cooldown runs down; a city that is cooling does not roll.
-        let order: Vec<Entity> = cities.iter().filter(|(_, c)| c.civ == civ).map(|(e, _)| e).collect();
+        let order: Vec<Entity> = cities
+            .iter()
+            .filter(|(_, c)| c.civ == civ)
+            .map(|(e, _)| e)
+            .collect();
         for e in order {
             {
-                let Ok((_, mut city)) = cities.get_mut(e) else { continue };
+                let Ok((_, mut city)) = cities.get_mut(e) else {
+                    continue;
+                };
                 if city.civ != civ {
                     continue;
                 }
@@ -305,13 +333,17 @@ pub fn run(
             if capital.0[civ] == Some(e) || diplomacy.convert_ask.is_some_and(|a| a.city == e) {
                 continue;
             }
-            let Ok((_, city_ref)) = cities.get(e) else { continue };
+            let Ok((_, city_ref)) = cities.get(e) else {
+                continue;
+            };
             let city_now = city_ref.clone();
             let owners = territory(&map);
             let tile_owner = |x: i32, y: i32| owners.get(&(x, y)).copied();
             let mut capital_of = [None; CIV_CAP];
             for (k, slot) in capital_of.iter_mut().enumerate() {
-                *slot = capital.0[k].and_then(|ce| cities.get(ce).ok()).map(|(_, c)| (c.x, c.y));
+                *slot = capital.0[k]
+                    .and_then(|ce| cities.get(ce).ok())
+                    .map(|(_, c)| (c.x, c.y));
             }
             let mut in_play = [false; CIV_CAP];
             for (k, p) in in_play.iter_mut().enumerate() {
@@ -336,7 +368,11 @@ pub fn run(
             let Some(to) = target else { continue };
             if !is_ai(to) {
                 if diplomacy.convert_ask.is_none() {
-                    diplomacy.convert_ask = Some(ConvertAsk { city: e, to, answer: None });
+                    diplomacy.convert_ask = Some(ConvertAsk {
+                        city: e,
+                        to,
+                        answer: None,
+                    });
                 }
                 continue;
             }
@@ -344,7 +380,22 @@ pub fn run(
             if !ai_accepts_city(&facts.facts(&facts.wonders)) {
                 continue;
             }
-            convert(&mut commands, &map, e, to, &mut cities, &mut units, &capital, &art, &mut rng, &mut board, &mut prompts, &mut view, &civs, &diplomacy);
+            convert(
+                &mut commands,
+                &map,
+                e,
+                to,
+                &mut cities,
+                &mut units,
+                &capital,
+                &art,
+                &mut rng,
+                &mut board,
+                &mut prompts,
+                &mut view,
+                &civs,
+                &diplomacy,
+            );
         }
     }
 }
@@ -420,13 +471,26 @@ fn convert(
         .filter(|&ce| ce != e)
         .and_then(|ce| cities.get(ce).ok())
         .map(|(_, c)| (c.x, c.y));
-    let Ok((_, mut city)) = cities.get_mut(e) else { return };
-    let lost = transfer(&mut city, to, was_capital, false, true, || rng.0.below(4) == 0);
+    let Ok((_, mut city)) = cities.get_mut(e) else {
+        return;
+    };
+    let lost = transfer(&mut city, to, was_capital, false, true, || {
+        rng.0.below(4) == 0
+    });
     // A conversion only records the pending nationality (`0x4BB090`).
-    crate::resistance::seed(&mut city, to, true, &crate::resistance::Nations::current(), &mut rng.0);
+    crate::resistance::seed(
+        &mut city,
+        to,
+        true,
+        &crate::resistance::Nations::current(),
+        &mut rng.0,
+    );
     drop(city);
     // Units of the old owner on the tile go to its capital, or are lost.
-    for (ue, mut u) in units.iter_mut().filter(|(_, u)| u.civ == from && (u.x, u.y) == (x, y)) {
+    for (ue, mut u) in units
+        .iter_mut()
+        .filter(|(_, u)| u.civ == from && (u.x, u.y) == (x, y))
+    {
         match home {
             Some((hx, hy)) => {
                 u.x = hx;
@@ -455,7 +519,11 @@ fn convert(
             format!(
                 "The citizens of {name} have switched to the {}!{}",
                 crate::civs::name(to),
-                if gone.is_empty() { String::new() } else { format!(" We lost: {}.", gone.join(", ")) }
+                if gone.is_empty() {
+                    String::new()
+                } else {
+                    format!(" We lost: {}.", gone.join(", "))
+                }
             ),
         );
     }
@@ -467,7 +535,11 @@ fn best_defender(civ: usize) -> Option<crate::units::UnitType> {
         .filter_map(|p| p.unit())
         .filter(|t| {
             let r = t.row();
-            r.playable && r.class == 0 && r.pop_cost == 0 && r.defense > 0 && r.attack > 0
+            r.playable
+                && r.class == 0
+                && r.pop_cost == 0
+                && r.defense > 0
+                && r.attack > 0
                 && r.ai & 0x2 != 0
                 && crate::research::can_build(civ, Production::from_unit(*t))
         })
@@ -479,35 +551,94 @@ mod tests {
     use super::*;
 
     fn base() -> Contender {
-        Contender { owner_rating: 10, rival_rating: 10, ..Contender::default() }
+        Contender {
+            owner_rating: 10,
+            rival_rating: 10,
+            ..Contender::default()
+        }
     }
 
     #[test]
     fn golden_f1_f2_the_count_of_people_and_borders() {
-        assert_eq!(strength(&Contender { nationals: 1, ..base() }), 1);
+        assert_eq!(
+            strength(&Contender {
+                nationals: 1,
+                ..base()
+            }),
+            1
+        );
         // A = 2, B = 1 (a resister counts twice), C = 5: S = 3 + 3.
-        assert_eq!(strength(&Contender { nationals: 2, resisters: 1, tiles: 5, ..base() }), 6);
+        assert_eq!(
+            strength(&Contender {
+                nationals: 2,
+                resisters: 1,
+                tiles: 5,
+                ..base()
+            }),
+            6
+        );
     }
 
     #[test]
     fn golden_f3_f4_f5_disorder_stake_and_rating() {
         // 6 doubles for disorder, doubles again for the larger stake.
-        let c = Contender { nationals: 6, disorder: true, larger_stake: true, ..base() };
+        let c = Contender {
+            nationals: 6,
+            disorder: true,
+            larger_stake: true,
+            ..base()
+        };
         assert_eq!(strength(&c), 24);
         // Ro = 11, Rj = 12: trunc(12 * 24 / 11) = 26.
-        let c = Contender { nationals: 6, disorder: true, larger_stake: true, owner_rating: 10, rival_rating: 11, ..base() };
+        let c = Contender {
+            nationals: 6,
+            disorder: true,
+            larger_stake: true,
+            owner_rating: 10,
+            rival_rating: 11,
+            ..base()
+        };
         assert_eq!(strength(&c), 26);
         // Rj = 50 > 4 * Ro: times four.
-        let c = Contender { nationals: 6, owner_rating: 10, rival_rating: 49, ..base() };
+        let c = Contender {
+            nationals: 6,
+            owner_rating: 10,
+            rival_rating: 49,
+            ..base()
+        };
         assert_eq!(strength(&c), 24);
     }
 
     #[test]
     fn s_is_capped_at_ten_and_a_celebration_and_martial_law_cut_it() {
-        assert_eq!(strength(&Contender { nationals: 40, ..base() }), 10);
-        assert_eq!(strength(&Contender { nationals: 10, celebrating: true, ..base() }), 5);
-        assert_eq!(strength(&Contender { nationals: 10, quelled: 3, ..base() }), 7);
-        assert_eq!(strength(&Contender { tiles: 2, ..base() }), 0, "two tiles are nothing");
+        assert_eq!(
+            strength(&Contender {
+                nationals: 40,
+                ..base()
+            }),
+            10
+        );
+        assert_eq!(
+            strength(&Contender {
+                nationals: 10,
+                celebrating: true,
+                ..base()
+            }),
+            5
+        );
+        assert_eq!(
+            strength(&Contender {
+                nationals: 10,
+                quelled: 3,
+                ..base()
+            }),
+            7
+        );
+        assert_eq!(
+            strength(&Contender { tiles: 2, ..base() }),
+            0,
+            "two tiles are nothing"
+        );
     }
 
     #[test]
@@ -549,11 +680,23 @@ mod tests {
             Production::named("The Pyramids"),
         ];
         let lost = transfer(&mut city, 2, true, false, true, || false);
-        assert!(lost.contains(&Production::named("Temple")), "culture buildings go");
-        assert!(lost.contains(&Production::named("Palace")), "a lost capital's Palace goes");
+        assert!(
+            lost.contains(&Production::named("Temple")),
+            "culture buildings go"
+        );
+        assert!(
+            lost.contains(&Production::named("Palace")),
+            "a lost capital's Palace goes"
+        );
         assert!(city.buildings.contains(&Production::named("Granary")));
-        assert!(city.buildings.contains(&Production::named("Barracks")), "no quarter rule on a conversion");
-        assert!(city.buildings.contains(&Production::named("The Pyramids")), "great wonders always stay");
+        assert!(
+            city.buildings.contains(&Production::named("Barracks")),
+            "no quarter rule on a conversion"
+        );
+        assert!(
+            city.buildings.contains(&Production::named("The Pyramids")),
+            "great wonders always stay"
+        );
         assert_eq!(city.civ, 2);
         assert_eq!(city.stakes[1], 77, "the old owner keeps its stake");
         assert_eq!(city.nationals(1), 4, "the people stay Roman");
@@ -585,11 +728,31 @@ mod tests {
         let caps = [None; CIV_CAP];
         // A die that always comes up 0 flips: S is 10, ratio 2/101 -> 0 first.
         let flip = |city: &City, ratings: &[u32]| {
-            test_city(&map, city, &caps, ratings, none, 0, &[false; CIV_CAP], &play, |_| 0)
+            test_city(
+                &map,
+                city,
+                &caps,
+                ratings,
+                none,
+                0,
+                &[false; CIV_CAP],
+                &play,
+                |_| 0,
+            )
         };
         assert_eq!(flip(&city, &[0, 5, 5, 0]), Some(2));
         // The die at the maximum never does.
-        let never = test_city(&map, &city, &caps, &[0, 5, 5, 0], none, 0, &[false; CIV_CAP], &play, |d| d - 1);
+        let never = test_city(
+            &map,
+            &city,
+            &caps,
+            &[0, 5, 5, 0],
+            none,
+            0,
+            &[false; CIV_CAP],
+            &play,
+            |d| d - 1,
+        );
         assert_eq!(never, None);
         // Nobody of that race and no land: nothing to roll.
         city.set_nationality(city.civ);
@@ -614,7 +777,9 @@ mod tests {
         app.init_resource::<cities::CityView>();
         app.add_message::<CivilizationEnded>();
         // The controller table is per test thread.
-        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.add_systems(Update, run);
         app
     }
@@ -667,22 +832,35 @@ mod tests {
             app.update();
         }
         assert_eq!(app.world().get::<City>(e).unwrap().civ, 1);
-        assert_eq!(app.world().get::<City>(e).unwrap().cooldown, 0, "one tick per city turn");
+        assert_eq!(
+            app.world().get::<City>(e).unwrap().cooldown,
+            0,
+            "one tick per city turn"
+        );
     }
 
     #[test]
     fn a_human_is_asked_and_may_rebuff_or_accept() {
         let mut app = world();
         let e = restless_city(&mut app);
-        app.world_mut().get_mut::<City>(e).unwrap().set_nationality(0);
+        app.world_mut()
+            .get_mut::<City>(e)
+            .unwrap()
+            .set_nationality(0);
         // Civ 0 is a human in the test's default controller mask.
-        app.world_mut().resource_mut::<Diplomacy>().convert_ask =
-            Some(ConvertAsk { city: e, to: 0, answer: Some(false) });
+        app.world_mut().resource_mut::<Diplomacy>().convert_ask = Some(ConvertAsk {
+            city: e,
+            to: 0,
+            answer: Some(false),
+        });
         app.update();
         assert_eq!(app.world().get::<City>(e).unwrap().civ, 1, "rebuffed");
         assert!(app.world().resource::<Diplomacy>().convert_ask.is_none());
-        app.world_mut().resource_mut::<Diplomacy>().convert_ask =
-            Some(ConvertAsk { city: e, to: 0, answer: Some(true) });
+        app.world_mut().resource_mut::<Diplomacy>().convert_ask = Some(ConvertAsk {
+            city: e,
+            to: 0,
+            answer: Some(true),
+        });
         app.update();
         assert_eq!(app.world().get::<City>(e).unwrap().civ, 0, "accepted");
     }

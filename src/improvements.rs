@@ -50,16 +50,25 @@ pub fn work_needed(action: WorkAction, tile: &Tile) -> i32 {
         WorkAction::Outpost => 11,
         WorkAction::Barricade => 12,
     };
-    crate::ruleset::WORK_NEEDED[row] * i32::from(crate::ruleset::TERRAINS[crate::map::terrain_row(tile)].movement)
+    crate::ruleset::WORK_NEEDED[row]
+        * i32::from(crate::ruleset::TERRAINS[crate::map::terrain_row(tile)].movement)
 }
 
 /// `0x5B33C0`: single-precision multiplications and truncation in native order.
 pub fn work_rate(unit: &Unit) -> i32 {
     let mut rate = crate::realm::govt(unit.civ).worker_steps as f32;
-    if crate::civs::RACES[unit.civ].traits & (1 << 5) != 0 { rate *= 1.5; }
-    if crate::realm::read(unit.civ, |r| r.known & crate::ruleset::doubles_work() != 0) { rate += rate; }
-    if unit.nationality != crate::civs::roster_index(unit.civ) { rate *= 0.5; }
-    (rate * crate::units::def(unit.utype).worker_strength).trunc().max(1.0) as i32
+    if crate::civs::RACES[unit.civ].traits & (1 << 5) != 0 {
+        rate *= 1.5;
+    }
+    if crate::realm::read(unit.civ, |r| r.known & crate::ruleset::doubles_work() != 0) {
+        rate += rate;
+    }
+    if unit.nationality != crate::civs::roster_index(unit.civ) {
+        rate *= 0.5;
+    }
+    (rate * crate::units::def(unit.utype).worker_strength)
+        .trunc()
+        .max(1.0) as i32
 }
 
 /// Estimate owner turns left with the workers currently sharing this job.
@@ -67,9 +76,13 @@ pub fn work_turns_left<'a>(unit: &Unit, tile: &Tile, units: impl Iterator<Item =
     let Some(job) = unit.work else { return 0 };
     let (mut progress, mut rate) = (0, 0);
     for other in units {
-        if (other.x, other.y) == (unit.x, unit.y) && other.work.is_some_and(|w| w.action == job.action) {
+        if (other.x, other.y) == (unit.x, unit.y)
+            && other.work.is_some_and(|w| w.action == job.action)
+        {
             progress += other.work.unwrap().progress;
-            if other.civ == unit.civ { rate += work_rate(other); }
+            if other.civ == unit.civ {
+                rate += work_rate(other);
+            }
         }
     }
     let left = (work_needed(job.action, tile) - progress).max(0);
@@ -134,37 +147,51 @@ pub fn is_water_base(b: Base) -> bool {
 
 /// Native roads require a nonzero TERR road bonus, including mountains.
 pub fn can_road(map: &GameMap, x: i32, y: i32) -> bool {
-    map.get(x, y)
-        .is_some_and(|t| map.is_land(x, y) && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].road != 0 && !t.road)
+    map.get(x, y).is_some_and(|t| {
+        map.is_land(x, y)
+            && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].road != 0
+            && !t.road
+    })
 }
 
 /// A mine replaces irrigation on terrain with a nonzero TERR mining bonus.
 pub fn can_mine(map: &GameMap, x: i32, y: i32) -> bool {
-    map.get(x, y).is_some_and(|t| map.is_land(x, y) && !t.mine
-        && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].mining != 0)
+    map.get(x, y).is_some_and(|t| {
+        map.is_land(x, y)
+            && !t.mine
+            && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].mining != 0
+    })
 }
 
 /// Clear Forest / Wetlands must be the effective terrain's job, on unowned or own land.
 pub fn can_clear(map: &GameMap, civ: usize, x: i32, y: i32) -> bool {
-    map.get(x, y).is_some_and(|t| map.is_land(x, y)
-        && t.owner.is_none_or(|owner| owner as usize == civ)
-        && matches!(crate::ruleset::TERRAINS[crate::map::terrain_row(t)].worker_job, 6 | 7))
+    map.get(x, y).is_some_and(|t| {
+        map.is_land(x, y)
+            && t.owner.is_none_or(|owner| owner as usize == civ)
+            && matches!(
+                crate::ruleset::TERRAINS[crate::map::terrain_row(t)].worker_job,
+                6 | 7
+            )
+    })
 }
 
 /// Native water-source predicate 0x5D8400. A city can relay water from
 /// freshwater or an adjacent farm; consecutive cities cannot relay it.
 fn water_source(map: &GameMap, cities: &[(i32, i32)], x: i32, y: i32, chain: bool) -> bool {
-    map.fresh_water(x, y) || map.neighbors(x, y).into_iter().any(|(nx, ny)| {
-        map.get(nx, ny).is_some_and(|nb| nb.irrigation)
-            || (chain && cities.contains(&(nx, ny)) && water_source(map, cities, nx, ny, false))
-    })
+    map.fresh_water(x, y)
+        || map.neighbors(x, y).into_iter().any(|(nx, ny)| {
+            map.get(nx, ny).is_some_and(|nb| nb.irrigation)
+                || (chain && cities.contains(&(nx, ny)) && water_source(map, cities, nx, ny, false))
+        })
 }
 
 /// Irrigation needs a nonzero TERR bonus and a water source. It replaces a mine.
 pub fn can_irrigate(map: &GameMap, cities: &[(i32, i32)], x: i32, y: i32) -> bool {
-    map.get(x, y).is_some_and(|t| map.is_land(x, y) && !t.irrigation
-        && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].irrigation != 0)
-        && water_source(map, cities, x, y, true)
+    map.get(x, y).is_some_and(|t| {
+        map.is_land(x, y)
+            && !t.irrigation
+            && crate::ruleset::TERRAINS[crate::map::terrain_row(t)].irrigation != 0
+    }) && water_source(map, cities, x, y, true)
 }
 
 /// 8-bit road mask. Cities count as connectors (road hubs).
@@ -236,8 +263,14 @@ pub fn apply_work(t: &mut Tile, a: WorkAction) {
         }
         WorkAction::Clear => t.cover = Cover::Bare,
         WorkAction::Fortress | WorkAction::Barricade => {
-            if matches!(t.site, Some(crate::sites::Site::Outpost(_))) { t.site = None; }
-            if a == WorkAction::Fortress { t.fortress = true; } else { t.barricade = true; }
+            if matches!(t.site, Some(crate::sites::Site::Outpost(_))) {
+                t.site = None;
+            }
+            if a == WorkAction::Fortress {
+                t.fortress = true;
+            } else {
+                t.barricade = true;
+            }
         }
         // The owner is installed by the worker completion system.
         WorkAction::Outpost => t.fortress = false,
@@ -255,7 +288,11 @@ pub fn end_turn_work(
     audio: Res<GameAudio>,
 ) {
     for event in end.read() {
-        let mut actors: Vec<_> = units.iter().filter(|(_, u)| u.civ == event.0 && u.work.is_some()).map(|(e, _)| e).collect();
+        let mut actors: Vec<_> = units
+            .iter()
+            .filter(|(_, u)| u.civ == event.0 && u.work.is_some())
+            .map(|(e, _)| e)
+            .collect();
         actors.sort();
         for actor in actors {
             let (x, y, action) = {
@@ -271,30 +308,53 @@ pub fn end_turn_work(
                 u.moves = 0;
                 (u.x, u.y, job.action)
             };
-            let progress: i32 = units.iter().filter_map(|(_, u)| {
-                u.work.filter(|w| (u.x, u.y) == (x, y) && w.action == action).map(|w| w.progress)
-            }).sum();
-            if progress < work_needed(action, &map.tiles[map.idx(x, y)]) { continue; }
+            let progress: i32 = units
+                .iter()
+                .filter_map(|(_, u)| {
+                    u.work
+                        .filter(|w| (u.x, u.y) == (x, y) && w.action == action)
+                        .map(|w| w.progress)
+                })
+                .sum();
+            if progress < work_needed(action, &map.tiles[map.idx(x, y)]) {
+                continue;
+            }
             for (_, mut u) in &mut units {
                 if (u.x, u.y) == (x, y) && u.work.is_some_and(|w| w.action == action) {
                     u.work = None;
                     u.path.clear();
-                    u.anim = UnitAnim::OneShot { slot: action_slot(action), t: 0.0 };
+                    u.anim = UnitAnim::OneShot {
+                        slot: action_slot(action),
+                        t: 0.0,
+                    };
                 }
             }
             let i = map.idx(x, y);
             let forest = crate::map::terrain_row(&map.tiles[i]) == 7;
             let mut harvest = None;
             apply_work(&mut map.tiles[i], action);
-            if forest && crate::map::terrain_row(&map.tiles[i]) != 7 && !map.tiles[i].forest_harvested {
+            if forest
+                && crate::map::terrain_row(&map.tiles[i]) != 7
+                && !map.tiles[i].forest_harvested
+            {
                 map.tiles[i].forest_harvested = true;
                 for &(dx, dy) in &crate::cities::border_offsets()[1..=20] {
                     let pos = (map.wrap_x(x + dx), y + dy);
-                    if let Some(mut city) = cities.iter_mut().find(|c| c.civ == event.0
-                        && (c.x, c.y) == pos && crate::hurry::ordinary(c.production)) {
+                    if let Some(mut city) = cities.iter_mut().find(|c| {
+                        c.civ == event.0
+                            && (c.x, c.y) == pos
+                            && crate::hurry::ordinary(c.production)
+                    }) {
                         let before = city.shields;
-                        city.shields = city.shields.saturating_add(crate::ruleset::forest_shields()).min(city.price(city.production));
-                        harvest = Some(format!("{} receives {} shields from the forest.", city.name, city.shields.saturating_sub(before)));
+                        city.shields = city
+                            .shields
+                            .saturating_add(crate::ruleset::forest_shields())
+                            .min(city.price(city.production));
+                        harvest = Some(format!(
+                            "{} receives {} shields from the forest.",
+                            city.name,
+                            city.shields.saturating_sub(before)
+                        ));
                         break;
                     }
                 }
@@ -306,7 +366,9 @@ pub fn end_turn_work(
             // The computer's workers finish their jobs unannounced.
             if !crate::civs::is_ai(event.0) {
                 commands.spawn(AudioPlayer(audio.work_sfx(action)));
-                let message = harvest.unwrap_or_else(|| format!("Workers complete {} ({x},{y}).", action_name(action)));
+                let message = harvest.unwrap_or_else(|| {
+                    format!("Workers complete {} ({x},{y}).", action_name(action))
+                });
                 post(&mut board, message);
             }
         }
@@ -351,7 +413,14 @@ impl ImprovementArt {
                 e.anchor[0] as f32 / e.size[0] as f32 - 0.5,
                 0.5 - e.anchor[1] as f32 / e.size[1] as f32,
             ));
-            defs.insert(name, ImpDef { file: e.file, anchor, image: Default::default() });
+            defs.insert(
+                name,
+                ImpDef {
+                    file: e.file,
+                    anchor,
+                    image: Default::default(),
+                },
+            );
         }
         Self { defs }
     }
@@ -360,7 +429,9 @@ impl ImprovementArt {
     /// the first use.
     fn get(&self, key: &str, assets: &AssetServer) -> (Handle<Image>, Anchor) {
         let def = &self.defs[key];
-        let image = def.image.get_or_init(|| assets.load(format!("cache/improvements/{}", def.file)));
+        let image = def
+            .image
+            .get_or_init(|| assets.load(format!("cache/improvements/{}", def.file)));
         (image.clone(), def.anchor)
     }
 }
@@ -398,8 +469,15 @@ fn sprite_key(t: &Tile, layer: ImpLayer, mask: u8) -> String {
 }
 
 impl ImpLayer {
-    const ALL: [ImpLayer; 7] =
-        [ImpLayer::Irrigation, ImpLayer::Road, ImpLayer::Mine, ImpLayer::Fortress, ImpLayer::Colony, ImpLayer::Outpost, ImpLayer::Barricade];
+    const ALL: [ImpLayer; 7] = [
+        ImpLayer::Irrigation,
+        ImpLayer::Road,
+        ImpLayer::Mine,
+        ImpLayer::Fortress,
+        ImpLayer::Colony,
+        ImpLayer::Outpost,
+        ImpLayer::Barricade,
+    ];
 
     fn on(self, t: &Tile) -> bool {
         match self {
@@ -591,7 +669,10 @@ mod tests {
     #[test]
     fn irrigation_accepts_small_lakes_but_not_oceans() {
         let mut map = dry_map();
-        for x in 10..30 { let i = map.idx(x, 10); map.tiles[i].base = Base::Coast; }
+        for x in 10..30 {
+            let i = map.idx(x, 10);
+            map.tiles[i].base = Base::Coast;
+        }
         assert!(map.fresh_water(10, 9));
         assert!(can_irrigate(&map, &[], 10, 9));
         let i = map.idx(30, 10);
@@ -604,7 +685,10 @@ mod tests {
     #[test]
     fn water_bodies_wrap_but_do_not_join_at_corners() {
         let mut map = dry_map();
-        for x in 0..20 { let i = map.idx(x, 10); map.tiles[i].base = Base::Coast; }
+        for x in 0..20 {
+            let i = map.idx(x, 10);
+            map.tiles[i].base = Base::Coast;
+        }
         // Diagonal contact is a separate lake, not the 21st connected tile.
         let corner = map.idx(20, 11);
         map.tiles[corner].base = Base::Coast;
@@ -633,11 +717,29 @@ mod tests {
         let farm = map.idx(12, 11);
         map.tiles[farm].resource = None;
         let worker = Unit::new(0, crate::units::UnitType::named("Worker"), 12, 11);
-        assert!(crate::actionbar::UnitCommand::Work(WorkAction::Irrigate).enabled(&map, &[relay], &worker));
-        assert_eq!(crate::ai::job_at(&map, &[relay], (12, 11)), Some(WorkAction::Irrigate));
+        assert!(
+            crate::actionbar::UnitCommand::Work(WorkAction::Irrigate).enabled(
+                &map,
+                &[relay],
+                &worker
+            )
+        );
+        assert_eq!(
+            crate::ai::job_at(&map, &[relay], (12, 11)),
+            Some(WorkAction::Irrigate)
+        );
         map.tiles[lake].irrigation = false;
-        assert!(!crate::actionbar::UnitCommand::Work(WorkAction::Irrigate).enabled(&map, &[relay], &worker));
-        assert_eq!(crate::ai::job_at(&map, &[relay], (12, 11)), Some(WorkAction::Mine));
+        assert!(
+            !crate::actionbar::UnitCommand::Work(WorkAction::Irrigate).enabled(
+                &map,
+                &[relay],
+                &worker
+            )
+        );
+        assert_eq!(
+            crate::ai::job_at(&map, &[relay], (12, 11)),
+            Some(WorkAction::Mine)
+        );
     }
 
     #[test]
@@ -648,10 +750,8 @@ mod tests {
             .flat_map(|y| (0..map.w).map(move |x| (x, y)))
             .find(|(x, y)| {
                 map.get(*x, *y).is_some_and(|t| {
-                    matches!(
-                        t.base,
-                        Base::Grassland | Base::Plains | Base::Desert
-                    ) && t.relief == Relief::Flat
+                    matches!(t.base, Base::Grassland | Base::Plains | Base::Desert)
+                        && t.relief == Relief::Flat
                         && t.cover == Cover::Bare
                         && map.fresh_water(*x, *y)
                 })
@@ -689,10 +789,8 @@ mod tests {
             .flat_map(|y| (0..map.w).map(move |x| (x, y)))
             .find(|(x, y)| {
                 map.get(*x, *y).is_some_and(|t| {
-                    matches!(
-                        t.base,
-                        Base::Grassland | Base::Plains | Base::Desert
-                    ) && t.relief == Relief::Flat
+                    matches!(t.base, Base::Grassland | Base::Plains | Base::Desert)
+                        && t.relief == Relief::Flat
                         && t.cover == Cover::Bare
                         && !map.fresh_water(*x, *y)
                 })
@@ -832,30 +930,67 @@ mod tests {
         map.tiles[i].fortress = true;
         map.tiles[i].owner = None;
         let mut app = test_app(map);
-        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.init_resource::<crate::civs::Civilizations>();
         app.init_resource::<crate::units::Exploration>();
-        app.add_systems(Update, (crate::sites::remove_overrun, crate::units::refresh_visibility).chain().after(end_turn_work));
+        app.add_systems(
+            Update,
+            (
+                crate::sites::remove_overrun,
+                crate::units::refresh_visibility,
+            )
+                .chain()
+                .after(end_turn_work),
+        );
         crate::realm::reset();
-        let mut actors: Vec<_> = (0..2).map(|_| app.world_mut().spawn(worker(10, 10, WorkAction::Outpost, 0)).id()).collect();
+        let mut actors: Vec<_> = (0..2)
+            .map(|_| {
+                app.world_mut()
+                    .spawn(worker(10, 10, WorkAction::Outpost, 0))
+                    .id()
+            })
+            .collect();
         actors.sort();
-        app.world_mut().write_message(crate::civs::CivilizationEnded(0));
+        app.world_mut()
+            .write_message(crate::civs::CivilizationEnded(0));
         app.update();
-        let remaining: Vec<_> = app.world_mut().query::<(Entity, &Unit)>().iter(app.world()).map(|(e, _)| e).collect();
-        assert_eq!(remaining, vec![actors[0]], "the second contribution crosses the mountain threshold and consumes its actor");
+        let remaining: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &Unit)>()
+            .iter(app.world())
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(
+            remaining,
+            vec![actors[0]],
+            "the second contribution crosses the mountain threshold and consumes its actor"
+        );
         app.world_mut().despawn(remaining[0]);
         app.update();
         let map = app.world().resource::<GameMap>();
         assert_eq!(map.tiles[i].site, Some(crate::sites::Site::Outpost(0)));
         assert!(!map.tiles[i].fortress);
-        assert!(map.get(13, 13).unwrap().visible, "mountain outpost sees the full 7x7 without a unit");
+        assert!(
+            map.get(13, 13).unwrap().visible,
+            "mountain outpost sees the full 7x7 without a unit"
+        );
         assert!(!map.get(14, 14).unwrap().visible);
-        app.world_mut().spawn(Unit::new(1, crate::units::UnitType::named("Warrior"), 10, 10));
+        app.world_mut().spawn(Unit::new(
+            1,
+            crate::units::UnitType::named("Warrior"),
+            10,
+            10,
+        ));
         app.update();
         let map = app.world().resource::<GameMap>();
         assert!(map.tiles[i].site.is_none());
         assert!(!map.get(13, 13).unwrap().visible);
-        assert!(map.get(13, 13).unwrap().seen, "destruction preserves explored history");
+        assert!(
+            map.get(13, 13).unwrap().seen,
+            "destruction preserves explored history"
+        );
     }
 
     fn worker(x: i32, y: i32, action: WorkAction, progress: i32) -> Unit {
@@ -895,32 +1030,75 @@ mod tests {
             map.tiles[i].cover = Cover::Bare;
         }
         let mut app = test_app(map);
-        let a = app.world_mut().spawn(worker(x, y, WorkAction::Road, 0)).id();
-        let b = app.world_mut().spawn(worker(x, y, WorkAction::Road, 0)).id();
-        let c = app.world_mut().spawn(worker(x + 1, y, WorkAction::Road, 0)).id();
+        let a = app
+            .world_mut()
+            .spawn(worker(x, y, WorkAction::Road, 0))
+            .id();
+        let b = app
+            .world_mut()
+            .spawn(worker(x, y, WorkAction::Road, 0))
+            .id();
+        let c = app
+            .world_mut()
+            .spawn(worker(x + 1, y, WorkAction::Road, 0))
+            .id();
         let mut foreign = worker(x, y, WorkAction::Road, 0);
         foreign.civ = 1;
         let foreign = app.world_mut().spawn(foreign).id();
         let mut query = app.world_mut().query::<&Unit>();
-        assert_eq!(work_turns_left(app.world().get::<Unit>(a).unwrap(), app.world().resource::<GameMap>().get(x, y).unwrap(), query.iter(app.world())), 2);
+        assert_eq!(
+            work_turns_left(
+                app.world().get::<Unit>(a).unwrap(),
+                app.world().resource::<GameMap>().get(x, y).unwrap(),
+                query.iter(app.world())
+            ),
+            2
+        );
         end_turn(&mut app);
         for e in [a, b, c] {
             let u = app.world().get::<Unit>(e).unwrap();
             assert_eq!(u.work.unwrap().progress, 2);
             assert_eq!(u.moves, 0);
         }
-        assert_eq!(app.world().get::<Unit>(foreign).unwrap().work.unwrap().progress, 0, "only the owner advances work");
+        assert_eq!(
+            app.world()
+                .get::<Unit>(foreign)
+                .unwrap()
+                .work
+                .unwrap()
+                .progress,
+            0,
+            "only the owner advances work"
+        );
         // Previous foreign labor participates in completion, but its owner
         // does not gain a contribution during Japan's end turn.
-        app.world_mut().get_mut::<Unit>(foreign).unwrap().work.as_mut().unwrap().progress = 2;
+        app.world_mut()
+            .get_mut::<Unit>(foreign)
+            .unwrap()
+            .work
+            .as_mut()
+            .unwrap()
+            .progress = 2;
         end_turn(&mut app);
-        for e in [a, b, foreign] { assert!(app.world().get::<Unit>(e).unwrap().work.is_none()); }
-        assert_eq!(app.world().get::<Unit>(c).unwrap().work.unwrap().progress, 4);
+        for e in [a, b, foreign] {
+            assert!(app.world().get::<Unit>(e).unwrap().work.is_none());
+        }
+        assert_eq!(
+            app.world().get::<Unit>(c).unwrap().work.unwrap().progress,
+            4
+        );
         let map = app.world().resource::<GameMap>();
         assert!(map.get(x, y).unwrap().road);
         assert!(!map.get(x + 1, y).unwrap().road);
         end_turn(&mut app);
-        assert!(app.world().resource::<GameMap>().get(x + 1, y).unwrap().road, "a native non-Industrious worker takes three turns on flat land");
+        assert!(
+            app.world()
+                .resource::<GameMap>()
+                .get(x + 1, y)
+                .unwrap()
+                .road,
+            "a native non-Industrious worker takes three turns on flat land"
+        );
     }
 
     #[test]
@@ -928,7 +1106,10 @@ mod tests {
         let map = GameMap::generate();
         let (x, y) = map.start;
         let mut app = test_app(map);
-        let e = app.world_mut().spawn(worker(x, y, WorkAction::Road, 0)).id();
+        let e = app
+            .world_mut()
+            .spawn(worker(x, y, WorkAction::Road, 0))
+            .id();
         app.world_mut().spawn(City::new(0, "Kyoto", x, y));
         end_turn(&mut app);
         let u = app.world().get::<Unit>(e).unwrap();
@@ -959,7 +1140,11 @@ mod tests {
         let mut u = worker(0, 0, WorkAction::Road, 0);
         assert_eq!(work_rate(&u), 2);
         u.civ = 1;
-        assert_eq!(work_rate(&u), 1, "captured Japanese worker under non-Industrious Rome");
+        assert_eq!(
+            work_rate(&u),
+            1,
+            "captured Japanese worker under non-Industrious Rome"
+        );
         u.civ = 0;
         // Industrious Egypt in the same game slot.
         let egypt = crate::civs::roster_index_named("Egypt").unwrap();
@@ -969,9 +1154,16 @@ mod tests {
         u.nationality = egypt;
         assert_eq!(work_rate(&u), 3);
         u.nationality = crate::civs::roster_index_named("Japan").unwrap();
-        assert_eq!(work_rate(&u), 1, "3 * 0.5 truncates after all multiplications");
+        assert_eq!(
+            work_rate(&u),
+            1,
+            "3 * 0.5 truncates after all multiplications"
+        );
         u.nationality = egypt;
-        crate::realm::write(0, |r| { r.govt = civ3mapgen::government::row::FASCISM; r.known |= crate::ruleset::doubles_work(); });
+        crate::realm::write(0, |r| {
+            r.govt = civ3mapgen::government::row::FASCISM;
+            r.known |= crate::ruleset::doubles_work();
+        });
         assert_eq!(work_rate(&u), 12);
         u.nationality = crate::civs::roster_index_named("Japan").unwrap();
         assert_eq!(work_rate(&u), 6);
@@ -991,7 +1183,8 @@ mod tests {
         map.tiles[i].owner = Some(0);
         let need = work_needed(WorkAction::Clear, &map.tiles[i]);
         let mut app = test_app(map);
-        app.world_mut().spawn(worker(0, 10, WorkAction::Clear, need - 2));
+        app.world_mut()
+            .spawn(worker(0, 10, WorkAction::Clear, need - 2));
         app
     }
 
@@ -1009,9 +1202,20 @@ mod tests {
         let first = app.world_mut().spawn(first).id();
         let later = app.world_mut().spawn(City::new(0, "Later", 0, 11)).id();
         end_turn(&mut app);
-        assert_eq!(app.world().get::<City>(first).unwrap().shields, 20, "chop is capped at the current item cost");
-        assert!(app.world().resource::<MessageBoard>().text.contains("First receives 5 shields"));
-        for e in [wonder, enemy, later] { assert_eq!(app.world().get::<City>(e).unwrap().shields, 0); }
+        assert_eq!(
+            app.world().get::<City>(first).unwrap().shields,
+            20,
+            "chop is capped at the current item cost"
+        );
+        assert!(
+            app.world()
+                .resource::<MessageBoard>()
+                .text
+                .contains("First receives 5 shields")
+        );
+        for e in [wonder, enemy, later] {
+            assert_eq!(app.world().get::<City>(e).unwrap().shields, 0);
+        }
         let map = app.world().resource::<GameMap>();
         assert_eq!(map.get(0, 10).unwrap().cover, Cover::Bare);
         assert!(map.get(0, 10).unwrap().forest_harvested);
@@ -1032,12 +1236,28 @@ mod tests {
         assert_eq!(app.world().get::<City>(wrapped).unwrap().shields, 10);
         let mut app = chop_app(Cover::Forest);
         end_turn(&mut app);
-        assert!(app.world().resource::<GameMap>().get(0, 10).unwrap().forest_harvested);
+        assert!(
+            app.world()
+                .resource::<GameMap>()
+                .get(0, 10)
+                .unwrap()
+                .forest_harvested
+        );
         let mut app = chop_app(Cover::Jungle);
         let near = app.world_mut().spawn(City::new(0, "Nearby", 1, 10)).id();
         end_turn(&mut app);
-        assert_eq!(app.world().get::<City>(near).unwrap().shields, 0, "wetlands give no harvest");
-        assert!(!app.world().resource::<GameMap>().get(0, 10).unwrap().forest_harvested);
+        assert_eq!(
+            app.world().get::<City>(near).unwrap().shields,
+            0,
+            "wetlands give no harvest"
+        );
+        assert!(
+            !app.world()
+                .resource::<GameMap>()
+                .get(0, 10)
+                .unwrap()
+                .forest_harvested
+        );
     }
 
     #[test]
@@ -1053,7 +1273,10 @@ mod tests {
             map.tiles[i].base = base;
             assert!(can_mine(&map, 10, 10));
         }
-        assert!(!can_irrigate(&map, &[], 10, 10), "tundra has no irrigation bonus");
+        assert!(
+            !can_irrigate(&map, &[], 10, 10),
+            "tundra has no irrigation bonus"
+        );
         map.tiles[i].relief = Relief::Mountain;
         assert!(can_mine(&map, 10, 10) && can_road(&map, 10, 10));
         map.tiles[i].relief = Relief::Flat;
@@ -1067,7 +1290,10 @@ mod tests {
             assert!(can_clear(&map, 1, 10, 10));
         }
         map.tiles[i].relief = Relief::Hill;
-        assert!(!can_clear(&map, 1, 10, 10), "hills override the underlying cover");
+        assert!(
+            !can_clear(&map, 1, 10, 10),
+            "hills override the underlying cover"
+        );
     }
 
     #[test]

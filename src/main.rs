@@ -1,31 +1,31 @@
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
-mod actionbar;
 mod abandon;
+mod actionbar;
 mod actions;
 mod advisor_frame;
 mod advisors;
 mod ai;
 mod army;
-mod barbarians;
 mod assets;
 mod audio;
+mod barbarians;
 mod blend;
+mod bombard;
 mod boot;
 mod borders;
-mod bombard;
 mod build_switch;
 mod calendar;
-mod cli;
 mod capital;
 mod cities;
 mod citizens;
-mod disease;
 mod citycalc;
 mod civs;
+mod cli;
 mod combat;
 mod diplomacy;
+mod disease;
 mod domestic;
 mod economy;
 mod features;
@@ -34,28 +34,29 @@ mod golden;
 mod govern;
 mod hurry;
 mod huts;
-mod naval;
 mod improvements;
 mod input;
 mod install;
 mod leaders;
 mod map;
+mod naval;
+mod populate;
 mod production_prompt;
-mod render;
 mod realm;
+mod render;
 mod research;
 mod resistance;
+mod rivers;
 mod rng;
 mod roles;
-mod populate;
-mod savfile;
-mod scenario;
-mod rivers;
-mod save;
 mod roster;
 mod ruleset;
+mod save;
+mod savfile;
+mod scenario;
 mod screenshot;
 mod script;
+mod sites;
 mod speech;
 mod splash;
 mod stage;
@@ -66,11 +67,10 @@ mod ui;
 mod unit_picker;
 mod units;
 mod upgrades;
-mod sites;
 mod weariness;
 mod web;
-mod zoc;
 mod wonders;
+mod zoc;
 
 use map::GameMap;
 
@@ -87,7 +87,8 @@ fn raise_fd_limit() {
     // value initialized here; failure just leaves the limit alone.
     unsafe {
         let mut limit = std::mem::zeroed::<libc::rlimit>();
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 || limit.rlim_cur >= limit.rlim_max {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 || limit.rlim_cur >= limit.rlim_max
+        {
             return;
         }
         // `rlim_max` may be `RLIM_INFINITY`, which is not a request the kernel
@@ -123,7 +124,12 @@ fn main() {
     web::show_progress("scenario ready");
     civs::set_controllers();
     let (roster, colors) = assets::in_play();
-    let wanted = assets::Wanted { install: &boot.install, plan: &ruleset::get().art, roster: &roster, colors };
+    let wanted = assets::Wanted {
+        install: &boot.install,
+        plan: &ruleset::get().art,
+        roster: &roster,
+        colors,
+    };
     if let Err(msg) = assets::ensure(&wanted) {
         fail(&msg);
     }
@@ -169,12 +175,15 @@ fn main() {
         .init_resource::<actionbar::GotoMode>()
         .insert_resource(GameMap::generate())
         // Debug: CIV3_REVEAL=1 starts with fog off, like the F9 toggle.
-        .insert_resource(render::RevealAll(std::env::var("CIV3_REVEAL").is_ok() || scenario::settings().reveal_map))
+        .insert_resource(render::RevealAll(
+            std::env::var("CIV3_REVEAL").is_ok() || scenario::settings().reveal_map,
+        ))
         .insert_resource(units::Turn(scenario::start_turn()))
         .init_resource::<unit_picker::UnitPicker>()
         .init_resource::<input::Hovered>()
         .init_resource::<input::HoverPin>()
         .init_resource::<input::MovePreview>()
+        .init_resource::<input::MapPress>()
         .init_resource::<cities::CityNamesUsed>()
         .init_resource::<cities::CityView>()
         .init_resource::<cities::CityFrame>()
@@ -216,8 +225,16 @@ fn main() {
             )
                 .chain(),
         )
-        .add_systems(Startup, populate::populate.after(units::spawn_party).before(units::spawn_selection_ring))
-        .add_systems(Startup, units::seed_exploration_from_save.after(populate::populate))
+        .add_systems(
+            Startup,
+            populate::populate
+                .after(units::spawn_party)
+                .before(units::spawn_selection_ring),
+        )
+        .add_systems(
+            Startup,
+            units::seed_exploration_from_save.after(populate::populate),
+        )
         .add_systems(
             Update,
             (
@@ -241,12 +258,22 @@ fn main() {
                     input::camera_control.run_if(unit_picker::inactive),
                     (input::hover, unit_picker::update).chain(),
                     input::hold_preview.run_if(unit_picker::inactive),
+                    input::track_press
+                        .run_if(barbarians::idle)
+                        .run_if(production_prompt::inactive)
+                        .run_if(unit_picker::inactive)
+                        .run_if(combat::idle),
                     input::orders
                         .run_if(barbarians::idle)
                         .run_if(production_prompt::inactive)
                         .run_if(unit_picker::inactive)
                         .run_if(combat::idle),
-                    (actionbar::run_commands, bombard::arm, naval::cargo_commands, army::commands)
+                    (
+                        actionbar::run_commands,
+                        bombard::arm,
+                        naval::cargo_commands,
+                        army::commands,
+                    )
                         .chain()
                         .run_if(barbarians::idle)
                         .run_if(production_prompt::inactive)
@@ -258,7 +285,7 @@ fn main() {
                         .run_if(combat::idle),
                     (
                         barbarians::play,
-                barbarians::uprising,
+                        barbarians::uprising,
                         (
                             govern::ai_turn,
                             army::ai_science_leaders,
@@ -322,9 +349,15 @@ fn main() {
                     cities::maintain_city_screen,
                     cities::city_screen_input.run_if(production_prompt::city_input_allowed),
                     (cities::city_screen_buttons, cities::update_panel_buttons).chain(),
-                    (production_prompt::respond, production_prompt::show,
-                        build_switch::respond, build_switch::show,
-                        abandon::respond, abandon::show).chain(),
+                    (
+                        production_prompt::respond,
+                        production_prompt::show,
+                        build_switch::respond,
+                        build_switch::show,
+                        abandon::respond,
+                        abandon::show,
+                    )
+                        .chain(),
                     features::sync_feature_sprites,
                     improvements::sync_improvement_sprites,
                     borders::sync_borders,
@@ -354,20 +387,36 @@ fn main() {
         // clips advance.
         .add_systems(
             Update,
-            (naval::unit_hazards, bombard::resolve, combat::start_attacks, combat::run_combat)
+            (
+                naval::unit_hazards,
+                bombard::resolve,
+                combat::start_attacks,
+                combat::run_combat,
+            )
                 .chain()
                 .after(units::drive_movement)
                 .before(units::advance_anims),
         )
-        .add_systems(Update, naval::sync_cargo.after(combat::run_combat).before(units::advance_anims))
+        .add_systems(
+            Update,
+            naval::sync_cargo
+                .after(combat::run_combat)
+                .before(units::advance_anims),
+        )
         .add_systems(Update, combat::sync_health_bars.after(units::animate_units))
         .add_systems(Update, units::sync_art_eras.before(units::animate_units))
         // Saving and loading change the whole world, so they run on their own,
         // before the turn's systems look at it.
         .add_systems(First, (save::keys, save::run).chain())
-        .add_systems(Update, cities::frame_city_view.after(cities::maintain_city_screen))
+        .add_systems(
+            Update,
+            cities::frame_city_view.after(cities::maintain_city_screen),
+        )
         .add_systems(Update, cities::highlight_menu_rows)
-        .add_systems(Update, (advisor_frame::hover_art, advisor_frame::switch_tabs));
+        .add_systems(
+            Update,
+            (advisor_frame::hover_art, advisor_frame::switch_tabs),
+        );
     #[cfg(target_arch = "wasm32")]
     web::show_progress("app run");
     app.run();

@@ -40,7 +40,8 @@ pub fn can_join(map: &GameMap, u: &Unit, city: Option<&City>) -> bool {
     u.moves > 0
         && c.civ == u.civ
         && (c.x, c.y) == (u.x, u.y)
-        && i32::from(c.size()) + i32::from(pop) <= citycalc::size_limit(c, map.fresh_water(c.x, c.y))
+        && i32::from(c.size()) + i32::from(pop)
+            <= citycalc::size_limit(c, map.fresh_water(c.x, c.y))
 }
 
 pub fn can_pillage_type(t: UnitType) -> bool {
@@ -117,12 +118,21 @@ pub fn pillage_check(
 /// Take `l` off the tile.
 pub fn strip(t: &mut Tile, l: Loot) {
     match l {
-        Loot::Barricade => { t.barricade = false; t.fortress = true; }
-        Loot::Terrain => { t.mine = false; t.irrigation = false; t.road = false; }
+        Loot::Barricade => {
+            t.barricade = false;
+            t.fortress = true;
+        }
+        Loot::Terrain => {
+            t.mine = false;
+            t.irrigation = false;
+            t.road = false;
+        }
         Loot::Fortifications => {
             t.fortress = false;
             t.barricade = false;
-            if matches!(t.site, Some(crate::sites::Site::Outpost(_))) { t.site = None; }
+            if matches!(t.site, Some(crate::sites::Site::Outpost(_))) {
+                t.site = None;
+            }
         }
     }
 }
@@ -155,11 +165,16 @@ pub fn run(
     mut board: ResMut<MessageBoard>,
 ) {
     for cmd in cmds.read().copied() {
-        if !matches!(cmd, UnitCommand::JoinCity | UnitCommand::Pillage | UnitCommand::Automate) {
+        if !matches!(
+            cmd,
+            UnitCommand::JoinCity | UnitCommand::Pillage | UnitCommand::Automate
+        ) {
             continue;
         }
         let Some(e) = selected.0 else { continue };
-        let Ok((_, mut u)) = units.get_mut(e) else { continue };
+        let Ok((_, mut u)) = units.get_mut(e) else {
+            continue;
+        };
         if u.civ != civs.active || u.carrier.is_some() {
             continue;
         }
@@ -194,7 +209,10 @@ pub fn run(
                         let box_ = crate::economy::food_box(c.size());
                         c.food = c.food.min(box_.saturating_sub(1));
                         cities::governor_fill(&map, &mut c, &taken);
-                        post(&mut board, format!("{} grows to size {}.", c.name, c.size()));
+                        post(
+                            &mut board,
+                            format!("{} grows to size {}.", c.name, c.size()),
+                        );
                     }
                 }
                 commands.entity(e).despawn();
@@ -207,7 +225,9 @@ pub fn run(
                 let city_here = refs.iter().any(|c| (c.x, c.y) == (u.x, u.y));
                 let owner = map.tiles[map.idx(u.x, u.y)].owner.map(usize::from);
                 let i = map.idx(u.x, u.y);
-                match pillage_check(&map.tiles[i], u.civ, city_here, owner, |a, b| diplomacy.at_war(a, b)) {
+                match pillage_check(&map.tiles[i], u.civ, city_here, owner, |a, b| {
+                    diplomacy.at_war(a, b)
+                }) {
                     Ok(l) => {
                         strip(&mut map.tiles[i], l);
                         u.moves = u.moves.saturating_sub(MP);
@@ -260,7 +280,9 @@ pub fn auto_workers(
         state.turn = Some((civ, turn.0));
         state.done.clear();
     }
-    state.targets.retain(|e, _| units.get(*e).is_ok_and(|(_, u)| u.auto));
+    state
+        .targets
+        .retain(|e, _| units.get(*e).is_ok_and(|(_, u)| u.auto));
     let idle = |e: Entity, u: &Unit| {
         u.civ == civ
             && u.auto
@@ -270,7 +292,11 @@ pub fn auto_workers(
             && matches!(u.anim, UnitAnim::Idle { .. })
             && !state.done.contains(&e)
     };
-    let mut ready: Vec<Entity> = units.iter().filter(|(e, u)| idle(*e, u)).map(|(e, _)| e).collect();
+    let mut ready: Vec<Entity> = units
+        .iter()
+        .filter(|(e, u)| idle(*e, u))
+        .map(|(e, _)| e)
+        .collect();
     if ready.is_empty() {
         return;
     }
@@ -282,7 +308,9 @@ pub fn auto_workers(
     )
     .with_war(diplomacy.war_matrix());
     for e in ready {
-        let Ok((_, mut u)) = units.get_mut(e) else { continue };
+        let Ok((_, mut u)) = units.get_mut(e) else {
+            continue;
+        };
         let own = state.targets.get(&e).copied();
         let claimed: HashSet<(i32, i32)> = state
             .targets
@@ -302,10 +330,16 @@ pub fn auto_workers(
         match act {
             Act::Go(path) => u.path = path.into(),
             Act::Work(action) => {
-                u.work = Some(Work { action, progress: 0 });
+                u.work = Some(Work {
+                    action,
+                    progress: 0,
+                });
                 u.moves = 0;
                 u.path.clear();
-                u.anim = UnitAnim::OneShot { slot: action_slot(action), t: 0.0 };
+                u.anim = UnitAnim::OneShot {
+                    slot: action_slot(action),
+                    t: 0.0,
+                };
                 state.done.insert(e);
             }
             _ => {
@@ -327,7 +361,7 @@ mod tests {
         t.base = Base::Grassland;
         t.relief = Relief::Flat;
         t.cover = Cover::Bare;
-            t.river = 0;
+        t.river = 0;
         t.road = false;
         t.irrigation = false;
         t.mine = false;
@@ -347,19 +381,31 @@ mod tests {
             taken.push(l);
             strip(&mut t, l);
         }
-        assert_eq!(taken, [Loot::Barricade, Loot::Terrain, Loot::Fortifications]);
+        assert_eq!(
+            taken,
+            [Loot::Barricade, Loot::Terrain, Loot::Fortifications]
+        );
     }
 
     #[test]
     fn pillaging_needs_something_to_take_outside_a_city_and_a_war() {
         let mut t = tile();
         let war = |a: usize, b: usize| a != b && (a, b) == (0, 2);
-        assert_eq!(pillage_check(&t, 0, false, None, war), Err(Refusal::Nothing));
+        assert_eq!(
+            pillage_check(&t, 0, false, None, war),
+            Err(Refusal::Nothing)
+        );
         t.road = true;
         assert_eq!(pillage_check(&t, 0, false, None, war), Ok(Loot::Terrain));
         assert_eq!(pillage_check(&t, 0, true, None, war), Err(Refusal::City));
-        assert_eq!(pillage_check(&t, 0, false, Some(0), war), Err(Refusal::Ours));
-        assert_eq!(pillage_check(&t, 0, false, Some(1), war), Err(Refusal::Peace(1)));
+        assert_eq!(
+            pillage_check(&t, 0, false, Some(0), war),
+            Err(Refusal::Ours)
+        );
+        assert_eq!(
+            pillage_check(&t, 0, false, Some(1), war),
+            Err(Refusal::Peace(1))
+        );
         assert_eq!(pillage_check(&t, 0, false, Some(2), war), Ok(Loot::Terrain));
     }
 
@@ -380,8 +426,15 @@ mod tests {
         assert!(can_join(&map, &u, Some(&city)));
         // A town of six holds no more without an Aqueduct.
         city.set_size(5);
-        assert!(!can_join(&map, &u, Some(&city)), "5 + 2 passes the town limit");
-        assert!(can_join(&map, &Unit::new(0, UnitType::named("Worker"), 3, 3), Some(&city)));
+        assert!(
+            !can_join(&map, &u, Some(&city)),
+            "5 + 2 passes the town limit"
+        );
+        assert!(can_join(
+            &map,
+            &Unit::new(0, UnitType::named("Worker"), 3, 3),
+            Some(&city)
+        ));
         city.buildings.push(cities::Production::named("Aqueduct"));
         assert!(can_join(&map, &u, Some(&city)));
         // Somebody else's city, an empty tile, or no movement left.
@@ -464,7 +517,10 @@ mod tests {
         app.add_systems(Update, auto_workers);
         app.update();
         let u = app.world().get::<Unit>(w).unwrap().clone();
-        assert!(u.work.is_none(), "the city tile has no job: the worker walks first");
+        assert!(
+            u.work.is_none(),
+            "the city tile has no job: the worker walks first"
+        );
         let goal = *u.path.back().expect("a route to a job");
         // Arrived with movement left: it starts work.
         {
@@ -502,7 +558,14 @@ mod tests {
         app.update();
         assert_eq!(app.world().get::<City>(c).unwrap().size(), 5);
         assert_eq!(app.world().get::<City>(c).unwrap().nationals(1), 2);
-        assert_eq!(app.world().get::<City>(c).unwrap().worked(app.world().resource::<GameMap>()).len(), 5);
+        assert_eq!(
+            app.world()
+                .get::<City>(c)
+                .unwrap()
+                .worked(app.world().resource::<GameMap>())
+                .len(),
+            5
+        );
         assert!(app.world().get_entity(s).is_err(), "the settler is gone");
     }
 
@@ -519,7 +582,10 @@ mod tests {
             let i = map.idx(x, y);
             map.tiles[i].road = true;
         }
-        let u = app.world_mut().spawn(Unit::new(0, UnitType::named("Warrior"), x, y)).id();
+        let u = app
+            .world_mut()
+            .spawn(Unit::new(0, UnitType::named("Warrior"), x, y))
+            .id();
         app.insert_resource(crate::units::Selected(Some(u)));
         app.init_resource::<crate::cities::BorderKey>();
         app.add_systems(Update, (crate::cities::update_borders, run).chain());

@@ -56,7 +56,11 @@ pub fn inactive(
     switch: Res<crate::build_switch::BuildSwitch>,
     abandon: Res<crate::abandon::Abandon>,
 ) -> bool {
-    !abandon.blocks(civs.active) && !switch.is_pending() && !prompts.blocks(civs.active) && !advisors.is_open() && !domestic.is_open()
+    !abandon.blocks(civs.active)
+        && !switch.is_pending()
+        && !prompts.blocks(civs.active)
+        && !advisors.is_open()
+        && !domestic.is_open()
 }
 
 pub fn city_input_allowed(
@@ -66,7 +70,9 @@ pub fn city_input_allowed(
     switch: Res<crate::build_switch::BuildSwitch>,
     abandon: Res<crate::abandon::Abandon>,
 ) -> bool {
-    !abandon.blocks(civs.active) && !switch.is_pending() && (!prompts.blocks(civs.active) || view.0.is_some())
+    !abandon.blocks(civs.active)
+        && !switch.is_pending()
+        && (!prompts.blocks(civs.active) || view.0.is_some())
 }
 
 #[derive(Component)]
@@ -126,7 +132,11 @@ pub fn show(
     abandon: Res<crate::abandon::Abandon>,
 ) {
     // One modal at a time: a build decision waits for the advisor's.
-    if abandon.blocks(civs.active) || switch.is_pending() || advisors.is_open() || domestic.is_open() {
+    if abandon.blocks(civs.active)
+        || switch.is_pending()
+        || advisors.is_open()
+        || domestic.is_open()
+    {
         return;
     }
     // A panel left over from the civ that just ended its turn comes down
@@ -159,7 +169,8 @@ pub fn show(
         let turns = if rate == 0 {
             "never".into()
         } else {
-            let n = u32::from(city.price(p).saturating_sub(preview.shields)).div_ceil(u32::from(rate));
+            let n =
+                u32::from(city.price(p).saturating_sub(preview.shields)).div_ceil(u32::from(rate));
             format!("{n} {}", if n == 1 { "turn" } else { "turns" })
         };
         format!("{} ({turns})", p.name())
@@ -246,7 +257,9 @@ pub fn respond(
     abandon: Res<crate::abandon::Abandon>,
     civs: Res<Civilizations>,
 ) {
-    if switch.is_pending() || abandon.blocks(civs.active) { return; }
+    if switch.is_pending() || abandon.blocks(civs.active) {
+        return;
+    }
     for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
             continue;
@@ -304,20 +317,43 @@ mod tests {
             let mut prompts = app.world_mut().resource_mut::<ProductionPrompts>();
             prompts.push(entity, 0, Production::named("Warrior"));
             prompts.open = Some(0);
-            app.world_mut().spawn((Interaction::Pressed, PromptButton::Pick(Production::named("Warrior"))));
+            app.world_mut().spawn((
+                Interaction::Pressed,
+                PromptButton::Pick(Production::named("Warrior")),
+            ));
             app.update();
-            assert!(app.world().resource::<crate::build_switch::BuildSwitch>().is_pending());
+            assert!(
+                app.world()
+                    .resource::<crate::build_switch::BuildSwitch>()
+                    .is_pending()
+            );
             let city = app.world().get::<City>(entity).unwrap();
-            assert_eq!((city.production, city.shields), (Production::named("Barracks"), 30));
-            app.world_mut().spawn((Interaction::Pressed, if accept {
-                crate::cities::ScreenButton::SwitchYes
-            } else { crate::cities::ScreenButton::SwitchNo }));
+            assert_eq!(
+                (city.production, city.shields),
+                (Production::named("Barracks"), 30)
+            );
+            app.world_mut().spawn((
+                Interaction::Pressed,
+                if accept {
+                    crate::cities::ScreenButton::SwitchYes
+                } else {
+                    crate::cities::ScreenButton::SwitchNo
+                },
+            ));
             app.update();
             let city = app.world().get::<City>(entity).unwrap();
-            assert_eq!((city.production, city.shields), if accept {
-                (Production::named("Warrior"), 10)
-            } else { (Production::named("Barracks"), 30) });
-            assert!(app.world().resource::<ProductionPrompts>().blocks(0), "the advisor decision remains pending");
+            assert_eq!(
+                (city.production, city.shields),
+                if accept {
+                    (Production::named("Warrior"), 10)
+                } else {
+                    (Production::named("Barracks"), 30)
+                }
+            );
+            assert!(
+                app.world().resource::<ProductionPrompts>().blocks(0),
+                "the advisor decision remains pending"
+            );
         }
     }
 

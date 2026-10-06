@@ -13,7 +13,7 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::blend::{cell_rect, VERTEX_TILES};
+use crate::blend::{VERTEX_TILES, cell_rect};
 use crate::map::*;
 use crate::tiles::TileArt;
 
@@ -197,8 +197,10 @@ pub fn spawn_terrain(
             ));
             let river = crate::rivers::corner_mask(&map, x, y);
             if river != 0 {
-                let mouth = crate::blend::CORNER_TILES.iter().any(|&(dx, dy)|
-                    map.get(x + dx, y + dy).is_some_and(|t| crate::improvements::is_water_base(t.base)));
+                let mouth = crate::blend::CORNER_TILES.iter().any(|&(dx, dy)| {
+                    map.get(x + dx, y + dy)
+                        .is_some_and(|t| crate::improvements::is_water_base(t.base))
+                });
                 let sheet = if mouth { "deltaRivers" } else { "mtnRivers" };
                 commands.spawn((
                     Sprite {
@@ -290,10 +292,7 @@ pub fn update_fog(
         ),
         Without<FogSprite>,
     >,
-    mut fog: Query<
-        (&FogSprite, &mut Sprite, &mut Visibility),
-        Without<TileSprite>,
-    >,
+    mut fog: Query<(&FogSprite, &mut Sprite, &mut Visibility), Without<TileSprite>>,
 ) {
     // The fog is a function of the map and the reveal switch alone (the
     // sprites are spawned at startup and on a load, which flags the map), so
@@ -399,15 +398,23 @@ mod tests {
         // After the fog, in the same frame: was the sprite's visibility written?
         app.add_systems(
             Update,
-            (update_fog, |q: Query<Ref<Visibility>>, mut seen: ResMut<Flagged>| {
-                seen.0.push(q.single().unwrap().is_changed())
-            })
+            (
+                update_fog,
+                |q: Query<Ref<Visibility>>, mut seen: ResMut<Flagged>| {
+                    seen.0.push(q.single().unwrap().is_changed())
+                },
+            )
                 .chain(),
         );
-        let fog = app.world_mut().spawn((Sprite::default(), Visibility::Hidden, FogSprite { x, y })).id();
+        let fog = app
+            .world_mut()
+            .spawn((Sprite::default(), Visibility::Hidden, FogSprite { x, y }))
+            .id();
         let vis = |app: &App| *app.world().get::<Visibility>(fog).unwrap();
         // A value `update_fog` never writes marks whether it ran again.
-        let tamper = |app: &mut App| *app.world_mut().get_mut::<Visibility>(fog).unwrap() = Visibility::Inherited;
+        let tamper = |app: &mut App| {
+            *app.world_mut().get_mut::<Visibility>(fog).unwrap() = Visibility::Inherited
+        };
 
         // The first frame draws the fog over the unseen tile.
         app.update();
@@ -434,7 +441,11 @@ mod tests {
         let _ = &mut app.world_mut().resource_mut::<GameMap>().tiles[0];
         app.update();
         assert_eq!(vis(&app), Visibility::Hidden);
-        assert_eq!(app.world().resource::<Flagged>().0[frames..], [false], "an unchanged fog sprite must not be flagged");
+        assert_eq!(
+            app.world().resource::<Flagged>().0[frames..],
+            [false],
+            "an unchanged fog sprite must not be flagged"
+        );
     }
 
     #[test]

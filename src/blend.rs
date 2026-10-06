@@ -140,7 +140,11 @@ pub fn corner_cell(map: &GameMap, x: i32, y: i32) -> (&'static str, u32, u32) {
         best
     };
     let digit = |ty: Terr| -> u32 {
-        let ty = if stem != WATER_SHEET.0 && is_water(ty) { Coast } else { ty };
+        let ty = if stem != WATER_SHEET.0 && is_water(ty) {
+            Coast
+        } else {
+            ty
+        };
         let pick = if triple.contains(&ty) {
             ty
         } else {
@@ -206,12 +210,21 @@ pub fn cover_sprite(map: &GameMap, x: i32, y: i32) -> Option<CoverSprite> {
     let col = h % cols;
     let row = row0 + (h / 7) % 2;
     // Jungle only exists on the grassland sheet; the tundra sheet has none.
-    let sheet = if t.cover == Cover::Jungle { "grassland forests" } else { sheet };
+    let sheet = if t.cover == Cover::Jungle {
+        "grassland forests"
+    } else {
+        sheet
+    };
     let y0 = (row as f32 * COVER_ROW_H).round() + 2.0;
     let y1 = ((row + 1) as f32 * COVER_ROW_H).round() - 2.0;
     Some(CoverSprite {
         path: format!("cache/terrain/sheets/{sheet}.png"),
-        rect: Rect::new(col as f32 * 128.0 + 2.0, y0, (col + 1) as f32 * 128.0 - 2.0, y1),
+        rect: Rect::new(
+            col as f32 * 128.0 + 2.0,
+            y0,
+            (col + 1) as f32 * 128.0 - 2.0,
+            y1,
+        ),
         anchor_px: Vec2::new(62.0, 48.0),
     })
 }
@@ -260,7 +273,13 @@ mod tests {
     fn each_vertex_is_its_own_tile() {
         // Cell (10,10) has tile (10,10) on N, (11,10) on E, (11,11) on S
         // and (10,11) on W. Only the E tile is water.
-        let map = flat_map(|x, y| if (x, y) == (11, 10) { Base::Coast } else { Base::Grassland });
+        let map = flat_map(|x, y| {
+            if (x, y) == (11, 10) {
+                Base::Coast
+            } else {
+                Base::Grassland
+            }
+        });
         let (stem, col, row) = corner_cell(&map, 10, 10);
         assert_eq!(stem, "xggc");
         // N, S, W grass (1), E coast (2).
@@ -275,9 +294,22 @@ mod tests {
     fn a_land_tile_keeps_its_center_among_water() {
         // A lone plains tile in the ocean is the vertex of the four cells
         // around it, and each draws plains there; the rest is water.
-        let map = flat_map(|x, y| if (x, y) == (10, 10) { Base::Plains } else { Base::Ocean });
+        let map = flat_map(|x, y| {
+            if (x, y) == (10, 10) {
+                Base::Plains
+            } else {
+                Base::Ocean
+            }
+        });
         let plains_digit = |stem: &str| {
-            LAND_SHEETS.iter().find(|s| s.0 == stem).unwrap().1.iter().position(|t| *t == Plains).unwrap() as u32
+            LAND_SHEETS
+                .iter()
+                .find(|s| s.0 == stem)
+                .unwrap()
+                .1
+                .iter()
+                .position(|t| *t == Plains)
+                .unwrap() as u32
         };
         // Tile is N of cell (10,10), E of (9,10), W of (10,9), S of (9,9).
         let (stem, col, _) = corner_cell(&map, 10, 10);
@@ -295,7 +327,13 @@ mod tests {
 
     #[test]
     fn tundra_grass_uses_xtgc_and_ice_blends_as_tundra() {
-        let map = flat_map(|x, _| if x <= 10 { Base::Tundra } else { Base::Grassland });
+        let map = flat_map(|x, _| {
+            if x <= 10 {
+                Base::Tundra
+            } else {
+                Base::Grassland
+            }
+        });
         assert_eq!(corner_cell(&map, 10, 10).0, "xtgc");
         let map = flat_map(|_, _| Base::Ice);
         assert_eq!(corner_cell(&map, 10, 10), ("xtgc", 0, 0));
@@ -314,6 +352,9 @@ mod tests {
     #[test]
     fn cell_rect_geometry() {
         let r = cell_rect(2, 3);
-        assert_eq!((r.min.x, r.min.y, r.max.x, r.max.y), (256.0, 192.0, 384.0, 256.0));
+        assert_eq!(
+            (r.min.x, r.min.y, r.max.x, r.max.y),
+            (256.0, 192.0, 384.0, 256.0)
+        );
     }
 }

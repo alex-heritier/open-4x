@@ -19,9 +19,9 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use civ3mapgen::government::{Govt, SHIPPED, row};
 #[cfg(test)]
 pub use civ3mapgen::government::row as govt_row;
+use civ3mapgen::government::{Govt, SHIPPED, row};
 
 use crate::cities::{Capital, City, Production, territory};
 use crate::civs::{CIV_CAP, civ_count};
@@ -41,7 +41,11 @@ pub struct Rates {
 
 impl Rates {
     /// Civ3's start: half taxes, half science.
-    pub const DEFAULT: Rates = Rates { tax: 5, sci: 5, lux: 0 };
+    pub const DEFAULT: Rates = Rates {
+        tax: 5,
+        sci: 5,
+        lux: 0,
+    };
 
     /// The rates add up to 100% and stay under the cap (10 is 100%).
     pub fn valid(self, cap: u8) -> bool {
@@ -176,7 +180,11 @@ impl Realm {
 
     pub fn restore(&mut self, s: &Saved) {
         self.govt = s.govt;
-        self.rates = Rates { tax: s.rates.0, sci: s.rates.1, lux: s.rates.2 };
+        self.rates = Rates {
+            tax: s.rates.0,
+            sci: s.rates.1,
+            lux: s.rates.2,
+        };
         self.anarchy = s.anarchy;
         self.then = s.then;
         self.cooldown = s.cooldown;
@@ -272,7 +280,11 @@ impl Realm {
 
     /// The end of the revolution (`0x55CBB0`).
     pub fn end_anarchy(&mut self) {
-        let g = if self.can_adopt(self.then) { self.then } else { row::DESPOTISM };
+        let g = if self.can_adopt(self.then) {
+            self.then
+        } else {
+            row::DESPOTISM
+        };
         self.adopt(g);
     }
 
@@ -373,8 +385,16 @@ pub fn in_anarchy(civ: usize) -> bool {
 }
 
 /// Government names by GOVT row.
-pub const GOVT_NAMES: [&str; 8] =
-    ["Anarchy", "Despotism", "Monarchy", "Communism", "Republic", "Democracy", "Fascism", "Feudalism"];
+pub const GOVT_NAMES: [&str; 8] = [
+    "Anarchy",
+    "Despotism",
+    "Monarchy",
+    "Communism",
+    "Republic",
+    "Democracy",
+    "Fascism",
+    "Feudalism",
+];
 
 /// Set the rates when they are legal under the civ's government.
 pub fn set_rates(civ: usize, rates: Rates) -> bool {
@@ -413,7 +433,10 @@ pub fn good_id(row: i32) -> Option<u8> {
         "Gems" => "Diamonds",
         n => n,
     };
-    crate::features::GOODS.iter().position(|g| g.name == name).map(|i| i as u8)
+    crate::features::GOODS
+        .iter()
+        .position(|g| g.name == name)
+        .map(|i| i as u8)
 }
 
 /// Land connected to `at` by king moves, wrapping in x (a continent).
@@ -486,7 +509,10 @@ pub fn sync(
     mut cities: Query<(Entity, &mut City)>,
     units: Query<&Unit>,
     diplomacy: Option<Res<crate::diplomacy::Diplomacy>>,
-    extra: (Option<Res<crate::flip::Flips>>, Option<Res<crate::units::Turn>>),
+    extra: (
+        Option<Res<crate::flip::Flips>>,
+        Option<Res<crate::units::Turn>>,
+    ),
     mut labels: Local<Vec<u16>>,
     mut basis: Local<Basis>,
 ) {
@@ -497,9 +523,16 @@ pub fn sync(
     let governments: Vec<usize> = (0..civ_count()).map(|civ| read(civ, |r| r.govt)).collect();
     let mut soldiers = std::mem::take(&mut basis.scratch);
     soldiers.clear();
-    soldiers.extend(units.iter().filter(|u| u.civ < civ_count() && def(u.utype).attack > 0).map(|u| (u.civ, u.x, u.y)));
+    soldiers.extend(
+        units
+            .iter()
+            .filter(|u| u.civ < civ_count() && def(u.utype).attack > 0)
+            .map(|u| (u.civ, u.x, u.y)),
+    );
     soldiers.sort_unstable();
-    let (count, touched) = cities.iter_mut().fold((0, false), |(n, t), (_, c)| (n + 1, t || c.is_changed()));
+    let (count, touched) = cities
+        .iter_mut()
+        .fold((0, false), |(n, t), (_, c)| (n + 1, t || c.is_changed()));
     let changed = governments != basis.govts || count != basis.cities;
     let moved = soldiers != basis.soldiers;
     if changed {
@@ -536,12 +569,20 @@ pub fn sync(
 
     let mut built = vec![false; bldg_count()];
     // The trade network of every civ, over every city (`trade.rs`).
-    let war = |a: usize, b: usize| a < civ_count() && b < civ_count() && a != b && diplomacy.as_ref().is_some_and(|d| d.at_war(a, b));
+    let war = |a: usize, b: usize| {
+        a < civ_count()
+            && b < civ_count()
+            && a != b
+            && diplomacy.as_ref().is_some_and(|d| d.at_war(a, b))
+    };
     let trade_flag = |c: &City, flag: u32| {
-        c.buildings.iter().filter_map(|b| b.building_row()).any(|row| {
-            let b = roster::bldg(row);
-            b.flags & flag != 0 && !(b.obsolete >= 0 && research_state.knows(c.civ, b.obsolete))
-        })
+        c.buildings
+            .iter()
+            .filter_map(|b| b.building_row())
+            .any(|row| {
+                let b = roster::bldg(row);
+                b.flags & flag != 0 && !(b.obsolete >= 0 && research_state.knows(c.civ, b.obsolete))
+            })
     };
     let nodes: Vec<crate::trade::Node> = all
         .iter()
@@ -572,8 +613,12 @@ pub fn sync(
         };
         let network = crate::trade::components(&map, &nodes, &view);
         let component = &network.comp;
-        let capital_pos = capital.0[civ].and_then(|e| all.iter().find(|(id, _)| *id == e)).map(|(_, c)| (c.x, c.y));
-        let capital_component = capital_pos.and_then(|p| nodes.iter().position(|n| n.at == p)).map(|i| component[i]);
+        let capital_pos = capital.0[civ]
+            .and_then(|e| all.iter().find(|(id, _)| *id == e))
+            .map(|(_, c)| (c.x, c.y));
+        let capital_component = capital_pos
+            .and_then(|p| nodes.iter().position(|n| n.at == p))
+            .map(|i| component[i]);
         let connected: std::collections::HashSet<(i32, i32)> = nodes
             .iter()
             .enumerate()
@@ -584,10 +629,14 @@ pub fn sync(
         let palaces: Vec<(i32, i32)> = mine
             .iter()
             .flat_map(|(_, c)| {
-                c.buildings.iter().filter_map(|b| b.building_row()).filter(move |&row| {
-                    let b = roster::bldg(row);
-                    b.small & 0x20 != 0 && (b.govt < 0 || b.govt as usize == govt_now)
-                }).map(move |_| (c.x, c.y))
+                c.buildings
+                    .iter()
+                    .filter_map(|b| b.building_row())
+                    .filter(move |&row| {
+                        let b = roster::bldg(row);
+                        b.small & 0x20 != 0 && (b.govt < 0 || b.govt as usize == govt_now)
+                    })
+                    .map(move |_| (c.x, c.y))
             })
             .collect();
         let city_order: Vec<(i32, i32)> = mine.iter().map(|(_, c)| (c.x, c.y)).collect();
@@ -619,7 +668,9 @@ pub fn sync(
         for (_, wc) in &mine {
             let land = labels[map.idx(wc.x, wc.y)];
             for b in &wc.buildings {
-                let Some(row) = b.building_row() else { continue };
+                let Some(row) = b.building_row() else {
+                    continue;
+                };
                 let w = roster::bldg(row);
                 if obsolete(row) {
                     continue;
@@ -658,14 +709,18 @@ pub fn sync(
         let colonies: std::collections::HashSet<(i32, i32)> = (0..map.h)
             .flat_map(|y| (0..map.w).map(move |x| (x, y)))
             .filter(|&(x, y)| {
-                map.get(x, y).is_some_and(|t| t.site == Some(crate::sites::Site::Colony(civ as u8)))
+                map.get(x, y)
+                    .is_some_and(|t| t.site == Some(crate::sites::Site::Colony(civ as u8)))
                     && border(x, y).is_none_or(|o| o == civ)
             })
             .collect();
-        let mut masks: HashMap<(i32, i32), u32> = mine.iter().map(|(_, c)| ((c.x, c.y), 0u32)).collect();
+        let mut masks: HashMap<(i32, i32), u32> =
+            mine.iter().map(|(_, c)| ((c.x, c.y), 0u32)).collect();
         for y in 0..map.h {
             for x in 0..map.w {
-                let Some(id) = map.tiles[map.idx(x, y)].resource else { continue };
+                let Some(id) = map.tiles[map.idx(x, y)].resource else {
+                    continue;
+                };
                 if border(x, y) != Some(civ) && !colonies.contains(&(x, y)) {
                     continue;
                 }
@@ -677,7 +732,9 @@ pub fn sync(
                     crate::features::GoodKind::Luxury => true,
                     crate::features::GoodKind::Bonus => false,
                 };
-                let Some(reach) = usable.then(|| network.reaches((x, y))).flatten() else { continue };
+                let Some(reach) = usable.then(|| network.reaches((x, y))).flatten() else {
+                    continue;
+                };
                 for (i, n) in nodes.iter().enumerate() {
                     if n.owner == civ && component[i] == reach {
                         *masks.entry(n.at).or_insert(0) |= 1 << id;
@@ -723,9 +780,9 @@ pub fn sync(
                 b.wonder & roster::wonder::SUFFRAGE != 0 && !obsolete(row)
             })
             .count() as i32;
-        let (war_counters, average_weariness) = diplomacy
-            .as_ref()
-            .map_or((vec![], 0), |d| (d.enemy_weariness(civ), d.average_weariness(civ)));
+        let (war_counters, average_weariness) = diplomacy.as_ref().map_or((vec![], 0), |d| {
+            (d.enemy_weariness(civ), d.average_weariness(civ))
+        });
         write(civ, |r| {
             r.known = known;
             r.owned = owned;
@@ -744,7 +801,11 @@ pub fn sync(
             r.city_order = city_order;
             r.connected = connected;
             r.palaces = palaces;
-            r.at_war = std::array::from_fn(|q| diplomacy.as_ref().is_some_and(|d| q != civ && d.at_war(civ, q)));
+            r.at_war = std::array::from_fn(|q| {
+                diplomacy
+                    .as_ref()
+                    .is_some_and(|d| q != civ && d.at_war(civ, q))
+            });
         });
         if changed {
             research_state.goods_changed();
@@ -772,14 +833,51 @@ mod tests {
     fn rates_add_up_to_ten_and_shift_one_tenth() {
         let r = Rates::DEFAULT;
         assert!(r.valid(10));
-        assert!(!Rates { tax: 6, sci: 5, lux: 0 }.valid(10));
-        assert!(!Rates { tax: 11, sci: 0, lux: 0 }.valid(10));
+        assert!(
+            !Rates {
+                tax: 6,
+                sci: 5,
+                lux: 0
+            }
+            .valid(10)
+        );
+        assert!(
+            !Rates {
+                tax: 11,
+                sci: 0,
+                lux: 0
+            }
+            .valid(10)
+        );
         let moved = r.shifted(Rate::Sci, Rate::Lux, 10).unwrap();
-        assert_eq!(moved, Rates { tax: 5, sci: 4, lux: 1 });
+        assert_eq!(
+            moved,
+            Rates {
+                tax: 5,
+                sci: 4,
+                lux: 1
+            }
+        );
         // Nothing to take from.
-        assert_eq!(Rates { tax: 10, sci: 0, lux: 0 }.shifted(Rate::Sci, Rate::Tax, 10), None);
+        assert_eq!(
+            Rates {
+                tax: 10,
+                sci: 0,
+                lux: 0
+            }
+            .shifted(Rate::Sci, Rate::Tax, 10),
+            None
+        );
         // A cap of 60% refuses a seventh tenth.
-        assert_eq!(Rates { tax: 6, sci: 4, lux: 0 }.shifted(Rate::Sci, Rate::Tax, 6), None);
+        assert_eq!(
+            Rates {
+                tax: 6,
+                sci: 4,
+                lux: 0
+            }
+            .shifted(Rate::Sci, Rate::Tax, 6),
+            None
+        );
     }
 
     #[test]
@@ -837,12 +935,29 @@ mod tests {
     #[test]
     fn the_process_wide_table_is_per_thread_under_test() {
         reset();
-        assert_eq!(govt(0).corruption_class, SHIPPED[row::DESPOTISM].corruption_class);
+        assert_eq!(
+            govt(0).corruption_class,
+            SHIPPED[row::DESPOTISM].corruption_class
+        );
         write(1, |r| r.adopt(row::MONARCHY));
         assert_eq!(read(1, |r| r.govt), row::MONARCHY);
         assert_eq!(read(0, |r| r.govt), row::DESPOTISM);
-        assert!(set_rates(0, Rates { tax: 3, sci: 7, lux: 0 }));
-        assert!(!set_rates(0, Rates { tax: 3, sci: 3, lux: 3 }));
+        assert!(set_rates(
+            0,
+            Rates {
+                tax: 3,
+                sci: 7,
+                lux: 0
+            }
+        ));
+        assert!(!set_rates(
+            0,
+            Rates {
+                tax: 3,
+                sci: 3,
+                lux: 3
+            }
+        ));
         assert_eq!(rates(0).sci, 7);
     }
 
@@ -857,7 +972,9 @@ mod tests {
         app.init_resource::<Capital>();
         app.insert_resource(crate::units::Turn(1));
         // The tables are per thread under test: run the pass on this one.
-        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.add_systems(Update, sync);
         let town = app.world_mut().spawn(City::new(0, "Kyoto", 10, 10)).id();
         app.update();
@@ -867,7 +984,11 @@ mod tests {
         write(0, |r| r.cities = 7);
         app.update();
         app.update();
-        assert_eq!(read(0, |r| r.cities), 7, "an idle world is not scanned again");
+        assert_eq!(
+            read(0, |r| r.cities),
+            7,
+            "an idle world is not scanned again"
+        );
 
         // A city that changed is noticed.
         app.world_mut().get_mut::<City>(town).unwrap().food += 1;
@@ -883,17 +1004,37 @@ mod tests {
         // A soldier arriving or walking about moves the garrison tables and
         // nothing else: the rest of the pass is not run for it.
         write(0, |r| r.cities = 7);
-        let guard = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Warrior"), 11, 10)).id();
+        let guard = app
+            .world_mut()
+            .spawn(Unit::new(
+                0,
+                crate::units::UnitType::named("Warrior"),
+                11,
+                10,
+            ))
+            .id();
         app.update();
-        assert_eq!(read(0, |r| (r.cities, r.garrison.get(&(11, 10)).copied())), (7, Some(1)));
+        assert_eq!(
+            read(0, |r| (r.cities, r.garrison.get(&(11, 10)).copied())),
+            (7, Some(1))
+        );
         app.world_mut().get_mut::<Unit>(guard).unwrap().x = 12;
         app.update();
         assert_eq!(
-            read(0, |r| (r.cities, r.garrison.get(&(11, 10)).copied(), r.garrison.get(&(12, 10)).copied())),
+            read(0, |r| (
+                r.cities,
+                r.garrison.get(&(11, 10)).copied(),
+                r.garrison.get(&(12, 10)).copied()
+            )),
             (7, None, Some(1))
         );
         // A civilian is no garrison.
-        app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Worker"), 13, 10));
+        app.world_mut().spawn(Unit::new(
+            0,
+            crate::units::UnitType::named("Worker"),
+            13,
+            10,
+        ));
         app.update();
         assert_eq!(read(0, |r| r.garrison.get(&(13, 10)).copied()), None);
         reset();

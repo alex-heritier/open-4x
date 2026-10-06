@@ -230,11 +230,17 @@ mod tests {
     fn named_constants_point_at_their_rows() {
         assert_eq!(unit(UnitType::named("Warrior").0 as usize).name, "Warrior");
         assert_eq!(unit(UnitType::named("Settler").0 as usize).name, "Settler");
-        assert_eq!(unit(UnitType::named("Three-Man Chariot").0 as usize).name, "Three-Man Chariot");
+        assert_eq!(
+            unit(UnitType::named("Three-Man Chariot").0 as usize).name,
+            "Three-Man Chariot"
+        );
         assert_eq!(Production::named("Temple").name(), "Temple");
         assert_eq!(Production::named("Barracks").name(), "Barracks");
         assert_eq!(Production::named("Warrior").name(), "Warrior");
-        assert_eq!(Production::named("Sun Tzu's Art of War").name(), "Sun Tzu's Art of War");
+        assert_eq!(
+            Production::named("Sun Tzu's Art of War").name(),
+            "Sun Tzu's Art of War"
+        );
     }
 
     #[test]
@@ -261,12 +267,16 @@ mod tests {
         let art = &crate::ruleset::get().art;
         for u in UNITS.iter().filter(|u| u.playable) {
             let variants = if u.art.ends_with(crate::assets::ERA_NAMES[0]) {
-                crate::assets::ERA_NAMES.map(|era| u.art.replace(crate::assets::ERA_NAMES[0], era)).to_vec()
+                crate::assets::ERA_NAMES
+                    .map(|era| u.art.replace(crate::assets::ERA_NAMES[0], era))
+                    .to_vec()
             } else {
                 vec![u.art.to_string()]
             };
             for v in variants {
-                let key = art.unit_key(&v).unwrap_or_else(|| panic!("{}: no art folder {v}", u.name));
+                let key = art
+                    .unit_key(&v)
+                    .unwrap_or_else(|| panic!("{}: no art folder {v}", u.name));
                 let m = format!("{}/{key}/manifest.json", crate::assets::CACHE);
                 assert!(std::path::Path::new(&m).is_file(), "{}: no {m}", u.name);
             }
@@ -275,11 +285,20 @@ mod tests {
 
     #[test]
     fn the_roster_has_what_the_game_needs() {
-        let playable: Vec<_> = UNITS.iter().filter(|u| u.playable).map(|u| u.name).collect();
-        for n in ["Settler", "Worker", "Scout", "Warrior", "Archer", "Spearman", "Horseman"] {
+        let playable: Vec<_> = UNITS
+            .iter()
+            .filter(|u| u.playable)
+            .map(|u| u.name)
+            .collect();
+        for n in [
+            "Settler", "Worker", "Scout", "Warrior", "Archer", "Spearman", "Horseman",
+        ] {
             assert!(playable.contains(&n), "{n}");
         }
         // The costs the exe charges: Barracks 4 is 40 shields.
-        assert_eq!(bldg(Production::named("Barracks").0 as usize - unit_count()).shields(), 40);
+        assert_eq!(
+            bldg(Production::named("Barracks").0 as usize - unit_count()).shields(),
+            40
+        );
     }
 }

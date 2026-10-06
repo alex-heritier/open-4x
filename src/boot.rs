@@ -70,7 +70,11 @@ pub fn world_of(biq: Biq) -> World {
 
 /// `GAME.search_folders` of a BIQ (empty without a `GAME` row).
 fn search_folders(biq: &Biq) -> String {
-    biq.scenario.game.first().map(|g| g.search_folders.text().to_string()).unwrap_or_default()
+    biq.scenario
+        .game
+        .first()
+        .map(|g| g.search_folders.text().to_string())
+        .unwrap_or_default()
 }
 
 fn stock_path(install_root: &Path) -> Option<PathBuf> {
@@ -98,14 +102,17 @@ pub fn load(options: &Options) -> Result<Boot, String> {
                 root.display()
             ));
         }
-        let path = stock_path(&root).ok_or_else(|| format!("no Conquests/conquests.biq under {}", root.display()))?;
+        let path = stock_path(&root)
+            .ok_or_else(|| format!("no Conquests/conquests.biq under {}", root.display()))?;
         read_biq(&path)
     };
 
     let (rules_from, world, folders): (Biq, World, Vec<PathBuf>) = match options.kind() {
         FileKind::Sav => {
             let save = Save::read_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-            let embedded = save.embedded_biq().map_err(|e| format!("{}: embedded scenario: {e}", file.display()))?;
+            let embedded = save
+                .embedded_biq()
+                .map_err(|e| format!("{}: embedded scenario: {e}", file.display()))?;
             let folders = Install::scenario_folders(&file, &search_folders(&embedded));
             (embedded, World::Saved(Box::new(save)), folders)
         }
@@ -125,26 +132,42 @@ pub fn load(options: &Options) -> Result<Boot, String> {
 
     let assets = options.assets_dir();
     if !assets.is_dir() {
-        return Err(format!("no original assets at {} (pass --assets <dir> or set CIV3_ASSETS)", assets.display()));
+        return Err(format!(
+            "no original assets at {} (pass --assets <dir> or set CIV3_ASSETS)",
+            assets.display()
+        ));
     }
     let install = Install::new(&assets, folders);
     ruleset::install(ruleset::build(&rules_from, &install));
-    Ok(Boot { options: options.clone(), install, file, world })
+    Ok(Boot {
+        options: options.clone(),
+        install,
+        file,
+        world,
+    })
 }
 
 /// Start the stock game from data bundled with the WASM binary and the
 /// converted art cache served beside it.
 #[cfg(target_arch = "wasm32")]
 pub fn load_web(options: &Options) -> Result<Boot, String> {
-    let biq = Biq::parse(crate::web::stock_biq()).map_err(|e| format!("stock conquests.biq: {e}"))?;
+    let biq =
+        Biq::parse(crate::web::stock_biq()).map_err(|e| format!("stock conquests.biq: {e}"))?;
     let install = crate::web::install();
     let file = PathBuf::from("Conquests/conquests.biq");
     let world = world_of(biq);
     let rules_from = match &world {
         World::Map(biq) | World::Scenario(biq) => (**biq).clone(),
-        World::Random => Biq::parse(crate::web::stock_biq()).map_err(|e| format!("stock conquests.biq: {e}"))?,
+        World::Random => {
+            Biq::parse(crate::web::stock_biq()).map_err(|e| format!("stock conquests.biq: {e}"))?
+        }
         World::Saved(_) => unreachable!("the bundled file is a BIQ"),
     };
     ruleset::install(ruleset::build(&rules_from, &install));
-    Ok(Boot { options: options.clone(), install, file, world })
+    Ok(Boot {
+        options: options.clone(),
+        install,
+        file,
+        world,
+    })
 }

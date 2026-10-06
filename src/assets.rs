@@ -32,13 +32,32 @@ pub const CACHE_URL: &str = "cache";
 const SCRIPT: &str = "tools/prep_assets.py";
 
 /// The folder names of the units that change with the era (leaders, armies).
-pub const ERA_NAMES: [&str; 4] = ["Ancient Times", "Middle Ages", "Industrial Ages", "Modern Times"];
+pub const ERA_NAMES: [&str; 4] = [
+    "Ancient Times",
+    "Middle Ages",
+    "Industrial Ages",
+    "Modern Times",
+];
 
 /// The interface stages of the script: the pieces our code draws from shared
 /// sheets, which no Civ3 data refers to.
 const STAGES: &[&str] = &[
-    "terrain", "cityscreen", "cities", "splash", "audio", "fonts", "features", "advisors",
-    "improvements", "unitbuttons", "hud", "fog", "borders", "cursor", "diplomacy", "wonders_ui",
+    "terrain",
+    "cityscreen",
+    "cities",
+    "splash",
+    "audio",
+    "fonts",
+    "features",
+    "advisors",
+    "improvements",
+    "unitbuttons",
+    "hud",
+    "fog",
+    "borders",
+    "cursor",
+    "diplomacy",
+    "wonders_ui",
 ];
 
 /// One `Art/Units` folder to convert.
@@ -83,13 +102,19 @@ pub struct ArtPlan {
 impl ArtPlan {
     /// The cache key of the unit folder `art` (any case).
     pub fn unit_key(&self, art: &str) -> Option<&str> {
-        self.unit_keys.get(&art.to_ascii_lowercase()).map(String::as_str)
+        self.unit_keys
+            .get(&art.to_ascii_lowercase())
+            .map(String::as_str)
     }
 
     /// The cache file of a wonder's splash and thumbnail, when converted.
     pub fn wonder_art(&self, row: usize, thumb: bool) -> Option<String> {
         let key = &self.wonders.get(&row)?.key;
-        let rel = if thumb { format!("{key}.thumb.png") } else { format!("{key}.png") };
+        let rel = if thumb {
+            format!("{key}.thumb.png")
+        } else {
+            format!("{key}.png")
+        };
         crate::web::cache_exists(Path::new(CACHE).join(&rel)).then(|| format!("{CACHE_URL}/{rel}"))
     }
 }
@@ -108,7 +133,10 @@ impl ArtPlan {
 pub fn key_of(install: &Install, path: &Path) -> String {
     let rel: PathBuf = match path.strip_prefix(&install.root) {
         Ok(rel) => rel.to_path_buf(),
-        Err(_) => path.components().filter(|c| matches!(c, Component::Normal(_))).collect(),
+        Err(_) => path
+            .components()
+            .filter(|c| matches!(c, Component::Normal(_)))
+            .collect(),
     };
     rel.components()
         .filter_map(|c| match c {
@@ -122,13 +150,21 @@ pub fn key_of(install: &Install, path: &Path) -> String {
 /// Work out the Civ3 files the rules of `biq` refer to. `pedia` is the
 /// merged `PediaIcons.txt`; `units` the built unit rows (their `art` is the
 /// `Art/Units` folder, empty for a unit that cannot be played).
-pub fn plan(biq: &Biq, install: &Install, pedia: &HashMap<String, String>, units: &[UnitRow]) -> ArtPlan {
+pub fn plan(
+    biq: &Biq,
+    install: &Install,
+    pedia: &HashMap<String, String>,
+    units: &[UnitRow],
+) -> ArtPlan {
     let r = &biq.rules;
     let mut plan = ArtPlan::default();
 
     for art in units.iter().map(|u| u.art).filter(|a| !a.is_empty()) {
         let variants: Vec<String> = if art.ends_with(ERA_NAMES[0]) {
-            ERA_NAMES.iter().map(|era| art.replace(ERA_NAMES[0], era)).collect()
+            ERA_NAMES
+                .iter()
+                .map(|era| art.replace(ERA_NAMES[0], era))
+                .collect()
         } else {
             vec![art.to_string()]
         };
@@ -143,8 +179,13 @@ pub fn plan(biq: &Biq, install: &Install, pedia: &HashMap<String, String>, units
                 .collect();
             let Some(first) = dirs.first() else { continue };
             let key = key_of(install, first);
-            plan.unit_keys.insert(name.to_ascii_lowercase(), key.clone());
-            plan.units.push(UnitItem { art: name, key, dirs });
+            plan.unit_keys
+                .insert(name.to_ascii_lowercase(), key.clone());
+            plan.units.push(UnitItem {
+                art: name,
+                key,
+                dirs,
+            });
         }
     }
 
@@ -153,17 +194,30 @@ pub fn plan(biq: &Biq, install: &Install, pedia: &HashMap<String, String>, units
         let at = |i: usize| -> Option<PathBuf> {
             let s = c.era_art.get(i)?.text();
             let s = s.trim();
-            if s.is_empty() { None } else { install.resolve(s).filter(|p| install.is_file(p)) }
+            if s.is_empty() {
+                None
+            } else {
+                install.resolve(s).filter(|p| install.is_file(p))
+            }
         };
         plan.leaders.push(std::array::from_fn(|era| {
             let forward = at(era)?;
-            Some(LeaderItem { key: key_of(install, &forward), forward, reverse: at(era + 4) })
+            Some(LeaderItem {
+                key: key_of(install, &forward),
+                forward,
+                reverse: at(era + 4),
+            })
         }));
     }
 
     let pic = |key: String| -> Option<PicItem> {
-        let path = install.resolve(pedia.get(&key)?).filter(|p| install.is_file(p))?;
-        Some(PicItem { key: key_of(install, &path), path })
+        let path = install
+            .resolve(pedia.get(&key)?)
+            .filter(|p| install.is_file(p))?;
+        Some(PicItem {
+            key: key_of(install, &path),
+            path,
+        })
     };
     for (row, b) in r.buildings.iter().enumerate() {
         let entry = b.civilopedia_entry.text().trim().to_ascii_lowercase();
@@ -218,14 +272,22 @@ fn read_index(script_hash: &str) -> Index {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default();
-    if index.script == script_hash { index } else { Index::default() }
+    if index.script == script_hash {
+        index
+    } else {
+        Index::default()
+    }
 }
 
 impl Index {
     /// Is `key` converted from the files that are there now?
     fn fresh(&self, root: &Path, key: &str, params: &Value, search: Option<&[String]>) -> bool {
-        let Some(e) = self.entries.get(key) else { return false };
-        let Ok(root) = root.canonicalize() else { return false };
+        let Some(e) = self.entries.get(key) else {
+            return false;
+        };
+        let Ok(root) = root.canonicalize() else {
+            return false;
+        };
         if e.root.as_deref() != Some(path_str(&root).as_str()) {
             return false;
         }
@@ -246,8 +308,14 @@ impl Index {
             return false;
         }
         e.sources.iter().all(|s| {
-            let full = if Path::new(&s.path).is_absolute() { PathBuf::from(&s.path) } else { root.join(&s.path) };
-            let Ok(meta) = std::fs::metadata(full) else { return false };
+            let full = if Path::new(&s.path).is_absolute() {
+                PathBuf::from(&s.path)
+            } else {
+                root.join(&s.path)
+            };
+            let Ok(meta) = std::fs::metadata(full) else {
+                return false;
+            };
             let mtime = meta
                 .modified()
                 .ok()
@@ -313,10 +381,25 @@ impl Wanted<'_> {
             let want_search = (*s == "diplomacy" || *s == "cities").then_some(search.as_slice());
             n += usize::from(!index.fresh(root, &format!("stage:{s}"), &Value::Null, want_search));
         }
-        n += self.plan.units.iter().filter(|u| !index.fresh(root, &u.key, &colors, None)).count();
-        n += self.leaders().iter().filter(|l| !index.fresh(root, &l.key, &Value::Null, None)).count();
-        let pics = self.plan.wonders.values().chain(self.plan.techs.iter().flatten());
-        n += pics.filter(|p| !index.fresh(root, &format!("{}.png", p.key), &Value::Null, None)).count();
+        n += self
+            .plan
+            .units
+            .iter()
+            .filter(|u| !index.fresh(root, &u.key, &colors, None))
+            .count();
+        n += self
+            .leaders()
+            .iter()
+            .filter(|l| !index.fresh(root, &l.key, &Value::Null, None))
+            .count();
+        let pics = self
+            .plan
+            .wonders
+            .values()
+            .chain(self.plan.techs.iter().flatten());
+        n += pics
+            .filter(|p| !index.fresh(root, &format!("{}.png", p.key), &Value::Null, None))
+            .count();
         n
     }
 }
@@ -334,7 +417,8 @@ fn have(cmd: &str, args: &[&str]) -> bool {
 /// the user (a tool is missing, or the script failed).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn ensure(wanted: &Wanted) -> Result<(), String> {
-    let script = std::fs::read(SCRIPT).map_err(|e| format!("{SCRIPT}: {e} (run from the repository root)"))?;
+    let script = std::fs::read(SCRIPT)
+        .map_err(|e| format!("{SCRIPT}: {e} (run from the repository root)"))?;
     let index = read_index(&fnv(&script));
     let stale = wanted.stale(&index);
     if stale == 0 {
@@ -351,9 +435,14 @@ pub fn ensure(wanted: &Wanted) -> Result<(), String> {
     }
     std::fs::create_dir_all(CACHE).map_err(|e| format!("{CACHE}: {e}"))?;
     let request = Path::new(CACHE).join("request.json");
-    std::fs::write(&request, serde_json::to_string_pretty(&wanted.request()).expect("the request serializes"))
-        .map_err(|e| format!("{}: {e}", request.display()))?;
-    eprintln!("open-4x: converting {stale} art item(s) into {CACHE}/ (the first run takes a while)");
+    std::fs::write(
+        &request,
+        serde_json::to_string_pretty(&wanted.request()).expect("the request serializes"),
+    )
+    .map_err(|e| format!("{}: {e}", request.display()))?;
+    eprintln!(
+        "open-4x: converting {stale} art item(s) into {CACHE}/ (the first run takes a while)"
+    );
     let status = Command::new("python3")
         .args([SCRIPT, "--request"])
         .arg(&request)
@@ -389,10 +478,19 @@ pub fn in_play() -> (Vec<usize>, Vec<u8>) {
 /// has something to check; a cache built for another game is skipped.
 #[cfg(test)]
 pub fn cache_covers_plan() -> bool {
-    let Ok(text) = std::fs::read_to_string(Path::new(CACHE).join("request.json")) else { return false };
-    let Ok(req) = serde_json::from_str::<Value>(&text) else { return false };
+    let Ok(text) = std::fs::read_to_string(Path::new(CACHE).join("request.json")) else {
+        return false;
+    };
+    let Ok(req) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
     let keys = |kind: &str| -> Vec<String> {
-        req[kind].as_array().into_iter().flatten().filter_map(|i| i["key"].as_str().map(str::to_string)).collect()
+        req[kind]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|i| i["key"].as_str().map(str::to_string))
+            .collect()
     };
     let plan = &crate::ruleset::get().art;
     let (units, wonders, techs) = (keys("units"), keys("wonders"), keys("techs"));
@@ -407,9 +505,18 @@ mod tests {
 
     #[test]
     fn keys_are_the_lowercased_path_under_the_install() {
-        let install = Install { root: PathBuf::from("/civ3"), search: vec![] };
-        assert_eq!(key_of(&install, Path::new("/civ3/Conquests/Art/Units/Warrior")), "conquests/art/units/warrior");
-        assert_eq!(key_of(&install, Path::new("/elsewhere/Mod/Art/X")), "elsewhere/mod/art/x");
+        let install = Install {
+            root: PathBuf::from("/civ3"),
+            search: vec![],
+        };
+        assert_eq!(
+            key_of(&install, Path::new("/civ3/Conquests/Art/Units/Warrior")),
+            "conquests/art/units/warrior"
+        );
+        assert_eq!(
+            key_of(&install, Path::new("/elsewhere/Mod/Art/X")),
+            "elsewhere/mod/art/x"
+        );
     }
 
     #[test]
@@ -419,16 +526,20 @@ mod tests {
         std::fs::create_dir_all(&b).unwrap();
         for root in [&a, &b] {
             let file = std::fs::File::create(root.join("source")).unwrap();
-            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000)).unwrap();
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000))
+                .unwrap();
         }
         let entry = json!({"root": path_str(&a.canonicalize().unwrap()),
             "outputs": [], "sources": [{"path": "source", "size": 0, "mtime": 1000}], "params": null, "search": []});
-        let index: Index = serde_json::from_value(json!({"script": "", "entries": {"stage:test": entry}})).unwrap();
+        let index: Index =
+            serde_json::from_value(json!({"script": "", "entries": {"stage:test": entry}}))
+                .unwrap();
         assert!(index.fresh(&a, "stage:test", &Value::Null, Some(&[])));
         assert!(!index.fresh(&b, "stage:test", &Value::Null, Some(&[])));
         let legacy: Index = serde_json::from_value(json!({"script": "", "entries": {
             "stage:test": {"outputs": [], "sources": [], "params": null}
-        }})).unwrap();
+        }}))
+        .unwrap();
         assert!(!legacy.fresh(&a, "stage:test", &Value::Null, None));
         std::fs::remove_dir_all(a).unwrap();
     }
@@ -442,9 +553,16 @@ mod tests {
     #[test]
     fn the_plan_finds_art_for_the_stock_rules() {
         let art = &crate::ruleset::get().art;
-        assert!(art.unit_key("warrior").is_some(), "{:?}", art.unit_keys.keys().collect::<Vec<_>>());
+        assert!(
+            art.unit_key("warrior").is_some(),
+            "{:?}",
+            art.unit_keys.keys().collect::<Vec<_>>()
+        );
         assert!(art.unit_key("Settler").is_some());
-        assert!(art.leaders.iter().flatten().flatten().count() > 100, "four clips for most civs");
+        assert!(
+            art.leaders.iter().flatten().flatten().count() > 100,
+            "four clips for most civs"
+        );
         assert!(art.techs.iter().flatten().count() > 80);
     }
 }

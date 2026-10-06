@@ -6,12 +6,15 @@ use crate::map::{Base, MP};
 type TilePos = (i32, i32);
 
 fn land(map: &GameMap, board: &Board, civ: usize, from: TilePos) -> HashSet<TilePos> {
-    flood(map, from, |p| map.get(p.0, p.1).is_some_and(|t| move_cost(t).is_some()) && !board.held_by_other(p, civ))
+    flood(map, from, |p| {
+        map.get(p.0, p.1).is_some_and(|t| move_cost(t).is_some()) && !board.held_by_other(p, civ)
+    })
 }
 
 fn coast(map: &GameMap, board: &Board, civ: usize, p: TilePos) -> bool {
-    !board.held_by_other(p, civ) && (map.get(p.0, p.1).is_some_and(|t| t.base == Base::Coast)
-        || board.city_at(p).is_some_and(|c| c.civ == civ && c.coastal))
+    !board.held_by_other(p, civ)
+        && (map.get(p.0, p.1).is_some_and(|t| t.base == Base::Coast)
+            || board.city_at(p).is_some_and(|c| c.civ == civ && c.coastal))
 }
 
 fn flood(map: &GameMap, from: TilePos, enter: impl Fn(TilePos) -> bool) -> HashSet<TilePos> {
@@ -28,21 +31,40 @@ fn flood(map: &GameMap, from: TilePos, enter: impl Fn(TilePos) -> bool) -> HashS
     seen
 }
 
-fn shores(map: &GameMap, board: &Board, civ: usize, water: &HashSet<TilePos>, claimed: &HashSet<TilePos>) -> HashSet<TilePos> {
-    water.iter().flat_map(|&p| map.neighbors(p.0, p.1))
-        .filter(|&p| site_ok(map, board, civ, claimed, p)).collect()
+fn shores(
+    map: &GameMap,
+    board: &Board,
+    civ: usize,
+    water: &HashSet<TilePos>,
+    claimed: &HashSet<TilePos>,
+) -> HashSet<TilePos> {
+    water
+        .iter()
+        .flat_map(|&p| map.neighbors(p.0, p.1))
+        .filter(|&p| site_ok(map, board, civ, claimed, p))
+        .collect()
 }
 
 /// Every land tile joined to `from` by land, whoever stands on it.
 fn landmass(map: &GameMap, from: TilePos) -> HashSet<TilePos> {
-    flood(map, from, |p| map.get(p.0, p.1).is_some_and(|t| move_cost(t).is_some()))
+    flood(map, from, |p| {
+        map.get(p.0, p.1).is_some_and(|t| move_cost(t).is_some())
+    })
 }
 
 /// The nearest city at war with `civ` that is on the shore of `water` and
 /// not on the landmass of `home`: the one a land campaign cannot reach.
-fn overseas_enemy<'a>(map: &GameMap, board: &'a Board, civ: usize, water: &HashSet<TilePos>, home: TilePos) -> Option<&'a City> {
+fn overseas_enemy<'a>(
+    map: &GameMap,
+    board: &'a Board,
+    civ: usize,
+    water: &HashSet<TilePos>,
+    home: TilePos,
+) -> Option<&'a City> {
     let here = landmass(map, home);
-    board.cities.iter()
+    board
+        .cities
+        .iter()
         .filter(|c| board.at_war(civ, c.civ) && !here.contains(&(c.x, c.y)))
         .filter(|c| map.neighbors(c.x, c.y).iter().any(|p| water.contains(p)))
         .min_by_key(|c| (map.distance(home, (c.x, c.y)), (c.x, c.y)))
@@ -60,11 +82,24 @@ pub(super) fn sea_war(map: &GameMap, board: &Board, civ: usize, from: TilePos) -
 fn spare_soldiers<'a>(map: &GameMap, board: &'a Board, civ: usize) -> Vec<(&'a Entity, &'a Unit)> {
     let mut out = vec![];
     for (tile, stack) in &board.at {
-        let mut soldiers: Vec<_> = stack.iter().filter(|(_, u)| u.civ == civ && super::land_soldier(u)).collect();
+        let mut soldiers: Vec<_> = stack
+            .iter()
+            .filter(|(_, u)| u.civ == civ && super::land_soldier(u))
+            .collect();
         soldiers.sort_by_key(|(e, _)| *e);
-        let keep = board.city_at(*tile).filter(|c| c.civ == civ)
-            .map_or(0, |c| super::garrison_need(c, super::threatened(map, board, civ, *tile)));
-        out.extend(soldiers.into_iter().skip(keep).map(|(e, u)| (e, u)).filter(|(_, u)| u.moves > 0 && u.path.is_empty() && !u.attacked));
+        let keep = board
+            .city_at(*tile)
+            .filter(|c| c.civ == civ)
+            .map_or(0, |c| {
+                super::garrison_need(c, super::threatened(map, board, civ, *tile))
+            });
+        out.extend(
+            soldiers
+                .into_iter()
+                .skip(keep)
+                .map(|(e, u)| (e, u))
+                .filter(|(_, u)| u.moves > 0 && u.path.is_empty() && !u.attacked),
+        );
     }
     out
 }
@@ -72,58 +107,136 @@ fn spare_soldiers<'a>(map: &GameMap, board: &'a Board, civ: usize) -> Vec<(&'a E
 pub(super) fn room(map: &GameMap, board: &Board, civ: usize, from: TilePos) -> bool {
     let local = land(map, board, civ, from);
     let water = flood(map, from, |p| coast(map, board, civ, p));
-    shores(map, board, civ, &water, &HashSet::new()).iter().any(|p| !local.contains(p))
+    shores(map, board, civ, &water, &HashSet::new())
+        .iter()
+        .any(|p| !local.contains(p))
 }
 
-fn voyage(map: &GameMap, board: &Board, civ: usize, from: TilePos, dest: TilePos) -> Option<Vec<TilePos>> {
-    map.find_path_by(from, dest, |_, to| (to == dest || coast(map, board, civ, to)).then_some(MP))
+fn voyage(
+    map: &GameMap,
+    board: &Board,
+    civ: usize,
+    from: TilePos,
+    dest: TilePos,
+) -> Option<Vec<TilePos>> {
+    map.find_path_by(from, dest, |_, to| {
+        (to == dest || coast(map, board, civ, to)).then_some(MP)
+    })
 }
 
 /// Ship and passenger paths. Deterministic ordering reserves each settler and
 /// destination once; an existing move finishes before a new plan is assigned.
-pub(super) fn orders(map: &GameMap, board: &Board, civ: usize, turn: u32, targets: &HashMap<Entity, TilePos>) -> Vec<(Entity, Vec<TilePos>)> {
-    if board.mine(civ).count() >= MAX_CITIES { return vec![]; }
-    let mut claimed: HashSet<_> = targets.iter().filter(|(e, _)| board.at.values().flatten().any(|(id, u)| id == *e && u.civ == civ)).map(|(_, &p)| p).collect();
+pub(super) fn orders(
+    map: &GameMap,
+    board: &Board,
+    civ: usize,
+    turn: u32,
+    targets: &HashMap<Entity, TilePos>,
+) -> Vec<(Entity, Vec<TilePos>)> {
+    if board.mine(civ).count() >= MAX_CITIES {
+        return vec![];
+    }
+    let mut claimed: HashSet<_> = targets
+        .iter()
+        .filter(|(e, _)| {
+            board
+                .at
+                .values()
+                .flatten()
+                .any(|(id, u)| id == *e && u.civ == civ)
+        })
+        .map(|(_, &p)| p)
+        .collect();
     let mut used = HashSet::new();
-    let mut ships: Vec<_> = board.at.values().flatten().filter(|(_, u)| u.civ == civ && def(u.utype).class == 1
-        && def(u.utype).capacity > 0 && u.moves > 0 && u.path.is_empty() && matches!(u.anim, UnitAnim::Idle { .. })).collect();
+    let mut ships: Vec<_> = board
+        .at
+        .values()
+        .flatten()
+        .filter(|(_, u)| {
+            u.civ == civ
+                && def(u.utype).class == 1
+                && def(u.utype).capacity > 0
+                && u.moves > 0
+                && u.path.is_empty()
+                && matches!(u.anim, UnitAnim::Idle { .. })
+        })
+        .collect();
     ships.sort_by_key(|(e, _)| *e);
     let spots = board.city_spots();
     let mut result = vec![];
     for &(ship, u) in &ships {
         let from = (u.x, u.y);
         let water = flood(map, from, |p| coast(map, board, civ, p));
-        let cargo: Vec<_> = board.at.values().flatten().filter(|(_, v)| v.carrier == Some(*ship)).collect();
-        if cargo.iter().any(|(_, v)| crate::roles::founds_cities(v.utype)) {
-            if cargo.iter().any(|(_, v)| !v.path.is_empty()) { continue; }
-            if !cargo.iter().any(|(_, v)| crate::roles::founds_cities(v.utype) && v.moves > 0) { continue; }
-            let goal = shores(map, board, civ, &water, &claimed).into_iter()
-                .max_by_key(|&p| (site_score(map, &spots, p.0, p.1) - 2 * map.distance(from, p), std::cmp::Reverse(p)));
-            if let Some(goal) = goal && let Some(path) = voyage(map, board, civ, from, goal) {
+        let cargo: Vec<_> = board
+            .at
+            .values()
+            .flatten()
+            .filter(|(_, v)| v.carrier == Some(*ship))
+            .collect();
+        if cargo
+            .iter()
+            .any(|(_, v)| crate::roles::founds_cities(v.utype))
+        {
+            if cargo.iter().any(|(_, v)| !v.path.is_empty()) {
+                continue;
+            }
+            if !cargo
+                .iter()
+                .any(|(_, v)| crate::roles::founds_cities(v.utype) && v.moves > 0)
+            {
+                continue;
+            }
+            let goal = shores(map, board, civ, &water, &claimed)
+                .into_iter()
+                .max_by_key(|&p| {
+                    (
+                        site_score(map, &spots, p.0, p.1) - 2 * map.distance(from, p),
+                        std::cmp::Reverse(p),
+                    )
+                });
+            if let Some(goal) = goal
+                && let Some(path) = voyage(map, board, civ, from, goal)
+            {
                 claimed.insert(goal);
                 result.push((*ship, path));
             }
             continue;
         }
-        let troops = cargo.iter().filter(|(_, v)| super::land_soldier_aboard(v)).count();
+        let troops = cargo
+            .iter()
+            .filter(|(_, v)| super::land_soldier_aboard(v))
+            .count();
         if troops > 0 {
-            if cargo.iter().any(|(_, v)| !v.path.is_empty()) { continue; }
-            if troops < def(u.utype).capacity as usize && troops < 2 { continue; }
+            if cargo.iter().any(|(_, v)| !v.path.is_empty()) {
+                continue;
+            }
+            if troops < def(u.utype).capacity as usize && troops < 2 {
+                continue;
+            }
             // Land units cannot attack from a ship (`naval::can_attack_from`):
             // the band lands on open ground beside the city and strikes
             // from there on a later turn.
             if let Some(target) = overseas_enemy(map, board, civ, &water, from) {
-                let beach = map.neighbors(target.x, target.y).into_iter()
-                    .filter(|&p| map.get(p.0, p.1).is_some_and(|t| move_cost(t).is_some()) && !board.held_by_other(p, civ)
-                        && map.neighbors(p.0, p.1).iter().any(|q| water.contains(q)))
+                let beach = map
+                    .neighbors(target.x, target.y)
+                    .into_iter()
+                    .filter(|&p| {
+                        map.get(p.0, p.1).is_some_and(|t| move_cost(t).is_some())
+                            && !board.held_by_other(p, civ)
+                            && map.neighbors(p.0, p.1).iter().any(|q| water.contains(q))
+                    })
                     .min_by_key(|&p| (map.distance(from, p), p));
-                if let Some(beach) = beach && let Some(path) = voyage(map, board, civ, from, beach) {
+                if let Some(beach) = beach
+                    && let Some(path) = voyage(map, board, civ, from, beach)
+                {
                     result.push((*ship, path));
                 }
             }
             continue;
         }
-        if !cargo.is_empty() { continue; }
+        if !cargo.is_empty() {
+            continue;
+        }
         if turn >= super::AGGRESSION_TURN {
             let spare = spare_soldiers(map, board, civ);
             if spare.len() >= 2 {
@@ -133,19 +246,34 @@ pub(super) fn orders(map: &GameMap, board: &Board, civ: usize, turn: u32, target
                     let home = (first.x, first.y);
                     let local = landmass(map, home);
                     if overseas_enemy(map, board, civ, &water, home).is_some() {
-                        let pickup = water.iter().copied().filter(|&p| map.get(p.0, p.1).is_some_and(|t| t.base == Base::Coast)
-                            && map.neighbors(p.0, p.1).iter().any(|p| local.contains(p)))
+                        let pickup = water
+                            .iter()
+                            .copied()
+                            .filter(|&p| {
+                                map.get(p.0, p.1).is_some_and(|t| t.base == Base::Coast)
+                                    && map.neighbors(p.0, p.1).iter().any(|p| local.contains(p))
+                            })
                             .min_by_key(|&p| (map.distance(from, p) + map.distance(home, p), p));
-                        if let Some(pickup) = pickup && let Some(path) = voyage(map, board, civ, from, pickup) {
+                        if let Some(pickup) = pickup
+                            && let Some(path) = voyage(map, board, civ, from, pickup)
+                        {
                             if from == pickup {
                                 let mut taken = 0;
-                                for &&(e, v) in band.iter().filter(|(_, v)| local.contains(&(v.x, v.y))) {
-                                    if taken >= def(u.utype).capacity as usize { break; }
+                                for &&(e, v) in
+                                    band.iter().filter(|(_, v)| local.contains(&(v.x, v.y)))
+                                {
+                                    if taken >= def(u.utype).capacity as usize {
+                                        break;
+                                    }
                                     let spot = (v.x, v.y);
                                     if let Some(walk) = map.find_path_by(spot, pickup, |a, b| {
-                                        if b == pickup { Some(MP) }
-                                        else if !board.held_by_other(b, civ) { map.land_cost(a, b, crate::units::bridges(civ)) }
-                                        else { None }
+                                        if b == pickup {
+                                            Some(MP)
+                                        } else if !board.held_by_other(b, civ) {
+                                            map.land_cost(a, b, crate::units::bridges(civ))
+                                        } else {
+                                            None
+                                        }
                                     }) {
                                         result.push((*e, walk));
                                         used.insert(*e);
@@ -162,27 +290,60 @@ pub(super) fn orders(map: &GameMap, board: &Board, civ: usize, turn: u32, target
                 }
             }
         }
-        let mut settlers: Vec<_> = board.at.values().flatten().filter(|(e, v)| v.civ == civ && crate::roles::founds_cities(v.utype)
-            && v.carrier.is_none() && v.moves > 0 && v.path.is_empty() && !used.contains(e)).collect();
+        let mut settlers: Vec<_> = board
+            .at
+            .values()
+            .flatten()
+            .filter(|(e, v)| {
+                v.civ == civ
+                    && crate::roles::founds_cities(v.utype)
+                    && v.carrier.is_none()
+                    && v.moves > 0
+                    && v.path.is_empty()
+                    && !used.contains(e)
+            })
+            .collect();
         settlers.sort_by_key(|(e, v)| (map.distance(from, (v.x, v.y)), *e));
         for &(passenger, v) in &settlers {
             let home = (v.x, v.y);
             let local = land(map, board, civ, home);
-            if local.iter().any(|&p| site_ok(map, board, civ, &claimed, p)) { continue; }
-            if !shores(map, board, civ, &water, &claimed).iter().any(|p| !local.contains(p)) { continue; }
-            let pickup = water.iter().copied().filter(|&p| map.get(p.0, p.1).is_some_and(|t| t.base == Base::Coast)
-                && map.neighbors(p.0, p.1).iter().any(|p| local.contains(p)))
+            if local.iter().any(|&p| site_ok(map, board, civ, &claimed, p)) {
+                continue;
+            }
+            if !shores(map, board, civ, &water, &claimed)
+                .iter()
+                .any(|p| !local.contains(p))
+            {
+                continue;
+            }
+            let pickup = water
+                .iter()
+                .copied()
+                .filter(|&p| {
+                    map.get(p.0, p.1).is_some_and(|t| t.base == Base::Coast)
+                        && map.neighbors(p.0, p.1).iter().any(|p| local.contains(p))
+                })
                 .min_by_key(|&p| (map.distance(from, p) + map.distance(home, p), p));
             let Some(pickup) = pickup else { continue };
-            let Some(path) = voyage(map, board, civ, from, pickup) else { continue };
+            let Some(path) = voyage(map, board, civ, from, pickup) else {
+                continue;
+            };
             if from == pickup {
                 // The final water step uses the ordinary friendly-capacity gate.
                 if let Some(walk) = map.find_path_by(home, pickup, |a, b| {
-                    if b == pickup { Some(MP) }
-                    else if !board.held_by_other(b, civ) { map.land_cost(a, b, crate::units::bridges(civ)) }
-                    else { None }
-                }) { result.push((*passenger, walk)); }
-            } else { result.push((*ship, path)); }
+                    if b == pickup {
+                        Some(MP)
+                    } else if !board.held_by_other(b, civ) {
+                        map.land_cost(a, b, crate::units::bridges(civ))
+                    } else {
+                        None
+                    }
+                }) {
+                    result.push((*passenger, walk));
+                }
+            } else {
+                result.push((*ship, path));
+            }
             used.insert(*passenger);
             break;
         }
@@ -196,12 +357,20 @@ mod tests {
 
     fn islands() -> (GameMap, City) {
         let mut map = GameMap::generate_with_seed(1);
-        for t in &mut map.tiles { t.base = Base::Ocean; t.hut = false; t.camp = false; }
-        for y in 1..=6 { for x in 1..=8 {
-            let i = map.idx(x, y); map.tiles[i].base = Base::Coast;
-        } }
+        for t in &mut map.tiles {
+            t.base = Base::Ocean;
+            t.hut = false;
+            t.camp = false;
+        }
+        for y in 1..=6 {
+            for x in 1..=8 {
+                let i = map.idx(x, y);
+                map.tiles[i].base = Base::Coast;
+            }
+        }
         for p in [(2, 3), (3, 3), (2, 4), (3, 4), (8, 3), (8, 4)] {
-            let i = map.idx(p.0, p.1); map.tiles[i].base = Base::Grassland;
+            let i = map.idx(p.0, p.1);
+            map.tiles[i].base = Base::Grassland;
         }
         let mut city = City::new(1, "Home", 2, 3);
         city.coastal = true;
@@ -213,11 +382,22 @@ mod tests {
         let (mut map, city) = islands();
         let board = Board::new(vec![city.clone()], vec![], &map);
         assert!(room(&map, &board, 1, (2, 3)));
-        let enemies = [(8, 3), (8, 4)].into_iter().enumerate().map(|(i, p)|
-            (Entity::from_bits(i as u64 + 1), Unit::new(2, UnitType::named("Warrior"), p.0, p.1))).collect();
+        let enemies = [(8, 3), (8, 4)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| {
+                (
+                    Entity::from_bits(i as u64 + 1),
+                    Unit::new(2, UnitType::named("Warrior"), p.0, p.1),
+                )
+            })
+            .collect();
         let occupied = Board::new(vec![city], enemies, &map);
         assert!(!room(&map, &occupied, 1, (2, 3)));
-        for y in 1..=6 { let i = map.idx(6, y); map.tiles[i].base = Base::Sea; }
+        for y in 1..=6 {
+            let i = map.idx(6, y);
+            map.tiles[i].base = Base::Sea;
+        }
         assert!(!room(&map, &board, 1, (2, 3)));
     }
 
@@ -228,7 +408,9 @@ mod tests {
         assert!(is_ai(1));
         let (map, city) = islands();
         let mut app = App::new();
-        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.insert_resource(Time::<()>::default());
         app.insert_resource(map);
         app.insert_resource(SplashUp(false));
@@ -244,10 +426,25 @@ mod tests {
         app.add_message::<TurnEnded>();
         app.add_message::<crate::bombard::Order>();
         app.add_message::<crate::combat::AttackOrder>();
-        app.add_systems(Update, (play_turn, crate::units::drive_movement, crate::naval::sync_cargo).chain());
+        app.insert_resource(crate::units::UnitArt::blank());
+        app.add_systems(
+            Update,
+            (
+                play_turn,
+                crate::units::drive_movement,
+                crate::naval::sync_cargo,
+            )
+                .chain(),
+        );
         app.world_mut().spawn(city);
-        let settler = app.world_mut().spawn(Unit::new(1, UnitType::named("Settler"), 3, 3)).id();
-        let ship = app.world_mut().spawn(Unit::new(1, UnitType::named("Galley"), 4, 3)).id();
+        let settler = app
+            .world_mut()
+            .spawn(Unit::new(1, UnitType::named("Settler"), 3, 3))
+            .id();
+        let ship = app
+            .world_mut()
+            .spawn(Unit::new(1, UnitType::named("Galley"), 4, 3))
+            .id();
         let mut boarded = false;
         let mut landed = false;
         let mut founded = false;
@@ -259,25 +456,49 @@ mod tests {
                 assert_eq!(u.moves, 0);
                 landed = true;
             }
-            if app.world().resource::<Messages<FoundCityOrder>>().iter_current_update_messages().any(|o| o.0 == settler) {
-                founded = true; break;
+            if app
+                .world()
+                .resource::<Messages<FoundCityOrder>>()
+                .iter_current_update_messages()
+                .any(|o| o.0 == settler)
+            {
+                founded = true;
+                break;
             }
             // Fast-forward animation and other civilizations' turns. Decisions,
             // boarding, domain gates and movement charges run through the game.
             if !app.world().resource::<Messages<TurnEnded>>().is_empty() {
-                app.world_mut().resource_mut::<Messages<TurnEnded>>().clear();
+                app.world_mut()
+                    .resource_mut::<Messages<TurnEnded>>()
+                    .clear();
                 app.world_mut().resource_mut::<Turn>().0 += 1;
-                for mut u in app.world_mut().query::<&mut Unit>().iter_mut(app.world_mut()) {
+                for mut u in app
+                    .world_mut()
+                    .query::<&mut Unit>()
+                    .iter_mut(app.world_mut())
+                {
                     u.moves = crate::naval::moves(u.utype, u.civ);
                 }
             }
-            for mut u in app.world_mut().query::<&mut Unit>().iter_mut(app.world_mut()) {
+            for mut u in app
+                .world_mut()
+                .query::<&mut Unit>()
+                .iter_mut(app.world_mut())
+            {
                 u.anim = UnitAnim::Idle { t: 0.0 };
             }
         }
-        assert!(boarded && landed && founded, "boarded={boarded}, landed={landed}, founded={founded}");
+        assert!(
+            boarded && landed && founded,
+            "boarded={boarded}, landed={landed}, founded={founded}"
+        );
         assert_ne!(app.world().get::<Unit>(ship).unwrap().x, 8);
-        assert!(app.world().resource::<crate::unit_picker::UnitPicker>().unload.is_none());
+        assert!(
+            app.world()
+                .resource::<crate::unit_picker::UnitPicker>()
+                .unload
+                .is_none()
+        );
     }
 
     #[test]
@@ -287,10 +508,18 @@ mod tests {
         let (map, city) = islands();
         let mut diplomacy = crate::diplomacy::Diplomacy::new();
         diplomacy.meet(1, 2);
-        diplomacy.declare(&crate::diplomacy::Facts::even(), 1, 2, 0, &mut crate::features::MessageBoard::default());
+        diplomacy.declare(
+            &crate::diplomacy::Facts::even(),
+            1,
+            2,
+            0,
+            &mut crate::features::MessageBoard::default(),
+        );
         assert!(diplomacy.at_war(1, 2));
         let mut app = App::new();
-        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.edit_schedule(Update, |s| {
+            s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.insert_resource(Time::<()>::default());
         app.insert_resource(map);
         app.insert_resource(SplashUp(false));
@@ -306,36 +535,92 @@ mod tests {
         app.add_message::<TurnEnded>();
         app.add_message::<crate::bombard::Order>();
         app.add_message::<crate::combat::AttackOrder>();
-        app.add_systems(Update, (play_turn, crate::units::drive_movement, crate::naval::sync_cargo).chain());
+        app.insert_resource(crate::units::UnitArt::blank());
+        app.add_systems(
+            Update,
+            (
+                play_turn,
+                crate::units::drive_movement,
+                crate::naval::sync_cargo,
+            )
+                .chain(),
+        );
         app.world_mut().spawn(city);
         let mut enemy = City::new(2, "Away", 8, 3);
         enemy.coastal = true;
         app.world_mut().spawn(enemy);
-        app.world_mut().spawn(Unit::new(1, UnitType::named("Warrior"), 2, 3));
-        let band: Vec<_> = [(3, 3), (3, 4), (2, 4)].into_iter()
-            .map(|p| app.world_mut().spawn(Unit::new(1, UnitType::named("Archer"), p.0, p.1)).id()).collect();
-        let ship = app.world_mut().spawn(Unit::new(1, UnitType::named("Galley"), 4, 3)).id();
+        app.world_mut()
+            .spawn(Unit::new(1, UnitType::named("Warrior"), 2, 3));
+        let band: Vec<_> = [(3, 3), (3, 4), (2, 4)]
+            .into_iter()
+            .map(|p| {
+                app.world_mut()
+                    .spawn(Unit::new(1, UnitType::named("Archer"), p.0, p.1))
+                    .id()
+            })
+            .collect();
+        let ship = app
+            .world_mut()
+            .spawn(Unit::new(1, UnitType::named("Galley"), 4, 3))
+            .id();
         let mut boarded = 0;
         let mut struck = false;
         for _ in 0..200 {
             app.update();
-            boarded = boarded.max(band.iter().filter(|e| app.world().get::<Unit>(**e).unwrap().carrier == Some(ship)).count());
-            if app.world().resource::<Messages<crate::combat::AttackOrder>>().iter_current_update_messages().any(|o| band.contains(&o.attacker) && o.to == (8, 3)) {
-                struck = true; break;
+            boarded = boarded.max(
+                band.iter()
+                    .filter(|e| app.world().get::<Unit>(**e).unwrap().carrier == Some(ship))
+                    .count(),
+            );
+            if app
+                .world()
+                .resource::<Messages<crate::combat::AttackOrder>>()
+                .iter_current_update_messages()
+                .any(|o| band.contains(&o.attacker) && o.to == (8, 3))
+            {
+                struck = true;
+                break;
             }
             if !app.world().resource::<Messages<TurnEnded>>().is_empty() {
-                app.world_mut().resource_mut::<Messages<TurnEnded>>().clear();
+                app.world_mut()
+                    .resource_mut::<Messages<TurnEnded>>()
+                    .clear();
                 app.world_mut().resource_mut::<Turn>().0 += 1;
-                for mut u in app.world_mut().query::<&mut Unit>().iter_mut(app.world_mut()) {
+                for mut u in app
+                    .world_mut()
+                    .query::<&mut Unit>()
+                    .iter_mut(app.world_mut())
+                {
                     u.moves = crate::naval::moves(u.utype, u.civ);
                 }
             }
-            for mut u in app.world_mut().query::<&mut Unit>().iter_mut(app.world_mut()) {
+            for mut u in app
+                .world_mut()
+                .query::<&mut Unit>()
+                .iter_mut(app.world_mut())
+            {
                 u.anim = UnitAnim::Idle { t: 0.0 };
             }
         }
         assert!(boarded >= 2, "boarded {boarded}");
-        let dbg: Vec<_> = band.iter().map(|e| { let u = app.world().get::<Unit>(*e).unwrap(); (u.x, u.y, u.carrier.is_some(), u.moves, u.path.len()) }).collect();
-        assert!(struck, "the landing party never struck the city; ship at {:?} {:?} unload {:?} turn {}", app.world().get::<Unit>(ship).map(|u| (u.x, u.y, u.moves, u.path.len())), dbg, app.world().resource::<crate::unit_picker::UnitPicker>().unload, app.world().resource::<Turn>().0);
+        let dbg: Vec<_> = band
+            .iter()
+            .map(|e| {
+                let u = app.world().get::<Unit>(*e).unwrap();
+                (u.x, u.y, u.carrier.is_some(), u.moves, u.path.len())
+            })
+            .collect();
+        assert!(
+            struck,
+            "the landing party never struck the city; ship at {:?} {:?} unload {:?} turn {}",
+            app.world()
+                .get::<Unit>(ship)
+                .map(|u| (u.x, u.y, u.moves, u.path.len())),
+            dbg,
+            app.world()
+                .resource::<crate::unit_picker::UnitPicker>()
+                .unload,
+            app.world().resource::<Turn>().0
+        );
     }
 }

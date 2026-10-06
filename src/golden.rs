@@ -13,7 +13,7 @@
 use bevy::prelude::*;
 
 use crate::cities::City;
-use crate::civs::{CIV_CAP, civ_count, Civilizations};
+use crate::civs::{CIV_CAP, Civilizations, civ_count};
 use crate::features::{MessageBoard, post};
 use crate::roster::{self, oth};
 use crate::units::Turn;
@@ -24,7 +24,16 @@ pub const LENGTH: u32 = 20;
 /// The `BLDG +0xF0` category bit of each trait `k = 0..7` (Militaristic,
 /// Commercial, Expansionist, Scientific, Religious, Industrious,
 /// Agricultural, Seafaring).
-pub const TRAIT_WONDER: [u32; 8] = [oth::MILITARISTIC, oth::COMMERCIAL, 0x80, oth::SCIENTIFIC, oth::RELIGIOUS, 0x200, oth::AGRICULTURAL, oth::SEAFARING];
+pub const TRAIT_WONDER: [u32; 8] = [
+    oth::MILITARISTIC,
+    oth::COMMERCIAL,
+    0x80,
+    oth::SCIENTIFIC,
+    oth::RELIGIOUS,
+    0x200,
+    oth::AGRICULTURAL,
+    oth::SEAFARING,
+];
 
 /// A great wonder of one of the civ's traits stands among `rows`.
 pub fn wonder_triggers(traits: u32, rows: impl IntoIterator<Item = usize>) -> bool {
@@ -72,7 +81,10 @@ pub fn track(
                     r.golden_due = false;
                 });
                 if civ == civs.viewer() {
-                    post(&mut board, "Our Great Civilization has entered a Golden Age!");
+                    post(
+                        &mut board,
+                        "Our Great Civilization has entered a Golden Age!",
+                    );
                 }
             }
         }
@@ -82,7 +94,10 @@ pub fn track(
         if end.is_some_and(|e| turn.0 >= e) && !ended[civ] {
             ended[civ] = true;
             if civ == civs.viewer() {
-                post(&mut board, "Our Civilization's Golden Age has ended. So say our analysts...");
+                post(
+                    &mut board,
+                    "Our Civilization's Golden Age has ended. So say our analysts...",
+                );
             }
         }
     }
@@ -93,7 +108,9 @@ mod tests {
     use super::*;
 
     fn row(name: &str) -> usize {
-        (0..roster::bldg_count()).find(|&r| roster::bldg(r).name == name).unwrap()
+        (0..roster::bldg_count())
+            .find(|&r| roster::bldg(r).name == name)
+            .unwrap()
     }
 
     #[test]
@@ -105,7 +122,10 @@ mod tests {
         assert!(roster::bldg(temple).other & oth::RELIGIOUS != 0);
         assert!(wonder_triggers(japan, [temple]));
         // The Great Lighthouse only counts if it carries one of the traits.
-        assert_eq!(wonder_triggers(japan, [lighthouse]), roster::bldg(lighthouse).other & (oth::MILITARISTIC | oth::RELIGIOUS) != 0);
+        assert_eq!(
+            wonder_triggers(japan, [lighthouse]),
+            roster::bldg(lighthouse).other & (oth::MILITARISTIC | oth::RELIGIOUS) != 0
+        );
         // An ordinary building never does.
         assert!(!wonder_triggers(japan, [row("Temple")]));
     }

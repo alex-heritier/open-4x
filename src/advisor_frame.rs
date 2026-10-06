@@ -23,7 +23,14 @@ pub enum Tab {
     Science = 5,
 }
 
-const TABS: [Tab; 6] = [Tab::Domestic, Tab::Trade, Tab::Military, Tab::Foreign, Tab::Culture, Tab::Science];
+const TABS: [Tab; 6] = [
+    Tab::Domestic,
+    Tab::Trade,
+    Tab::Military,
+    Tab::Foreign,
+    Tab::Culture,
+    Tab::Science,
+];
 
 impl Tab {
     /// The advisors the clone has a screen for; the others' tabs are drawn
@@ -56,7 +63,14 @@ pub fn art_button<A: Component>(
     (x, y, w, h): (f32, f32, f32, f32),
     action: A,
 ) -> Entity {
-    s.spawn((Button, ArtButton(stem), action, art(assets, &format!("{stem}_0")), ui.st.rect(x, y, w, h))).id()
+    s.spawn((
+        Button,
+        ArtButton(stem),
+        action,
+        art(assets, &format!("{stem}_0")),
+        ui.st.rect(x, y, w, h),
+    ))
+    .id()
 }
 
 /// Civ3 sets the advisor's name in widely spaced capitals.
@@ -83,20 +97,52 @@ pub struct Frame<'a> {
 
 /// Draw the frame on a stage; `close` goes on the X. Without one the
 /// advisor must be answered first: no X, and the tabs do nothing.
-pub fn frame<A: Component>(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, f: &Frame, close: Option<A>) {
+pub fn frame<A: Component>(
+    s: &mut ChildSpawnerCommands,
+    ui: &Ui,
+    assets: &AssetServer,
+    f: &Frame,
+    close: Option<A>,
+) {
     ui.picture(s, art(assets, f.background), 0.0, 0.0, 1024.0, 768.0);
-    ui.words(s, 0.0, 20.0, 1024.0, 30.0, spaced(f.title), 22.0, Color::BLACK, true);
+    ui.words(
+        s,
+        0.0,
+        20.0,
+        1024.0,
+        30.0,
+        spaced(f.title),
+        22.0,
+        Color::BLACK,
+        true,
+    );
     // The head rises above the box, which hides the shoulders.
     ui.picture(s, art(assets, &f.portrait), 861.0, -22.0, 150.0, 150.0);
     ui.picture(s, art(assets, "dialog"), 806.0, 110.0, 207.0, 132.0);
-    ui.words(s, 815.0, 118.0, 190.0, 116.0, f.says.clone(), 12.0, Color::BLACK, false);
+    ui.words(
+        s,
+        815.0,
+        118.0,
+        190.0,
+        116.0,
+        f.says.clone(),
+        12.0,
+        Color::BLACK,
+        false,
+    );
     for tab in TABS {
         let row = tab as usize;
         let rect = ui.st.rect(4.0, 242.0 + 62.0 * row as f32, 56.0, 56.0);
         if tab == f.tab {
             s.spawn((art(assets, &format!("tab_{row}_2")), rect));
         } else if tab.built() && close.is_some() {
-            s.spawn((Button, ArtButton(TAB_STEMS[row]), TabClick(tab), art(assets, &format!("tab_{row}_0")), rect));
+            s.spawn((
+                Button,
+                ArtButton(TAB_STEMS[row]),
+                TabClick(tab),
+                art(assets, &format!("tab_{row}_0")),
+                rect,
+            ));
         } else {
             s.spawn((art(assets, &format!("tab_{row}_0")), rect));
         }
@@ -111,7 +157,12 @@ pub fn frame<A: Component>(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &Asset
 pub const CLOSE_BOX: (f32, f32, f32, f32) = (952.0, 720.0, 72.0, 48.0);
 
 /// The boxed close X in the corner of a 1024 x 768 screen.
-pub fn close_box<A: Component>(s: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, close: A) -> Entity {
+pub fn close_box<A: Component>(
+    s: &mut ChildSpawnerCommands,
+    ui: &Ui,
+    assets: &AssetServer,
+    close: A,
+) -> Entity {
     art_button(s, ui, assets, "exitbox", CLOSE_BOX, close)
 }
 
@@ -139,7 +190,9 @@ pub fn switch_tabs(
     mut advisors: ResMut<crate::advisors::Advisors>,
     mut domestic: ResMut<crate::domestic::Domestic>,
 ) {
-    let Some((_, tab)) = tabs.iter().find(|(i, _)| **i == Interaction::Pressed) else { return };
+    let Some((_, tab)) = tabs.iter().find(|(i, _)| **i == Interaction::Pressed) else {
+        return;
+    };
     match tab.0 {
         Tab::Domestic => {
             advisors.dismiss();

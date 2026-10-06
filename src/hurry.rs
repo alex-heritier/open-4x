@@ -193,12 +193,21 @@ pub fn quote(city: &City, how: i32, gold: u32, buyer: Buyer) -> Result<Offer, Re
 /// `0x4B5CA0`: the box fills to the cost, then the gold leaves the
 /// treasury (never below zero) or the citizens die and the city remembers
 /// the whip for twenty turns each.
-pub fn apply(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>, offer: Offer, gold: &mut u32, rng: &mut crate::rng::MapRng) {
+pub fn apply(
+    map: &GameMap,
+    city: &mut City,
+    taken: &HashSet<(i32, i32)>,
+    offer: Offer,
+    gold: &mut u32,
+    rng: &mut crate::rng::MapRng,
+) {
     city.shields = city.price(city.production);
     match offer {
         Offer::Gold(price) => *gold = gold.saturating_sub(price),
         Offer::People(n) => {
-            city.hurry_timer = city.hurry_timer.saturating_add(SACRIFICE_TURNS * u16::from(n));
+            city.hurry_timer = city
+                .hurry_timer
+                .saturating_add(SACRIFICE_TURNS * u16::from(n));
             remove_citizens(map, city, taken, n, rng);
         }
     }
@@ -206,7 +215,13 @@ pub fn apply(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>, offer:
 
 /// Native cyclic-slot victims release their own tiles/jobs. A size-class
 /// change caps food at half the new box with a Granary, zero without it.
-pub fn remove_citizens(map: &GameMap, city: &mut City, taken: &HashSet<(i32, i32)>, n: u8, rng: &mut crate::rng::MapRng) {
+pub fn remove_citizens(
+    map: &GameMap,
+    city: &mut City,
+    taken: &HashSet<(i32, i32)>,
+    n: u8,
+    rng: &mut crate::rng::MapRng,
+) {
     for _ in 0..n {
         if city.size() <= 1 {
             break;
@@ -264,18 +279,33 @@ mod tests {
     fn the_validator_checks_in_the_executables_order() {
         let mut c = city(7, 0, Production::named("Warrior"));
         let cost = u32::from(c.price(Production::named("Warrior")));
-        assert_eq!(quote(&c, method::PAY, 1000, Buyer::Human), Ok(Offer::Gold(cost * 8)));
+        assert_eq!(
+            quote(&c, method::PAY, 1000, Buyer::Human),
+            Ok(Offer::Gold(cost * 8))
+        );
         assert_eq!(
             quote(&c, method::PAY, 1, Buyer::Human),
             Err(Refusal::NotEnoughGold(cost * 8))
         );
-        assert_eq!(quote(&c, method::NONE, 1000, Buyer::Human), Err(Refusal::Unavailable));
+        assert_eq!(
+            quote(&c, method::NONE, 1000, Buyer::Human),
+            Err(Refusal::Unavailable)
+        );
         c.production = Production::named("Palace");
-        assert_eq!(quote(&c, method::PAY, 1000, Buyer::Human), Err(Refusal::Cannot));
+        assert_eq!(
+            quote(&c, method::PAY, 1000, Buyer::Human),
+            Err(Refusal::Cannot)
+        );
         c.unrest = 1;
-        assert_eq!(quote(&c, method::PAY, 1000, Buyer::Human), Err(Refusal::Disorder));
+        assert_eq!(
+            quote(&c, method::PAY, 1000, Buyer::Human),
+            Err(Refusal::Disorder)
+        );
         let full = city(3, 1000, Production::named("Warrior"));
-        assert_eq!(quote(&full, method::PAY, 1000, Buyer::Human), Err(Refusal::NotNecessary));
+        assert_eq!(
+            quote(&full, method::PAY, 1000, Buyer::Human),
+            Err(Refusal::NotNecessary)
+        );
     }
 
     #[test]
@@ -286,7 +316,10 @@ mod tests {
             Err(Refusal::NotEnoughPeople(1))
         );
         let c = city(2, 1, Production::named("Warrior"));
-        assert_eq!(quote(&c, method::FORCED_LABOR, 0, Buyer::Human), Ok(Offer::People(1)));
+        assert_eq!(
+            quote(&c, method::FORCED_LABOR, 0, Buyer::Human),
+            Ok(Offer::People(1))
+        );
     }
 
     #[test]
@@ -294,13 +327,27 @@ mod tests {
         let map = GameMap::generate();
         let mut c = city(4, 1, Production::named("Warrior"));
         let mut gold = 0;
-        apply(&map, &mut c, &HashSet::new(), Offer::People(1), &mut gold, &mut crate::rng::MapRng::new(1));
+        apply(
+            &map,
+            &mut c,
+            &HashSet::new(),
+            Offer::People(1),
+            &mut gold,
+            &mut crate::rng::MapRng::new(1),
+        );
         assert_eq!(c.size(), 3);
         assert_eq!(c.shields, c.price(Production::named("Warrior")));
         assert_eq!(c.hurry_timer, 20);
         let mut c = city(4, 1, Production::named("Warrior"));
         let mut gold = 100;
-        apply(&map, &mut c, &HashSet::new(), Offer::Gold(36), &mut gold, &mut crate::rng::MapRng::new(1));
+        apply(
+            &map,
+            &mut c,
+            &HashSet::new(),
+            Offer::Gold(36),
+            &mut gold,
+            &mut crate::rng::MapRng::new(1),
+        );
         assert_eq!((c.size(), gold), (4, 64));
     }
 
@@ -310,12 +357,24 @@ mod tests {
         let map = GameMap::generate();
         let mut c = city(7, 0, Production::named("Warrior"));
         c.food = 25;
-        remove_citizens(&map, &mut c, &HashSet::new(), 1, &mut crate::rng::MapRng::new(1));
+        remove_citizens(
+            &map,
+            &mut c,
+            &HashSet::new(),
+            1,
+            &mut crate::rng::MapRng::new(1),
+        );
         assert_eq!((c.size(), c.food), (6, 0));
         // S4: 5 -> 4 keeps the store unchanged, even when the box is full.
         let mut c = city(5, 0, Production::named("Warrior"));
         c.food = 20;
-        remove_citizens(&map, &mut c, &HashSet::new(), 1, &mut crate::rng::MapRng::new(1));
+        remove_citizens(
+            &map,
+            &mut c,
+            &HashSet::new(),
+            1,
+            &mut crate::rng::MapRng::new(1),
+        );
         assert_eq!((c.size(), c.food), (4, 20));
     }
 }
