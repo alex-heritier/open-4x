@@ -61,14 +61,25 @@ pub fn remove_overrun(
     units: bevy::prelude::Query<&crate::units::Unit>,
 ) {
     let w = map.w;
-    for (i, t) in map.tiles.iter_mut().enumerate() {
-        let Some(site) = t.site else { continue };
-        let civ = owner(site);
-        let p = (i as i32 % w, i as i32 / w);
-        if cities.iter().any(|c| (c.x, c.y) == p)
-            || t.owner.is_some_and(|o| match site { Site::Colony(_) => true, Site::Outpost(_) => o as usize != civ })
-            || units.iter().any(|u| u.carrier.is_none() && (u.x, u.y) == p && u.civ != civ)
-        { t.site = None; }
+    // Looked at through a shared borrow: this runs every frame, and a
+    // mutable one would flag the whole map as changed each time (the realm
+    // tables and the borders wait on that flag).
+    let overrun: Vec<usize> = map
+        .tiles
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let site = t.site?;
+            let civ = owner(site);
+            let p = (i as i32 % w, i as i32 / w);
+            (cities.iter().any(|c| (c.x, c.y) == p)
+                || t.owner.is_some_and(|o| match site { Site::Colony(_) => true, Site::Outpost(_) => o as usize != civ })
+                || units.iter().any(|u| u.carrier.is_none() && (u.x, u.y) == p && u.civ != civ))
+            .then_some(i)
+        })
+        .collect();
+    for i in overrun {
+        map.tiles[i].site = None;
     }
 }
 

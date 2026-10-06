@@ -295,15 +295,26 @@ pub fn update_fog(
         Without<TileSprite>,
     >,
 ) {
+    // The fog is a function of the map and the reveal switch alone (the
+    // sprites are spawned at startup and on a load, which flags the map), so
+    // between those changes there is nothing to redo; and what is written is
+    // written only when it differs, so the sprites are not flagged either.
+    if !(map.is_changed() || reveal.is_changed()) {
+        return;
+    }
     for (ts, overlay, mut sprite, mut vis) in terrain.iter_mut() {
         let t = &map.tiles[map.idx(ts.x, ts.y)];
         match (fog_for(reveal.0, t), overlay.is_some()) {
             // Tall art on unseen tiles hides; the tile's own black diamond
             // covers it, and nothing spills onto visible neighbors.
-            (Fog::Black, true) => *vis = Visibility::Hidden,
+            (Fog::Black, true) => {
+                vis.set_if_neq(Visibility::Hidden);
+            }
             _ => {
-                sprite.color = Color::WHITE;
-                *vis = Visibility::Visible;
+                if sprite.color != Color::WHITE {
+                    sprite.color = Color::WHITE;
+                }
+                vis.set_if_neq(Visibility::Visible);
             }
         }
     }
@@ -312,12 +323,15 @@ pub fn update_fog(
         // A lit tile lights all four of its vertices, so its cell is the
         // sheet's clear one and the sprite can stay off.
         if fog_for(reveal.0, t) == Fog::Clear {
-            *vis = Visibility::Hidden;
+            vis.set_if_neq(Visibility::Hidden);
             continue;
         }
         let (col, row) = fog_cell(&map, reveal.0, fs.x, fs.y);
-        sprite.rect = Some(cell_rect(col, row));
-        *vis = Visibility::Visible;
+        let rect = Some(cell_rect(col, row));
+        if sprite.rect != rect {
+            sprite.rect = rect;
+        }
+        vis.set_if_neq(Visibility::Visible);
     }
 }
 
@@ -368,6 +382,59 @@ mod tests {
         assert_eq!(fog_for(false, &fog_tile(false, true)), Fog::Dim);
         assert_eq!(fog_for(false, &fog_tile(false, false)), Fog::Black);
         assert_eq!(fog_for(true, &fog_tile(false, false)), Fog::Clear);
+    }
+
+    /// The fog is redone when the map or the reveal switch is flagged and
+    /// at no other time (the sprites are spawned once and never change
+    /// otherwise), and a rewrite that changes nothing flags nothing.
+    #[test]
+    fn the_fog_is_redone_only_when_its_inputs_change() {
+        #[derive(Resource, Default)]
+        struct Flagged(Vec<bool>);
+        let (x, y) = (10, 10);
+        let mut app = App::new();
+        app.insert_resource(all_tiles(false, false));
+        app.insert_resource(RevealAll(false));
+        app.init_resource::<Flagged>();
+        // After the fog, in the same frame: was the sprite's visibility written?
+        app.add_systems(
+            Update,
+            (update_fog, |q: Query<Ref<Visibility>>, mut seen: ResMut<Flagged>| {
+                seen.0.push(q.single().unwrap().is_changed())
+            })
+                .chain(),
+        );
+        let fog = app.world_mut().spawn((Sprite::default(), Visibility::Hidden, FogSprite { x, y })).id();
+        let vis = |app: &App| *app.world().get::<Visibility>(fog).unwrap();
+        // A value `update_fog` never writes marks whether it ran again.
+        let tamper = |app: &mut App| *app.world_mut().get_mut::<Visibility>(fog).unwrap() = Visibility::Inherited;
+
+        // The first frame draws the fog over the unseen tile.
+        app.update();
+        assert_eq!(vis(&app), Visibility::Visible);
+
+        // Nothing flagged: left as it is.
+        tamper(&mut app);
+        app.update();
+        assert_eq!(vis(&app), Visibility::Inherited);
+
+        // The map written (even to the same value): redone.
+        let _ = &mut app.world_mut().resource_mut::<GameMap>().tiles[0];
+        app.update();
+        assert_eq!(vis(&app), Visibility::Visible);
+
+        // The reveal switch flipped: redone, and the fog goes clear.
+        tamper(&mut app);
+        app.world_mut().resource_mut::<RevealAll>().0 = true;
+        app.update();
+        assert_eq!(vis(&app), Visibility::Hidden);
+
+        // A redo that writes what is already there leaves the sprite unflagged.
+        let frames = app.world().resource::<Flagged>().0.len();
+        let _ = &mut app.world_mut().resource_mut::<GameMap>().tiles[0];
+        app.update();
+        assert_eq!(vis(&app), Visibility::Hidden);
+        assert_eq!(app.world().resource::<Flagged>().0[frames..], [false], "an unchanged fog sprite must not be flagged");
     }
 
     #[test]

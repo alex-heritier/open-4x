@@ -1735,8 +1735,7 @@ mod tests {
     /// DEFAULT-only art for every unit type, so captures can spawn Workers.
     fn test_clip(frames: usize) -> Clip {
         Clip {
-            strips: std::array::from_fn(|_| Handle::default()),
-            teams: vec![],
+            strips: crate::units::Strips::blank(),
             frame_w: 40.0,
             frame_h: 40.0,
             frames,

@@ -74,7 +74,33 @@ mod wonders;
 
 use map::GameMap;
 
+/// Lift the open-file soft limit to the hard limit (no privilege needed).
+///
+/// The asset server opens one file per pending load; a unit-heavy save queues
+/// thousands at once, and macOS starts a shell's game with `RLIMIT_NOFILE`
+/// soft = 256, so those loads fail with `EMFILE` (os error 24) and the sprite
+/// keeps its placeholder. The hard limit is the machine's own cap
+/// (`kern.maxfilesperproc`), so this only removes the artificial ceiling.
+#[cfg(unix)]
+fn raise_fd_limit() {
+    // SAFETY: `getrlimit`/`setrlimit` read and write a process rlimit, on a
+    // value initialized here; failure just leaves the limit alone.
+    unsafe {
+        let mut limit = std::mem::zeroed::<libc::rlimit>();
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 || limit.rlim_cur >= limit.rlim_max {
+            return;
+        }
+        // `rlim_max` may be `RLIM_INFINITY`, which is not a request the kernel
+        // takes; ask for a million, above `kern.maxfilesperproc`.
+        limit.rlim_cur = limit.rlim_max.min(1 << 20);
+        libc::setrlimit(libc::RLIMIT_NOFILE, &limit);
+    }
+}
+
 fn main() {
+    #[cfg(unix)]
+    raise_fd_limit();
+
     #[cfg(target_arch = "wasm32")]
     {
         console_error_panic_hook::set_once();
@@ -410,7 +436,7 @@ fn setup_art(mut commands: Commands, assets: Res<AssetServer>, mut images: ResMu
     commands.insert_resource(units::UnitArt::load(&assets));
     commands.insert_resource(cities::CityArt::load(&assets));
     commands.insert_resource(features::FeatureArt::load(&assets));
-    commands.insert_resource(improvements::ImprovementArt::load(&assets));
+    commands.insert_resource(improvements::ImprovementArt::load());
     commands.insert_resource(borders::BorderArt::load(&assets));
     commands.insert_resource(units::SelectionRing::load(&assets));
     commands.insert_resource(cities::CapitalStar::generate(&mut images));

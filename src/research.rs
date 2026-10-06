@@ -566,16 +566,34 @@ pub fn refresh(
             defenders[u.civ] += 1;
         }
     }
-    research.world.turn = turn.0 as i32;
-    for civ in 0..civ_count() {
-        let s = slot(civ) as usize;
+    // Work the new figures out first and write only if one differs: this
+    // runs every frame, and any write marks `Research` changed for every
+    // system (like `realm::sync`) that waits on it.
+    let turn_now = turn.0 as i32;
+    let figures: Vec<(usize, i32, i32, u32, i32)> = (0..civ_count())
+        .map(|civ| {
+            let s = slot(civ) as usize;
+            let me = &research.world.players[s];
+            let rate = if me.science_until.is_some_and(|last| turn_now <= last) {
+                (rate[civ] as f32 * 1.25) as i32
+            } else { rate[civ] };
+            (s, rate, count[civ], diplomacy.contacts(civ), defenders[civ])
+        })
+        .collect();
+    let current = |s: usize| {
+        let me = &research.world.players[s];
+        (me.rate, me.cities, me.contact, research.profiles[s].defenders)
+    };
+    if research.world.turn == turn_now && figures.iter().all(|&(s, rate, cities, contact, defenders)| current(s) == (rate, cities, contact, defenders)) {
+        return;
+    }
+    research.world.turn = turn_now;
+    for (s, rate, cities, contact, defenders) in figures {
         let me = &mut research.world.players[s];
-        me.rate = if me.science_until.is_some_and(|last| turn.0 as i32 <= last) {
-            (rate[civ] as f32 * 1.25) as i32
-        } else { rate[civ] };
-        me.cities = count[civ];
-        me.contact = diplomacy.contacts(civ);
-        research.profiles[s].defenders = defenders[civ];
+        me.rate = rate;
+        me.cities = cities;
+        me.contact = contact;
+        research.profiles[s].defenders = defenders;
     }
 }
 
@@ -630,6 +648,11 @@ pub fn spawn_leaders(
     art: Res<crate::units::UnitArt>,
     mut board: ResMut<MessageBoard>,
 ) {
+    // Looking is free; `take` borrows mutably and would flag `Research`
+    // changed on every frame, pending leader or not.
+    if research.leaders.is_empty() {
+        return;
+    }
     for civ in std::mem::take(&mut research.leaders) {
         let Some(city) = capital.0[civ].and_then(|e| cities.get(e).ok()).filter(|c| c.civ == civ) else { continue };
         let e = crate::units::spawn_unit(&mut commands, &art, crate::roles::leader(), city.x, city.y, civ);

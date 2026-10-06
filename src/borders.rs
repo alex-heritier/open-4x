@@ -126,6 +126,12 @@ pub fn sync_borders(
     reveal: Res<RevealAll>,
     mut q: Query<(Entity, &BorderSprite, &mut Sprite, &mut Visibility)>,
 ) {
+    // The ribbons are a function of tile ownership and fog alone, and both
+    // live in the map: until it (or the reveal switch) changes, last
+    // frame's ribbons are still right. The scan below walks every tile.
+    if !map.is_changed() && !reveal.is_changed() {
+        return;
+    }
     let owner = territory(&map);
     let mut have: HashSet<(i32, i32, Side)> = HashSet::new();
     for (e, bs, mut sprite, mut vis) in q.iter_mut() {
@@ -136,11 +142,17 @@ pub fn sync_borders(
         have.insert((bs.x, bs.y, bs.side));
         // Civ3 draws a border at full strength on every tile ever seen, so
         // the ribbon sits above the fog and only hides where it is black.
-        sprite.color = owner_color(&owner, bs.x, bs.y);
-        *vis = match fog_for(reveal.0, &map.tiles[map.idx(bs.x, bs.y)]) {
+        let color = owner_color(&owner, bs.x, bs.y);
+        if sprite.color != color {
+            sprite.color = color;
+        }
+        let shown = match fog_for(reveal.0, &map.tiles[map.idx(bs.x, bs.y)]) {
             Fog::Black => Visibility::Hidden,
             _ => Visibility::Visible,
         };
+        if *vis != shown {
+            *vis = shown;
+        }
     }
     for y in 0..map.h {
         for x in 0..map.w {

@@ -390,7 +390,12 @@ pub fn check_elimination(
             println!("ai: the {} are eliminated", CIVS[civ].name);
         }
     }
-    civs.outcome = outcome_of(&civs.eliminated, is_ai);
+    // Assigned only on a change: this runs every frame, and a write would
+    // mark `Civilizations` (and so the diplomacy refresh) changed each time.
+    let outcome = outcome_of(&civs.eliminated, is_ai);
+    if civs.outcome != outcome {
+        civs.outcome = outcome;
+    }
     if civs.outcome.is_some() && std::env::var("CIV3_AI_LOG").is_ok() {
         println!("ai: game over: {:?}", civs.outcome);
     }

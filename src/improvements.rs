@@ -322,13 +322,25 @@ struct ImpEntry {
     anchor: [i32; 2],
 }
 
+/// One picture of the manifest: where it lives and where its anchor sits.
+/// The image is asked for the first time something is drawn with it.
+struct ImpDef {
+    file: String,
+    anchor: Anchor,
+    image: std::sync::OnceLock<Handle<Image>>,
+}
+
 #[derive(Resource)]
 pub struct ImprovementArt {
-    defs: HashMap<String, (Handle<Image>, Anchor)>,
+    defs: HashMap<String, ImpDef>,
 }
 
 impl ImprovementArt {
-    pub fn load(asset_server: &AssetServer) -> Self {
+    /// The manifest only: a road has 256 neighbor masks and each irrigation
+    /// sheet 16, and a game shows a few dozen, so the pictures are fetched as
+    /// they are first drawn, not all at startup (in a browser each is a
+    /// request).
+    pub fn load() -> Self {
         let text = crate::web::read_text("assets/cache/improvements/manifest.json")
             .expect("run from the repo root: the art cache (assets/cache) is built at startup");
         let raw: HashMap<String, ImpEntry> =
@@ -339,15 +351,17 @@ impl ImprovementArt {
                 e.anchor[0] as f32 / e.size[0] as f32 - 0.5,
                 0.5 - e.anchor[1] as f32 / e.size[1] as f32,
             ));
-            defs.insert(
-                name.clone(),
-                (
-                    asset_server.load(format!("cache/improvements/{}", e.file)),
-                    anchor,
-                ),
-            );
+            defs.insert(name, ImpDef { file: e.file, anchor, image: Default::default() });
         }
         Self { defs }
+    }
+
+    /// The picture of `key` and its anchor, requesting the image if this is
+    /// the first use.
+    fn get(&self, key: &str, assets: &AssetServer) -> (Handle<Image>, Anchor) {
+        let def = &self.defs[key];
+        let image = def.image.get_or_init(|| assets.load(format!("cache/improvements/{}", def.file)));
+        (image.clone(), def.anchor)
     }
 }
 
@@ -420,6 +434,10 @@ impl ImpLayer {
     }
 }
 
+/// What the overlays were last built from besides the map: the viewer's era
+/// and where the cities were.
+type Basis = (u8, Vec<(i32, i32)>);
+
 /// Spawn overlays for new improvements, refresh masks, tint by fog.
 pub fn sync_improvement_sprites(
     mut commands: Commands,
@@ -430,10 +448,23 @@ pub fn sync_improvement_sprites(
     research: Res<crate::research::Research>,
     civs: Res<crate::civs::Civilizations>,
     mut q: Query<(Entity, &mut ImprovementSprite, &mut Sprite, &mut Visibility)>,
+    assets: Res<AssetServer>,
+    images: Res<Assets<Image>>,
+    mut last: Local<Option<Basis>>,
+    mut waiting: Local<bool>,
 ) {
     // Structures are drawn in the viewer's era (`graphics-terrain.md`).
     let era = crate::tech_tree::era_of(&research, civs.viewer()) as u8;
     let hubs: Vec<(i32, i32)> = cities.iter().map(|c| (c.x, c.y)).collect();
+    // The overlays follow the map, the reveal switch, the era and where the
+    // cities are (the roads meet there); with all of those as they were,
+    // and no picture still on its way, there is nothing to redo.
+    let same = last.as_ref().is_some_and(|(e, h)| *e == era && *h == hubs);
+    if same && !*waiting && !(map.is_changed() || reveal.is_changed() || art.is_changed()) {
+        return;
+    }
+    *last = Some((era, hubs.clone()));
+    *waiting = false;
     let mut have: HashSet<(i32, i32, ImpLayer)> = HashSet::new();
     for (e, mut fs, mut sprite, mut vis) in q.iter_mut() {
         let t = &map.tiles[map.idx(fs.x, fs.y)];
@@ -445,18 +476,26 @@ pub fn sync_improvement_sprites(
         have.insert((fs.x, fs.y, fs.layer));
         let mask = fs.layer.mask(&map, &hubs, fs.x, fs.y, era);
         if mask != fs.mask {
-            // Neighbor change: swap to the new mask tile.
-            let key = sprite_key(t, fs.layer, mask);
-            sprite.image = art.defs[&key].0.clone();
-            fs.mask = mask;
+            // Neighbor change: swap to the new mask tile, once it is here;
+            // until then the old one stays up rather than a gap.
+            let (image, _) = art.get(&sprite_key(t, fs.layer, mask), &assets);
+            let failed = matches!(assets.load_state(&image), bevy::asset::LoadState::Failed(_));
+            if images.contains(&image) || failed {
+                sprite.image = image;
+                fs.mask = mask;
+            } else {
+                *waiting = true;
+            }
         }
         // Improvements sit below the fog diamonds, which do the dimming;
         // unseen ones hide so nothing spills past the fog edge.
-        sprite.color = Color::WHITE;
-        *vis = match fog_for(reveal.0, t) {
+        if sprite.color != Color::WHITE {
+            sprite.color = Color::WHITE;
+        }
+        vis.set_if_neq(match fog_for(reveal.0, t) {
             Fog::Black => Visibility::Hidden,
             _ => Visibility::Visible,
-        };
+        });
     }
     // Spawn overlays for improvements that lack them.
     for y in 0..map.h {
@@ -468,7 +507,7 @@ pub fn sync_improvement_sprites(
                     continue;
                 }
                 let mask = layer.mask(&map, &hubs, x, y, era);
-                let (image, anchor) = art.defs[&sprite_key(t, layer, mask)].clone();
+                let (image, anchor) = art.get(&sprite_key(t, layer, mask), &assets);
                 let vis = match fog_for(reveal.0, t) {
                     Fog::Black => Visibility::Hidden,
                     _ => Visibility::Visible,

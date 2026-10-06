@@ -67,11 +67,57 @@ struct ClipEntry {
     sounds: Vec<(f32, String)>,
 }
 
+/// The picture strips of one clip: a file for each facing, and one more set
+/// for each owner's team color when the converted art has them.
+///
+/// A strip is requested the first time it is drawn. A unit type has up to 19
+/// clips of 8 facings in every team color, and a match draws a few of those;
+/// loading them all when the type first appeared meant hundreds of requests
+/// and megabytes of decoded pixels, mostly for art nobody sees.
+pub struct Strips {
+    server: Option<AssetServer>,
+    /// `<cache>/<unit folder>/<slot>`: a file is `<base>_d<facing>[_c<color>].png`.
+    base: String,
+    /// Team color of each owner (`team_colors` order); empty when the art
+    /// has no team strips, and every owner draws the plain ones.
+    colors: Vec<u8>,
+    plain: [OnceLock<Handle<Image>>; 8],
+    teams: Vec<[OnceLock<Handle<Image>>; 8]>,
+}
+
+impl Strips {
+    fn new(server: &AssetServer, base: String, colors: Vec<u8>) -> Self {
+        Self {
+            server: Some(server.clone()),
+            base,
+            teams: colors.iter().map(|_| std::array::from_fn(|_| OnceLock::new())).collect(),
+            colors,
+            plain: std::array::from_fn(|_| OnceLock::new()),
+        }
+    }
+
+    /// Strips that load nothing: every picture is the default image (tests).
+    #[cfg(test)]
+    pub fn blank() -> Self {
+        Self { server: None, base: String::new(), colors: vec![], plain: std::array::from_fn(|_| OnceLock::new()), teams: vec![] }
+    }
+
+    fn load(&self, file: String) -> Handle<Image> {
+        self.server.as_ref().map_or_else(Handle::default, |s| s.load(file))
+    }
+
+    /// The strip for facing `dir` in `civ`'s colors; the first call asks for
+    /// the file.
+    pub fn get(&self, dir: usize, civ: usize) -> &Handle<Image> {
+        match self.colors.get(civ) {
+            Some(color) => self.teams[civ][dir].get_or_init(|| self.load(format!("{}_d{dir}_c{color}.png", self.base))),
+            None => self.plain[dir].get_or_init(|| self.load(format!("{}_d{dir}.png", self.base))),
+        }
+    }
+}
+
 pub struct Clip {
-    pub strips: [Handle<Image>; 8],
-    /// The strips in each owner's team color (`TEAM_COLORS` order), when
-    /// the converted art has them.
-    pub teams: Vec<[Handle<Image>; 8]>,
+    pub strips: Strips,
     pub frame_w: f32,
     pub frame_h: f32,
     pub frames: usize,
@@ -93,9 +139,17 @@ pub fn team_colors() -> [u8; crate::civs::CIV_CAP] {
 }
 
 impl Clip {
-    /// The strip for facing `dir` in `civ`'s colors.
-    pub fn strip(&self, dir: usize, civ: usize) -> Handle<Image> {
-        self.teams.get(civ).map_or_else(|| self.strips[dir].clone(), |t| t[dir].clone())
+    /// The strip for facing `dir` in `civ`'s colors, requested on first use.
+    pub fn strip(&self, dir: usize, civ: usize) -> &Handle<Image> {
+        self.strips.get(dir, civ)
+    }
+
+    /// Ask for the strips of every facing in `civ`'s colors, so they are on
+    /// their way before the clip is first drawn.
+    pub fn warm(&self, civ: usize) {
+        for dir in 0..8 {
+            self.strips.get(dir, civ);
+        }
     }
 
     /// Playing time in seconds.
@@ -162,8 +216,7 @@ impl UnitArt {
         let mut art = Self::default();
         for t in UnitType::all() {
             let clip = Clip {
-                strips: std::array::from_fn(|_| Handle::default()),
-                teams: vec![],
+                strips: Strips::blank(),
                 frame_w: 40.0,
                 frame_h: 40.0,
                 frames: 4,
@@ -203,29 +256,18 @@ impl UnitArt {
         let raw: HashMap<String, ClipEntry> =
             serde_json::from_str(&text).expect("unit manifest parses");
         let mut clips = HashMap::new();
+        // The converter recolors every slot of a folder or none, so one slot
+        // answers for them all (and in a browser the answer comes from the
+        // request, not from the server).
+        let tinted = raw.keys().next().is_some_and(|slot| {
+            crate::web::cache_exists(format!("{CACHE}/{dir}/{slot}_d0_c{}.png", palette[0]))
+        });
         for (slot, e) in raw {
-            let strips: Vec<Handle<Image>> = (0..8)
-                .map(|d| asset_server.load(format!("{CACHE_URL}/{dir}/{slot}_d{d}.png")))
-                .collect();
-            let tinted = crate::web::cache_exists(format!("{CACHE}/{dir}/{slot}_d0_c{}.png", palette[0]));
-            let teams: Vec<[Handle<Image>; 8]> = if tinted {
-                palette
-                    .iter()
-                    .map(|c| {
-                        let v: Vec<Handle<Image>> = (0..8)
-                            .map(|d| asset_server.load(format!("{CACHE_URL}/{dir}/{slot}_d{d}_c{c}.png")))
-                            .collect();
-                        v.try_into().unwrap()
-                    })
-                    .collect()
-            } else {
-                vec![]
-            };
+            let base = format!("{CACHE_URL}/{dir}/{slot}");
             clips.insert(
                 slot,
                 Clip {
-                    strips: strips.try_into().unwrap(),
-                    teams,
+                    strips: Strips::new(asset_server, base, if tinted { palette.to_vec() } else { vec![] }),
                     frame_w: e.frame[0] as f32,
                     frame_h: e.frame[1] as f32,
                     frames: e.frames,
@@ -515,11 +557,16 @@ pub(crate) fn spawn_unit_at_level(
     level: Level,
 ) -> Entity {
     let clip = art.clip_for(utype, civ, "DEFAULT").expect("DEFAULT clip");
+    // Standing and walking are what every unit does first.
+    clip.warm(civ);
+    if let Some(run) = art.clip_for(utype, civ, "RUN") {
+        run.warm(civ);
+    }
     let pos = tile_to_world(x, y);
     let e = commands
         .spawn((
             Sprite {
-                image: clip.strip(0, civ),
+                image: clip.strip(0, civ).clone(),
                 rect: Some(frame_rect(clip, 0)),
                 ..default()
             },
@@ -949,17 +996,36 @@ pub fn advance_anims(
 }
 
 /// Put `frame` of `clip` on the sprite, facing `u.facing`, feet on the tile.
+///
+/// Each field is written only when it differs: this runs for every unit on
+/// every frame, and a write flags the sprite changed for everything that
+/// reacts to that. A strip that has not arrived yet (art is fetched on first
+/// use) leaves the previous picture, its frame and its anchor in place, so
+/// the unit does not blink out while the file comes in.
 fn show(
     art: &UnitArt,
+    images: &Assets<Image>,
     u: &Unit,
     clip: &Clip,
     frame: usize,
-    sprite: &mut Sprite,
-    anchor: &mut Anchor,
+    sprite: &mut Mut<Sprite>,
+    anchor: &mut Mut<Anchor>,
 ) {
-    sprite.image = clip.strip(u.facing, u.civ);
-    sprite.rect = Some(frame_rect(clip, frame));
-    *anchor = art.anchor(u.utype, u.civ, clip, u.facing);
+    let strip = clip.strip(u.facing, u.civ);
+    if sprite.image != *strip {
+        if !images.contains(strip) {
+            return;
+        }
+        sprite.image = strip.clone();
+    }
+    let rect = Some(frame_rect(clip, frame));
+    if sprite.rect != rect {
+        sprite.rect = rect;
+    }
+    let at = art.anchor(u.utype, u.civ, clip, u.facing);
+    if **anchor != at {
+        **anchor = at;
+    }
 }
 
 /// Tell the unit art each civ's era, so Leaders and Armies wear the look of
@@ -970,7 +1036,7 @@ pub fn sync_art_eras(art: Res<UnitArt>, research: Res<crate::research::Research>
     }
 }
 
-pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite, &mut Anchor)>) {
+pub fn animate_units(art: Res<UnitArt>, images: Res<Assets<Image>>, mut q: Query<(&Unit, &mut Sprite, &mut Anchor)>) {
     for (u, mut sprite, mut anchor) in q.iter_mut() {
         let (slot, t, fps, looped) = match u.anim {
             UnitAnim::Idle { t } => {
@@ -983,7 +1049,7 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite, &mut A
                 } else if u.fortified {
                     match art.clip_for(u.utype, u.civ, "FORTIFY") {
                         Some(clip) => {
-                            show(&art, u, clip, clip.frames - 1, &mut sprite, &mut anchor);
+                            show(&art, &images, u, clip, clip.frames - 1, &mut sprite, &mut anchor);
                             continue;
                         }
                         None => ("DEFAULT", t, 8.0, true),
@@ -1000,7 +1066,7 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite, &mut A
                     continue;
                 };
                 let f = ((t * fps) as usize) % clip.frames;
-                show(&art, u, clip, f, &mut sprite, &mut anchor);
+                show(&art, &images, u, clip, f, &mut sprite, &mut anchor);
                 continue;
             }
             UnitAnim::OneShot { slot, t } => (slot, t, 12.0, false),
@@ -1010,7 +1076,7 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite, &mut A
                 let Some(clip) = clip else {
                     continue;
                 };
-                show(&art, u, clip, clip.frame_at(t, looped), &mut sprite, &mut anchor);
+                show(&art, &images, u, clip, clip.frame_at(t, looped), &mut sprite, &mut anchor);
                 continue;
             }
         };
@@ -1025,7 +1091,7 @@ pub fn animate_units(art: Res<UnitArt>, mut q: Query<(&Unit, &mut Sprite, &mut A
         } else {
             ((t * fps) as usize).min(clip.frames - 1)
         };
-        show(&art, u, clip, f, &mut sprite, &mut anchor);
+        show(&art, &images, u, clip, f, &mut sprite, &mut anchor);
     }
 }
 
@@ -1051,27 +1117,42 @@ impl Exploration {
     }
 }
 
+/// Light the tiles the viewer's units, colonies and cities see, and remember
+/// what has been seen.
+///
+/// The map is written only when a tile's state changes: every system that
+/// asks `map.is_changed()` (the cover sweep, the realm tables) would
+/// otherwise run on every frame, whether or not anything on the map moved.
 pub fn refresh_visibility(
     mut map: ResMut<GameMap>,
     civs: Res<crate::civs::Civilizations>,
     mut explored: ResMut<Exploration>,
     units: Query<&Unit>,
     cities: Query<&crate::cities::City>,
+    mut lit: Local<Vec<bool>>,
 ) {
-    if let Some(civ) = explored.viewer {
-        for (seen, tile) in explored.seen[civ].iter_mut().zip(&map.tiles) {
-            *seen = tile.seen;
-        }
-    }
     // The screen shows the human's view, even while the computer plays.
     let viewer = civs.viewer();
-    explored.viewer = Some(viewer);
-    let memory = &mut explored.seen[viewer];
-    memory.resize(map.tiles.len(), false);
-    for (t, &seen) in map.tiles.iter_mut().zip(memory.iter()) {
-        t.visible = false;
-        t.seen = seen;
+    // Same viewer as last frame and a memory the size of the map: the tiles
+    // already hold what the memory would give back, so it need not be
+    // touched. (It is brought up to date when the viewer changes.)
+    let steady = explored.viewer == Some(viewer) && explored.seen[viewer].len() == map.tiles.len();
+    if !steady {
+        if let Some(civ) = explored.viewer {
+            for (seen, tile) in explored.seen[civ].iter_mut().zip(&map.tiles) {
+                *seen = tile.seen;
+            }
+        }
+        explored.viewer = Some(viewer);
+        let memory = &mut explored.seen[viewer];
+        memory.resize(map.tiles.len(), false);
+        for (t, &seen) in map.tiles.iter_mut().zip(memory.iter()) {
+            t.visible = false;
+            t.seen = seen;
+        }
     }
+    lit.clear();
+    lit.resize(map.tiles.len(), false);
     for u in units.iter() {
         if u.civ != viewer || u.carrier.is_some() {
             continue;
@@ -1088,10 +1169,7 @@ pub fn refresh_visibility(
                     continue;
                 }
                 let nx = map.wrap_x(u.x + dx);
-                let i = map.idx(nx, ny);
-                let t = &mut map.tiles[i];
-                t.visible = true;
-                t.seen = true;
+                lit[map.idx(nx, ny)] = true;
             }
         }
     }
@@ -1103,9 +1181,7 @@ pub fn refresh_visibility(
     for ((x, y), r) in structures {
         for dy in -r..=r { for dx in -r..=r {
             if !(0..map.h).contains(&(y + dy)) { continue; }
-            let i = map.idx(map.wrap_x(x + dx), y + dy);
-            map.tiles[i].visible = true;
-            map.tiles[i].seen = true;
+            lit[map.idx(map.wrap_x(x + dx), y + dy)] = true;
         } }
     }
     // Cities light their workable radius, as in Civ3.
@@ -1116,14 +1192,22 @@ pub fn refresh_visibility(
         let mut tiles = crate::cities::radius_tiles(&map, c.x, c.y);
         tiles.push((c.x, c.y));
         for (nx, ny) in tiles {
-            let i = map.idx(nx, ny);
-            let t = &mut map.tiles[i];
-            t.visible = true;
-            t.seen = true;
+            lit[map.idx(nx, ny)] = true;
         }
     }
-    for (seen, tile) in memory.iter_mut().zip(&map.tiles) {
-        *seen = tile.seen;
+    // A tile is visible exactly when lit, and seen once it has been lit.
+    let stale = map.tiles.iter().zip(lit.iter()).any(|(t, &l)| t.visible != l || (l && !t.seen));
+    if stale {
+        for (t, &l) in map.tiles.iter_mut().zip(lit.iter()) {
+            t.visible = l;
+            t.seen |= l;
+        }
+    }
+    if !steady {
+        let memory = &mut explored.seen[viewer];
+        for (seen, tile) in memory.iter_mut().zip(&map.tiles) {
+            *seen = tile.seen;
+        }
     }
 }
 
@@ -1396,6 +1480,39 @@ mod tests {
             .active = 0;
         app.update();
         assert!(app.world().resource::<GameMap>().tiles[extra].seen);
+    }
+
+    /// The map is flagged changed only on frames where what the viewer sees
+    /// changes; `sync_cover` and the realm tables wait on that flag.
+    #[test]
+    fn an_unchanged_view_leaves_the_map_unflagged() {
+        #[derive(Resource, Default)]
+        struct Flags(Vec<bool>);
+        let map = GameMap::generate();
+        let (x, y) = crate::civs::starting_positions(&map)[0];
+        let mut app = App::new();
+        app.insert_resource(map);
+        app.init_resource::<crate::civs::Civilizations>();
+        app.init_resource::<Exploration>();
+        app.init_resource::<Flags>();
+        app.add_systems(
+            Update,
+            (refresh_visibility, |map: Res<GameMap>, mut flags: ResMut<Flags>| flags.0.push(map.is_changed())).chain(),
+        );
+        let scout = app.world_mut().spawn(scout_at(x, y)).id();
+        for _ in 0..3 {
+            app.update();
+        }
+        // Frame 0 lights the map; the next two have nothing to change.
+        assert_eq!(app.world().resource::<Flags>().0, [true, false, false]);
+        let lit = |app: &App| app.world().resource::<GameMap>().tiles.iter().filter(|t| t.visible).count();
+        let before = lit(&app);
+        // One step east: the lit area shifts, so the map is written once.
+        app.world_mut().get_mut::<Unit>(scout).unwrap().x += 1;
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Flags>().0[3..], [true, false]);
+        assert!(before > 0 && lit(&app) > 0);
     }
 
     #[test]

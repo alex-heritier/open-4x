@@ -81,6 +81,19 @@ The browser build plays the same game with the cache already under
 `python3 tools/prep_assets.py` once if that cache is missing, then run
 `tools/serve_web.sh` and open `http://127.0.0.1:8080`.
 
+`tools/serve_web.sh` builds with the optimized `profiling` Cargo profile (no fat
+LTO, so a rebuild takes about a minute); `tools/build_web.sh` makes the build to
+host into `dist/` (fat LTO, `wasm-opt`). Neither copies the art cache, which is
+over a gigabyte: a Trunk hook (`tools/web_assets.py`) links `dist/assets` to
+`assets/`, and writes `dist/web-bundle.json`, the few hundred small text files the
+game reads as it plays, so that they arrive in one request instead of one
+blocking request each. `tools/build_web.sh --copy-assets` makes `dist/assets` a
+tree of hard links (real files) for hosts that do not follow symlinks.
+
+The game asks for art as it needs it: a unit's animation strips load on first
+use, and which files exist is known from the converter's request, so no
+request is spent finding out that a file is absent.
+
 `CIV3_HOTSEAT=1` makes all four civs human again (the old hotseat mode),
 `CIV3_AUTOPLAY=1` hands all four to the computer to watch, `CIV3_AI_FAST=1`
 skips the computer's animations and `CIV3_AI_LOG=1` prints what it decides

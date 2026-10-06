@@ -664,7 +664,15 @@ pub fn sync_feature_sprites(
         &mut bevy::prelude::Visibility,
     )>,
 ) {
+    use bevy::ecs::change_detection::DetectChanges;
+    use bevy::ecs::change_detection::DetectChangesMut;
     use bevy::prelude::Visibility;
+    // Which sprites stand, and which show, follow from the map and the reveal
+    // switch alone (they are spawned at startup and on a load, which flags
+    // the map).
+    if !(map.is_changed() || reveal.is_changed()) {
+        return;
+    }
     let mut dead = vec![];
     for (e, fs, mut vis) in q.iter_mut() {
         let t = &map.tiles[map.idx(fs.x, fs.y)];
@@ -675,11 +683,11 @@ pub fn sync_feature_sprites(
         // Hidden only under a solid black diamond, so art poking past its
         // tile never shows over unexplored neighbors.
         let lit = crate::render::fog_cell(&map, reveal.0, fs.x, fs.y) != (0, 0);
-        *vis = if lit {
+        vis.set_if_neq(if lit {
             Visibility::Inherited
         } else {
             Visibility::Hidden
-        };
+        });
     }
     for e in dead {
         commands.entity(e).despawn();
@@ -792,9 +800,15 @@ pub fn resolve_features(
             }
         }
     }
+    // Restored only if a hut or camp spoke: this runs every frame of the
+    // computer's turn, and a write marks the board changed each time.
     if let Some((text, ttl)) = quiet {
-        board.text = text;
-        board.ttl = ttl;
+        if board.text != text {
+            board.text = text;
+        }
+        if board.ttl != ttl {
+            board.ttl = ttl;
+        }
     }
 }
 

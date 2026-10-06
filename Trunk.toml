@@ -1,6 +1,18 @@
 [build]
 target = "web/index.html"
 dist = "dist"
+# The page hashes nothing: SRI makes the browser SHA-384 the whole WASM
+# binary before it may run, which costs real time on a file this size and
+# buys nothing when we serve our own build.
+no_sri = true
+
+# The art cache is over a gigabyte: link it into dist instead of copying it
+# (`copy-dir`), and bundle the small files the game reads while it plays.
+# `--copy` makes real (hard-linked) files for hosts that do not follow links.
+[[hooks]]
+stage = "post_build"
+command = "python3"
+command_arguments = ["tools/web_assets.py"]
 
 [serve]
 addresses = ["127.0.0.1"]

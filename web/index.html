@@ -4,8 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Civ3 Clone</title>
-    <link data-trunk rel="rust" href="../Cargo.toml" data-bin="civ3-clone">
-    <link data-trunk rel="copy-dir" href="../assets">
+    <!-- rustc emits these WebAssembly features by default (bulk memory,
+         saturating float-to-int, ...); wasm-opt rejects the module unless
+         told to allow them. -->
+    <link data-trunk rel="rust" href="../Cargo.toml" data-bin="civ3-clone" data-wasm-opt="3"
+          data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types --enable-call-indirect-overlong">
+    <!-- assets/ is linked into dist by tools/web_assets.py (Trunk.toml hook). -->
+    <!-- The game reads this at startup with a blocking request; fetch it
+         while the WASM downloads. -->
+    <link rel="preload" href="web-bundle.json" as="fetch" crossorigin="anonymous">
     <link data-trunk rel="css" href="app.css">
   </head>
   <body>

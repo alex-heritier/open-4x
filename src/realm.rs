@@ -448,10 +448,37 @@ pub fn continents(map: &GameMap) -> Vec<u16> {
     label
 }
 
+/// What [`sync`] last worked from, for the inputs that carry no change flag:
+/// the governments live in the process-wide table, and the soldiers move
+/// every frame for the animation's sake, so a flag on `Unit` says nothing.
+#[derive(Default)]
+pub struct Basis {
+    govts: Vec<usize>,
+    cities: usize,
+    /// `(civ, x, y)` of every soldier of a playing civ, sorted.
+    soldiers: Vec<(usize, i32, i32)>,
+    scratch: Vec<(usize, i32, i32)>,
+}
+
+/// Soldiers of `civ` on each tile, from the sorted list of [`Basis`].
+fn garrison_of(soldiers: &[(usize, i32, i32)], civ: usize) -> HashMap<(i32, i32), u8> {
+    let mut garrison = HashMap::new();
+    for &(_, x, y) in soldiers.iter().filter(|s| s.0 == civ) {
+        *garrison.entry((x, y)).or_insert(0u8) += 1;
+    }
+    garrison
+}
+
 /// Refresh the process-wide tables from the world: the advances known, the
 /// improvements held, the grants of wonders, the strategic resources inside
 /// the borders (which unlock units and improvements), the wonders that are
 /// built, the capital, the luxuries and the soldiers on each tile.
+///
+/// The pass reads every city, the map and the trade network, so it runs
+/// only when something it reads has changed: the resources and cities it
+/// takes (their change flags), the governments and the number of cities
+/// (the [`Basis`]). Where the soldiers stand feeds the garrison tables
+/// alone, and those are refreshed on their own.
 pub fn sync(
     map: Res<GameMap>,
     research_state: Res<Research>,
@@ -461,10 +488,44 @@ pub fn sync(
     diplomacy: Option<Res<crate::diplomacy::Diplomacy>>,
     extra: (Option<Res<crate::flip::Flips>>, Option<Res<crate::units::Turn>>),
     mut labels: Local<Vec<u16>>,
+    mut basis: Local<Basis>,
 ) {
     let (flips, turn) = extra;
-    if let Some(turn) = turn {
+    if let Some(turn) = turn.as_ref() {
         set_turn(turn.0);
+    }
+    let governments: Vec<usize> = (0..civ_count()).map(|civ| read(civ, |r| r.govt)).collect();
+    let mut soldiers = std::mem::take(&mut basis.scratch);
+    soldiers.clear();
+    soldiers.extend(units.iter().filter(|u| u.civ < civ_count() && def(u.utype).attack > 0).map(|u| (u.civ, u.x, u.y)));
+    soldiers.sort_unstable();
+    let (count, touched) = cities.iter_mut().fold((0, false), |(n, t), (_, c)| (n + 1, t || c.is_changed()));
+    let changed = governments != basis.govts || count != basis.cities;
+    let moved = soldiers != basis.soldiers;
+    if changed {
+        basis.govts = governments;
+        basis.cities = count;
+    }
+    if moved {
+        std::mem::swap(&mut basis.soldiers, &mut soldiers);
+    }
+    basis.scratch = soldiers;
+    let flagged = map.is_changed()
+        || research_state.is_changed()
+        || capital.is_changed()
+        || diplomacy.as_ref().is_some_and(|d| d.is_changed())
+        || flips.as_ref().is_some_and(|f| f.is_changed())
+        || turn.as_ref().is_some_and(|t| t.is_changed());
+    if !(changed || touched || flagged) {
+        // Soldiers walking about change the garrison tables and nothing else
+        // the pass computes.
+        if moved {
+            for civ in 0..civ_count() {
+                let garrison = garrison_of(&basis.soldiers, civ);
+                write(civ, |r| r.garrison = garrison);
+            }
+        }
+        return;
     }
     if labels.is_empty() {
         *labels = continents(&map);
@@ -647,10 +708,7 @@ pub fn sync(
             }
         }
         let changed = research::set_goods(civ, goods);
-        let mut garrison: HashMap<(i32, i32), u8> = HashMap::new();
-        for u in units.iter().filter(|u| u.civ == civ && def(u.utype).attack > 0) {
-            *garrison.entry((u.x, u.y)).or_insert(0) += 1;
-        }
+        let garrison = garrison_of(&basis.soldiers, civ);
         let capital_at = capital.0[civ]
             .and_then(|e| all.iter().find(|(id, _)| *id == e))
             .map(|(_, c)| (c.x, c.y));
@@ -786,6 +844,59 @@ mod tests {
         assert!(set_rates(0, Rates { tax: 3, sci: 7, lux: 0 }));
         assert!(!set_rates(0, Rates { tax: 3, sci: 3, lux: 3 }));
         assert_eq!(rates(0).sci, 7);
+    }
+
+    /// `sync` reads the whole world, so it waits for a change: a figure the
+    /// table has wrong stays wrong until something the pass reads moves.
+    #[test]
+    fn sync_runs_only_when_its_inputs_change() {
+        reset();
+        let mut app = App::new();
+        app.insert_resource(GameMap::generate());
+        app.insert_resource(Research::new());
+        app.init_resource::<Capital>();
+        app.insert_resource(crate::units::Turn(1));
+        // The tables are per thread under test: run the pass on this one.
+        app.edit_schedule(Update, |s| { s.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded); });
+        app.add_systems(Update, sync);
+        let town = app.world_mut().spawn(City::new(0, "Kyoto", 10, 10)).id();
+        app.update();
+        assert_eq!(read(0, |r| r.cities), 1);
+
+        // Spoil a figure: nothing changed, so the pass leaves it alone.
+        write(0, |r| r.cities = 7);
+        app.update();
+        app.update();
+        assert_eq!(read(0, |r| r.cities), 7, "an idle world is not scanned again");
+
+        // A city that changed is noticed.
+        app.world_mut().get_mut::<City>(town).unwrap().food += 1;
+        app.update();
+        assert_eq!(read(0, |r| r.cities), 1);
+
+        // So is a government, which carries no change flag of its own.
+        write(0, |r| r.cities = 7);
+        write(0, |r| r.adopt(row::MONARCHY));
+        app.update();
+        assert_eq!(read(0, |r| r.cities), 1);
+
+        // A soldier arriving or walking about moves the garrison tables and
+        // nothing else: the rest of the pass is not run for it.
+        write(0, |r| r.cities = 7);
+        let guard = app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Warrior"), 11, 10)).id();
+        app.update();
+        assert_eq!(read(0, |r| (r.cities, r.garrison.get(&(11, 10)).copied())), (7, Some(1)));
+        app.world_mut().get_mut::<Unit>(guard).unwrap().x = 12;
+        app.update();
+        assert_eq!(
+            read(0, |r| (r.cities, r.garrison.get(&(11, 10)).copied(), r.garrison.get(&(12, 10)).copied())),
+            (7, None, Some(1))
+        );
+        // A civilian is no garrison.
+        app.world_mut().spawn(Unit::new(0, crate::units::UnitType::named("Worker"), 13, 10));
+        app.update();
+        assert_eq!(read(0, |r| r.garrison.get(&(13, 10)).copied()), None);
+        reset();
     }
 
     #[test]

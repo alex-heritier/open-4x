@@ -4,7 +4,43 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.18.1", features = ["wav"] }
+# Only the 2D slice of Bevy: sprites, UI, text, gizmos, audio and the
+# window. The defaults also pull in the whole 3D stack (PBR, glTF, lights,
+# anti-aliasing, tonemapping LUTs), scenes, picking, post-processing and
+# gamepad support, none of which the game uses; they cost compile time,
+# download size and startup work on the web.
+bevy = { version = "0.18.1", default-features = false, features = [
+    "std",
+    "async_executor",
+    "multi_threaded",
+    "bevy_asset",
+    "bevy_log",
+    "bevy_state",
+    "bevy_window",
+    "bevy_winit",
+    "bevy_input_focus",
+    "bevy_color",
+    "bevy_camera",
+    "bevy_image",
+    "bevy_mesh",
+    "bevy_shader",
+    "bevy_text",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_gizmos",
+    "bevy_gizmos_render",
+    "bevy_ui",
+    "bevy_ui_render",
+    "default_font",
+    "png",
+    "audio",
+    "wav",
+    "webgl2",
+    "x11",
+    "wayland",
+] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 # The reverse-engineered Civ3 combat model (odds, terms, tables).
@@ -12,8 +48,42 @@ civ3mapgen = { path = "reverse-engineering/rust" }
 # Civ3's own files: .biq rules, maps and scenarios, and .SAV saved games.
 civ3-biq = { path = "civ3_utils/biq" }
 
+[target.'cfg(unix)'.dependencies]
+# `main::raise_fd_limit`: lift the open-file soft limit before Bevy starts
+# loading art (macOS hands a shell game 256 file descriptors).
+libc = "0.2.189"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.7"
 js-sys = "0.3.106"
 wasm-bindgen = "0.2.129"
 web-sys = { version = "0.3.106", features = ["Document", "Window", "XmlHttpRequest"] }
+
+# Debug builds of Bevy are unplayably slow (the web build ran at 15 fps), so
+# the game's own code stays quick to compile while every dependency, Bevy
+# above all, is optimized.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# What ships. Fat LTO and one codegen unit give the smallest, fastest WASM;
+# `panic = "abort"` drops the unwinding tables (the web build aborts on a
+# panic anyway, and the panic hook has already shown the message by then).
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# Release code generation without the link-time price (a fat-LTO WASM build
+# takes minutes): for the web dev loop (`tools/serve_web.sh`) and for native
+# profiling. Roughly the speed of `release`, rebuilt incrementally.
+[profile.profiling]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+strip = "none"

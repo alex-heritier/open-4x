@@ -116,7 +116,7 @@ pub fn update_hover_label(
     let Ok(mut text) = q.single_mut() else {
         return;
     };
-    text.0 = match hovered.0 {
+    let shown = match hovered.0 {
         Some((x, y)) => {
             let t = &map.tiles[map.idx(x, y)];
             let base = format!("({x},{y}) {:?} {:?} {:?}", t.base, t.relief, t.cover);
@@ -159,6 +159,10 @@ pub fn update_hover_label(
         }
         None => String::new(),
     };
+    // Every assignment makes the text lay itself out again.
+    if text.0 != shown {
+        text.0 = shown;
+    }
 }
 
 pub fn update_message_label(
@@ -169,14 +173,18 @@ pub fn update_message_label(
     let Ok(mut text) = q.single_mut() else {
         return;
     };
+    // Every assignment makes the text lay itself out again, so write only
+    // what differs.
     if board.ttl > 0.0 {
         board.ttl -= time.delta_secs();
-        text.0 = board.text.clone();
+        if text.0 != board.text {
+            text.0 = board.text.clone();
+        }
         if board.ttl <= 0.0 {
             board.text.clear();
         }
-    } else {
-        text.0 = String::new();
+    } else if !text.0.is_empty() {
+        text.0.clear();
     }
 }
 

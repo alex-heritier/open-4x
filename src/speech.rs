@@ -72,58 +72,39 @@ impl Who<'_> {
 
 #[derive(Resource, Default)]
 pub struct Speech {
-    sets: HashMap<String, Set>,
+    sets: std::sync::OnceLock<HashMap<String, Set>>,
+    /// The sets are still to be read from the converted file, when first
+    /// asked for.
+    from_file: bool,
 }
 
 impl Speech {
-    /// The converted file; empty (every `say` is `None`) when it is missing.
+    /// The converted file, read when a leader first speaks (the diplomacy
+    /// screen): it is large, and in a browser reading it is a blocking
+    /// request that startup need not wait for. Empty (every `say` is `None`)
+    /// when it is missing.
     pub fn load() -> Speech {
-        match crate::web::read_text(PATH) {
-            Ok(text) => Speech::parse(&text),
-            Err(_) => Speech::default(),
-        }
+        Speech { sets: Default::default(), from_file: true }
     }
 
+    /// Sets from text already in hand.
+    #[cfg(test)]
     pub fn parse(text: &str) -> Speech {
-        let mut sets: HashMap<String, Set> = HashMap::new();
-        let mut comments: Vec<&str> = vec![];
-        let mut current: Option<String> = None;
-        for raw in text.lines() {
-            let line = raw.trim();
-            if let Some(note) = line.strip_prefix(';') {
-                comments.push(note.trim());
-            } else if let Some(head) = line.strip_prefix('#') {
-                let mut words = head.split_whitespace();
-                let word = words.next().unwrap_or("");
-                let number = words.next().and_then(|n| n.parse::<usize>().ok());
-                let key = current.as_ref().and_then(|k| sets.get_mut(k));
-                match (word, number, key) {
-                    ("civ", Some(n), Some(s)) => s.by_civ = n != 0,
-                    ("power", Some(n), Some(s)) => s.by_power = n != 0,
-                    ("mood", Some(n), Some(s)) => s.by_mood = n != 0,
-                    ("random", Some(n), Some(s)) => s.random = n.max(1),
-                    _ => {
-                        let name = word.to_string();
-                        let vars = comments.iter().filter_map(|c| var_note(c)).collect();
-                        sets.insert(name.clone(), Set { random: 1, vars, ..Set::default() });
-                        current = Some(name);
-                        comments.clear();
-                    }
-                }
-            } else if !line.is_empty()
-                && let Some(s) = current.as_ref().and_then(|k| sets.get_mut(k))
-            {
-                s.lines.push(unquote(line).to_string());
-            }
-        }
-        Speech { sets }
+        Speech { sets: parse_sets(text).into(), from_file: false }
+    }
+
+    fn sets(&self) -> &HashMap<String, Set> {
+        self.sets.get_or_init(|| match self.from_file.then(|| crate::web::read_text(PATH)) {
+            Some(Ok(text)) => parse_sets(&text),
+            _ => HashMap::new(),
+        })
     }
 
     /// The line of block `key` that the leader of `ai` says, in the tone of
     /// `power` (0 weaker, 1 level, 2 stronger than the player) and `mood`
     /// (0 friendly .. 2 hostile); `roll` picks among the phrasings.
     pub fn say(&self, key: &str, power: usize, mood: usize, roll: usize, who: &Who) -> Option<String> {
-        let set = self.sets.get(key)?;
+        let set = self.sets().get(key)?;
         let n = |on: bool| if on { TONES } else { 1 };
         let civ = if set.by_civ { LEADERS[who.ai].text_set } else { 0 };
         let p = if set.by_power { power.min(TONES - 1) } else { 0 };
@@ -131,6 +112,41 @@ impl Speech {
         let at = ((civ * n(set.by_power) + p) * n(set.by_mood) + m) * set.random + roll % set.random;
         Some(fill(set, set.lines.get(at)?, who))
     }
+}
+
+fn parse_sets(text: &str) -> HashMap<String, Set> {
+    let mut sets: HashMap<String, Set> = HashMap::new();
+    let mut comments: Vec<&str> = vec![];
+    let mut current: Option<String> = None;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if let Some(note) = line.strip_prefix(';') {
+            comments.push(note.trim());
+        } else if let Some(head) = line.strip_prefix('#') {
+            let mut words = head.split_whitespace();
+            let word = words.next().unwrap_or("");
+            let number = words.next().and_then(|n| n.parse::<usize>().ok());
+            let key = current.as_ref().and_then(|k| sets.get_mut(k));
+            match (word, number, key) {
+                ("civ", Some(n), Some(s)) => s.by_civ = n != 0,
+                ("power", Some(n), Some(s)) => s.by_power = n != 0,
+                ("mood", Some(n), Some(s)) => s.by_mood = n != 0,
+                ("random", Some(n), Some(s)) => s.random = n.max(1),
+                _ => {
+                    let name = word.to_string();
+                    let vars = comments.iter().filter_map(|c| var_note(c)).collect();
+                    sets.insert(name.clone(), Set { random: 1, vars, ..Set::default() });
+                    current = Some(name);
+                    comments.clear();
+                }
+            }
+        } else if !line.is_empty()
+            && let Some(s) = current.as_ref().and_then(|k| sets.get_mut(k))
+        {
+            s.lines.push(unquote(line).to_string());
+        }
+    }
+    sets
 }
 
 /// `$GET6 = what ai wants` -> `("GET", 6, "what ai wants")`.
@@ -269,10 +285,10 @@ mod tests {
     #[test]
     fn blocks_keep_their_arrangement_and_lines() {
         let s = Speech::parse(SAMPLE);
-        let hello = &s.sets["HELLO"];
+        let hello = &s.sets()["HELLO"];
         assert!(hello.by_civ && !hello.by_power && !hello.by_mood);
         assert_eq!(hello.lines.len(), 2);
-        let war = &s.sets["WAR"];
+        let war = &s.sets()["WAR"];
         assert_eq!((war.by_civ, war.by_power, war.random, war.lines.len()), (false, true, 2, 6));
         assert_eq!(war.lines[4], "Strong one, $PLAYER0, and $CIVNAME3.", "curly quotes come off too");
         assert_eq!(war.expected(), 6);
@@ -318,7 +334,7 @@ mod tests {
             return;
         };
         let mut checked = 0;
-        for (key, set) in &s.sets {
+        for (key, set) in s.sets() {
             // HEADINGS, GOLD and friends are plain lists, not arranged.
             if !set.by_civ && !set.by_power && !set.by_mood && set.random == 1 {
                 continue;
@@ -350,7 +366,7 @@ mod tests {
             return;
         };
         let who = Who::between(1, 0);
-        for (key, set) in &s.sets {
+        for (key, set) in s.sets() {
             for line in &set.lines {
                 let said = fill(set, line, &who);
                 assert!(!said.contains('$'), "{key}: {said}");

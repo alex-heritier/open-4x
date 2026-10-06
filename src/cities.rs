@@ -2009,6 +2009,13 @@ fn shade(c: Color, k: f32) -> Color {
     Color::srgba(s.red * k, s.green * k, s.blue * k, s.alpha)
 }
 
+/// Move a transform along x, flagging it changed only if it moved.
+fn set_x(tf: &mut Mut<Transform>, x: f32) {
+    if tf.translation.x != x {
+        tf.translation.x = x;
+    }
+}
+
 pub fn sync_city_visuals(
     map: Res<GameMap>,
     art: Res<CityArt>,
@@ -2027,39 +2034,62 @@ pub fn sync_city_visuals(
     >,
 ) {
     let viewer = civs.viewer();
+    // Every write below is made only when the value differs. This runs each
+    // frame for every city, and a write flags the component changed: a
+    // flagged `Text2d` is measured and shaped again, a flagged `Sprite` is
+    // re-bounded, whether or not the city changed at all.
     let light = |city: &City| if city_lit(&map, &reveal, city) { 1.0 } else { FOGGED };
     for (link, mut sprite) in sprites.iter_mut() {
         if let Ok(city) = cities.get(link.0) {
             let era = crate::tech_tree::era_of(&research, city.civ);
-            sprite.image = if crate::roles::walls().is_some_and(|w| city.buildings.contains(&w)) {
+            let image = if crate::roles::walls().is_some_and(|w| city.buildings.contains(&w)) {
                 art.wall(culture_group(city.civ), era)
             } else {
                 art.graphic(city.size(), culture_group(city.civ), era)
             };
-            sprite.color = shade(Color::WHITE, light(city));
+            if sprite.image != image {
+                sprite.image = image;
+            }
+            let color = shade(Color::WHITE, light(city));
+            if sprite.color != color {
+                sprite.color = color;
+            }
         }
     }
     for (link, mut banner, mut ink) in banners.iter_mut() {
         if let Ok(city) = cities.get(link.0) {
-            banner.0 = banner_text(&map, city, viewer);
-            ink.0 = shade(LABEL_INK, light(city));
+            let text = banner_text(&map, city, viewer);
+            if banner.0 != text {
+                banner.0 = text;
+            }
+            let color = shade(LABEL_INK, light(city));
+            if ink.0 != color {
+                ink.0 = color;
+            }
         }
     }
     for (link, mut text, mut ink) in badge_texts.iter_mut() {
         if let Ok(city) = cities.get(link.0) {
-            text.0 = city.size().to_string();
-            ink.0 = shade(CIV_BADGE_INK, light(city));
+            let size = city.size().to_string();
+            if text.0 != size {
+                text.0 = size;
+            }
+            let color = shade(CIV_BADGE_INK, light(city));
+            if ink.0 != color {
+                ink.0 = color;
+            }
         }
     }
     // Lay the pieces out around the label center from the measured text.
+    // (Looked up by city once, not searched for by every piece.)
+    let measured: HashMap<Entity, f32> = layouts.iter().map(|(b, l)| (b.0, l.size.x)).collect();
     for (part, mut tf, mut sprite, mut vis) in parts.iter_mut() {
         let Ok(city) = cities.get(part.city) else {
             continue;
         };
-        let w = layouts
-            .iter()
-            .find(|(b, _)| b.0 == part.city)
-            .map(|(_, l)| l.size.x)
+        let w = measured
+            .get(&part.city)
+            .copied()
             .filter(|w| *w >= 1.0)
             .unwrap_or_else(|| estimate_text_width(&banner_text(&map, city, viewer)));
         let layout = label_layout(w, capital.0[city.civ] == Some(part.city));
@@ -2069,27 +2099,33 @@ pub fn sync_city_visuals(
         let k = light(city);
         let color = match part.piece {
             LabelPiece::Badge => {
-                tf.translation.x = layout.badge;
+                set_x(&mut tf, layout.badge);
                 badge_frame(CIVS[city.civ].color)
             }
             LabelPiece::BadgeFill => CIVS[city.civ].color,
             LabelPiece::Star => {
-                tf.translation.x = layout.star;
-                *vis = if is_capital {
+                set_x(&mut tf, layout.star);
+                let shown = if is_capital {
                     Visibility::Inherited
                 } else {
                     Visibility::Hidden
                 };
+                if *vis != shown {
+                    *vis = shown;
+                }
                 Color::WHITE
             }
             LabelPiece::Text => {
-                tf.translation.x = layout.text;
+                set_x(&mut tf, layout.text);
                 continue;
             }
             LabelPiece::NameBand | LabelPiece::BuildBand => {
-                tf.translation.x = layout.text;
+                set_x(&mut tf, layout.text);
                 if let Some(sprite) = sprite.as_mut() {
-                    sprite.custom_size = Some(Vec2::new(layout.box_w, LINE_H));
+                    let size = Some(Vec2::new(layout.box_w, LINE_H));
+                    if sprite.custom_size != size {
+                        sprite.custom_size = size;
+                    }
                 }
                 if part.piece == LabelPiece::NameBand {
                     NAME_BAND
@@ -2099,7 +2135,10 @@ pub fn sync_city_visuals(
             }
         };
         if let Some(mut sprite) = sprite {
-            sprite.color = shade(color, k);
+            let tint = shade(color, k);
+            if sprite.color != tint {
+                sprite.color = tint;
+            }
         }
     }
 }

@@ -7,6 +7,8 @@
 
 use std::path::Path;
 #[cfg(target_arch = "wasm32")]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
 use std::path::PathBuf;
 #[cfg(target_arch = "wasm32")]
 use std::sync::OnceLock;
@@ -33,7 +35,69 @@ pub enum PathKind {
 struct Catalog {
     root: PathBuf,
     search: Vec<PathBuf>,
-    paths: Vec<(String, PathKind)>,
+    /// Every file and folder the request names, by normalized path.
+    paths: HashMap<String, PathKind>,
+}
+
+/// The small text files of the cache (manifests, clip lists, the request),
+/// fetched in one request at startup. Every `read_text` is otherwise a
+/// blocking round trip, and a unit type's first appearance would freeze the
+/// page for one. `tools/web_assets.py` writes it; without it (a plain
+/// static copy of the cache) each file is fetched on its own.
+#[cfg(target_arch = "wasm32")]
+fn bundle() -> &'static HashMap<String, String> {
+    static BUNDLE: OnceLock<HashMap<String, String>> = OnceLock::new();
+    BUNDLE.get_or_init(|| {
+        xhr("web-bundle.json", false)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    })
+}
+
+/// What `request.json` promises the converter wrote, so the browser need not
+/// ask the server (a blocking request each) whether a file is there.
+#[cfg(target_arch = "wasm32")]
+struct Promised {
+    /// Wonder splashes and thumbnails, advance icons.
+    pictures: HashSet<String>,
+    /// Unit folders (cache keys).
+    units: HashSet<String>,
+    /// Team colors every unit slot was recolored in.
+    colors: HashSet<u64>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn promised(rel: &str) -> bool {
+    static PROMISED: OnceLock<Promised> = OnceLock::new();
+    let p = PROMISED.get_or_init(|| {
+        let request = request();
+        let keys = |kind: &str| -> Vec<String> {
+            request[kind].as_array().into_iter().flatten().filter_map(|i| i["key"].as_str()).map(str::to_string).collect()
+        };
+        let mut pictures = HashSet::new();
+        for key in keys("wonders") {
+            pictures.insert(format!("{key}.png"));
+            pictures.insert(format!("{key}.thumb.png"));
+        }
+        for key in keys("techs") {
+            pictures.insert(format!("{key}.png"));
+        }
+        Promised {
+            pictures,
+            units: keys("units").into_iter().collect(),
+            colors: request["team_colors"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect(),
+        }
+    });
+    if p.pictures.contains(rel) {
+        return true;
+    }
+    // `<unit key>/<slot>_d<dir>_c<color>.png`
+    let Some((dir, file)) = rel.rsplit_once('/') else { return false };
+    let Some(color) = file.strip_suffix(".png").and_then(|f| f.rsplit_once("_c")).and_then(|(_, c)| c.parse::<u64>().ok()) else {
+        return false;
+    };
+    p.units.contains(dir) && p.colors.contains(&color)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -79,31 +143,33 @@ fn catalog() -> &'static Catalog {
             .map(PathBuf::from)
             .collect::<Vec<_>>();
         let root_text = request["root"].as_str().unwrap_or_default();
-        let mut paths = vec![
-            (norm(&format!("{root_text}/Conquests/Text/PediaIcons.txt")), PathKind::File),
-            (norm(&format!("{root_text}/Text/PediaIcons.txt")), PathKind::File),
-        ];
+        let mut paths = HashMap::new();
+        // The first kind a path is given stands.
+        let mut add = |path: String, kind: PathKind| {
+            paths.entry(norm(&path)).or_insert(kind);
+        };
+        add(format!("{root_text}/Conquests/Text/PediaIcons.txt"), PathKind::File);
+        add(format!("{root_text}/Text/PediaIcons.txt"), PathKind::File);
         for color in request["team_colors"].as_array().into_iter().flatten().filter_map(Value::as_u64) {
-            paths.push((norm(&format!("{root_text}/Art/Units/Palettes/ntp{color:02}.pcx")), PathKind::File));
+            add(format!("{root_text}/Art/Units/Palettes/ntp{color:02}.pcx"), PathKind::File);
         }
         for unit in request["units"].as_array().into_iter().flatten() {
             for dir in unit["dirs"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-                paths.push((norm(dir), PathKind::Dir));
+                add(dir.to_string(), PathKind::Dir);
             }
         }
         for leader in request["leaders"].as_array().into_iter().flatten() {
             for key in ["forward", "reverse"] {
                 if let Some(path) = leader[key].as_str() {
-                    paths.push((norm(path), PathKind::File));
+                    add(path.to_string(), PathKind::File);
                 }
             }
         }
         for pic in request["wonders"].as_array().into_iter().flatten().chain(request["techs"].as_array().into_iter().flatten()) {
             if let Some(path) = pic["path"].as_str() {
-                paths.push((norm(path), PathKind::File));
+                add(path.to_string(), PathKind::File);
             }
         }
-        paths.dedup_by(|a, b| a.0 == b.0);
         Catalog { root, search, paths }
     })
 }
@@ -121,18 +187,13 @@ pub fn install() -> crate::install::Install {
 
 #[cfg(target_arch = "wasm32")]
 pub fn resolve(root: &Path, rel: &str) -> Option<PathBuf> {
-    let root = norm(&root.to_string_lossy());
-    let rel = norm(rel);
-    catalog().paths.iter().find_map(|(path, _)| {
-        let path_rel = path.strip_prefix(&root)?.strip_prefix('/')?;
-        (path_rel == rel).then(|| PathBuf::from(path))
-    })
+    let full = format!("{}/{}", norm(&root.to_string_lossy()), norm(rel));
+    catalog().paths.contains_key(&full).then(|| PathBuf::from(full))
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn kind(path: &Path) -> Option<PathKind> {
-    let path = norm(&path.to_string_lossy());
-    catalog().paths.iter().find_map(|(candidate, kind)| (*candidate == path).then_some(*kind))
+    catalog().paths.get(&norm(&path.to_string_lossy())).copied()
 }
 
 fn cache_url(path: &Path) -> Option<String> {
@@ -174,6 +235,10 @@ pub fn read_text(path: impl AsRef<Path>) -> std::io::Result<String> {
         }
     }
     let url = cache_url(path).unwrap_or_else(|| path.to_string_lossy().into_owned());
+    #[cfg(target_arch = "wasm32")]
+    if let Some(text) = bundle().get(&url) {
+        return Ok(text.clone());
+    }
     Ok(String::from_utf8_lossy(&xhr(&url, false)?).into_owned())
 }
 
@@ -197,6 +262,11 @@ pub fn cache_exists(path: impl AsRef<Path>) -> bool {
     let Some(url) = cache_url(path.as_ref()) else { return false };
     #[cfg(target_arch = "wasm32")]
     {
+        // What the request lists is converted in full; only a file it does
+        // not mention is worth a blocking round trip.
+        if url.strip_prefix("assets/cache/").is_some_and(promised) {
+            return true;
+        }
         let Ok(xhr) = XmlHttpRequest::new() else { return false };
         if xhr.open_with_async("HEAD", &url, false).is_err() || xhr.send().is_err() {
             return false;

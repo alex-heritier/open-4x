@@ -92,8 +92,13 @@ pub fn hover(
     view: Res<CityView>,
 ) {
     // The city screen's band shows the map, but the map is not in play.
+    // (This and the preview below write only a change: both run every
+    // frame, and a write marks the resource changed for everything waiting
+    // on it.)
     if view.0.is_some() {
-        hovered.0 = None;
+        if hovered.0.is_some() {
+            hovered.0 = None;
+        }
         return;
     }
     // The pointer is over a UI button: map picking is off.
@@ -109,7 +114,9 @@ pub fn hover(
         });
         picked
     };
-    hovered.0 = tile;
+    if hovered.0 != tile {
+        hovered.0 = tile;
+    }
     let Some((x, y)) = tile else {
         return;
     };
@@ -150,7 +157,9 @@ pub fn hold_preview(
     mut preview: ResMut<MovePreview>,
 ) {
     if bombard.0.is_some() {
-        preview.0 = None;
+        if preview.0.is_some() {
+            preview.0 = None;
+        }
         hold.armed = false;
         return;
     }
@@ -171,10 +180,13 @@ pub fn hold_preview(
         hold.secs += time.delta_secs();
     }
     let aiming = goto.0 || (hold.armed && hold.secs >= HOLD_SECS);
-    preview.0 = match (aiming, hovered.0, from) {
+    let aimed = match (aiming, hovered.0, from) {
         (true, Some(dest), Some(here)) if dest != here => Some(dest),
         _ => None,
     };
+    if preview.0 != aimed {
+        preview.0 = aimed;
+    }
 }
 
 fn move_order(map: &GameMap, units: &mut Query<(Entity, &mut Unit)>, s: Entity, dest: (i32, i32), ports: &[(i32, i32)]) {
