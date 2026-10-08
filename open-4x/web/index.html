@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Open 4X — Dawn over the Straits</title>
+  <link data-trunk rel="rust" href="../crates/client/Cargo.toml" data-bin="fourx-client" data-no-default-features>
+  <link data-trunk rel="copy-dir" href="../assets">
+  <style>
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10272b;color:#e1d4ac;font-family:Georgia,serif}
+    #stage{position:absolute;inset:0;touch-action:none}
+    canvas{display:block;width:100%;height:100%;outline:none}
+    #loading{position:absolute;inset:0;display:grid;place-content:center;text-align:center;pointer-events:none}
+    #loading h1{font-weight:normal;letter-spacing:.12em}
+    #loading p{color:#bda473}
+  </style>
+</head>
+<body>
+  <div id="loading"><h1>DAWN OVER THE STRAITS</h1><p>Preparing the campaign chart…</p></div>
+  <div id="stage"><canvas id="game" tabindex="0" aria-label="Open 4X strategy game"></canvas></div>
+  <script>
+    const canvas = document.getElementById('game');
+    new MutationObserver(() => {
+      if (canvas.width > 300) document.getElementById('loading').style.display='none';
+    }).observe(canvas,{attributes:true,attributeFilter:['width','height']});
+    window.addEventListener('error',e=>{
+      document.getElementById('loading').style.display='grid';
+      document.querySelector('#loading p').textContent=e.message;
+    });
+  </script>
+</body>
+</html>

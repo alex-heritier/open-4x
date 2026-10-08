@@ -1,0 +1,33 @@
+# Generate with XcodeGen after building the Rust static library.
+name: Dawn
+options:
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  Dawn:
+    type: application
+    platform: iOS
+    sources:
+      - main.m
+      - path: ../../assets
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.open4x.dawn
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        OTHER_LDFLAGS: "$(inherited) -lc++ -lresolv"
+    dependencies:
+      - library: ../../target/aarch64-apple-ios/release/libfourx_client.a
+      - sdk: UIKit.framework
+      - sdk: Foundation.framework
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreGraphics.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AVFAudio.framework
+      - sdk: CoreAudio.framework
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework

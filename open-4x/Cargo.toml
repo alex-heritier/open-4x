@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = ["crates/sim", "crates/content", "crates/runtime", "crates/server", "crates/client", "tools/asset-forge"]
+default-members = ["crates/sim", "crates/content", "crates/runtime", "crates/server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+fourx-sim = { path = "crates/sim" }
+fourx-content = { path = "crates/content" }
+fourx-runtime = { path = "crates/runtime" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = 0
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# Fast renderer smoke builds without multi-gigabyte dependency debug symbols.
+[profile.quick]
+inherits = "dev"
+debug = 0
+opt-level = 0
+
+[profile.quick.package."*"]
+opt-level = 0

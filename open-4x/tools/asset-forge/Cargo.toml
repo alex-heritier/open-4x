@@ -1,0 +1,10 @@
+[package]
+name = "asset-forge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+hound = "3"
+

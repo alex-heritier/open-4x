@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "id": "dawn-straits",
+  "name": "Dawn over the Straits",
+  "rules": {
+    "combat_width": 4,
+    "victory_industry": 500,
+    "research_cost": 60,
+    "starting_gold": 120,
+    "units": {
+      "infantry": {"id":"infantry","name":"Line Infantry","cost":36,"fire":5,"shock":3,"speed":3,"naval":false,"settler":false,"sprite":"sprites/infantry.png"},
+      "cavalry": {"id":"cavalry","name":"Dragoon Cavalry","cost":54,"fire":2,"shock":7,"speed":5,"naval":false,"settler":false,"sprite":"sprites/cavalry.png"},
+      "artillery": {"id":"artillery","name":"Field Artillery","cost":72,"fire":9,"shock":1,"speed":2,"naval":false,"settler":false,"sprite":"sprites/artillery.png"},
+      "pioneer": {"id":"pioneer","name":"Pioneers","cost":60,"fire":1,"shock":1,"speed":3,"naval":false,"settler":true,"sprite":"sprites/pioneer.png"},
+      "ironclad": {"id":"ironclad","name":"Ironclad Squadron","cost":90,"fire":10,"shock":4,"speed":5,"naval":true,"settler":false,"sprite":"sprites/ironclad.png"}
+    }
+  },
+  "scenario": {
+    "width": 24,
+    "height": 18,
+    "player_name": "The Dawn Empire",
+    "enemy_name": "The Northern League",
+    "cities": [
+      {"owner":1,"position":{"x":8,"y":9},"name":"Akatsuki","population":3,"industry":4},
+      {"owner":2,"position":{"x":16,"y":8},"name":"Northwatch","population":3,"industry":4}
+    ],
+    "armies": [
+      {"owner":1,"position":{"x":8,"y":9},"name":"Imperial Guard","kinds":["infantry","cavalry","artillery"],"general":2},
+      {"owner":1,"position":{"x":8,"y":9},"name":"First Pioneers","kinds":["pioneer"],"general":0},
+      {"owner":2,"position":{"x":16,"y":8},"name":"League Expedition","kinds":["infantry","cavalry","artillery"],"general":2},
+      {"owner":2,"position":{"x":16,"y":8},"name":"League Pioneers","kinds":["pioneer"],"general":0},
+      {"owner":1,"position":{"x":4,"y":13},"name":"Southern Fleet","kinds":["ironclad"],"general":2},
+      {"owner":2,"position":{"x":4,"y":16},"name":"League Squadron","kinds":["ironclad"],"general":2}
+    ],
+    "tiles": []
+  },
+  "script": "scripts/campaign.lua",
+  "visuals": {
+    "terrain": "terrain/temperate.png",
+    "forest": "sprites/forest.png",
+    "mountain": "sprites/mountain.png",
+    "city": "sprites/city.png",
+    "turn_sound": "audio/bell.wav"
+  }
+}

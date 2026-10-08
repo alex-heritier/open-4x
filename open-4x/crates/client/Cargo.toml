@@ -1,0 +1,52 @@
+[package]
+name = "fourx-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["desktop"]
+desktop = ["bevy/x11", "bevy/wayland"]
+android = ["bevy/android-native-activity"]
+
+[dependencies]
+fourx-sim.workspace = true
+fourx-content.workspace = true
+fourx-runtime.workspace = true
+serde_json.workspace = true
+bevy = { version = "0.18.1", default-features = false, features = [
+  "std", "async_executor", "bevy_asset", "bevy_log", "bevy_window", "bevy_winit",
+  "bevy_color", "bevy_camera", "bevy_image", "bevy_mesh", "bevy_shader",
+  "bevy_text", "bevy_render", "bevy_core_pipeline", "bevy_sprite", "bevy_sprite_render",
+  "bevy_ui", "bevy_ui_render", "bevy_gizmos", "bevy_gizmos_render", "default_font", "png", "webgl2", "http", "https", "audio", "wav"
+] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Location", "WebSocket", "MessageEvent", "ErrorEvent", "Event", "BinaryType", "UrlSearchParams", "Storage"] }
+
+[package.metadata.android]
+package = "org.open4x.dawn"
+apk_name = "open4x-dawn"
+assets = "../../assets"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[package.metadata.android.application]
+label = "Dawn over the Straits"
+
+[package.metadata.android.application.activity]
+orientation = "landscape"
+config_changes = "orientation|keyboardHidden|screenSize"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
