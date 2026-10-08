@@ -15,14 +15,14 @@ fn choose<'a>(
     let mut high = 0;
     for &(entity, city) in &cities {
         let neighbors = (1..289).filter_map(|i| {
-            let (dx, dy) = civ3mapgen::spiral::spiral_offset(i);
+            let (dx, dy) = civ3_worldgen::spiral::spiral_offset(i);
             let pos = (map.wrap_x(city.x + (dx + dy) / 2), city.y + (dy - dx) / 2);
             cities
                 .iter()
                 .find(|(_, c)| (c.x, c.y) == pos)
                 .map(|(_, c)| i32::from(c.size()))
         });
-        let score = civ3mapgen::capital::score(
+        let score = civ3_rules::capital::score(
             i32::from(city.size()),
             city.nationals(civ) as i32,
             police(city.x, city.y),

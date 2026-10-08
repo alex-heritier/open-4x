@@ -1,6 +1,6 @@
 //! Land artillery: units, cities and improvements (`combat.md` 8, `colonies.md` 8).
 use bevy::prelude::*;
-use civ3mapgen::combat as exe;
+use civ3_rules::combat as exe;
 
 use crate::cities::{City, Production};
 use crate::combat::CombatRng;
@@ -543,7 +543,7 @@ mod tests {
                 let i = map.idx(11, 10);
                 map.tiles[i].road = true;
             }
-            let mut reference = civ3mapgen::rng::Rng::new(seed);
+            let mut reference = civ3_worldgen::rng::Rng::new(seed);
             let mut hp = exe::Fighter {
                 max_hp: 3,
                 damage: 0,

@@ -15,7 +15,7 @@
 //! isometric grid.
 
 use bevy::prelude::*;
-use civ3mapgen::capture::{AcceptFacts, Wonder, ai_accepts_city};
+use civ3_rules::capture::{AcceptFacts, Wonder, ai_accepts_city};
 
 use crate::cities::{self, Capital, City, Production, radius_tiles, territory};
 use crate::civs::{CIV_CAP, CivilizationEnded, civ_count, is_ai};

@@ -1,7 +1,7 @@
 //! Combat: odds, the animated fight, capture, conquest, healing, promotion.
 //!
 //! The numbers come from the reverse-engineered model in
-//! `reverse-engineering/rust/src/combat.rs` (`civ3mapgen::combat`, read from
+//! `reverse-engineering/rust/src/combat.rs` (`civ3_rules::combat`, read from
 //! `Civ3Conquests.exe`): the round die is `rand(1024)`, the defender wins a
 //! round when the roll is below `1024 * X / (X + Y)` (clamped to 1..=1023),
 //! `X = defense * (100 + D)`, `Y = attack * (100 + P)`, the loser of a round
@@ -18,7 +18,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use civ3mapgen::combat as exe;
+use civ3_rules::combat as exe;
 
 use crate::cities::{Capital, City, CityView};
 use crate::features::{MessageBoard, post};
@@ -713,7 +713,7 @@ impl Realm<'_, '_> {
     /// the city keeps its owner and suffers the first loss that applies.
     /// The caller removes the raider.
     fn raid(&mut self, e: Entity, rng: &mut MapRng) {
-        use civ3mapgen::capture::{RaidLoss, raid_loot, raid_loss};
+        use civ3_rules::capture::{RaidLoss, raid_loot, raid_loss};
         let cities_owned = |civ: usize, q: &Query<(Entity, &mut City)>| {
             q.iter().filter(|(_, c)| c.civ == civ).count() as i32
         };
@@ -1136,9 +1136,9 @@ pub fn promote(rng: &mut MapRng, u: &mut Unit, loser_is_barbarian: bool) -> bool
     let Some(next) = u.level.next() else {
         return false;
     };
-    let militaristic = civ3mapgen::economy::has_trait(
+    let militaristic = civ3_rules::economy::has_trait(
         crate::cities::traits(u.civ),
-        civ3mapgen::economy::trait_bit::MILITARISTIC,
+        civ3_rules::economy::trait_bit::MILITARISTIC,
     );
     let Some(die) = exe::promotion_die(u.level as i32, loser_is_barbarian, militaristic) else {
         return false;
@@ -1584,15 +1584,14 @@ mod tests {
             eprintln!("skipped: {path} is not installed");
             return;
         };
-        let body = civ3mapgen::dcl::decompress(&raw).expect("biq decodes");
-        let prto = civ3mapgen::dcl::sections(&body)
-            .into_iter()
-            .find(|s| s.tag_str() == "PRTO")
-            .expect("PRTO section");
+        let scenario = civ3_biq::raw::Raw::parse(&raw).expect("biq decodes");
+        let prto = scenario.section(b"PRTO").expect("PRTO section");
         let dword = |r: &[u8], at: usize| i32::from_le_bytes(r[at..at + 4].try_into().unwrap());
         for t in UnitType::all() {
-            let row = (0..prto.count)
-                .map(|i| prto.row(&body, i).unwrap())
+            let row = prto
+                .rows
+                .iter()
+                .map(|r| scenario.row(r))
                 .find(|r| {
                     let n = &r[4..36];
                     let n = &n[..n.iter().position(|&c| c == 0).unwrap_or(n.len())];
@@ -1658,7 +1657,7 @@ mod tests {
     /// left, and the same number of dice drawn from the same generator.
     #[test]
     fn rounds_match_the_reverse_engineered_duel() {
-        use civ3mapgen::rng::Rng;
+        use civ3_worldgen::rng::Rng;
         let none = exe::RetreatFlags {
             attacker: false,
             defender: false,
@@ -1694,7 +1693,7 @@ mod tests {
 
     #[test]
     fn retreat_rounds_damage_and_dice_match_the_executable_model() {
-        use civ3mapgen::rng::Rng;
+        use civ3_worldgen::rng::Rng;
         let mut outcomes = HashSet::new();
         for seed in 0..300 {
             for odds in [200, 512, 900] {
@@ -2110,7 +2109,7 @@ mod tests {
             let d = app.world_mut().spawn(dfn.clone()).id();
             let s = app.world_mut().spawn(shooter.clone()).id();
             app.world_mut().spawn(City::new(1, "Rome", 2, 1));
-            let mut reference = civ3mapgen::rng::Rng::new(seed);
+            let mut reference = civ3_worldgen::rng::Rng::new(seed);
             let mut hp = fighter(&att);
             let shot =
                 exe::defensive_bombard(&mut reference, support_odds(&shooter, &att), &mut hp);
@@ -2882,7 +2881,7 @@ mod tests {
         assert!(matches!(
             crate::hurry::quote(
                 &c,
-                civ3mapgen::government::hurry::PAY,
+                civ3_rules::government::hurry::PAY,
                 9999,
                 crate::hurry::Buyer::Human
             ),

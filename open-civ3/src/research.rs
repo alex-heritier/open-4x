@@ -1,4 +1,4 @@
-//! Research: the reverse-engineered advance rules (`civ3mapgen::research`,
+//! Research: the reverse-engineered advance rules (`civ3_rules::research`,
 //! specification `reverse-engineering/research.md`) wired into the game.
 //!
 //! One `World` holds every civilization's knowledge, target and beakers. A
@@ -14,8 +14,8 @@
 //! Regent standard world.
 use bevy::prelude::*;
 
-use civ3mapgen::research::{Ctx, Dice, Event, NONE, World};
-use civ3mapgen::research_ai::{Profile, Tables, Valuer, category_mask_from_flags};
+use civ3_rules::research::{Ctx, Dice, Event, NONE, World};
+use civ3_rules::research_ai::{Profile, Tables, Valuer, category_mask_from_flags};
 
 use crate::cities::{City, Production};
 use crate::civs::{CIV_CAP, CivilizationEnded, Civilizations, RACES, civ_count, is_ai};
@@ -201,7 +201,7 @@ impl Research {
         world.difficulty_cost_factor =
             rules_data::DIFFICULTY_COST_FACTOR[crate::scenario::difficulty()];
         world.size_tech_rate = rules_data::WORLD_TECH_RATE[crate::scenario::setup().size];
-        let mut profiles = vec![Profile::default(); civ3mapgen::research::SLOTS];
+        let mut profiles = vec![Profile::default(); civ3_rules::research::SLOTS];
         for (civ, race) in RACES.iter().enumerate() {
             let s = slot(civ);
             world.in_play |= 1 << s;
@@ -247,7 +247,7 @@ impl Research {
     }
 
     /// Everything that changes in play: the started flag, pending leader
-    /// rewards, then the world (`civ3mapgen::research::World::to_words`).
+    /// rewards, then the world (`civ3_rules::research::World::to_words`).
     pub fn snapshot(&self) -> Vec<i64> {
         let mut words = vec![i64::from(self.started)];
         words.push(self.leaders.len() as i64);
@@ -565,7 +565,7 @@ impl Research {
     /// The advances `giver` could hand to `taker`: known to the giver,
     /// researchable by the taker, and tradeable.
     pub fn giftable(&self, giver: usize, taker: usize) -> Vec<i32> {
-        use civ3mapgen::research::flags::CANNOT_BE_TRADED;
+        use civ3_rules::research::flags::CANNOT_BE_TRADED;
         (0..self.world.t())
             .filter(|&t| {
                 self.knows(giver, t)
@@ -791,7 +791,7 @@ pub fn spawn_leaders(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use civ3mapgen::rng::Rng;
+    use civ3_worldgen::rng::Rng;
 
     /// A research world with Japan human and the rest computer, regardless
     /// of the process-wide controller mask.

@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use civ3mapgen::government::hurry as method;
+use civ3_rules::government::hurry as method;
 
 use crate::cities::{City, Production};
 use crate::map::GameMap;

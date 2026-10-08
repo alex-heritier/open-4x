@@ -2,7 +2,7 @@
 use crate::cities::City;
 use crate::map::GameMap;
 use crate::rng::MapRng;
-use civ3mapgen::disease as exe;
+use civ3_rules::disease as exe;
 
 /// Some(Some(TERR)) is a new infection; Some(None) is a continuing loss.
 /// Recovery itself has no native notification. The flag changes no yields.

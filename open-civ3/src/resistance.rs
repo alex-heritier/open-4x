@@ -1,5 +1,5 @@
 //! Resistance of captured citizens and nationality drift, the game side of
-//! `civ3mapgen::resistance` (`city-turn.md` 8).
+//! `civ3_rules::resistance` (`city-turn.md` 8).
 //!
 //! A military capture marks every citizen of another race with a pending
 //! change to the captor's race and rolls whether it resists (`0x4BB090`).
@@ -14,8 +14,8 @@
 //! (`realm` garrison), standing in for `0x5A6060` mode 4 (land units with
 //! positive attack or defense, any owner).
 
-use civ3mapgen::population::Citizen;
-use civ3mapgen::resistance::{self as native, Standing};
+use civ3_rules::population::Citizen;
+use civ3_rules::resistance::{self as native, Standing};
 
 use crate::cities::City;
 use crate::civs::{CIV_CAP, civ_count};

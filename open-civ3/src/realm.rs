@@ -3,7 +3,7 @@
 //! follows a revolution, the capital, the advances it knows, how many cities
 //! hold each improvement and where its soldiers stand.
 //!
-//! The reverse-engineered rules are `civ3mapgen::government` (the eight
+//! The reverse-engineered rules are `civ3_rules::government` (the eight
 //! shipped GOVT rows and the AI's choice, specification
 //! `reverse-engineering/government.md`); this module is the state they act
 //! on. The city layer's plain functions (`citycalc`) have no ECS access, so
@@ -20,8 +20,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 #[cfg(test)]
-pub use civ3mapgen::government::row as govt_row;
-use civ3mapgen::government::{Govt, SHIPPED, row};
+pub use civ3_rules::government::row as govt_row;
+use civ3_rules::government::{Govt, SHIPPED, row};
 
 use crate::cities::{Capital, City, Production, territory};
 use crate::civs::{CIV_CAP, civ_count};
@@ -225,7 +225,7 @@ impl Realm {
             born_content: if cfg!(test) {
                 99
             } else {
-                civ3mapgen::happiness::shipped::BORN_CONTENT[crate::scenario::difficulty()]
+                civ3_rules::happiness::shipped::BORN_CONTENT[crate::scenario::difficulty()]
             },
         }
     }

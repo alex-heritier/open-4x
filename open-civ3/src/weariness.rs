@@ -12,7 +12,7 @@
 //! decoded). Nothing mobilizes, so the mobilization bonus never applies.
 
 use bevy::prelude::*;
-use civ3mapgen::government as exe;
+use civ3_rules::government as exe;
 
 use crate::cities::{City, territory};
 use crate::civs::{CIV_CAP, CivilizationEnded, civ_count};

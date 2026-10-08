@@ -345,7 +345,7 @@ sequence ends. `CIV3_COMBAT_SPEED=<n>` plays it `n` times faster, for
 unattended runs.
 
 From the executable (`reverse-engineering/combat.md`, consumed through
-`civ3mapgen::combat`): the round die and odds `defense * (100 + D)` against
+`civ3_rules::combat`): the round die and odds `defense * (100 + D)` against
 `attack * (100 + P)` with terrain, city size and walls, and fortify terms,
 clamped to `1..=1023` of 1024; one hit point per lost round; the `EXPR` hit
 points per level (2, 3, 4, 5, plus the unit's bonus); the dice are the same

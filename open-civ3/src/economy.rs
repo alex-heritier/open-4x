@@ -51,7 +51,7 @@ pub fn granary_keep(size: u8) -> u8 {
 pub fn unit_support_cost(civ: usize, sizes: &[u8], units: usize) -> u32 {
     let classes = sizes.iter().map(|&s| i32::from(size_class(s)));
     let terms = crate::realm::govt(civ).support(classes);
-    civ3mapgen::economy::unit_support_charge(
+    civ3_rules::economy::unit_support_charge(
         sizes.len() as i32,
         units as i32,
         0,

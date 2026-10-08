@@ -1,5 +1,5 @@
 //! Diplomacy: contact, war and peace, treaties and deals, and the computer's
-//! attitude (reverse-engineered in `civ3mapgen::diplomacy`, specification
+//! attitude (reverse-engineered in `civ3_rules::diplomacy`, specification
 //! `reverse-engineering/diplomacy.md`).
 //!
 //! The relation state is the binary's: no pair is at war until somebody
@@ -21,8 +21,8 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use civ3mapgen::diplomacy::{Clause, Env, Relations, Verdict, WarCall, rec, relbit, treaty, weigh};
-use civ3mapgen::research::{Dice, Event};
+use civ3_rules::diplomacy::{Clause, Env, Relations, Verdict, WarCall, rec, relbit, treaty, weigh};
+use civ3_rules::research::{Dice, Event};
 
 use crate::cities::{City, Treasury, territory};
 use crate::civs::RACES;
@@ -190,7 +190,7 @@ impl Env for Facts {
     }
     /// `GOVT.war_weariness` of a government row.
     fn war_weariness(&self, government: i32) -> i32 {
-        civ3mapgen::government::SHIPPED
+        civ3_rules::government::SHIPPED
             .get(government as usize)
             .map_or(0, |g| g.war_weariness)
     }
@@ -374,11 +374,11 @@ impl Diplomacy {
             let counter = self.rel.war_counter(p, q);
             let next = if self.at_war(civ, c) {
                 let incidents = self.rel.rec(p, q)[rec::ACC38] + self.rel.rec(q, p)[rec::ACC38];
-                civ3mapgen::government::weariness_at_war(
+                civ3_rules::government::weariness_at_war(
                     counter, incidents, abroad[c], at_home[c], mobilized,
                 )
             } else {
-                civ3mapgen::government::weariness_at_peace(counter, mobilized)
+                civ3_rules::government::weariness_at_peace(counter, mobilized)
             };
             *self.rel.war_counter_mut(p, q) = next;
         }
@@ -395,8 +395,8 @@ impl Diplomacy {
 
     /// The average war weariness (`0x5007B0`).
     pub fn average_weariness(&self, civ: usize) -> i32 {
-        civ3mapgen::government::average_weariness((0..civ_count()).filter(|&c| c != civ).map(|c| {
-            civ3mapgen::government::Relation {
+        civ3_rules::government::average_weariness((0..civ_count()).filter(|&c| c != civ).map(|c| {
+            civ3_rules::government::Relation {
                 in_play: self.rel.in_play & (1 << slot(c)) != 0,
                 met: self.contact(civ, c),
                 flag_20: false,
@@ -1157,7 +1157,7 @@ impl Diplomacy {
 mod tests {
     use super::*;
     use crate::units::UnitType;
-    use civ3mapgen::rng::Rng;
+    use civ3_worldgen::rng::Rng;
 
     fn research() -> Research {
         crate::civs::set_controllers();

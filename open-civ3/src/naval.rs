@@ -383,7 +383,7 @@ pub fn unit_hazards(
                 }
                 continue;
             }
-            if civ3mapgen::disease::unit_jungle_loss(
+            if civ3_rules::disease::unit_jungle_loss(
                 false,
                 def(u.utype).pop_cost,
                 u.fortified,

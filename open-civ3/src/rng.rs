@@ -20,7 +20,7 @@ const C: u32 = 12_345;
 /// The map generator's LCG.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapRng {
-    inner: civ3mapgen::rng::Rng,
+    inner: civ3_worldgen::rng::Rng,
 }
 
 impl MapRng {
@@ -28,7 +28,7 @@ impl MapRng {
     #[inline]
     pub fn new(seed: u32) -> Self {
         MapRng {
-            inner: civ3mapgen::rng::Rng::new(seed),
+            inner: civ3_worldgen::rng::Rng::new(seed),
         }
     }
 
@@ -51,7 +51,7 @@ impl MapRng {
     }
 
     /// Share the same dice state with reverse-engineered gameplay routines.
-    pub fn reference(&mut self) -> &mut civ3mapgen::rng::Rng {
+    pub fn reference(&mut self) -> &mut civ3_worldgen::rng::Rng {
         &mut self.inner
     }
 

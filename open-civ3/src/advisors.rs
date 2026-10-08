@@ -15,7 +15,7 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use civ3mapgen::diplomacy::Clause;
+use civ3_rules::diplomacy::Clause;
 
 use crate::cities::{City, CityView, Treasury};
 use crate::civs::{CIV_CAP, Civilizations, civ_count, is_ai};
@@ -30,7 +30,7 @@ use crate::speech::{Speech, Who, mood_tone, power_tone};
 use crate::stage::{self, Stage, Ui};
 use crate::units::{Turn, Unit};
 use crate::wonders::{self, Wonders};
-use civ3mapgen::diplomacy::Verdict;
+use civ3_rules::diplomacy::Verdict;
 
 /// Gold moved by one click of the plus and minus buttons.
 const GOLD_STEP: i32 = 10;

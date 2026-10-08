@@ -190,7 +190,7 @@ impl GameMap {
     pub fn land_cost(&self, from: (i32, i32), to: (i32, i32), bridges: bool) -> Option<u8> {
         let origin = self.get(from.0, from.1)?;
         let destination = self.get(to.0, to.1)?;
-        Some(civ3mapgen::movement::land_step_cost(
+        Some(civ3_rules::movement::land_step_cost(
             move_cost(destination)?,
             origin.road,
             destination.road,
@@ -277,7 +277,7 @@ impl GameMap {
             for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
                 let nb = (self.wrap_x(x + dx), y + dy);
                 if water(nb) && seen.insert(nb) {
-                    if seen.len() > civ3mapgen::lakes::LAKE_MAX {
+                    if seen.len() > civ3_rules::lakes::LAKE_MAX {
                         return seen.len();
                     }
                     queue.push_back(nb);
@@ -295,7 +295,7 @@ impl GameMap {
                 .chain(self.neighbors(x, y))
                 .any(|p| {
                     let size = self.water_body_size(p);
-                    size > 0 && size <= civ3mapgen::lakes::LAKE_MAX
+                    size > 0 && size <= civ3_rules::lakes::LAKE_MAX
                 })
     }
 
@@ -303,7 +303,7 @@ impl GameMap {
     pub fn coastal_site(&self, x: i32, y: i32) -> bool {
         self.neighbors(x, y)
             .into_iter()
-            .any(|p| self.water_body_size(p) > civ3mapgen::lakes::LAKE_MAX)
+            .any(|p| self.water_body_size(p) > civ3_rules::lakes::LAKE_MAX)
     }
 
     /// The match's map: the file's own when it has one, else a random one

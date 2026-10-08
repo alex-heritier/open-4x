@@ -9,7 +9,7 @@
 
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::prelude::*;
-use civ3mapgen::government as exe;
+use civ3_rules::government as exe;
 
 use crate::advisor_frame::{self, Frame, Tab, art, art_button};
 use crate::cities::{City, CityView, Production, Treasury};

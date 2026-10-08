@@ -1,0 +1,13 @@
+[package]
+name = "civ3-worldgen"
+version = "0.1.0"
+edition = "2021"
+description = "The recovered Civ3 world/river generator geometry used by open-4x: the (W/2)xH cell grid, the diamond spiral, the LCG, and the WCHR option roll"
+publish = false
+
+# Standalone: a small library of the map-side primitives the game (and, until
+# it was retired, the reference crate) build on. No dependency on the
+# reverse-engineering reference tree.
+[workspace]
+
+[dependencies]

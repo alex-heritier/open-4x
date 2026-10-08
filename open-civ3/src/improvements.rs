@@ -1161,7 +1161,7 @@ mod tests {
         );
         u.nationality = egypt;
         crate::realm::write(0, |r| {
-            r.govt = civ3mapgen::government::row::FASCISM;
+            r.govt = civ3_rules::government::row::FASCISM;
             r.known |= crate::ruleset::doubles_work();
         });
         assert_eq!(work_rate(&u), 12);

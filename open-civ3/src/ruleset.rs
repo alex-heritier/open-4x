@@ -17,8 +17,8 @@ use bevy::prelude::Color;
 use civ3_biq::Biq;
 use civ3_biq::sections::bldg::other_characteristics as oc;
 use civ3_biq::sections::prto::ability as ab;
-use civ3mapgen::research::{Rules, TechRow};
-use civ3mapgen::research_ai::{BldgRow, Tables, UnitRow as AiUnitRow};
+use civ3_rules::research::{Rules, TechRow};
+use civ3_rules::research_ai::{BldgRow, Tables, UnitRow as AiUnitRow};
 
 use crate::install::Install;
 use crate::roster::{BldgDef, UnitRow};
@@ -72,7 +72,7 @@ pub struct RaceFacts {
 /// Normal TERR values used by tile yields, worker jobs and land movement.
 pub struct TerrainFacts {
     pub name: &'static str,
-    pub disease: civ3mapgen::disease::Terrain,
+    pub disease: civ3_rules::disease::Terrain,
     pub food: u8,
     pub shields: u8,
     pub commerce: u8,
@@ -295,7 +295,7 @@ pub fn bridges() -> u128 {
     get().bridges
 }
 
-/// The advance rules for `civ3mapgen::research`.
+/// The advance rules for `civ3_rules::research`.
 pub fn rules() -> Rules {
     let r = get();
     Rules {
@@ -699,7 +699,7 @@ pub fn build(biq: &Biq, install: &Install) -> Ruleset {
         .iter()
         .map(|t| TerrainFacts {
             name: leak(&*t.name.text()),
-            disease: civ3mapgen::disease::Terrain {
+            disease: civ3_rules::disease::Terrain {
                 causes: t.causes_disease(),
                 cured: t.cured_by_sanitation(),
                 strength: t.disease_strength,

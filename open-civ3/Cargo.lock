@@ -1673,7 +1673,8 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "civ3-biq",
- "civ3mapgen",
+ "civ3-rules",
+ "civ3-worldgen",
  "console_error_panic_hook",
  "js-sys",
  "libc",
@@ -1684,7 +1685,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "civ3mapgen"
+name = "civ3-rules"
+version = "0.1.0"
+dependencies = [
+ "civ3-worldgen",
+]
+
+[[package]]
+name = "civ3-worldgen"
 version = "0.1.0"
 
 [[package]]

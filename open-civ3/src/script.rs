@@ -437,7 +437,7 @@ pub fn drive_script(
             "propose" => {
                 // The civ offers the first advance it can spare, for peace.
                 use crate::diplomacy::{Deal, Proposal};
-                use civ3mapgen::diplomacy::Clause;
+                use civ3_rules::diplomacy::Clause;
                 let from = arg
                     .parse::<usize>()
                     .ok()

@@ -44,12 +44,12 @@ pub fn traits(civ: usize) -> u32 {
 /// Shields `p` costs the civ (`0x569FE0`, `economy.md`).
 pub fn price_for(civ: usize, p: Production) -> u16 {
     let Some(b) = p.bldg() else { return p.cost() };
-    let matched = civ3mapgen::economy::trait_discount(b.other, traits(civ));
+    let matched = civ3_rules::economy::trait_discount(b.other, traits(civ));
     let palace = (b.flags & roster::imp::CENTER_OF_EMPIRE != 0).then(|| {
         let cities = crate::realm::read(civ, |r| r.cities).max(1) as i32;
-        civ3mapgen::economy::palace_cost_factor(cities, crate::govern::WORLD_BASE)
+        civ3_rules::economy::palace_cost_factor(cities, crate::govern::WORLD_BASE)
     });
-    civ3mapgen::economy::improvement_cost(b.cost, 10, matched, palace).clamp(1, i32::from(u16::MAX))
+    civ3_rules::economy::improvement_cost(b.cost, 10, matched, palace).clamp(1, i32::from(u16::MAX))
         as u16
 }
 
@@ -298,7 +298,7 @@ pub struct City {
     pub river: bool,
     /// Persistent native citizen slots, including holes and free-list order.
     #[serde(with = "crate::citizens::pool_serde")]
-    pub citizens: civ3mapgen::population::Pool,
+    pub citizens: civ3_rules::population::Pool,
     /// Culture accumulated: border levels are powers of ten (`economy.md`).
     pub culture: u32,
     /// Turn the city was founded (the clone has no calendar).
@@ -2055,7 +2055,7 @@ pub fn end_turn_cities(
                         format!(
                             "{} needs an {} to grow any larger.",
                             city.name,
-                            if city.size() as i32 >= civ3mapgen::economy::CITY_MAX {
+                            if city.size() as i32 >= civ3_rules::economy::CITY_MAX {
                                 "Hospital"
                             } else {
                                 "Aqueduct"

@@ -142,7 +142,7 @@ fn complete(world: &mut World, choice: Choice) {
                 crate::research::slot(victim),
                 crate::research::slot(city.civ),
             );
-            record[civ3mapgen::diplomacy::rec::RAZED] += 1;
+            record[civ3_rules::diplomacy::rec::RAZED] += 1;
         }
         remove_empty(world, choice.city, &city);
         crate::features::post(
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(
             dip.rel
                 .rec(crate::research::slot(1), crate::research::slot(0))
-                [civ3mapgen::diplomacy::rec::RAZED],
+                [civ3_rules::diplomacy::rec::RAZED],
             1
         );
     }

@@ -8,9 +8,9 @@
 //! binary's reach of this clone's notes: **HYPOTHESIS**, see `best_rates`.
 
 use bevy::prelude::*;
-use civ3mapgen::economy as exe_econ;
-use civ3mapgen::government as exe;
-use civ3mapgen::rng::Rng;
+use civ3_rules::economy as exe_econ;
+use civ3_rules::government as exe;
+use civ3_worldgen::rng::Rng;
 
 use crate::cities::{City, Treasury};
 use crate::civs::{Civilizations, civ_count, is_ai};
@@ -239,7 +239,7 @@ pub fn choose_government(civ: usize, mine: &[&City], units: usize) -> Option<usi
 mod tests {
     use super::*;
     use crate::cities::City;
-    use civ3mapgen::government::row;
+    use civ3_rules::government::row;
 
     fn dice() -> GameRng {
         GameRng::new(7)

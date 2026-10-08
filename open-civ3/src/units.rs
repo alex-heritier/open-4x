@@ -712,7 +712,7 @@ pub fn entry_cost(
     } else {
         let origin = map.get(from.0, from.1)?;
         let terrain = &crate::ruleset::TERRAINS[crate::map::terrain_row(t)];
-        if !civ3mapgen::movement::land_terrain_allowed(
+        if !civ3_rules::movement::land_terrain_allowed(
             terrain.impassable,
             terrain.impassable_wheeled,
             u.wheeled(),

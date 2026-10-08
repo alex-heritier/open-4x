@@ -18,7 +18,7 @@ const EDGES: [(i32, i32, u8, u8); 4] = [
 ];
 
 pub fn generate(map: &mut GameMap) {
-    use civ3mapgen::{cell::MapGrid, continents::number_continents, rivergen::grow_rivers};
+    use civ3_worldgen::{cell::MapGrid, continents::number_continents, rivergen::grow_rivers};
     // The native chain limit is 20. Copies cover its neighborhood at either seam.
     let pad = 24;
     let side = (map.w + map.h + 2 * pad + 1) & !1;
@@ -107,9 +107,9 @@ pub fn crossed(map: &GameMap, defender: (i32, i32), attacker: (i32, i32)) -> boo
         dx -= map.w;
     }
     let dy = attacker.1 - defender.1;
-    let direction = civ3mapgen::combat::dir_from_delta(dx - dy, dx + dy);
+    let direction = civ3_rules::combat::dir_from_delta(dx - dy, dx + dy);
     map.get(defender.0, defender.1)
-        .is_some_and(|t| civ3mapgen::combat::river_edge(t.river, direction))
+        .is_some_and(|t| civ3_rules::combat::river_edge(t.river, direction))
 }
 
 #[cfg(test)]

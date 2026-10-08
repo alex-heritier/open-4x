@@ -1,0 +1,12 @@
+[package]
+name = "civ3-rules"
+version = "0.1.0"
+edition = "2021"
+description = "The recovered Civ3 gameplay rules open-4x runs on: combat, government, research, diplomacy, economy, happiness and the rest"
+publish = false
+
+[dependencies]
+# The map-side primitives (cell grid, spiral, LCG, option roll, region numbering).
+civ3-worldgen = { path = "../civ3_utils/worldgen" }
+
+[workspace]

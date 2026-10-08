@@ -43,8 +43,10 @@ bevy = { version = "0.18.1", default-features = false, features = [
 ] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-# The reverse-engineered Civ3 combat model (odds, terms, tables).
-civ3mapgen = { path = "reverse-engineering/rust" }
+# The recovered map-side primitives (cell grid, spiral, LCG, option roll).
+civ3-worldgen = { path = "civ3_utils/worldgen" }
+# The recovered gameplay rules (combat, government, research, diplomacy, ...).
+civ3-rules = { path = "civ3-rules" }
 # Civ3's own files: .biq rules, maps and scenarios, and .SAV saved games.
 civ3-biq = { path = "civ3_utils/biq" }
 

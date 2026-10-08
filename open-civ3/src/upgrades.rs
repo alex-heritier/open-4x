@@ -1,7 +1,7 @@
 //! Gold upgrades: one unit (`U`), every unit of its type (`Shift+U`), and
 //! the computer's habit of spending spare gold on them
 //! (`reverse-engineering/unit-upgrades.md`; the arithmetic is
-//! `civ3mapgen::upgrade`).
+//! `civ3_rules::upgrade`).
 //!
 //! A unit upgrades in a city, with the movement it has left, to the
 //! furthest successor on its `upgrade_to` chain that its civ can train. The
@@ -12,7 +12,7 @@
 //! and has no movement left.
 
 use bevy::prelude::*;
-use civ3mapgen::upgrade as exe;
+use civ3_rules::upgrade as exe;
 
 use crate::cities::{City, Production, Treasury};
 use crate::civs::{Civilizations, is_ai};

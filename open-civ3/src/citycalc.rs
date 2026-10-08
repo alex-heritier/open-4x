@@ -5,17 +5,17 @@
 //! The rules are the executable's where `reverse-engineering/` could read
 //! them: the shield sum and its multiplier (`yields.md` 5.4), the commerce
 //! split with its rates, multipliers and Wealth (`yields.md` 5.5, 5.6,
-//! `civ3mapgen::city`), the moods (`happiness.md`, `civ3mapgen::happiness`)
+//! `civ3_rules::city`), the moods (`happiness.md`, `civ3_rules::happiness`)
 //! and the effect of disorder (`yields.md` 5.3 to 5.5). The government and
 //! everything else about the owner comes from [`crate::realm`].
 //!
 //! Corruption and waste are the executable's `0x4B1190` (`economy.md`,
 //! "Corruption math"), checked against the binary run in the emulator.
 
-use civ3mapgen::city as exe;
-use civ3mapgen::economy as exe_econ;
-use civ3mapgen::government::Govt;
-use civ3mapgen::happiness::{self as hap, BuildingFaces, Citizen, mood};
+use civ3_rules::city as exe;
+use civ3_rules::economy as exe_econ;
+use civ3_rules::government::Govt;
+use civ3_rules::happiness::{self as hap, BuildingFaces, Citizen, mood};
 
 use crate::cities::{City, Production, tile_commerce};
 use crate::map::{Base, GameMap, yields};
@@ -154,7 +154,7 @@ impl Rules {
         if water {
             // `0x5D7470`: lakes add one food independently of a Harbor.
             // `0x5D7484`: only larger water bodies receive Harbor food.
-            let lake = map.water_body_size((x, y)) <= civ3mapgen::lakes::LAKE_MAX;
+            let lake = map.water_body_size((x, y)) <= civ3_rules::lakes::LAKE_MAX;
             if lake || self.harbor {
                 f += 1;
             }
@@ -280,7 +280,7 @@ pub fn native_distance_on(w: i32, a: (i32, i32), b: (i32, i32)) -> i32 {
         dx -= w * dx.signum();
     }
     let dy = a.1 - b.1;
-    civ3mapgen::starts::distance((dx - dy).abs(), (dx + dy).abs())
+    civ3_worldgen::starts::distance((dx - dy).abs(), (dx + dy).abs())
 }
 
 /// The native map size the corruption distance clamp reads
@@ -291,7 +291,7 @@ const NATIVE_W: i32 = 100;
 const NATIVE_H: i32 = 100;
 
 /// Corruption or waste: `City::lostToCorruption` `0x4B1190`
-/// (`civ3mapgen::economy::corruption`, executed against the binary). The
+/// (`civ3_rules::economy::corruption`, executed against the binary). The
 /// rank orders the owner's cities by distance from the capital, ties by city
 /// order (the native tie words `+0x358..+0x364` are not modelled).
 pub fn corruption(map: &GameMap, city: &City, gross: i32, kind: Loss) -> i32 {
@@ -673,7 +673,7 @@ pub fn produced_units(
 /// improvement the rioters destroy, if any. The capital is spared, wonders
 /// and the size-limit buildings never burn.
 pub fn riot(rng: &mut crate::rng::MapRng, city: &City, is_capital: bool) -> Option<usize> {
-    use civ3mapgen::economy::{CITY_MAX, TOWN_MAX};
+    use civ3_rules::economy::{CITY_MAX, TOWN_MAX};
     let chance = hap::shipped::CHANCE_OF_RIOTING;
     if rng.below(100) >= chance || is_capital {
         return None;
@@ -699,7 +699,7 @@ pub fn growth_blocked(city: &City, fresh_water: bool) -> bool {
 
 /// The size allowed by active improvement effects and local freshwater.
 pub fn size_limit(city: &City, fresh_water: bool) -> i32 {
-    civ3mapgen::economy::growth_limit(
+    civ3_rules::economy::growth_limit(
         fresh_water,
         has_flag(city, imp::ALLOWS_SIZE_LEVEL_2),
         has_flag(city, imp::ALLOWS_SIZE_LEVEL_3),
@@ -749,7 +749,7 @@ mod tests {
             (0, 1, 1)
         );
         realm::write(0, |r| {
-            r.govt = civ3mapgen::government::row::ANARCHY;
+            r.govt = civ3_rules::government::row::ANARCHY;
             r.capital = Some((5, 5));
         });
         let anarchy = totals(&map, &city);

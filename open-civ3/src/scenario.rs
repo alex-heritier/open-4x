@@ -215,7 +215,7 @@ pub struct Setup {
     /// `WSIZ` row.
     pub size: usize,
     /// Climate, barbarians, landmass, ocean, temperature, age (`WCHR`).
-    pub opts: civ3mapgen::options::Options,
+    pub opts: civ3_worldgen::options::Options,
     /// `DIFF` row.
     pub difficulty: usize,
     pub settings: Settings,
@@ -228,7 +228,7 @@ impl Default for Setup {
             w: crate::map::MAP_W,
             h: crate::map::MAP_H,
             size: 2,
-            opts: civ3mapgen::options::Options {
+            opts: civ3_worldgen::options::Options {
                 seed: 0,
                 size: 2,
                 climate: 1,
@@ -320,7 +320,7 @@ fn slot(flag: &str, value: &Option<String>, names: &[&str]) -> Result<Option<i32
 
 /// Resolve the options and the file's `WCHR`/`GAME` into the match's setup.
 pub fn setup_from(o: &crate::cli::Options, biq: Option<&Biq>) -> Result<Setup, String> {
-    use civ3mapgen::options::RawOptions;
+    use civ3_worldgen::options::RawOptions;
     let mut s = Setup::default();
     s.seed = o.seed.unwrap_or(s.seed);
     // The file's world characteristics, then the command line over them.

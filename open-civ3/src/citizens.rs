@@ -3,7 +3,7 @@
 //! spiral (`0x5E6E50`) transformed onto the clone's square map.
 use crate::cities::{City, Specialist};
 use crate::map::GameMap;
-use civ3mapgen::population::{Citizen, Pool};
+use civ3_rules::population::{Citizen, Pool};
 use std::collections::HashSet;
 
 pub fn new_pool(civ: usize, size: u8) -> Pool {
@@ -207,7 +207,7 @@ impl City {
         for _ in 0..n {
             let before = self.size();
             if let Some((_, victim)) = self.citizens.remove(race, |n| rng.reference().below(n)) {
-                self.food = civ3mapgen::population::food_after_loss(
+                self.food = civ3_rules::population::food_after_loss(
                     i32::from(self.food),
                     i32::from(before),
                     i32::from(self.size()),
@@ -244,7 +244,7 @@ impl City {
     }
 
     fn work_at(&self, map: &GameMap, index: u8) -> (i32, i32) {
-        let (x, y) = civ3mapgen::spiral::spiral_offset(i32::from(index));
+        let (x, y) = civ3_worldgen::spiral::spiral_offset(i32::from(index));
         (map.wrap_x(self.x + (x + y) / 2), self.y + (y - x) / 2)
     }
     fn work_index(&self, map: &GameMap, tile: (i32, i32)) -> Option<u8> {

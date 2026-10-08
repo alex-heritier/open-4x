@@ -483,7 +483,7 @@ fn attacker(city: &City, n: &Needs) -> Production {
 fn building(city: &City, n: &Needs) -> Option<Production> {
     let want = |p: Production| n.can(p) && !city.has(p) && city.can_build_here(p);
     if citycalc::growth_blocked(city, n.fresh_water) {
-        let flag = if citycalc::size_limit(city, n.fresh_water) == civ3mapgen::economy::TOWN_MAX {
+        let flag = if citycalc::size_limit(city, n.fresh_water) == civ3_rules::economy::TOWN_MAX {
             roster::imp::ALLOWS_SIZE_LEVEL_2
         } else {
             roster::imp::ALLOWS_SIZE_LEVEL_3

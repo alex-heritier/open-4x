@@ -164,7 +164,7 @@ fn place_leads(sc: &Scenario, treasury: &mut Treasury) {
         treasury.0[slot] = lead.gold;
         if let Some(g) = lead
             .government
-            .filter(|&g| g < civ3mapgen::government::SHIPPED.len())
+            .filter(|&g| g < civ3_rules::government::SHIPPED.len())
         {
             crate::realm::write(slot, |r| r.adopt(g));
         }

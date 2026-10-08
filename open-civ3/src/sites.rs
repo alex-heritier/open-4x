@@ -184,8 +184,8 @@ mod tests {
         assert!(map.tiles[i].fortress && map.tiles[i].barricade);
         assert!(!can_barricade(&map, false, x, y));
         assert_eq!(
-            civ3mapgen::combat::Structure::from_overlay(true, true),
-            civ3mapgen::combat::Structure::Fortress
+            civ3_rules::combat::Structure::from_overlay(true, true),
+            civ3_rules::combat::Structure::Fortress
         );
         map.tiles[i].site = Some(Site::Outpost(1));
         assert!(!can_outpost(&map, 1, false, x, y));
