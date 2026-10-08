@@ -42,7 +42,7 @@ pub fn setup_splash(
         return;
     }
     splash.0 = true;
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     commands
         .spawn((
             Node {
@@ -57,7 +57,7 @@ pub fn setup_splash(
         ))
         .with_children(|root| {
             root.spawn((
-                ImageNode::new(assets.load("cache/splash/tokugawa.png")),
+                ImageNode::new(assets.load("splash/tokugawa.png")),
                 Node {
                     width: Val::Px(400.0),
                     height: Val::Px(480.0),

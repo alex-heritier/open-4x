@@ -25,7 +25,7 @@ const FORTIFY_SOUNDS: &[(&str, &str)] = &[("warrior", "WarriorFortify.wav")];
 /// ruleset has no such unit.
 fn unit_sound(assets: &AssetServer, art: &str, file: &str) -> Handle<AudioSource> {
     match crate::ruleset::get().art.unit_key(art) {
-        Some(key) => assets.load(format!("{}/{key}/{file}", crate::assets::CACHE_URL)),
+        Some(key) => assets.load(format!("{key}/{file}")),
         None => Handle::default(),
     }
 }
@@ -65,7 +65,7 @@ impl GameAudio {
         ];
         let mut ui = HashMap::new();
         for n in ui_names {
-            ui.insert(n, assets.load(format!("cache/audio/ui/{n}.wav")));
+            ui.insert(n, assets.load(format!("audio/ui/{n}.wav")));
         }
         // Unit sounds are keyed by the unit's `Art/Units` folder (lowercase),
         // the Civ3 file they come from.
@@ -78,8 +78,8 @@ impl GameAudio {
             fortify.insert(art.to_string(), unit_sound(assets, art, file));
         }
         Self {
-            menu: assets.load("cache/audio/music/menu.ogg"),
-            peace: assets.load("cache/audio/music/as_early_peace.ogg"),
+            menu: assets.load("audio/music/menu.ogg"),
+            peace: assets.load("audio/music/as_early_peace.ogg"),
             ui,
             run,
             build: unit_sound(assets, "settler", "SettlerBuild.wav"),

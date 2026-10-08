@@ -794,8 +794,8 @@ For hand-made art from real modders, `python3 tools/fetch_community_assets.py`
 builds the git-ignored `test-assets-community/` from this tree plus a slice of
 a community archive.
 
-Conversion needs Pillow and ffmpeg. `assets/cache` is shared by every source
-root: keep a copy of a valuable cache before running with another `--assets`.
+Conversion needs Pillow and ffmpeg. Each scenario and source root has its own converted asset cache under
+`.cache/<scenario namespace>/`.
 """
 
 # ---------------------------------------------------------------- per-item art

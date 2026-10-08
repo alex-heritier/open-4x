@@ -203,7 +203,7 @@ pub struct UnitArt {
     eras: [std::sync::atomic::AtomicU8; crate::civs::CIV_CAP],
 }
 
-use crate::assets::{CACHE, CACHE_URL, ERA_NAMES};
+use crate::assets::{ERA_NAMES, cache_path};
 
 fn has_era_art(t: UnitType) -> bool {
     def(t).art.ends_with(ERA_NAMES[0])
@@ -285,7 +285,7 @@ impl UnitArt {
             return None;
         };
         let palette = team_colors();
-        let text = match crate::web::read_text(format!("{CACHE}/{dir}/manifest.json")) {
+        let text = match crate::web::read_text(cache_path(format!("{dir}/manifest.json"))) {
             Ok(text) => text,
             Err(e) => {
                 warn!("{}: no converted art ({e})", def(t).name);
@@ -299,10 +299,10 @@ impl UnitArt {
         // answers for them all (and in a browser the answer comes from the
         // request, not from the server).
         let tinted = raw.keys().next().is_some_and(|slot| {
-            crate::web::cache_exists(format!("{CACHE}/{dir}/{slot}_d0_c{}.png", palette[0]))
+            crate::web::cache_exists(cache_path(format!("{dir}/{slot}_d0_c{}.png", palette[0])))
         });
         for (slot, e) in raw {
-            let base = format!("{CACHE_URL}/{dir}/{slot}");
+            let base = format!("{dir}/{slot}");
             clips.insert(
                 slot,
                 Clip {
@@ -319,9 +319,7 @@ impl UnitArt {
                     sounds: e
                         .sounds
                         .iter()
-                        .map(|(at, wav)| {
-                            (*at, asset_server.load(format!("{CACHE_URL}/{dir}/{wav}")))
-                        })
+                        .map(|(at, wav)| (*at, asset_server.load(format!("{dir}/{wav}"))))
                         .collect(),
                 },
             );
@@ -1135,7 +1133,9 @@ pub fn step_to(u: &mut Unit, nx: i32, ny: i32, dur: f32) {
 /// way Civ3 paces a tile per stride loop. Units without walk art keep
 /// the old fixed beat.
 pub fn step_duration(art: &UnitArt, utype: UnitType, civ: usize) -> f32 {
-    art.clip_for(utype, civ, "RUN").map(|c| c.duration()).unwrap_or(STEP_DUR)
+    art.clip_for(utype, civ, "RUN")
+        .map(|c| c.duration())
+        .unwrap_or(STEP_DUR)
 }
 
 pub fn advance_anims(
@@ -2156,13 +2156,13 @@ struct RingEntry {
 
 impl SelectionRing {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let text = crate::web::read_text("assets/cache/cursor/manifest.json")
-            .expect("run from the repo root: the art cache (assets/cache) is built at startup");
+        let text = crate::web::read_text(crate::assets::cache_path("cursor/manifest.json"))
+            .expect("run from the repo root: the scenario art cache is built at startup");
         let raw: HashMap<String, RingEntry> =
             serde_json::from_str(&text).expect("cursor manifest parses");
         let e = &raw["ring"];
         Self {
-            image: asset_server.load(format!("cache/cursor/{}", e.file)),
+            image: asset_server.load(format!("cursor/{}", e.file)),
             frame: Vec2::new(e.frame[0] as f32, e.frame[1] as f32),
             frames: e.frames,
             ms: e.ms,

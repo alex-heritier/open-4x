@@ -403,8 +403,8 @@ impl ImprovementArt {
     /// they are first drawn, not all at startup (in a browser each is a
     /// request).
     pub fn load() -> Self {
-        let text = crate::web::read_text("assets/cache/improvements/manifest.json")
-            .expect("run from the repo root: the art cache (assets/cache) is built at startup");
+        let text = crate::web::read_text(crate::assets::cache_path("improvements/manifest.json"))
+            .expect("run from the repo root: the scenario art cache is built at startup");
         let raw: HashMap<String, ImpEntry> =
             serde_json::from_str(&text).expect("improvements manifest parses");
         let mut defs = HashMap::new();
@@ -431,7 +431,7 @@ impl ImprovementArt {
         let def = &self.defs[key];
         let image = def
             .image
-            .get_or_init(|| assets.load(format!("cache/improvements/{}", def.file)));
+            .get_or_init(|| assets.load(format!("improvements/{}", def.file)));
         (image.clone(), def.anchor)
     }
 }

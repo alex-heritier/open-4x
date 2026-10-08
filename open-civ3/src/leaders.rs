@@ -16,7 +16,7 @@ use serde::Deserialize;
 use crate::civs::{civ_count, is_ai};
 use crate::research::{Research, slot};
 
-use crate::assets::{CACHE, CACHE_URL};
+use crate::assets::cache_path;
 
 pub use crate::ruleset::Leader;
 
@@ -105,8 +105,8 @@ impl LeaderArt {
                 .iter()
                 .flatten()
                 .filter_map(|item| {
-                    let text =
-                        crate::web::read_text(format!("{CACHE}/{}/clip.json", item.key)).ok()?;
+                    let text = crate::web::read_text(cache_path(format!("{}/clip.json", item.key)))
+                        .ok()?;
                     let mut clip: Clip = serde_json::from_str(&text).ok()?;
                     clip.dir = item.key.clone();
                     Some(clip)
@@ -134,7 +134,7 @@ impl LeaderArt {
     /// on the GPU only: a sheet is 23 MB.
     pub fn sheet(&mut self, assets: &AssetServer, civ: usize, era: usize) -> Option<Handle<Image>> {
         let clip = self.clip(civ, era)?;
-        let path = format!("{CACHE_URL}/{}/{}", clip.dir, clip.file);
+        let path = format!("{}/{}", clip.dir, clip.file);
         // One era of a civ at a time: an older sheet is let go.
         let era = self
             .clips
@@ -271,12 +271,14 @@ mod tests {
         // Skipped without the converted art (the game converts it at startup).
         let art = LeaderArt::load();
         if art.clips.is_empty() {
-            eprintln!("skipped: no leader clips in {CACHE}");
+            eprintln!("skipped: no cached leader clips");
             return;
         }
         for clips in art.clips.values() {
             for clip in clips {
-                let path = format!("{CACHE}/{}/{}", clip.dir, clip.file);
+                let path = cache_path(format!("{}/{}", clip.dir, clip.file))
+                    .to_string_lossy()
+                    .into_owned();
                 let (w, h) = image_size(&path);
                 assert_eq!(w, clip.frame[0] * clip.cols, "{path}");
                 assert!(

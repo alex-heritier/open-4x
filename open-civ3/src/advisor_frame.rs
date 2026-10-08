@@ -50,7 +50,7 @@ pub struct TabClick(pub Tab);
 pub struct ArtButton(pub &'static str);
 
 pub fn art(assets: &AssetServer, path: &str) -> ImageNode {
-    ImageNode::new(assets.load(format!("cache/advisors/{path}.png")))
+    ImageNode::new(assets.load(format!("advisors/{path}.png")))
 }
 
 /// A button drawn with three-state art, `w` x `h`, with `action` on it.
@@ -85,10 +85,10 @@ fn spaced(title: &str) -> String {
 
 /// What one advisor's frame shows.
 pub struct Frame<'a> {
-    /// The background, a stem under `cache/advisors`.
+    /// The background, a stem under `advisors`.
     pub background: &'a str,
     pub title: &'a str,
-    /// The portrait, a stem under `cache/advisors` (`domestic_0` ...).
+    /// The portrait, a stem under `advisors` (`domestic_0` ...).
     pub portrait: String,
     /// What the advisor says in the box under the portrait.
     pub says: String,
@@ -180,7 +180,7 @@ pub fn hover_art(
             Interaction::Hovered => 1,
             Interaction::None => 0,
         };
-        img.image = assets.load(format!("cache/advisors/{}_{state}.png", b.0));
+        img.image = assets.load(format!("advisors/{}_{state}.png", b.0));
     }
 }
 

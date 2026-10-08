@@ -224,7 +224,7 @@ impl Production {
         self.bldg().map_or(0, |b| b.happy as u8)
     }
 
-    /// Cell of the unit icon sheet (`cache/ui/unit_icons.png`, 14 columns of
+    /// Cell of the unit icon sheet (`ui/unit_icons.png`, 14 columns of
     /// 32-px icons on a 33-px grid with a 1-px frame).
     pub fn unit_icon_rect(self) -> Option<Rect> {
         let i = self.unit()?.row().icon.max(0) as f32;
@@ -253,9 +253,9 @@ pub enum Specialist {
 impl Specialist {
     pub fn art(self) -> &'static str {
         match self {
-            Self::Entertainer => "cache/ui/entertainer.png",
-            Self::Scientist => "cache/ui/scientist.png",
-            Self::TaxCollector => "cache/ui/tax_collector.png",
+            Self::Entertainer => "ui/entertainer.png",
+            Self::Scientist => "ui/scientist.png",
+            Self::TaxCollector => "ui/tax_collector.png",
         }
     }
     pub(crate) fn next(self) -> Self {
@@ -392,8 +392,8 @@ const CITY_ERAS: usize = 4;
 
 impl CityArt {
     pub fn load(asset_server: &AssetServer) -> Self {
-        let text = crate::web::read_text("assets/cache/cities/manifest.json")
-            .expect("run from the repo root: the art cache (assets/cache) is built at startup");
+        let text = crate::web::read_text(crate::assets::cache_path("cities/manifest.json"))
+            .expect("run from the repo root: the scenario art cache is built at startup");
         let raw: HashMap<String, CityEntry> =
             serde_json::from_str(&text).expect("cities manifest parses");
         let anchor = {
@@ -404,7 +404,7 @@ impl CityArt {
             ))
         };
         let load = |kind: &str, g: usize, e: usize| {
-            asset_server.load(format!("cache/cities/{kind}_{g}_{e}.png"))
+            asset_server.load(format!("cities/{kind}_{g}_{e}.png"))
         };
         let sprites = (0..CULTURE_GROUPS)
             .map(|g| {
@@ -1532,7 +1532,7 @@ pub fn spawn_city_visuals(
         Transform::from_xyz(pos.x, pos.y, sprite_z(city.x, city.y, 3.0)),
         CitySprite(entity),
     ));
-    let font: Handle<Font> = assets.load("cache/fonts/lsans.ttf");
+    let font: Handle<Font> = assets.load("fonts/lsans.ttf");
     // Civ3 paints the badge in the owner's civ color.
     let civ_color = CIVS[city.civ].color;
     let origin = label_origin(city);
@@ -2475,7 +2475,7 @@ fn txt_centered(
 fn build_icon(assets: &AssetServer, p: Production) -> ImageNode {
     match p.building_rect() {
         Some(rect) => {
-            let mut n = ImageNode::new(assets.load("cache/cityscreen/buildings-small.png"));
+            let mut n = ImageNode::new(assets.load("cityscreen/buildings-small.png"));
             n.rect = Some(rect);
             n
         }
@@ -2485,7 +2485,7 @@ fn build_icon(assets: &AssetServer, p: Production) -> ImageNode {
 
 /// The 32-px icon of a unit production, cropped from the Conquests sheet.
 fn unit_icon_node(assets: &AssetServer, p: Production) -> ImageNode {
-    let mut n = ImageNode::new(assets.load("cache/ui/unit_icons.png"));
+    let mut n = ImageNode::new(assets.load("ui/unit_icons.png"));
     n.rect = p.unit_icon_rect();
     n
 }
@@ -2903,7 +2903,7 @@ const WORKED_ELSEWHERE: Color = Color::srgb(0.26, 0.16, 0.08);
 /// Cell of `CityIcons.png`: 30-px icons on a 31-px stride (1-px green
 /// separators). 2 = commerce, 4 = shield, 6 = food.
 fn city_icon(assets: &AssetServer, cell: u32) -> ImageNode {
-    let mut n = ImageNode::new(assets.load("cache/cityscreen/CityIcons.png"));
+    let mut n = ImageNode::new(assets.load("cityscreen/CityIcons.png"));
     let x = 1.0 + cell as f32 * 31.0;
     n.rect = Some(Rect::new(x, 1.0, x + 30.0, 31.0));
     n
@@ -2980,7 +2980,7 @@ fn build_city_screen(
     let ClusterCtx {
         assets, map, city, ..
     } = *ctx;
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     let shields_pt = city_income(map, city).1;
     // Black fills the window around the 1024x768 panel; the panel's own
     // art is open over the city view band, where the map shows.
@@ -3017,7 +3017,7 @@ fn build_city_screen(
             .with_children(|row| {
                 row.spawn(black(Val::Auto, Val::Percent(100.0)));
                 row.spawn((
-                    ImageNode::new(assets.load("cache/cityscreen/background.png")),
+                    ImageNode::new(assets.load("cityscreen/background.png")),
                     Node {
                         width: Val::Px(CONTENT_W),
                         height: Val::Px(CONTENT_H),
@@ -3057,7 +3057,7 @@ fn production_queue(
     shields_pt: u8,
 ) {
     content.spawn((
-        ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
+        ImageNode::new(assets.load("cityscreen/ProductionQueueBox.png")),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(QUEUE_X),
@@ -3221,7 +3221,7 @@ fn icon(
     w: f32,
     tint: Color,
 ) {
-    let mut n = ImageNode::new(assets.load("cache/cityscreen/CityIcons.png"));
+    let mut n = ImageNode::new(assets.load("cityscreen/CityIcons.png"));
     let cx = 1.0 + cell as f32 * 31.0;
     n.rect = Some(Rect::new(cx, 1.0, cx + 30.0, 31.0));
     n.color = tint;
@@ -3247,7 +3247,7 @@ fn good_icon(
     y: f32,
     w: f32,
 ) {
-    let path = format!("cache/features/{}.png", crate::features::art_key(id));
+    let path = format!("features/{}.png", crate::features::art_key(id));
     parent.spawn((
         ImageNode::new(assets.load(path)),
         Node {
@@ -3327,7 +3327,7 @@ fn panel_button(
 ) {
     content.spawn((
         Button,
-        ImageNode::new(assets.load(format!("cache/ui/{stem}_0.png"))),
+        ImageNode::new(assets.load(format!("ui/{stem}_0.png"))),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(x),
@@ -3352,7 +3352,7 @@ pub fn update_panel_buttons(
             Interaction::Hovered => 1,
             Interaction::None => 0,
         };
-        img.image = assets.load(format!("cache/ui/{}_{state}.png", button.stem));
+        img.image = assets.load(format!("ui/{}_{state}.png", button.stem));
     }
 }
 
@@ -3567,7 +3567,7 @@ fn city_panel(
             Color::srgb(1.0, 0.55, 0.5),
             m.unhappy as usize,
         ))
-        .map(|tint| ("cache/ui/citizen.png", tint, None))
+        .map(|tint| ("ui/citizen.png", tint, None))
         .chain(
             city.specialist_jobs()
                 .enumerate()
@@ -3623,7 +3623,7 @@ fn city_panel(
     }
     for (i, (name, rect, culture, upkeep, happy)) in rows.iter().take(7).enumerate() {
         let y = 528.0 + i as f32 * 32.0;
-        let mut n = ImageNode::new(assets.load("cache/cityscreen/buildings-small.png"));
+        let mut n = ImageNode::new(assets.load("cityscreen/buildings-small.png"));
         n.rect = Some(*rect);
         content.spawn((
             n,
@@ -3679,7 +3679,7 @@ fn city_panel(
     // there is never anything to scroll: it is the panel's chrome.
     for (art, y) in [("scroll_up_0", 509.0), ("scroll_down_0", 748.0)] {
         content.spawn((
-            ImageNode::new(assets.load(format!("cache/ui/{art}.png"))),
+            ImageNode::new(assets.load(format!("ui/{art}.png"))),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(140.0),
@@ -3692,7 +3692,7 @@ fn city_panel(
     }
     for i in 0..11 {
         content.spawn((
-            ImageNode::new(assets.load("cache/ui/scroll_track.png")),
+            ImageNode::new(assets.load("ui/scroll_track.png")),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(143.0),
@@ -3894,7 +3894,7 @@ fn city_panel(
     content
         .spawn((
             Button,
-            ImageNode::new(assets.load("cache/ui/prod_0.png")),
+            ImageNode::new(assets.load("ui/prod_0.png")),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(905.0),
@@ -3933,7 +3933,7 @@ fn city_panel(
     // Civ3's hurry button beside it (the sheet's note: "draw @ (860, 520)").
     content.spawn((
         Button,
-        ImageNode::new(assets.load("cache/ui/hurry_0.png")),
+        ImageNode::new(assets.load("ui/hurry_0.png")),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(860.0),

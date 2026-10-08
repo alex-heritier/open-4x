@@ -142,9 +142,9 @@ fn request() -> &'static Value {
         #[cfg(target_arch = "wasm32")]
         {
             serde_json::from_str(
-                &read_text("assets/cache/request.json").expect("assets/cache/request.json"),
+                &read_text(crate::assets::cache_path("request.json")).expect("cache request.json"),
             )
-            .expect("assets/cache/request.json parses")
+            .expect("cache request.json parses")
         }
     })
 }
@@ -153,13 +153,13 @@ fn request() -> &'static Value {
 fn catalog() -> &'static Catalog {
     CATALOG.get_or_init(|| {
         let request = request();
-        let root = PathBuf::from(request["root"].as_str().unwrap_or_default());
+        let root = PathBuf::from(norm(request["root"].as_str().unwrap_or_default()));
         let search = request["search"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|p| p.as_str())
-            .map(PathBuf::from)
+            .map(|p| PathBuf::from(norm(p)))
             .collect::<Vec<_>>();
         let root_text = request["root"].as_str().unwrap_or_default();
         let mut paths = HashMap::new();
@@ -248,8 +248,14 @@ pub fn kind(path: &Path) -> Option<PathKind> {
 
 fn cache_url(path: &Path) -> Option<String> {
     let path = path.to_string_lossy().replace('\\', "/");
-    path.strip_prefix("assets/cache/")
-        .map(|rel| format!("assets/cache/{rel}"))
+    let prefix = format!(
+        "{}/",
+        crate::assets::cache_dir()
+            .replace('\\', "/")
+            .trim_end_matches('/')
+    );
+    path.strip_prefix(&prefix)
+        .map(|rel| format!("{prefix}{rel}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -333,7 +339,7 @@ pub fn cache_exists(path: impl AsRef<Path>) -> bool {
     {
         // What the request lists is converted in full; only a file it does
         // not mention is worth a blocking round trip.
-        if url.strip_prefix("assets/cache/").is_some_and(promised) {
+        if url.strip_prefix("assets/").is_some_and(promised) {
             return true;
         }
         let Ok(xhr) = XmlHttpRequest::new() else {

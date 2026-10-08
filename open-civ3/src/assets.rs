@@ -3,13 +3,13 @@
 //! The game draws PNG and plays WAV/OGG; Civ3 ships PCX, FLC and MP3.
 //! `tools/prep_assets.py` converts, and nobody runs it by hand: after the
 //! rules are read, [`plan`] works out which Civ3 files the rules refer to,
-//! and [`ensure`] checks them against `assets/cache/index.json`. When
-//! anything is missing or stale it writes `assets/cache/request.json` and runs
+//! and [`ensure`] checks them against `.cache/<namespace>/index.json`. When
+//! anything is missing or stale it writes `.cache/<namespace>/request.json` and runs
 //! `python3 tools/prep_assets.py --request` before the window opens.
 //!
 //! Everything Civ3's data refers to is cached under its **resolved path**,
 //! lowercased and relative to the source asset root: the unit folder
-//! `Conquests/Art/Units/Warrior` is `assets/cache/conquests/art/units/warrior/`.
+//! `Conquests/Art/Units/Warrior` is `.cache/<namespace>/conquests/art/units/warrior/`.
 //! The key says which file won the search, so a scenario's own Warrior and the
 //! stock one are separate entries. Interface pieces nothing in Civ3's data
 //! names keep fixed output names (`ui/`, `terrain/`, ...).
@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use civ3_biq::Biq;
 use serde::Deserialize;
@@ -25,10 +26,62 @@ use serde_json::{Value, json};
 use crate::install::Install;
 use crate::roster::UnitRow;
 
-/// Where the cache lives, from the game's working directory.
-pub const CACHE: &str = "assets/cache";
-/// The path the asset server loads from (relative to `assets/`).
-pub const CACHE_URL: &str = "cache";
+static CACHE: OnceLock<String> = OnceLock::new();
+
+/// The selected scenario's cache, relative to the working directory.
+pub fn cache_dir() -> &'static str {
+    #[cfg(target_arch = "wasm32")]
+    return "assets";
+    #[cfg(not(target_arch = "wasm32"))]
+    CACHE.get().map_or(".cache/civ3", String::as_str)
+}
+
+/// Pick the cache before conversion or asset loading starts.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn select_cache(boot: &crate::boot::Boot) {
+    let dir =
+        std::env::var("CIV3_CACHE").unwrap_or_else(|_| format!(".cache/{}", boot.cache_namespace));
+    CACHE.set(dir).expect("cache selected once at startup");
+}
+
+/// Rules and source search roots identify an asset scenario. Map contents,
+/// turns, save names and compression do not change its cache.
+pub fn scenario_namespace(biq: &Biq, install: &Install, stock: Option<(&Biq, &Install)>) -> String {
+    let identity = scenario_identity(biq, install);
+    if stock.is_some_and(|(biq, install)| scenario_identity(biq, install) == identity) {
+        return "civ3".into();
+    }
+    format!("scenario-{}", fnv(&identity))
+}
+
+fn scenario_identity(biq: &Biq, install: &Install) -> Vec<u8> {
+    // Serialize only the rule sections in a fixed layout, so an embedded
+    // BIQ and its original produce the same identity.
+    let mut rules = Biq::new(civ3_biq::Version::new(12, 8));
+    rules.rules = biq.rules.clone();
+    rules.flavors = biq.flavors.clone();
+    let mut identity = rules.to_stream();
+    let resolved = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let mut roots = vec![resolved(&install.root)];
+    for path in &install.search {
+        // A save's containing directory is not an asset root merely because
+        // the save lives there. Keep directories that supply scenario assets.
+        if crate::install::resolve_in(path, "Art").is_some()
+            || crate::install::resolve_in(path, "Text").is_some()
+        {
+            let path = resolved(path);
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+    }
+    identity.extend_from_slice(json!(roots).to_string().as_bytes());
+    identity
+}
+
+pub fn cache_path(rel: impl AsRef<Path>) -> PathBuf {
+    Path::new(cache_dir()).join(rel)
+}
 const SCRIPT: &str = "tools/prep_assets.py";
 
 /// The folder names of the units that change with the era (leaders, armies).
@@ -115,7 +168,7 @@ impl ArtPlan {
         } else {
             format!("{key}.png")
         };
-        crate::web::cache_exists(Path::new(CACHE).join(&rel)).then(|| format!("{CACHE_URL}/{rel}"))
+        crate::web::cache_exists(cache_path(&rel)).then_some(rel)
     }
 }
 
@@ -124,14 +177,19 @@ impl ArtPlan {
     /// missing file shows nothing).
     pub fn tech_icon(&self, row: usize) -> Option<String> {
         let p = self.techs.get(row)?.as_ref()?;
-        Some(format!("{CACHE_URL}/{}.png", p.key))
+        Some(format!("{}.png", p.key))
     }
 }
 
 /// A file's cache key: its path under the install, lowercased and `/`
 /// separated (anything outside the install keeps the path without its root).
 pub fn key_of(install: &Install, path: &Path) -> String {
-    let rel: PathBuf = match path.strip_prefix(&install.root) {
+    let root = install
+        .root
+        .canonicalize()
+        .unwrap_or_else(|_| install.root.clone());
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let rel: PathBuf = match path.strip_prefix(&root) {
         Ok(rel) => rel.to_path_buf(),
         Err(_) => path
             .components()
@@ -268,7 +326,7 @@ fn fnv(bytes: &[u8]) -> String {
 }
 
 fn read_index(script_hash: &str) -> Index {
-    let index: Index = std::fs::read_to_string(Path::new(CACHE).join("index.json"))
+    let index: Index = std::fs::read_to_string(cache_path("index.json"))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default();
@@ -304,7 +362,7 @@ impl Index {
                 return false;
             }
         }
-        if e.outputs.iter().any(|o| !Path::new(CACHE).join(o).exists()) {
+        if e.outputs.iter().any(|o| !cache_path(o).exists()) {
             return false;
         }
         e.sources.iter().all(|s| {
@@ -421,6 +479,14 @@ pub fn ensure(wanted: &Wanted) -> Result<(), String> {
         .map_err(|e| format!("{SCRIPT}: {e} (run from the repository root)"))?;
     let index = read_index(&fnv(&script));
     let stale = wanted.stale(&index);
+    let cache = cache_dir();
+    std::fs::create_dir_all(cache).map_err(|e| format!("{cache}: {e}"))?;
+    let request = cache_path("request.json");
+    std::fs::write(
+        &request,
+        serde_json::to_string_pretty(&wanted.request()).expect("the request serializes"),
+    )
+    .map_err(|e| format!("{}: {e}", request.display()))?;
     if stale == 0 {
         return Ok(());
     }
@@ -433,19 +499,13 @@ pub fn ensure(wanted: &Wanted) -> Result<(), String> {
     if !have("ffmpeg", &["-version"]) {
         return Err("the art cache needs ffmpeg (it is not on the PATH)".into());
     }
-    std::fs::create_dir_all(CACHE).map_err(|e| format!("{CACHE}: {e}"))?;
-    let request = Path::new(CACHE).join("request.json");
-    std::fs::write(
-        &request,
-        serde_json::to_string_pretty(&wanted.request()).expect("the request serializes"),
-    )
-    .map_err(|e| format!("{}: {e}", request.display()))?;
     eprintln!(
-        "open-4x: converting {stale} art item(s) into {CACHE}/ (the first run takes a while)"
+        "open-4x: converting {stale} art item(s) into {cache}/ (the first run takes a while)"
     );
     let status = Command::new("python3")
         .args([SCRIPT, "--request"])
         .arg(&request)
+        .env("CIV3_CACHE", cache)
         .status()
         .map_err(|e| format!("python3 {SCRIPT}: {e}"))?;
     if !status.success() {
@@ -456,9 +516,9 @@ pub fn ensure(wanted: &Wanted) -> Result<(), String> {
 
 #[cfg(target_arch = "wasm32")]
 pub fn ensure(_wanted: &Wanted) -> Result<(), String> {
-    crate::web::read_text(Path::new(CACHE).join("request.json"))
+    crate::web::read_text(cache_path("request.json"))
         .map(|_| ())
-        .map_err(|e| format!("{CACHE}/request.json: {e}"))
+        .map_err(|e| format!("{}: {e}", cache_path("request.json").display()))
 }
 
 /// The team colors and civs of the match in play, for [`Wanted`].
@@ -478,7 +538,7 @@ pub fn in_play() -> (Vec<usize>, Vec<u8>) {
 /// has something to check; a cache built for another game is skipped.
 #[cfg(test)]
 pub fn cache_covers_plan() -> bool {
-    let Ok(text) = std::fs::read_to_string(Path::new(CACHE).join("request.json")) else {
+    let Ok(text) = std::fs::read_to_string(cache_path("request.json")) else {
         return false;
     };
     let Ok(req) = serde_json::from_str::<Value>(&text) else {
@@ -504,7 +564,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_biq_and_its_saves_share_the_scenario_cache() {
+        let mut biq = Biq::new(civ3_biq::Version::new(12, 8));
+        biq.rules.general_rules.push(Default::default());
+        let install = Install::new("/civ3", vec![]);
+        let namespace = scenario_namespace(&biq, &install, None);
+        for turn in [1, 42] {
+            let save = civ3_biq::Save::blank(biq.to_stream(), 4, 4, turn, -4000).unwrap();
+            let embedded = save.embedded_biq().unwrap();
+            assert_eq!(scenario_namespace(&embedded, &install, None), namespace);
+        }
+        let stock = Some((&biq, &install));
+        assert_eq!(scenario_namespace(&biq, &install, stock), "civ3");
+        let mut changed = biq.clone();
+        changed.rules.general_rules[0].max_research_time += 1;
+        assert_ne!(scenario_namespace(&changed, &install, stock), "civ3");
+        assert_ne!(scenario_namespace(&changed, &install, None), namespace);
+        assert_ne!(
+            scenario_namespace(&biq, &Install::new("/other-art", vec![]), None),
+            namespace
+        );
+    }
+
+    #[test]
+    fn save_locations_are_ignored_but_scenario_asset_folders_are_isolated() {
+        let tmp = std::env::temp_dir().join(format!("open4x-namespace-{}", std::process::id()));
+        for name in ["stock", "mod-a", "mod-b"] {
+            std::fs::create_dir_all(tmp.join(name).join("Art")).unwrap();
+        }
+        let biq = Biq::new(civ3_biq::Version::new(12, 8));
+        let root = tmp.join("stock");
+        let original = Install::new(&root, vec![]);
+        let moved_save = Install::new(&root, vec![tmp.join("saves")]);
+        assert_eq!(
+            scenario_namespace(&biq, &original, None),
+            scenario_namespace(&biq, &moved_save, None)
+        );
+        let a = Install::new(&root, vec![tmp.join("mod-a")]);
+        let b = Install::new(&root, vec![tmp.join("mod-b")]);
+        assert_ne!(
+            scenario_namespace(&biq, &a, None),
+            scenario_namespace(&biq, &b, None)
+        );
+        std::fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
     fn keys_are_the_lowercased_path_under_the_install() {
+        let local = Install::new(".", vec![]);
+        assert_eq!(
+            key_of(&local, Path::new("Cargo.toml")),
+            key_of(&local, &std::env::current_dir().unwrap().join("Cargo.toml")),
+        );
         let install = Install {
             root: PathBuf::from("/civ3"),
             search: vec![],

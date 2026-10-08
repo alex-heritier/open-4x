@@ -22,7 +22,11 @@ impl Install {
     /// folder and `GAME.search_folders`) in front.
     pub fn new(root: impl Into<PathBuf>, extra: Vec<PathBuf>) -> Install {
         let root = root.into();
-        let mut search = extra;
+        let root = root.canonicalize().unwrap_or(root);
+        let mut search: Vec<_> = extra
+            .into_iter()
+            .map(|p| p.canonicalize().unwrap_or(p))
+            .collect();
         for sub in ["Conquests", "civ3PTW"] {
             if let Some(dir) = child(&root, sub) {
                 search.push(dir);
@@ -155,14 +159,17 @@ mod tests {
         std::fs::create_dir_all(d.join("Scenarios/X/Art/Units/Warrior")).unwrap();
         let inst = Install::new(&d, vec![d.join("Scenarios/X")]);
         let hit = inst.resolve("Art/Units/Warrior").unwrap();
-        assert!(hit.starts_with(d.join("Scenarios/X")), "{hit:?}");
+        assert!(
+            hit.starts_with(d.join("Scenarios/X").canonicalize().unwrap()),
+            "{hit:?}"
+        );
         // Without the scenario's copy the Conquests one wins.
         let stock = Install::new(&d, vec![]);
         assert!(
             stock
                 .resolve("Art/Units/Warrior")
                 .unwrap()
-                .starts_with(d.join("Conquests"))
+                .starts_with(d.join("Conquests").canonicalize().unwrap())
         );
         assert_eq!(inst.resolve_all("art/units/warrior").len(), 2);
         let _ = std::fs::remove_dir_all(&d);
@@ -191,7 +198,7 @@ mod tests {
         assert_eq!(options.civ3_dir(), rules);
         let install = Install::new(options.assets_dir(), vec![]);
         let picked = install.resolve("art/units/warrior/warrior.INI").unwrap();
-        assert!(picked.starts_with(&assets));
+        assert!(picked.starts_with(assets.canonicalize().unwrap()));
         assert_eq!(std::fs::read_to_string(&picked).unwrap(), "override");
         println!(
             "--assets resolution: {} -> override; rules root {}",

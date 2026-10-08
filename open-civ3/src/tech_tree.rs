@@ -153,8 +153,8 @@ fn title_color(s: State) -> Color {
 /// The 32-px icon of something an advance brings.
 pub fn item_icon(assets: &AssetServer, p: Production) -> ImageNode {
     let (path, rect) = match p.unit() {
-        Some(_) => ("cache/ui/unit_icons.png", p.unit_icon_rect()),
-        None => ("cache/cityscreen/buildings-small.png", p.building_rect()),
+        Some(_) => ("ui/unit_icons.png", p.unit_icon_rect()),
+        None => ("cityscreen/buildings-small.png", p.building_rect()),
     };
     let mut n = ImageNode::new(assets.load(path));
     n.rect = rect;

@@ -115,6 +115,8 @@ fn main() {
         Ok(b) => b,
         Err(msg) => fail(&msg),
     };
+    #[cfg(not(target_arch = "wasm32"))]
+    assets::select_cache(&boot);
     #[cfg(target_arch = "wasm32")]
     web::show_progress("rules ready");
     if let Err(msg) = scenario::install(&boot) {
@@ -430,7 +432,14 @@ fn asset_plugin() -> bevy::asset::AssetPlugin {
         plugin
     }
     #[cfg(not(target_arch = "wasm32"))]
-    bevy::asset::AssetPlugin::default()
+    bevy::asset::AssetPlugin {
+        file_path: std::env::current_dir()
+            .expect("working directory")
+            .join(assets::cache_dir())
+            .to_string_lossy()
+            .into_owned(),
+        ..default()
+    }
 }
 
 fn fail(message: &str) -> ! {

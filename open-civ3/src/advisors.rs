@@ -565,7 +565,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
         ..default()
     };
     let parchment = |assets: &AssetServer| {
-        ImageNode::new(assets.load("cache/advisors/popup.png"))
+        ImageNode::new(assets.load("advisors/popup.png"))
             .with_mode(NodeImageMode::Sliced(slices.clone()))
     };
     commands
@@ -593,7 +593,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
                     s,
                     ImageNode::new(
                         v.assets
-                            .load(format!("cache/advisors/portrait_science_{era}.png")),
+                            .load(format!("advisors/portrait_science_{era}.png")),
                     ),
                     221.0,
                     -132.0,
@@ -650,7 +650,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
                         Underline,
                     ));
                     b.spawn((
-                        ImageNode::new(v.assets.load("cache/advisors/pulldown.png")),
+                        ImageNode::new(v.assets.load("advisors/pulldown.png")),
                         st.rect(pw - 23.0, 0.0, 21.0, 21.0),
                     ));
                 });
@@ -685,7 +685,7 @@ fn research_ask(commands: &mut Commands, ui: &Ui, v: &View, scale: f32) {
                     .with_children(|b| {
                         let bullet = if focus { "bullet_2" } else { "bullet_0" };
                         b.spawn((
-                            ImageNode::new(v.assets.load(format!("cache/advisors/{bullet}.png"))),
+                            ImageNode::new(v.assets.load(format!("advisors/{bullet}.png"))),
                             Node {
                                 width: st.px(19.0),
                                 height: st.px(20.0),
@@ -769,7 +769,7 @@ fn portrait(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, art: &mut LeaderArt
 fn frame(s: &mut ChildSpawnerCommands, ui: &Ui, v: &View, name: &str) {
     ui.picture(
         s,
-        ImageNode::new(v.assets.load(format!("cache/diplomacy/{name}.png"))),
+        ImageNode::new(v.assets.load(format!("diplomacy/{name}.png"))),
         0.0,
         0.0,
         1024.0,
@@ -1335,7 +1335,7 @@ pub fn show(
     if !advisors.is_open() {
         return;
     }
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     let cs: Vec<&City> = cities.iter().collect();
     let us: Vec<&Unit> = units.iter().collect();
     let facts = diplomacy.facts(&map, &research, &cs, &us);
@@ -1422,7 +1422,7 @@ pub fn show(
                     border: UiRect::all(Val::Px(2.0)),
                     ..default()
                 },
-                ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
+                ImageNode::new(assets.load("cityscreen/ProductionQueueBox.png")),
                 BackgroundColor(Color::srgb(0.94, 0.91, 0.77)),
                 BorderColor::all(Color::srgb(0.25, 0.4, 0.28)),
             ))
@@ -1752,7 +1752,7 @@ pub fn update_science_line(
 
 /// Small buttons for the mouse: Science (F6), Foreign (F4) and Wonders (F7).
 pub fn spawn_buttons(mut commands: Commands, assets: Res<AssetServer>) {
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     commands
         .spawn((
             Node {

@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""Stage `assets/cache` for the browser build (a Trunk `post_build` hook).
+"""Stage the selected scenario cache for the browser build (a Trunk `post_build` hook).
 
-`assets/cache` is over a gigabyte, so Trunk's `copy-dir` made every build a
+The cache can exceed a gigabyte, so Trunk's `copy-dir` made every build a
 long copy and a second copy on disk. This does two cheaper things:
 
 * Writes `<dist>/web-bundle.json`: the small text files the game reads
   while it starts and plays (unit manifests, clip lists, the request), keyed
-  by URL. It goes beside the page and never into `assets/cache`, which belongs
-  to the converter. In a browser every `read_text` is a blocking request, so a
+  by URL. It goes beside the page; the converter owns the cache. In a browser every `read_text` is a blocking request, so a
   unit type's first appearance would freeze the page for a round trip; with
   the bundle they are one request at startup.
 
-* Makes `<dist>/assets` point at the repo's `assets/`: a symlink by default
-  (instant; `trunk serve` and `python3 -m http.server` follow it), or with
+* Makes `<dist>/assets` point at `.cache/civ3/` (or `CIV3_CACHE`): a symlink
+  by default (instant; `trunk serve` and `python3 -m http.server` follow it), or with
   `--copy` a tree of hard links (real files, no extra disk space, for hosts
   and upload tools that do not follow symlinks). `index.json`, the
   converter's bookkeeping, is left out of the hard-link tree.
@@ -26,9 +25,8 @@ import shutil
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ASSETS = os.path.join(ROOT, "assets")
-CACHE = os.path.join(ASSETS, "cache")
-URL = "assets/cache"
+CACHE = os.path.abspath(os.environ.get("CIV3_CACHE", os.path.join(ROOT, ".cache", "civ3")))
+URL = "assets"
 BUNDLE = "web-bundle.json"
 
 # Bookkeeping the game never reads.
@@ -70,7 +68,7 @@ def hard_link_tree(dest):
     for rel, path in walk():
         if rel == "index.json":
             continue
-        out = os.path.join(dest, "cache", *rel.split("/"))
+        out = os.path.join(dest, *rel.split("/"))
         os.makedirs(os.path.dirname(out), exist_ok=True)
         try:
             os.link(path, out)
@@ -101,8 +99,8 @@ def main():
         files = hard_link_tree(dest)
         print(f"web_assets: {files} files hard-linked into {dest}; bundle {bundled} files, {size / 1e6:.2f} MB")
     else:
-        os.symlink(ASSETS, dest)
-        print(f"web_assets: {dest} -> {ASSETS}; bundle {bundled} files, {size / 1e6:.2f} MB")
+        os.symlink(CACHE, dest)
+        print(f"web_assets: {dest} -> {CACHE}; bundle {bundled} files, {size / 1e6:.2f} MB")
 
 
 if __name__ == "__main__":

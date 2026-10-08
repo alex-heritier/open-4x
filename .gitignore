@@ -15,6 +15,7 @@ civ3/
 open-civ3/civ3_utils/terrain-builder/packs/*/out/
 open-civ3/civ3_utils/terrain-builder/packs/*/*.png
 saves/
+.cache/
 open-civ3/assets/cache/
 
 # community-art fixture root (tools/fetch_community_assets.py); fan content, never committed

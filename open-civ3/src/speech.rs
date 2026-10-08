@@ -22,7 +22,7 @@ use crate::civs::CIVS;
 use crate::diplomacy::people;
 use crate::leaders::LEADERS;
 
-const PATH: &str = "assets/cache/text/diplomacy.txt";
+const PATH: &str = "text/diplomacy.txt";
 /// Text sets in the file.
 #[cfg(test)]
 pub const TEXT_SETS: usize = 32;
@@ -107,12 +107,15 @@ impl Speech {
     }
 
     fn sets(&self) -> &HashMap<String, Set> {
-        self.sets.get_or_init(
-            || match self.from_file.then(|| crate::web::read_text(PATH)) {
+        self.sets.get_or_init(|| {
+            match self
+                .from_file
+                .then(|| crate::web::read_text(crate::assets::cache_path(PATH)))
+            {
                 Some(Ok(text)) => parse_sets(&text),
                 _ => HashMap::new(),
-            },
-        )
+            }
+        })
     }
 
     /// The line of block `key` that the leader of `ai` says, in the tone of
@@ -396,7 +399,7 @@ mod tests {
 
     /// The real file, when prep has converted it.
     fn real() -> Option<Speech> {
-        let text = std::fs::read_to_string(PATH).ok()?;
+        let text = std::fs::read_to_string(crate::assets::cache_path(PATH)).ok()?;
         Some(Speech::parse(&text))
     }
 

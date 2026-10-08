@@ -56,7 +56,7 @@ What already exists:
                     ▼
           biq crate: Biq / Save  ──▶  Ruleset (in memory)  ──▶  game
                     │                     │
-                    │                     └─ art and sound: Civ3 path → assets/cache/
+                    │                     └─ art and sound: Civ3 path → .cache/<namespace>/
                     │                        (prep_assets.py, run automatically when stale)
                     └─ map / scenario / saved state ──▶ game world
 ```
@@ -195,7 +195,7 @@ Rules, maps and saves are read straight from Civ3's files. Art and sound
 keep going through `tools/prep_assets.py` (PCX/FLC → PNG, MP3 → OGG, its
 crops, transparency, team colors and manifests unchanged), but nobody runs
 it by hand: the game runs it when something it needs is missing or stale.
-Output goes to the gitignored `assets/cache/` (replacing `assets/gen/`).
+Output goes to the gitignored `.cache/<namespace>/` (replacing `assets/gen/`).
 Players need Python 3, PIL and ffmpeg, as developers do today; if they are
 missing, the game says so and exits.
 
@@ -204,10 +204,10 @@ missing, the game says so and exits.
 After reading the BIQ, the game knows what it will draw: the `PRTO.art`
 unit folders, the `RACE.era_art` leader clips of the civs in play, the
 wonder splashes (`BLDG.civilopedia_entry` via `PediaIcons.txt`), the tech
-icons, the interface. It checks each against `assets/cache/index.json`
+icons, the interface. It checks each against `.cache/<namespace>/index.json`
 (below). If anything is missing or stale, it writes the list to
-`assets/cache/request.json` together with the search path, runs
-`python3 tools/prep_assets.py --request assets/cache/request.json`, streams
+`.cache/<namespace>/request.json` together with the search path, runs
+`python3 tools/prep_assets.py --request .cache/<namespace>/request.json`, streams
 the script's progress to the console, and continues when it exits. The
 first run against a new install or scenario takes a while; later runs
 start immediately.
@@ -222,8 +222,11 @@ The request carries Civ3's search order: the scenario's own folder and
 `GAME.search_folders`, then `Conquests/`, `civ3PTW/`, then the **asset root** (`--assets`,
 else `$CIV3_ASSETS`, else the install root). Scenario folders remain relative
 to the played file, including `GAME.search_folders`; the flag does not move them.
-The asset root is also the base for cache keys. The converted cache is always
-`assets/cache/`, regardless of either root flag.
+The asset root is also the base for cache keys. The converted cache is `.cache/<scenario namespace>/`, relative to the working
+directory. Rules and resolved asset search roots determine the namespace,
+so BIQ files and saves of the same scenario share it. Stock Civ3 uses
+`.cache/civ3/`; other scenarios use `scenario-<hash>`. Save filenames and
+turn state are excluded. `CIV3_CACHE` overrides the exact directory.
 The script resolves each reference through it, **case-insensitively**
 (Civ3's references and file names disagree in case, which only Windows
 forgives). A scenario's own Warrior is found before the stock one.
@@ -234,9 +237,9 @@ Assets that Civ3 data refers to are cached under their **Civ3 path**,
 lowercased, so the BIQ and INI references keep working as keys:
 
 ```
-Conquests/Art/Units/Warrior/          ->  assets/cache/conquests/art/units/warrior/   (strips + manifest)
-Art/Flics/To_A01.flc                  ->  assets/cache/art/flics/to_a01.flc/          (frames)
-Scenarios/X/Art/Units/Warrior/        ->  assets/cache/scenarios/x/art/units/warrior/
+Conquests/Art/Units/Warrior/          ->  .cache/<namespace>/conquests/art/units/warrior/   (strips + manifest)
+Art/Flics/To_A01.flc                  ->  .cache/<namespace>/art/flics/to_a01.flc/          (frames)
+Scenarios/X/Art/Units/Warrior/        ->  .cache/<namespace>/scenarios/x/art/units/warrior/
 ```
 
 The key is the *resolved* file, so a scenario's override and the stock art
@@ -246,7 +249,7 @@ Interface pieces the script cuts out of shared sheets (unit buttons, city
 screen cells, HUD parts) keep their current output names: nothing in Civ3's
 data refers to them, only our code.
 
-`assets/cache/index.json` records, for every Civ3 source the script
+`.cache/<namespace>/index.json` records, for every Civ3 source the script
 converted: the outputs it produced, the source's size and modification
 time, the canonical absolute source root, and a hash of `prep_assets.py` itself. An entry is stale when its
 source root changed, its source changed or the script changed, so editing the script reconverts
@@ -254,7 +257,7 @@ what it produces, with no version number to bump by hand. The game reads
 the index to check freshness; the index also answers "which Civ3 file did
 this PNG come from".
 
-Deleting `assets/cache/` is always safe: it is rebuilt on the next run.
+Deleting `.cache/<namespace>/` is always safe: it is rebuilt on the next run.
 `python3 tools/prep_assets.py` with no arguments still converts the stock
 install in full, for development.
 
@@ -288,7 +291,7 @@ python3 tools/check_stub_assets.py test-assets --civ3 ../civ3/civ3-gog/app
 ```
 
 `tools/smoke_assets.sh [ROOT]` then boots both fixtures on a root with no install
-and fails on a crash or a blank frame (it converts into the shared cache first).
+and fails on a crash or a blank frame (it converts into the scenario cache first).
 
 `tools/stub_asset_refs.json` lists the names to draw art for (units, leaders,
 advances, wonders, buildings) and every sheet's pixel size. `--biq` (repeatable)
@@ -324,13 +327,8 @@ What community art taught the pipeline: INI sound paths such as
 sound is silent, not fatal), and a unit sprite's transparent colour is palette
 index 255 whatever its RGB (`(238, 0, 237)` in one pack).
 
-Before changing source roots, preserve any valuable `assets/cache/` elsewhere:
-switching roots intentionally invalidates and overwrites the shared converted
-art. Three `cargo test` checks (leader clips of 100-130 frames, the real
-`diplomacy.txt` speech blocks) read that cache and expect stock art, so they fail
-while a generated root's conversion is in it; restore the cache (or run the game
-once on the install) before testing. This implementation retains the fixed Rust cache location; do not set the
-Python script's standalone `CIV3_CACHE` override when launching the game.
+Different source roots have separate converted caches. Stock-art tests read
+`.cache/civ3/`, so generated-art runs keep their cached inputs separate.
 
 ## Suggested order
 
@@ -344,7 +342,7 @@ Each step leaves the game playable.
 5. **Scenario maps, players, cities and units** from the BIQ.
 6. **Load `.SAV`**, then **write `.SAV`**.
 7. **Automatic asset cache**: `prep_assets.py` takes a request list and a
-   search path, writes `assets/cache/` and `index.json`; the game builds the
+   search path, writes `.cache/<namespace>/` and `index.json`; the game builds the
    request from the BIQ and runs the script when something is missing.
 
 2 and 3 are the bulk and unblock the rest. 7 can run in parallel with any of

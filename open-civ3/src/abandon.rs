@@ -232,7 +232,7 @@ pub fn show(
         return;
     }
     let city = cities.get(choice.city).unwrap();
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     commands
         .spawn((
             AbandonRoot(choice.city),
@@ -256,7 +256,7 @@ pub fn show(
                     row_gap: Val::Px(16.0),
                     ..default()
                 },
-                ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
+                ImageNode::new(assets.load("cityscreen/ProductionQueueBox.png")),
                 BackgroundColor(Color::srgb(0.94, 0.91, 0.77)),
             ))
             .with_children(|panel| {

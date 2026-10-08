@@ -5,8 +5,8 @@
 #
 #   tools/smoke_assets.sh [ASSET_ROOT] [OUT_DIR]     # test-assets, /tmp/open-4x-smoke
 #
-# Each run converts the root's art into the shared assets/cache first (a few
-# minutes the first time per root), so keep a copy of a cache you care about.
+# Each scenario converts its art into its own .cache/ namespace (a few
+# minutes the first time per scenario and source root).
 set -eu
 cd "$(dirname "$0")/.."
 root=${1:-test-assets}

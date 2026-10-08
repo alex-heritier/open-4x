@@ -77,7 +77,7 @@ impl BorderArt {
         for side in Side::ALL {
             defs.insert(
                 side,
-                asset_server.load(format!("cache/borders/border_{}.png", side.name())),
+                asset_server.load(format!("borders/border_{}.png", side.name())),
             );
         }
         Self { defs }

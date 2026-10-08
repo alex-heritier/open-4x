@@ -24,7 +24,7 @@ pub(crate) struct MessageLabel;
 pub(crate) struct GameOverLabel;
 
 pub fn spawn_hud(mut commands: Commands, assets: Res<AssetServer>) {
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     commands.spawn((
         Text::new(""),
         TextFont {

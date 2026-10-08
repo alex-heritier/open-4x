@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the browser game for hosting into dist/: fat-LTO release WASM through
-# wasm-opt -O3. `dist/assets` is a symlink to the repo's assets/; pass
+# wasm-opt -O3. `dist/assets` is a symlink to the selected scenario cache; pass
 # `--copy-assets` for real (hard-linked) files, for hosts and upload tools
 # that do not follow symlinks. Other arguments go to `trunk build`.
 set -euo pipefail

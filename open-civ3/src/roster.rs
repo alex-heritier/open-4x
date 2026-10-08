@@ -261,7 +261,7 @@ mod tests {
     fn unit_art_exists_for_every_playable_unit() {
         // Skipped without the converted art (the game converts it at startup).
         if !crate::assets::cache_covers_plan() {
-            eprintln!("skipped: assets/cache was not built for these rules");
+            eprintln!("skipped: scenario cache was not built for these rules");
             return;
         }
         let art = &crate::ruleset::get().art;
@@ -277,8 +277,8 @@ mod tests {
                 let key = art
                     .unit_key(&v)
                     .unwrap_or_else(|| panic!("{}: no art folder {v}", u.name));
-                let m = format!("{}/{key}/manifest.json", crate::assets::CACHE);
-                assert!(std::path::Path::new(&m).is_file(), "{}: no {m}", u.name);
+                let m = crate::assets::cache_path(format!("{key}/manifest.json"));
+                assert!(m.is_file(), "{}: no {}", u.name, m.display());
             }
         }
     }

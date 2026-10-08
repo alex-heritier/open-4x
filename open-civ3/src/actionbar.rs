@@ -622,7 +622,7 @@ pub fn spawn_bar(
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     let ink = Color::srgb(0.23, 0.14, 0.06);
     let layout = layouts.add(TextureAtlasLayout::from_grid(
         UVec2::splat(BTN_PX as u32),
@@ -631,18 +631,17 @@ pub fn spawn_bar(
         None,
         None,
     ));
-    let sheets =
-        ["norm", "over", "down"].map(|s| assets.load(format!("cache/ui/unitbtns_{s}.png")));
+    let sheets = ["norm", "over", "down"].map(|s| assets.load(format!("ui/unitbtns_{s}.png")));
     commands.insert_resource(ButtonArt {
         sheets: sheets.clone(),
     });
-    let turn_art = [0, 1, 2].map(|i| assets.load(format!("cache/ui/nextturn_{i}.png")));
+    let turn_art = [0, 1, 2].map(|i| assets.load(format!("ui/nextturn_{i}.png")));
     commands.insert_resource(NextTurnArt(turn_art.clone()));
     // Civ3's bottom-right box: unit readout, or the end-turn prompt.
     // `Button` keeps map clicks from landing through it.
     commands
         .spawn((
-            ImageNode::new(assets.load("cache/ui/box_right.png")),
+            ImageNode::new(assets.load("ui/box_right.png")),
             Button,
             InfoBox,
             Node {

@@ -34,6 +34,8 @@ pub struct Boot {
     /// The file played (the stock `conquests.biq` by default).
     pub file: PathBuf,
     pub world: World,
+    /// Shared by games using the same rules and asset search roots.
+    pub cache_namespace: String,
 }
 
 /// Whether a BIQ carries the rule sections (units, buildings, advances...).
@@ -113,8 +115,21 @@ pub fn load(options: &Options) -> Result<Boot, String> {
             let embedded = save
                 .embedded_biq()
                 .map_err(|e| format!("{}: embedded scenario: {e}", file.display()))?;
-            let folders = Install::scenario_folders(&file, &search_folders(&embedded));
-            (embedded, World::Saved(Box::new(save)), folders)
+            let scenario = save.scenario_file().replace('\\', "/");
+            let recorded = PathBuf::from(&scenario);
+            let source = recorded
+                .is_file()
+                .then_some(recorded)
+                .or_else(|| crate::install::resolve_in(&root, &scenario))
+                .filter(|p| p.is_file())
+                .unwrap_or_else(|| file.clone());
+            let folders = Install::scenario_folders(&source, &search_folders(&embedded));
+            let rules_from = if has_rules(&embedded) {
+                embedded
+            } else {
+                stock()?
+            };
+            (rules_from, World::Saved(Box::new(save)), folders)
         }
         FileKind::Biq => {
             let biq = read_biq(&file)?;
@@ -138,12 +153,20 @@ pub fn load(options: &Options) -> Result<Boot, String> {
         ));
     }
     let install = Install::new(&assets, folders);
+    let stock_biq = stock_path(&root).and_then(|p| read_biq(&p).ok());
+    let stock_install = Install::new(&root, vec![]);
+    let cache_namespace = crate::assets::scenario_namespace(
+        &rules_from,
+        &install,
+        stock_biq.as_ref().map(|b| (b, &stock_install)),
+    );
     ruleset::install(ruleset::build(&rules_from, &install));
     Ok(Boot {
         options: options.clone(),
         install,
         file,
         world,
+        cache_namespace,
     })
 }
 
@@ -169,5 +192,6 @@ pub fn load_web(options: &Options) -> Result<Boot, String> {
         install,
         file,
         world,
+        cache_namespace: "civ3".into(),
     })
 }

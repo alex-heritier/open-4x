@@ -56,10 +56,10 @@ Prereqs: Rust, Python 3 with PIL, ffmpeg.
 1. Point the game at the Civ3 install (default `../civ3/civ3-gog/app`):
    `export CIV3_DIR=$PWD/../civ3/civ3-gog/app` or `--civ3 <dir>`. This root supplies
    stock rules. Original art defaults to the same root; use `--assets <dir>`
-   or `CIV3_ASSETS` to choose another source tree. Both flags keep the converted
-   cache at `assets/cache/`.
+   or `CIV3_ASSETS` to choose another source tree. Converted assets go to
+   `.cache/<scenario namespace>/`.
 2. Run: `cargo run [-- FILE.biq|FILE.SAV]`. The first run converts the art the
-   rules refer to into the gitignored `assets/cache/` by running
+   rules refer to into the gitignored scenario cache by running
    `tools/prep_assets.py` (it says so and takes a few minutes); later runs
    start at once. If Python 3, PIL or ffmpeg is missing, the game says so and
    exits. `python3 tools/prep_assets.py` with no arguments converts the stock
@@ -69,15 +69,19 @@ For install-free testing, run a BIQ or SAV with `--assets test-assets`, a full
 set of original generated art (CC0, drawn by `tools/make_stub_assets.py`). Add
 `python3 tools/fetch_community_assets.py` and `--assets test-assets-community`
 to try the same game on hand-made community terrain, cities and units (git-ignored,
-fan content; see `docs/civ3-files.md` section 7). Back up an existing
-`assets/cache/` before switching roots: conversions replace the shared cached art.
+fan content; see `docs/civ3-files.md` section 7).
+
+Each scenario and source asset root has its own cache. BIQ files and saves
+with the same rules and asset search paths share it; save filenames and turns
+do not affect the namespace. Stock Civ3 uses `.cache/civ3/`; other namespaces
+are `scenario-<hash>`. `CIV3_CACHE` overrides the exact cache directory.
 
 See `docs/civ3-files.md` for the file formats the game plays.
 
 ## Browser
 
-The browser build plays the same game with the cache already under
-`assets/cache/`. Install [Trunk](https://trunkrs.dev), run
+The browser build plays the same game with the stock cache already under
+`.cache/civ3/`. Install [Trunk](https://trunkrs.dev), run
 `python3 tools/prep_assets.py` once if that cache is missing, then run
 `tools/serve_web.sh` and open `http://127.0.0.1:8080`.
 
@@ -85,8 +89,8 @@ The browser build plays the same game with the cache already under
 LTO, so a rebuild takes about a minute); `tools/build_web.sh` makes the build to
 host into `dist/` (fat LTO, `wasm-opt`). Neither copies the art cache, which is
 over a gigabyte: a Trunk hook (`tools/web_assets.py`) links `dist/assets` to
-`assets/`, and writes `dist/web-bundle.json`, the few hundred small text files the
-game reads as it plays, so that they arrive in one request instead of one
+`.cache/civ3/` (or `CIV3_CACHE`), and writes `dist/web-bundle.json`, the small text
+files the game reads as it plays, so that they arrive in one request instead of one
 blocking request each. `tools/build_web.sh --copy-assets` makes `dist/assets` a
 tree of hard links (real files) for hosts that do not follow symlinks.
 

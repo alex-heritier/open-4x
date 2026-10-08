@@ -161,7 +161,7 @@ pub fn show(
     };
     let completed = prompts.pending[i].2;
     prompts.open = Some(civs.active);
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     let rate = city_yields(&map, city).1;
     let label = |p: Production| {
         let mut preview = city.clone();
@@ -198,7 +198,7 @@ pub fn show(
                     border: UiRect::all(Val::Px(2.0)),
                     ..default()
                 },
-                ImageNode::new(assets.load("cache/cityscreen/ProductionQueueBox.png")),
+                ImageNode::new(assets.load("cityscreen/ProductionQueueBox.png")),
                 BackgroundColor(Color::srgb(0.94, 0.91, 0.77)),
                 BorderColor::all(Color::srgb(0.25, 0.4, 0.28)),
             ))

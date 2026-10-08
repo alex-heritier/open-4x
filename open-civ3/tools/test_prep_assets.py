@@ -1,14 +1,32 @@
 """Cache provenance tests; run: python3 -m unittest discover -s tools -p 'test_*.py'."""
 import configparser
+import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 import prep_assets as prep
+import web_assets as web
 
 
 class CacheRoots(unittest.TestCase):
+    def test_requests_write_to_separate_scenario_caches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            caches = [Path(tmp)/'.cache'/n for n in ('scenario-a', 'scenario-b')]
+            def convert(*_):
+                (Path(prep.OUT)/'picture').write_text(prep.GOG)
+            with patch.dict(os.environ, {}, clear=True), patch.object(prep, 'run_all', convert), \
+                 patch.object(prep, 'OUT'), patch.object(prep, 'GOG'):
+                for cache in caches:
+                    cache.mkdir(parents=True)
+                    request = cache/'request.json'
+                    request.write_text(json.dumps({'root': cache.name}))
+                    with patch('sys.argv', ['prep_assets.py', '--request', str(request)]):
+                        prep.main()
+                self.assertEqual([(c/'picture').read_text() for c in caches],
+                                 ['scenario-a', 'scenario-b'])
+
     def test_identical_sources_in_different_roots_are_stale(self):
         with tempfile.TemporaryDirectory() as tmp:
             a, b, cache = [Path(tmp)/n for n in ('a','b','cache')]
@@ -60,6 +78,27 @@ class UnitFilePaths(unittest.TestCase):
         locate = lambda name: os.path.join('/nonexistent', name)
         self.assertEqual(prep.slot_sounds(cfg, locate, 'ATTACK1'), [])
         self.assertEqual(prep.slot_sounds(cfg, locate, 'DEATH'), [])
+
+
+class WebCache(unittest.TestCase):
+    def test_selected_namespace_is_staged_with_matching_manifest_urls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache, dist = Path(tmp)/'.cache'/'scenario-a', Path(tmp)/'dist'
+            cache.mkdir(parents=True)
+            (cache/'request.json').write_text('{"root":"scenario-a"}')
+            (cache/'picture.png').write_bytes(b'picture')
+            (cache/'index.json').write_text('{}')
+            with patch.object(web, 'CACHE', str(cache)):
+                for copy in [False, True]:
+                    args = ['web_assets.py', '--dest', str(dist)] + (['--copy'] if copy else [])
+                    with patch('sys.argv', args):
+                        web.main()
+                    bundle = json.loads((dist/'web-bundle.json').read_text())
+                    self.assertEqual(json.loads(bundle['assets/request.json'])['root'], 'scenario-a')
+                    self.assertEqual((dist/'assets'/'picture.png').read_bytes(), b'picture')
+                    self.assertNotIn('assets/index.json', bundle)
+                    if copy:
+                        self.assertFalse((dist/'assets'/'index.json').exists())
 
 
 if __name__ == '__main__':

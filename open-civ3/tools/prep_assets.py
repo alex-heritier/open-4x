@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Convert Civ3 assets into runtime formats (RGBA PNG, OGG, WAV) under
-`assets/cache/` (`docs/civ3-files.md` section 7).
+`.cache/<namespace>/` (`docs/civ3-files.md` section 7).
 
 The game never reads PCX, FLC, or MP3. Two ways to run it from the repo root:
 
-    python3 tools/prep_assets.py --request assets/cache/request.json
+    python3 tools/prep_assets.py --request .cache/civ3/request.json
         what the game does when something it draws is missing or stale: the
         request names every item (unit art folders, leader clips, wonder and
         advance pictures) with the Civ3 file it resolved, plus the install
@@ -16,7 +16,7 @@ The game never reads PCX, FLC, or MP3. Two ways to run it from the repo root:
         terrain cities cityscreen splash audio fonts features advisors
         improvements unitbuttons hud fog borders cursor diplomacy
 
-`assets/cache/index.json` records, for every item, what it produced, the
+`.cache/<namespace>/index.json` records, for every item, what it produced, the
 size and modification time of every Civ3 file it read, and a hash of this
 script, so editing the script reconverts what it produces. The game reads the
 index to decide whether to run the script at all.
@@ -43,7 +43,7 @@ from PIL import Image, ImageChops
 sys.stdout.reconfigure(line_buffering=True)
 
 GOG = os.environ.get("CIV3_GOG", "../civ3/civ3-gog/app")
-OUT = os.environ.get("CIV3_CACHE", "assets/cache")
+OUT = os.environ.get("CIV3_CACHE", ".cache/civ3")
 SELF = os.path.abspath(__file__)
 
 # The match's items. A request fills these; a bare run scans the install.
@@ -1675,9 +1675,10 @@ def scan_install():
 
 
 def main():
-    global GOG, SEARCH, UNITS, TEAM_COLORS, LEADERS, WONDERS, TECHS
+    global GOG, OUT, SEARCH, UNITS, TEAM_COLORS, LEADERS, WONDERS, TECHS
     args = sys.argv[1:]
     if args[:1] == ["--request"]:
+        OUT = os.environ.get("CIV3_CACHE", os.path.dirname(args[1]) or ".")
         with open(args[1]) as f:
             req = json.load(f)
         GOG = req["root"]

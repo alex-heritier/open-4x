@@ -137,7 +137,21 @@ pub fn capture(world: &mut World) -> Result<Save, String> {
         .get_resource::<Boot>()
         .ok_or("no game file to embed")?;
     let biq = embedded(boot)?;
-    build(world, biq)
+    let paths = match &boot.world {
+        BootWorld::Saved(save) => save.bic.0[4..524].to_vec(),
+        _ => {
+            let file = boot.file.canonicalize().map_err(|e| e.to_string())?;
+            let dir = file.parent().expect("scenario file has a parent");
+            [
+                civ3_biq::io::Str::<260>::new(&dir.to_string_lossy()).0,
+                civ3_biq::io::Str::<260>::new(&file.to_string_lossy()).0,
+            ]
+            .concat()
+        }
+    };
+    let mut save = build(world, biq)?;
+    save.bic.0[4..524].copy_from_slice(&paths);
+    Ok(save)
 }
 
 /// The game as a `Save` embedding `biq` (the bytes of the BIQ it runs on;
@@ -286,6 +300,35 @@ mod tests {
     use super::*;
     use crate::cities::Production;
     use crate::units::UnitType;
+
+    #[test]
+    fn saves_keep_the_original_scenario_location_when_saved_again() {
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("civ3_utils/biq/tests/data/Intro3 New Alliances.biq");
+        let mut w = world();
+        w.insert_resource(Boot {
+            options: Default::default(),
+            install: crate::install::Install::new("test-assets", vec![]),
+            file: file.clone(),
+            world: BootWorld::Random,
+            cache_namespace: "test-scenario".into(),
+        });
+        let save = capture(&mut w).unwrap();
+        assert_eq!(
+            save.scenario_file(),
+            file.canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            save.scenario_dir(),
+            file.parent().unwrap().to_string_lossy()
+        );
+        let boot = &mut *w.resource_mut::<Boot>();
+        boot.file = "renamed-save.SAV".into();
+        boot.world = BootWorld::Saved(Box::new(save.clone()));
+        let resaved = capture(&mut w).unwrap();
+        assert_eq!(resaved.scenario_file(), save.scenario_file());
+        assert_eq!(resaved.scenario_dir(), save.scenario_dir());
+    }
 
     fn world() -> World {
         crate::civs::set_controllers();

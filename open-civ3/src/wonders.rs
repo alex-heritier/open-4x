@@ -323,7 +323,7 @@ pub fn splash(stage: &mut ChildSpawnerCommands, ui: &Ui, assets: &AssetServer, s
     }
     ui.picture(
         stage,
-        ImageNode::new(assets.load("cache/wonders/frame.png")),
+        ImageNode::new(assets.load("wonders/frame.png")),
         0.0,
         0.0,
         1024.0,
@@ -374,7 +374,7 @@ pub fn fanfare(
     let up = advisors.screen == crate::advisors::Screen::Splash;
     if up && !*played {
         commands.spawn(AudioPlayer::<AudioSource>(
-            assets.load("cache/audio/ui/Wonder.wav"),
+            assets.load("audio/ui/Wonder.wav"),
         ));
     }
     *played = up;
@@ -475,7 +475,7 @@ pub fn window(
 ) {
     ui.picture(
         stage,
-        ImageNode::new(assets.load("cache/wonders/window.png")),
+        ImageNode::new(assets.load("wonders/window.png")),
         0.0,
         0.0,
         1024.0,
@@ -516,7 +516,7 @@ pub fn window(
         let name = roster::bldg(card.row).name;
         ui.picture(
             stage,
-            ImageNode::new(assets.load("cache/wonders/card.png")),
+            ImageNode::new(assets.load("wonders/card.png")),
             x,
             y,
             370.0,
@@ -582,14 +582,14 @@ pub fn window(
             // Not built: the plate over the picture.
             ui.picture(
                 stage,
-                ImageNode::new(assets.load("cache/wonders/card_hidden.png")),
+                ImageNode::new(assets.load("wonders/card_hidden.png")),
                 x,
                 y,
                 370.0,
                 200.0,
             );
         } else {
-            let mut eye = ImageNode::new(assets.load("cache/wonders/eye.png"));
+            let mut eye = ImageNode::new(assets.load("wonders/eye.png"));
             eye.rect = Some(eye_state(0));
             stage.spawn((
                 Button,
@@ -833,7 +833,7 @@ mod tests {
     fn every_great_wonder_has_its_art() {
         // Skipped without the converted art (the game converts it at startup).
         if !crate::assets::cache_covers_plan() {
-            eprintln!("skipped: assets/cache was not built for these rules");
+            eprintln!("skipped: scenario cache was not built for these rules");
             return;
         }
         // PediaIcons.txt names a splash for each great wonder; the small ones

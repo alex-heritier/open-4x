@@ -150,7 +150,7 @@ pub fn update(
     let pos = window
         .cursor_position()
         .unwrap_or(Vec2::new(window.width() / 2.0, window.height() / 2.0));
-    let font = assets.load("cache/fonts/lsans.ttf");
+    let font = assets.load("fonts/lsans.ttf");
     let root = commands
         .spawn((
             PickerBackdrop,
@@ -482,9 +482,7 @@ mod tests {
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
         app.update();
-        app.world_mut()
-            .resource_mut::<crate::input::MapPress>()
-            .0 = None;
+        app.world_mut().resource_mut::<crate::input::MapPress>().0 = None;
         // End the press frame by hand (see NOTE below): the game clears
         // `just_pressed` every frame, test apps do not.
         app.world_mut()
