@@ -2,17 +2,20 @@ target/
 dist/
 .DS_Store
 shot-*.png
-/shots/
+open-civ3/shots/
 __pycache__/
 *.py[cod]
 
+# Civ3 reference installs and reverse-engineering scratch: multi-GB purchased
+# and fan assets plus Wine prefixes, never committed. They stay at the repo
+# root beside the `open-civ3/` project, so the `civ3/...` paths in the docs hold.
 civ3/
 
 # terrain-builder outputs and generated materials
-civ3_utils/terrain-builder/packs/*/out/
-civ3_utils/terrain-builder/packs/*/*.png
+open-civ3/civ3_utils/terrain-builder/packs/*/out/
+open-civ3/civ3_utils/terrain-builder/packs/*/*.png
 saves/
-assets/cache/
+open-civ3/assets/cache/
 
 # community-art fixture root (tools/fetch_community_assets.py); fan content, never committed
-/test-assets-community/
+open-civ3/test-assets-community/

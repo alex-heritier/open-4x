@@ -1,0 +1,376 @@
+# Running Civ3's own files: `.biq` and `.sav`
+
+Status: **implemented** (steps 1 to 7 below). The decisions on the open questions are at the end.
+
+## Goal
+
+open-4x plays Civ3's own `.biq` and `.sav` files directly. There is no
+import step and no open-4x content format. Art and sound are converted by
+`prep_assets.py`, which the game runs automatically, into a cache (section 7). Everything is chosen on the
+command line, with no main menu or setup screen:
+
+```
+open-4x                                    # new random game, Conquests rules (conquests.biq)
+open-4x path/to/Scenario.biq               # a scenario or mod (.biq / .bix / .bic)
+open-4x path/to/Game.SAV                   # a saved game
+```
+
+What happens with a `.biq` depends on what it holds:
+
+| The `.biq` has | open-4x does |
+|---|---|
+| rules only (a mod, or `conquests.biq` itself) | random map, played by those rules |
+| a map, no players (`LEAD`) | that map, civs picked as for a random game |
+| a map and players | the scenario as authored: its map, players, cities, units, victory settings |
+| no rules (the scenario uses the defaults) | the rules of the stock `conquests.biq`, like Civ3 does |
+
+## Where we started
+
+| What | Where it lives now | Problem |
+|---|---|---|
+| Units, buildings, techs, civs, leaders, governments, terrain facts | `src/rules_data.rs` (now `src/ruleset.rs`, built from the BIQ at startup), generated from `conquests.biq` by `civ3_utils/biq/examples/gen_game_rules.rs` and compiled in | One rule set per build |
+| Game logic tied to specific rows | ~640 uses of named constants: `UnitType::Warrior` (104), `UnitType::Worker` (59), `Production::Temple` (37), `Production::ThePyramids` (17), ... | A mod that changes or drops those rows breaks the game |
+| Player count | `civs::CIV_COUNT = 4`, `[T; CIV_COUNT]` arrays everywhere | Scenarios have 2 to 31 players |
+| Map | `GameMap::generate` from `MAP_SEED` | No way to play a scenario's map |
+| Art and audio | `tools/prep_assets.py` → `assets/gen/` PNG/OGG plus JSON manifests. It gets the unit list by pattern-matching `rules_data.rs`, hardcodes the leaders of four civs, and has a hand-written wonder table | A manual step; misses most leaders and every scenario's own art (section 7) |
+| Saves | `src/save.rs`, our own JSON (format 11) | Not a Civ3 save |
+
+What already exists:
+
+* `civ3_utils/biq/` reads every `.biq`/`.bix`/`.bic` into typed rows (`Biq::read_file`,
+  `Rules`, `MapData`, `Scenario`), including a scenario's art override folders
+  (`GAME.search_folders`).
+* `civ3_utils/biq/src/sav` reads **and writes** Civ3 `.SAV` byte for byte. Units, cities,
+  tiles, players, the turn and the embedded BIQ are decoded. Most of the big
+  runtime blocks (`LEAD`, `CITY`, `CTZN`, `UNIT` bodies) are only partly
+  decoded (`reverse-engineering/savegame.md` section 9).
+* Civ3 itself is fully data-driven: the exe never knows what a "Granary" is,
+  only BIQ fields and flags. Almost every named constant has a field that
+  means the same thing (step 2 below).
+
+## The shape
+
+```
+ CLI args ──▶ Civ3 install dir + file (.biq / .sav)
+                    │
+                    ▼
+          biq crate: Biq / Save  ──▶  Ruleset (in memory)  ──▶  game
+                    │                     │
+                    │                     └─ art and sound: Civ3 path → assets/cache/
+                    │                        (prep_assets.py, run automatically when stale)
+                    └─ map / scenario / saved state ──▶ game world
+```
+
+The `biq` crate becomes a dependency of the game (today it is standalone on
+purpose). The in-memory `Ruleset` is plain Rust structs built from the BIQ at
+startup, not a file format; nothing is written to disk.
+
+## 1. Command line
+
+Hand-rolled over `std::env::args` (a few flags; no need for `clap`):
+
+```
+open-4x [FILE] [options]
+
+  FILE                  .biq/.bix/.bic scenario or mod, or .sav saved game
+                        (default: <civ3>/Conquests/conquests.biq, a new random game)
+  --civ3 <dir>          Civ3 install root (default: $CIV3_DIR, $CIV3_GOG, else ../civ3/civ3-gog/app)
+  --assets <dir>        original asset root (default: $CIV3_ASSETS, else --civ3)
+
+New games (ignored for a .sav):
+  --civ <name>          the human's civilization (RACE name, case-insensitive)
+  --opponents <n|names> number of rivals, or a comma list of RACE names
+  --difficulty <name>   DIFF row (default: RULE.default_difficulty)
+  --size <name>         WSIZ row (default: Standard)
+  --land, --water, --climate, --temperature, --age, --barbarians
+                        WCHR settings, as Civ3's custom-world screen names them
+  --seed <n>            map seed
+```
+
+The current env vars fold into this: `CIV3_PLAYER` → `--civ`,
+`CIV3_CIVS` → `--civ` + `--opponents`, `MAP_SEED` → `--seed`,
+`CIV3_DIR` / `CIV3_GOG` → `--civ3`, `CIV3_ASSETS` → `--assets`. Flags win.
+The install root supplies stock rules (`Conquests/conquests.biq`); the asset
+root supplies original art and sound. Without an asset option, both roots
+are the install root. A supplied BIQ with rules or a SAV with embedded rules
+needs no installed stock rules. The dev/debug ones (`CIV3_SHOT`, `CIV3_SCRIPT`,
+`CIV3_AUTOPLAY`, `CIV3_HOTSEAT`, `CIV3_REVEAL`, ...) can stay env vars or
+become flags; either is fine, as long as the screenshot and script tooling
+keeps working.
+
+Since there is no menu, the app keeps starting straight into the game: the
+CLI is parsed in `main` before `App::new()`, the file is loaded there, and
+the resulting rules and world are handed to the existing `Startup` systems.
+No app states needed.
+
+## 2. Rules from the BIQ at startup
+
+Replace `rules_data.rs` with a `Ruleset` built from `Biq::rules` when the
+game starts.
+
+Least invasive: keep the `&'static` accessors. Build the `Ruleset` once in
+`main`, `Box::leak` it, and put the reference in a `OnceLock`.
+`UnitType::row()`, `roster::unit()`, `CIVS.get()`, `rules()`, `tables()` keep
+their signatures and callers do not change. One game per process means the
+leak is once, by design.
+
+Before deleting `rules_data.rs`: a test that builds the `Ruleset` from
+`conquests.biq` and compares it field by field with the generated tables.
+Then delete `rules_data.rs` and `civ3_utils/biq/examples/gen_game_rules.rs`.
+
+`UnitType(pub u8)` probably becomes `u16`: mods with more than 255 units exist.
+
+## 3. Remove the named constants
+
+The bulk of the work. Each `UnitType::X` / `Production::X` becomes the BIQ
+field or flag that Civ3 itself reads:
+
+| Today | What Civ3 reads instead |
+|---|---|
+| `UnitType::Settler` / `Worker` | the build-city / worker-job bits of the `PRTO` worker actions; start units from `DIFF` + `RULE` |
+| `UnitType::Scout` | `RULE.scout_unit` |
+| `UnitType::Warrior` for barbarians | `RULE.basic_barbarian_unit`, `advanced_barbarian_unit`, `barbarian_sea_unit` |
+| `UnitType::Leader`, `Army` | `RULE.battle_created_unit`, `RULE.build_army_unit` |
+| captured Settler → Workers | `RULE.captured_unit` |
+| `UnitType::Galley` checks | sea class + `capacity` + the coast-only flag |
+| `Production::Granary` | `DOUBLES_CITY_GROWTH_RATE` (`0x200`, the exe's own Granary test, `hurry.md`) |
+| `Production::Aqueduct` / `Hospital` | `ALLOWS_CITY_SIZE_LEVEL_2` / `_3` against `RULE.town_max_size` / `city_max_size` |
+| `Production::Temple`, `Marketplace`, `Library`... | `happy_faces`, `INCREASES_LUXURY_TRADE`, `TAX_BONUS`, `RESEARCH_BONUS` |
+| `Production::Walls` | `defense_bonus` |
+| `Production::Barracks` | `VETERAN_GROUND_UNITS` |
+| `Production::ThePyramids` (wonders generally) | `gain_in_every_city_on_continent` (Pyramids = a Granary in every city, `buildable.md`), `gain_in_every_city`, the wonder flags |
+| `Production::Palace` / `ForbiddenPalace` | `CENTER_OF_EMPIRE` / small-wonder `REDUCES_CORRUPTION` |
+| `Production::Wealth` | `CAPITALIZATION` |
+
+Many of the hits are in tests; those can look rows up by name.
+
+Done when `grep -E "UnitType::[A-Z]|Production::[A-Z]" src` finds nothing
+outside `#[cfg(test)]`.
+
+## 4. Any number of players
+
+`CIV_COUNT` becomes a runtime value (up to 31 civs plus the barbarians, as in
+Civ3). `[T; CIV_COUNT]` → `Vec<T>`, or a fixed cap of 32 with a live count,
+whichever means less churn in each file. Player slots hold `RACE` row indices,
+which is what both the BIQ (`LEAD`) and the SAV use.
+
+## 5. Maps and scenarios from the BIQ
+
+* **Map**: `WMAP`/`TILE`/`CONT` → `GameMap` (terrain, overlays, resources,
+  rivers, huts, barbarian camps). `MapView` in the `biq` crate already gives
+  tiles by `(x, y)`.
+* **Players and objects**: `LEAD` → players (civ, human or computer, gold,
+  government, techs, start units), `CITY` → cities (size, buildings, name,
+  owner), `UNIT` → units, `CLNY` → colonies, `SLOC` → start locations.
+* **Settings**: `GAME` → victory conditions, turn limit, calendar, locked
+  alliances, and which player slots a human may take.
+* **Random maps** keep using our generator, with its parameters from
+  `WSIZ`/`WCHR` and the CLI instead of constants.
+
+## 6. Saved games are `.SAV`
+
+**Loading** a `.SAV`: the embedded BIQ supplies the rules (exactly as in
+Civ3), the decoded tiles, units, cities and players build the world. Fields
+the RE has not decoded yet get defaults; each one we hit becomes a decoding
+task in `savegame.md`.
+
+**Writing** a `.SAV` (F5): build a `civ3_biq::Save` from the game state and
+write it with `Save::to_bytes`. Two ways, depending on how much we care that
+real Civ3 can open it:
+
+* **open-4x only**: fill the decoded fields, zero the rest. Achievable as soon
+  as everything the clone tracks has a decoded home.
+* **Civ3 can open it too**: every field the exe's loader checks must be
+  valid. Harder, but `tools/emu/` can run the game's own loader over our
+  output and tell us exactly where it fails, which makes it a well-defined task.
+
+The gap either way: state the clone keeps but whose place in the SAV is not
+decoded yet (AI attitude memory, flip ratings, culture, war weariness, ...).
+Until it is all mapped, the current JSON quicksave would stay as a stopgap,
+and be deleted once `.SAV` writing covers it.
+
+## 7. Art and sound: `prep_assets.py`, run automatically, cached
+
+Rules, maps and saves are read straight from Civ3's files. Art and sound
+keep going through `tools/prep_assets.py` (PCX/FLC → PNG, MP3 → OGG, its
+crops, transparency, team colors and manifests unchanged), but nobody runs
+it by hand: the game runs it when something it needs is missing or stale.
+Output goes to the gitignored `assets/cache/` (replacing `assets/gen/`).
+Players need Python 3, PIL and ffmpeg, as developers do today; if they are
+missing, the game says so and exits.
+
+### What the game asks for
+
+After reading the BIQ, the game knows what it will draw: the `PRTO.art`
+unit folders, the `RACE.era_art` leader clips of the civs in play, the
+wonder splashes (`BLDG.civilopedia_entry` via `PediaIcons.txt`), the tech
+icons, the interface. It checks each against `assets/cache/index.json`
+(below). If anything is missing or stale, it writes the list to
+`assets/cache/request.json` together with the search path, runs
+`python3 tools/prep_assets.py --request assets/cache/request.json`, streams
+the script's progress to the console, and continues when it exits. The
+first run against a new install or scenario takes a while; later runs
+start immediately.
+
+Giving the script an explicit list keeps BIQ parsing in Rust: the script
+never reads a BIQ, and the hardcoded lists in it (the unit list scraped from
+`rules_data.rs`, the four leaders, the wonder table) go away.
+
+### Search path and case
+
+The request carries Civ3's search order: the scenario's own folder and
+`GAME.search_folders`, then `Conquests/`, `civ3PTW/`, then the **asset root** (`--assets`,
+else `$CIV3_ASSETS`, else the install root). Scenario folders remain relative
+to the played file, including `GAME.search_folders`; the flag does not move them.
+The asset root is also the base for cache keys. The converted cache is always
+`assets/cache/`, regardless of either root flag.
+The script resolves each reference through it, **case-insensitively**
+(Civ3's references and file names disagree in case, which only Windows
+forgives). A scenario's own Warrior is found before the stock one.
+
+### The mapping: Civ3 path → cache files
+
+Assets that Civ3 data refers to are cached under their **Civ3 path**,
+lowercased, so the BIQ and INI references keep working as keys:
+
+```
+Conquests/Art/Units/Warrior/          ->  assets/cache/conquests/art/units/warrior/   (strips + manifest)
+Art/Flics/To_A01.flc                  ->  assets/cache/art/flics/to_a01.flc/          (frames)
+Scenarios/X/Art/Units/Warrior/        ->  assets/cache/scenarios/x/art/units/warrior/
+```
+
+The key is the *resolved* file, so a scenario's override and the stock art
+get separate entries with no scenario-specific logic.
+
+Interface pieces the script cuts out of shared sheets (unit buttons, city
+screen cells, HUD parts) keep their current output names: nothing in Civ3's
+data refers to them, only our code.
+
+`assets/cache/index.json` records, for every Civ3 source the script
+converted: the outputs it produced, the source's size and modification
+time, the canonical absolute source root, and a hash of `prep_assets.py` itself. An entry is stale when its
+source root changed, its source changed or the script changed, so editing the script reconverts
+what it produces, with no version number to bump by hand. The game reads
+the index to check freshness; the index also answers "which Civ3 file did
+this PNG come from".
+
+Deleting `assets/cache/` is always safe: it is rebuilt on the next run.
+`python3 tools/prep_assets.py` with no arguments still converts the stock
+install in full, for development.
+
+### Assets without an install
+
+`test-assets/` is a complete asset root drawn by `tools/make_stub_assets.py`
+(drawing code in `tools/openart/`): ground sheets with blended shorelines and
+overlays, resources, a folder of INI and 8-direction FLC clips per unit, cities,
+the city, advisor, diplomacy and wonder screens, an icon per advance and wonder,
+leader clips, sound and the vendored Arimo font (OFL). No pixel, frame or sample comes
+from a Civ3 install; an install is read only for file formats and sheet
+geometry. It has the base and Conquests layout every conversion stage reads, in
+the case-blind layout the engine resolves (`src/install.rs`).
+
+Run a scenario or a save with it, with no install present:
+
+```sh
+CIV3_DIR=/nonexistent CIV3_GOG=/nonexistent CIV3_NO_SPLASH=1 CIV3_REVEAL=1 \
+  cargo run --release -- "civ3_utils/biq/tests/data/TEST.SAV" --assets test-assets
+```
+
+`civ3_utils/biq/tests/data/` holds two fixtures (`TEST.SAV`, `Intro3 New
+Alliances.biq`); both load and render with it.
+
+Regenerate and verify (Pillow only; conversion later needs ffmpeg as with real art):
+
+```sh
+python3 tools/make_stub_assets.py --clean \
+  --biq "civ3_utils/biq/tests/data/Intro3 New Alliances.biq"
+python3 tools/check_stub_assets.py test-assets --civ3 ../civ3/civ3-gog/app
+```
+
+`tools/smoke_assets.sh [ROOT]` then boots both fixtures on a root with no install
+and fails on a crash or a blank frame (it converts into the shared cache first).
+
+`tools/stub_asset_refs.json` lists the names to draw art for (units, leaders,
+advances, wonders, buildings) and every sheet's pixel size. `--biq` (repeatable)
+merges a scenario's names into it through the Rust parser's `asset_refs`
+example; a name the manifest lacks gets no art, so a scenario's units would
+render blank. `--clean` removes files the run did not write. The checker
+asserts every sheet's size, every unit's INI and clips, the leader clips and,
+with `--civ3`, that no file is byte-identical to an install file and no PCX
+shares pixels with one. Leader clips come in two spellings, stock
+(`Bs_B01.flc` and its `02` twin) and Conquests (`x_name diplo ancient fwrd.flc`
+and `bwrd`); both are written, the civs share 16 archetypes by era.
+
+#### Community-art fixture
+
+`python3 tools/fetch_community_assets.py` builds `test-assets-community/`
+(git-ignored): a copy of `test-assets/` with a curated slice of the King Arthur
+Civ3 Mods Collection (archive.org `king-arthur-civ3-mods-collection`, 5.9 GiB,
+fetched once into `~/.cache/open-4x-community`) laid over it. A community file
+replaces a generated one only when the pixel size matches. It covers the ARES
+terrain pack (ground, hills, mountains, forests, roads, rivers, irrigation,
+fog, huts), city and wall sheets, 27 advance icons, the advisor popups the engine reads and 11
+unit folders (64x78 to 200x200 frames, INI files as modders write them). It
+exists to run real hand-made art through `prep_assets.py` and the renderer. The
+archive is fan content that may carry Firaxis-derived pixels, so only the
+script is committed; `PROVENANCE.md` in the output lists every file and its
+archive path. Run it the same way: `--assets test-assets-community`.
+
+Some of those units carry a magenta anti-aliasing fringe in palette entries
+224-253; only index 255 is transparent, so the fringe shows as drawn.
+
+What community art taught the pipeline: INI sound paths such as
+`..\Archer\ArcherAttack.amb` resolve against sibling folders (and a missing
+sound is silent, not fatal), and a unit sprite's transparent colour is palette
+index 255 whatever its RGB (`(238, 0, 237)` in one pack).
+
+Before changing source roots, preserve any valuable `assets/cache/` elsewhere:
+switching roots intentionally invalidates and overwrites the shared converted
+art. Three `cargo test` checks (leader clips of 100-130 frames, the real
+`diplomacy.txt` speech blocks) read that cache and expect stock art, so they fail
+while a generated root's conversion is in it; restore the cache (or run the game
+once on the install) before testing. This implementation retains the fixed Rust cache location; do not set the
+Python script's standalone `CIV3_CACHE` override when launching the game.
+
+## Suggested order
+
+Each step leaves the game playable.
+
+1. **CLI** with today's behavior as the default, env vars folded in.
+2. **Rules from the BIQ** at startup, parity test, delete `rules_data.rs`.
+   `open-4x some-mod.biq` now plays a mod's numbers on a random map.
+3. **Named constants → BIQ fields.**
+4. **Any number of players.**
+5. **Scenario maps, players, cities and units** from the BIQ.
+6. **Load `.SAV`**, then **write `.SAV`**.
+7. **Automatic asset cache**: `prep_assets.py` takes a request list and a
+   search path, writes `assets/cache/` and `index.json`; the game builds the
+   request from the BIQ and runs the script when something is missing.
+
+2 and 3 are the bulk and unblock the rest. 7 can run in parallel with any of
+them.
+
+## Open questions
+
+1. **Must `.SAV` files written by open-4x open in real Civ3**, or only in
+   open-4x? The first is much more work (section 6).
+2. **Vanilla and PTW files**: Conquests `.biq` and Conquests `.SAV` first, or
+   do Civ3 1.x `.bic` / PTW `.bix` and their saves need to work from the
+   start? The parser reads all `.biq` versions; the SAV reader only reads
+   Conquests saves (format 24).
+3. **Rules the engine does not implement** (a mod's flag nobody has coded):
+   print a warning at startup and ignore it (proposed), or refuse to start?
+
+### Decisions
+
+1. **`.SAV` compatibility**: open-4x writes `.SAV` files that open-4x reads
+   back, not files real Civ3 is known to open: most runtime blocks are only
+   partly decoded, so what is not decoded is written blank. F5 writes
+   `saves/quicksave.SAV` and, beside it, `saves/quicksave.json`, the stopgap
+   that holds the state the clone keeps and the format cannot yet (F8 reads
+   the JSON). `open-4x saves/quicksave.SAV` plays the `.SAV`.
+2. **Vanilla and PTW**: Conquests `.biq` and Conquests `.SAV` (format 24).
+   Older `.biq` files load for their rules and maps; older saves are
+   rejected with a message.
+3. **Unimplemented rules**: the game ignores them (it plays the rest of the
+   file) rather than refusing to start.

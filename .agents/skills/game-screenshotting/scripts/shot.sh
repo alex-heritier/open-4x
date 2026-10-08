@@ -11,7 +11,8 @@
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-crate=${CIV3_CLONE_DIR:-$(git -C "$script_dir" rev-parse --show-toplevel)}
+# The game crate lives in the `open-civ3/` project directory under the repo root.
+crate=${CIV3_CLONE_DIR:-$(git -C "$script_dir" rev-parse --show-toplevel)/open-civ3}
 
 out=./shots/shot.png
 frames=90

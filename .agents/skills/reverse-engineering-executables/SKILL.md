@@ -6,7 +6,7 @@ description: Reverse-engineer the Civ3 Windows executable the way this repo does
 # Reverse-Engineering Executables
 
 How to reverse-engineer `Civ3Conquests.exe` (and its sibling binaries) and land
-findings in `reverse-engineering/`, matching the method that produced
+findings in `open-civ3/reverse-engineering/`, matching the method that produced
 the existing notes. Read this before opening the binary.
 
 ## Targets and layout
@@ -21,8 +21,8 @@ the reverse-engineering scratch tree both live under `civ3/`.
   contains no editor (verified: case-insensitive `editor` scan finds only 3
   uppercase data tags). Check which binary a question belongs to before
   digging.
-- Findings: `reverse-engineering/*.md`, one file per system, plus
-  `reverse-engineering/rust/src/*.rs` reference implementations. `NOTES.md` is
+- Findings: `open-civ3/reverse-engineering/*.md`, one file per system, plus
+  `open-civ3/reverse-engineering/rust/src/*.rs` reference implementations. `NOTES.md` is
   the map-generation source of truth. `REGIONS.md` is the code atlas.
   `dynamic-tracing.md` is the live-debugging runbook.
 - Scratch probes go in `/tmp` (`/tmp/re_probeN.py`, `/tmp/sweep_R*.txt`).
@@ -117,7 +117,7 @@ overrules raw disassembly.
 
 ## Dynamic tracing (live debugging the running exe)
 
-Full trace specs: `reverse-engineering/dynamic-tracing.md`. The mechanics
+Full trace specs: `open-civ3/reverse-engineering/dynamic-tracing.md`. The mechanics
 below are settled and load-bearing; follow them exactly.
 
 - Runtime: `civ3/.runtime/Wine Staging.app/.../bin/wine` (Staging 11.16),
@@ -217,7 +217,7 @@ children sweep:
   zero `.text` refs to a string, zero direct `call [iat]` sites for all 23
   `WSOCK32` imports. State the scan that bounds the claim.
 - One system owns one findings file and one Rust module. Cross-reference
-  instead of duplicating. `reverse-engineering/README.md` holds the
+  instead of duplicating. `open-civ3/reverse-engineering/README.md` holds the
   ownership table and the headline findings; update it when systems land.
 - Never-located lists and open questions are deliverables too
   (`ai.md` next targets, `biq.md` open mode-1 streams). An unresolved item
@@ -276,19 +276,19 @@ python3 $S/scans.py slots                 # indirect-call slot census
 python3 $S/scans.py buckets               # 64KB string clustering
 sh $S/live_dbg.sh launch 7               # game under winedbg (background it)
 sh $S/live_dbg.sh send 7 'break *0x5942cf\ncont\n'
-cd reverse-engineering/rust && cargo test --release
+cd open-civ3/reverse-engineering/rust && cargo test --release
 ```
 
 ## Files
 
-- `reverse-engineering/README.md`: ownership table, quick start.
-- `reverse-engineering/REGIONS.md`: code atlas and fan-out units.
-- `reverse-engineering/NOTES.md`: mapgen source of truth, method.
-- `reverse-engineering/dynamic-tracing.md`: Wine/winedbg runbook.
-- `reverse-engineering/tools/emu/`: Unicorn harness that runs the exe's own save
+- `open-civ3/reverse-engineering/README.md`: ownership table, quick start.
+- `open-civ3/reverse-engineering/REGIONS.md`: code atlas and fan-out units.
+- `open-civ3/reverse-engineering/NOTES.md`: mapgen source of truth, method.
+- `open-civ3/reverse-engineering/dynamic-tracing.md`: Wine/winedbg runbook.
+- `open-civ3/reverse-engineering/tools/emu/`: Unicorn harness that runs the exe's own save
   loader headless on a decoded `.SAV` and traces every chunk and raw read
   (`savegame.md` section 7); use it to verify a grammar instead of transcribing it.
-- `reverse-engineering/rust/`: reference implementation + tests.
+- `open-civ3/reverse-engineering/rust/`: reference implementation + tests.
 - `scripts/scans.py`: stdlib-only `calls`/`pushes`/`tags`/`slots`/`buckets`
   scans over any PE32 exe (`--exe` overrides the default search).
 - `scripts/r2q.sh`: quiet r2 one-liner wrapper (no color, no WARN lines).

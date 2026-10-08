@@ -5,7 +5,7 @@ Unicorn, on fractals the exe itself generated (0x5E1B60), and compares with the 
 (`cargo run --example fractal_probe`) on the same inputs.
 
     /tmp/emu/bin/python diff_sample.py [seed] [cases] [fpcw]
-    FIXTURES=reverse-engineering/rust/tests/data/fractal_probe.txt \\
+    FIXTURES=open-civ3/reverse-engineering/rust/tests/data/fractal_probe.txt \\
         /tmp/emu/bin/python diff_sample.py 5 14      # also write the exe's answers out
 
 `fpcw` is the x87 control word to run the exe under; the default 0x27F is the C
@@ -23,7 +23,7 @@ from unicorn.x86_const import UC_X86_REG_FPCW
 from emu import Emu
 
 RUST_DIR = __import__("os").path.abspath(
-    __import__("os").path.join(__import__("os").path.dirname(__file__), "../../../../../reverse-engineering/rust"))
+    __import__("os").path.join(__import__("os").path.dirname(__file__), "../../../../../open-civ3/reverse-engineering/rust"))
 
 
 def rust(lines):
