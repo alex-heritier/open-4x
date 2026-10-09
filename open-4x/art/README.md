@@ -11,7 +11,7 @@ cd art
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # numpy, pillow
 brew install librsvg                                                   # provides rsvg-convert
 .venv/bin/python build.py              # all groups
-.venv/bin/python build.py terrain      # or: terrain | overlays | sprites | ui | icons
+.venv/bin/python build.py terrain      # or: terrain | overlays | relief | sprites | units | ui | icons
 ```
 
 Output goes to `assets/packs/base/`; the vector sources of the sprites are written to `art/svg/` (git-ignored, reproducible). Builds are deterministic (fixed seeds).
@@ -31,9 +31,9 @@ Art is authored at **2x** the size the game draws, so it stays crisp on high-DPI
 | ground, water, river cell | 192x96 (1.5x) | 128x64 | one dual-grid diamond |
 | city (one per flavor), forest, pine, jungle, marsh, hills, mountain (and the dry and cold variants) | 256x224 | 128x112 | ground-diamond centre at (128, 160) |
 | fog sheet cell, flat border sheet cell | 256x128 | 128x64 | one diamond, drawn over the tile |
-| infantry, pioneer, worker, cavalry, artillery | 160x160 | 70x70 | tile centre about (80, 108) |
+| infantry, pioneer, worker, cavalry, artillery (and each cell of their animation sheets) | 160x160 | 70x70 | tile centre about (80, 108) |
 | farm, mine overlays | 256x128 | 128x64 | one diamond, drawn over the tile |
-| ironclad, transport, battleship, protected cruiser, torpedo boat | 256x192 | 112x84 | tile centre about (128, 123) |
+| ironclad, transport, battleship, protected cruiser, torpedo boat (and each cell of their sheets) | 256x192 | 112x84 | tile centre about (128, 123) |
 
 All light comes from the upper left, in every module.
 
@@ -80,9 +80,32 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 | `kit.py` | round and organic primitives in the same light: drums, cones, domes, onion domes, minarets, palms, palisades, stilts, tents, canoes |
 | `cities.py` | the eleven city skins, one per flavor: `western`, `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, `oceanic` (`sprites/city_<flavor>.png`). They share one camera, ground disc and light, and carry no flag: the client tints the nation's plate over them |
 | `overlay.py` | the fog-of-war and culture-border sheets |
-| `units.py` | soldiers, workers, horse, field gun, ironclad |
-| `ships.py` | shared isometric `Hull` frame; troop transport, battleship, protected cruiser, torpedo boat. Wakes are fitted inside the sprite and fade out |
+| `rig.py` | a small 3D puppet renderer that writes SVG: the game's 2:1 camera, painter-sorted polygons, tubes, tapered limbs and balls, Lambert light from the upper left, two-bone IK, the eight facings |
+| `troops.py` | the land units as puppets: riflemen, pioneers and workers, horse and dragoon, field gun and gunner, and their five clips |
+| `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, deck) with boxes, funnels, turrets, masts, ensign, wake and smoke, and their five clips |
 | `ui.py`, `icons.py` | brass-framed panels, plates, buttons, bars, flags, parchment; engraved and HUD icons |
+
+## Unit animation (`units/`)
+
+`python build.py units` renders every design's five clips (about a quarter of an hour on four cores) and writes them as
+`units/<design>/<clip>.png`, plus the design's single `sprites/<design>.png` (its first idle frame, facing south-west).
+A clip sheet has a column per frame and a row per facing, in Civ3's strip order: south-west, south, south-east, east,
+north-east, north, north-west, west. Facing `k` looks along the ground at `225 + 45k` degrees (east 0, north 90).
+
+| Clip | Land frames x ms | Ship frames x ms | What it shows |
+| --- | --- | --- | --- |
+| `idle` | 8 x 160 (loops) | 8 x 170 (loops) | breathing, a glance around, a horse's tail; a ship riding the swell, smoke drifting aft |
+| `run` | 8 x 60 (loops) | 8 x 90 (loops) | one stride, gallop or wheel turn in place; a ship's bow wave and wake |
+| `attack` | 10 x 80 | 8 x 120 | the shot 30% of the way in (a charge connects at 50%), then back to rest |
+| `victory` | 8 x 90 | 8 x 110 | rifles, sabre or cap raised, a horse rearing; a ship's whistle |
+| `death` | 10 x 90 | 8 x 220 | struck, crumpling and falling; a ship burning, listing and going down |
+
+These numbers are also in `pack.json` (`visuals.units`), and a content test checks every sheet against them. Each
+figure is posed in its own frame and drawn through the camera, so all eight facings come from one model: a puppet is
+built from tapered limbs (its knees and elbows by two-bone IK toward its feet and hands), elliptical tubes for coats
+and barrels, boxes for packs and deckhouses. Sheets are palette PNGs, one palette per sheet, which at the drawn size
+cannot be told from full colour and is about five times smaller. `preview_anim.py <design> <clip>` draws a quick
+contact sheet of one clip into `preview/`.
 
 ## UI kit (`ui/`)
 

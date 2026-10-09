@@ -6,6 +6,7 @@
 //! `docs/combat-animation.md`; keep its constants table in step with the ones below.
 use super::motion::{FIRE_AT, Motion, Pose, STEP_SECS, STRIKE_AT};
 use bevy::math::Vec2;
+use fourx_content::animation::Clip;
 use fourx_content::combat::{CombatVisuals, Style};
 use fourx_sim::{Battle, Fighter, Id, Outcome, Rules, Support, terrain::Coord};
 
@@ -30,6 +31,8 @@ pub struct Setting<'a> {
     pub combat: &'a CombatVisuals,
     /// Whether a square holds a city. A unit in a city stands beside it, not on it.
     pub city: &'a dyn Fn(Coord) -> bool,
+    /// Whether a unit design has its own clips (see [`Script::showing`]).
+    pub animated: &'a dyn Fn(&str) -> bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,11 +57,22 @@ pub struct Actor {
     pub anchor: Vec2,
     /// A unit vector toward the foe.
     pub toward: Vec2,
-    /// The sprite faces left.
+    /// The sprite faces left (a single image only; clips have a row for every facing).
     pub flip: bool,
+    /// The design plays clips rather than moving one image about.
+    pub animated: bool,
     /// Who the unit's colour turns to if it yields.
     pub captor: Option<Id>,
     pub motions: Vec<Segment>,
+}
+
+/// Which clip an actor shows at a moment, and where in it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Showing {
+    /// A clip played once over a motion, `progress` of the way through; the last frame holds.
+    Once { clip: Clip, progress: f32 },
+    /// A looping clip, `seconds` after it began.
+    Looping { clip: Clip, seconds: f32 },
 }
 
 /// A motion on the clock.
@@ -191,8 +205,84 @@ impl Script {
             if u >= 1.0 && !seg.motion.is_terminal() {
                 return pose;
             }
-            pose.and(seg.motion.sample(u, a.toward))
+            let pose_now = seg.motion.sample(u, a.toward);
+            pose.and(if a.animated {
+                seg.motion.under_clip(pose_now)
+            } else {
+                pose_now
+            })
         })
+    }
+
+    /// The clip an actor shows `t` seconds in: a swing while it attacks, the cheer while it
+    /// cheers, the walk while it steps, the death from its fall on (holding the last frame), and
+    /// otherwise standing. Of two motions under way, the one begun later shows.
+    pub fn showing(&self, actor: usize, t: f32) -> Showing {
+        let mut best: Option<(f32, Showing)> = None;
+        for seg in &self.actors[actor].motions {
+            if t < seg.start {
+                continue;
+            }
+            let u = (t - seg.start) / seg.motion.length();
+            let shown = match seg.motion {
+                Motion::Fall | Motion::Sink => Some(Showing::Once {
+                    clip: Clip::Death,
+                    progress: u.min(1.0),
+                }),
+                Motion::Attack { .. } if u < 1.0 => Some(Showing::Once {
+                    clip: Clip::Attack,
+                    progress: u,
+                }),
+                Motion::Cheer { .. } if u < 1.0 => Some(Showing::Once {
+                    clip: Clip::Victory,
+                    progress: u,
+                }),
+                Motion::Step { .. } if u < 1.0 => Some(Showing::Looping {
+                    clip: Clip::Run,
+                    seconds: t - seg.start,
+                }),
+                _ => None,
+            };
+            // Death outlasts everything after it.
+            let dead = matches!(
+                best,
+                Some((
+                    _,
+                    Showing::Once {
+                        clip: Clip::Death,
+                        ..
+                    }
+                ))
+            );
+            if let Some(shown) = shown
+                && !dead
+                && best.is_none_or(|(start, _)| seg.start >= start)
+            {
+                best = Some((seg.start, shown));
+            }
+        }
+        best.map_or(
+            Showing::Looping {
+                clip: Clip::Idle,
+                seconds: t,
+            },
+            |(_, shown)| shown,
+        )
+    }
+
+    /// Which way an actor looks `t` seconds in, in screen units: at its foe, or along the step
+    /// it is taking or took.
+    pub fn heading_at(&self, actor: usize, t: f32) -> Vec2 {
+        let a = &self.actors[actor];
+        a.motions
+            .iter()
+            .filter(|seg| t >= seg.start)
+            .filter_map(|seg| match seg.motion {
+                Motion::Step { by } if by != Vec2::ZERO => Some(by),
+                _ => None,
+            })
+            .last()
+            .unwrap_or(a.toward)
     }
 
     /// An actor's hit points `t` seconds in: each blow so far costs one.
@@ -248,6 +338,7 @@ impl<'a> Builder<'a> {
             anchor,
             toward: Vec2::X,
             flip: false,
+            animated: (self.setting.animated)(&fighter.kind),
             captor: None,
             motions: Vec::new(),
         });
@@ -636,6 +727,20 @@ mod tests {
                 rules: &pack.rules,
                 combat,
                 city,
+                animated: &|_| false,
+            },
+        )
+    }
+
+    fn build_animated(battle: &Battle) -> Script {
+        let pack = Pack::base();
+        Script::build(
+            battle,
+            &Setting {
+                rules: &pack.rules,
+                combat: &CombatVisuals::default(),
+                city: &|_| false,
+                animated: &|_| true,
             },
         )
     }
@@ -661,6 +766,92 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn clip_at(script: &Script, actor: usize, t: f32) -> Clip {
+        match script.showing(actor, t) {
+            Showing::Once { clip, .. } | Showing::Looping { clip, .. } => clip,
+        }
+    }
+
+    #[test]
+    fn actors_stand_swing_every_round_and_the_loser_dies_while_the_winner_cheers() {
+        let script = build_animated(&duel(
+            ("infantry", "infantry"),
+            &[true, false, true],
+            Outcome::AttackerWon,
+        ));
+        let (att, def) = (0, 1);
+        assert_eq!(clip_at(&script, att, 0.1), Clip::Idle, "the lead-in");
+        for beat in &script.beats {
+            let middle = beat.start + beat.length * 0.5;
+            for actor in [att, def] {
+                assert_eq!(clip_at(&script, actor, middle), Clip::Attack);
+            }
+        }
+        let after = script.finale + 0.3;
+        assert_eq!(clip_at(&script, def, after), Clip::Death);
+        assert_eq!(clip_at(&script, att, after), Clip::Victory);
+        // The dead hold their last frame to the end; the living stand again.
+        assert_eq!(
+            script.showing(def, script.length),
+            Showing::Once {
+                clip: Clip::Death,
+                progress: 1.0
+            }
+        );
+        assert_eq!(clip_at(&script, att, script.length), Clip::Idle);
+    }
+
+    #[test]
+    fn a_swing_runs_through_its_clip_from_the_start_of_its_beat_to_the_end() {
+        let script = build_animated(&duel(
+            ("infantry", "cavalry"),
+            &[true],
+            Outcome::AttackerWon,
+        ));
+        let beat = script.beats[0];
+        let progress = |t: f32| match script.showing(0, t) {
+            Showing::Once {
+                clip: Clip::Attack,
+                progress,
+            } => progress,
+            other => panic!("{other:?}"),
+        };
+        assert!(progress(beat.start + 0.01) < 0.05);
+        assert!((progress(beat.start + beat.length * FIRE_AT) - FIRE_AT).abs() < 0.02);
+        assert!(progress(beat.start + beat.length - 0.01) > 0.95);
+    }
+
+    #[test]
+    fn a_retreat_walks_and_looks_the_way_it_goes() {
+        let mut battle = duel(("cavalry", "infantry"), &[true], Outcome::DefenderRetreated);
+        if let Battle::Duel { retreat_to, .. } = &mut battle {
+            *retreat_to = Some(Coord::new(6, 6));
+        }
+        let script = build_animated(&battle);
+        let during = script.finale + STEP_SECS * 0.5;
+        assert_eq!(clip_at(&script, 1, during), Clip::Run);
+        let away = script.heading_at(1, during);
+        assert!(
+            away.dot(script.actors[1].toward) < 0.0,
+            "it turns its back on the foe"
+        );
+        assert_eq!(script.heading_at(1, 0.0), script.actors[1].toward);
+    }
+
+    #[test]
+    fn clips_replace_the_tilt_and_the_topple_but_not_the_fade() {
+        let battle = duel(("infantry", "infantry"), &[true], Outcome::AttackerWon);
+        let (plain, animated) = (build(&battle), build_animated(&battle));
+        assert!(animated.actors.iter().all(|a| a.animated));
+        let late = plain.finale + Motion::Fall.length() * 0.95;
+        let fallen = plain.pose_at(1, late);
+        let lying = animated.pose_at(1, late);
+        assert!(fallen.tilt.abs() > 1.0 && fallen.offset.length() > 5.0);
+        assert_eq!((lying.tilt, lying.offset), (0.0, Vec2::ZERO));
+        assert_eq!(lying.alpha, fallen.alpha);
+        assert!(lying.alpha < 0.5);
     }
 
     fn motions(script: &Script, pick: impl Fn(&Motion) -> bool) -> usize {

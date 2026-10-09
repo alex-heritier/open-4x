@@ -20,6 +20,7 @@ pub use calendar::Date;
 pub use combat::Estimate;
 pub use economy::Yield;
 pub use improvements::Job;
+pub use movement::March;
 pub use scenario::{
     CityStart, Flavor, NationStart, RegionStart, Rgb, RuleOverrides, SCENARIO_FORMAT, Scenario,
     Status, UnitStart, WarStart,
@@ -183,6 +184,10 @@ pub struct Game {
     /// next [`Game::apply`]. See [`battle`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub battles: Vec<Battle>,
+    /// The walks of the latest command, in order, for the interface to replay. Cleared by the
+    /// next [`Game::apply`]. See [`movement::March`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marches: Vec<March>,
     pub winner: Option<Id>,
     pub next_id: Id,
     #[serde(skip)]
@@ -397,6 +402,7 @@ impl Game {
             wars: BTreeSet::new(),
             log: Vec::new(),
             battles: Vec::new(),
+            marches: Vec::new(),
             winner: None,
             next_id: 1,
             index: Box::default(),
@@ -583,6 +589,7 @@ impl Game {
             return Err(error("Unknown player"));
         }
         self.battles.clear();
+        self.marches.clear();
         self.execute(player, command, rules, tick)?;
         self.reveal();
         // A finished improvement, a new city, or a turn of computer play may all have changed
@@ -888,6 +895,11 @@ impl Game {
                 .iter()
                 .filter(|b| Self::witnessed(b, player, visible))
                 .cloned()
+                .collect(),
+            marches: self
+                .marches
+                .iter()
+                .filter_map(|m| m.seen_by(player, visible))
                 .collect(),
             winner: self.winner,
             next_id: self.next_id,

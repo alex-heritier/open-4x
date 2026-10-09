@@ -74,7 +74,9 @@ impl Game {
         let ship = self
             .ship_with_room(at, unit, rules)
             .ok_or_else(|| error("No friendly ship with room is there"))?;
+        let from = unit.position;
         self.set_position(id, at);
+        self.record_march(id, vec![from, at]);
         let unit = self.units.get_mut(&id).unwrap();
         unit.moves_used += MOVE_UNIT.min(left);
         unit.clear_orders();

@@ -3,9 +3,43 @@
 //! Movement is eight-directional, counted in thirds of a move. Entering rough ground costs its
 //! whole move cost, a step between two roads costs a third of a move, and a step between two
 //! railroads is free. A unit with any movement left may always make a step, spending what it has.
+//!
+//! Every walk is also written down as a [`March`], square by square, so the interface can show
+//! the unit walking instead of jumping. The simulation never reads them back.
 use crate::{Game, GameError, Id, Index, Result, Rules, error, terrain::Coord, units::*};
+use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
+
+/// Most marches one command keeps; the oldest are dropped first.
+pub const MARCH_LIMIT: usize = 1024;
+
+/// A unit's walk during one command, for the interface to replay. Like the battle records, it
+/// says what happened and never how long it takes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct March {
+    pub unit: Id,
+    pub owner: Id,
+    pub kind: String,
+    /// The square it started on, then each square it stepped onto, in order.
+    pub path: Vec<Coord>,
+}
+
+impl March {
+    /// What a player may know of the walk: all of it for their own units, otherwise the
+    /// stretch between the first and last squares they can see, or nothing.
+    pub fn seen_by(&self, player: Id, sees: impl Fn(Coord) -> bool) -> Option<March> {
+        if self.owner == player {
+            return Some(self.clone());
+        }
+        let first = self.path.iter().position(|p| sees(*p))?;
+        let last = self.path.iter().rposition(|p| sees(*p))?;
+        (last > first).then(|| March {
+            path: self.path[first..=last].to_vec(),
+            ..self.clone()
+        })
+    }
+}
 
 /// Weights a step so that among equally cheap routes the one with fewer steps wins.
 const STEP_WEIGHT: u32 = 16;
@@ -338,7 +372,7 @@ impl Game {
         let path = self
             .path(owner, domain, start, goal, budget)
             .ok_or_else(|| error("No passable route"))?;
-        let mut moved = false;
+        let mut walked = vec![start];
         for next in path.into_iter().skip(1) {
             let unit = &self.units[&id];
             let left = unit.moves_left(def);
@@ -358,9 +392,28 @@ impl Game {
             unit.moves_used += spend;
             unit.order = Order::None;
             unit.work = 0;
-            moved = true;
+            walked.push(next);
+        }
+        let moved = walked.len() > 1;
+        if moved {
+            self.record_march(id, walked);
         }
         Ok(moved)
+    }
+
+    /// Write down a walk for the interface.
+    pub(crate) fn record_march(&mut self, id: Id, path: Vec<Coord>) {
+        let Some(unit) = self.units.get(&id) else {
+            return;
+        };
+        self.marches.push(March {
+            unit: id,
+            owner: unit.owner,
+            kind: unit.kind.clone(),
+            path,
+        });
+        let excess = self.marches.len().saturating_sub(MARCH_LIMIT);
+        self.marches.drain(..excess);
     }
 
     /// The `Move` order: march toward `destination`, and keep marching each turn until there.
@@ -454,8 +507,55 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::arena;
+    use super::March;
+    use crate::tests::{arena, rules, spawn};
     use crate::units::MOVE_UNIT;
+    use crate::{Command, TickRules, terrain::Coord};
+
+    #[test]
+    fn a_walk_is_recorded_square_by_square_and_cleared_by_the_next_command() {
+        let mut game = arena(8, 3);
+        let id = spawn(&mut game, 1, "cavalry", 0, 1);
+        let to = Coord::new(3, 1);
+        let mv = Command::Move {
+            unit: id,
+            destination: to,
+        };
+        game.apply(1, mv, &rules(), TickRules::default()).unwrap();
+        assert_eq!(game.units[&id].position, to);
+        let [march] = &game.marches[..] else {
+            panic!("one walk: {:?}", game.marches);
+        };
+        assert_eq!((march.unit, march.owner, &*march.kind), (id, 1, "cavalry"));
+        assert_eq!(march.path.first(), Some(&Coord::new(0, 1)));
+        assert_eq!(march.path.last(), Some(&to));
+        assert_eq!(march.path.len(), 4, "three steps: {:?}", march.path);
+        assert!(march.path.windows(2).all(|w| w[0].distance(w[1]) == 1));
+        let fortify = Command::Fortify { unit: id };
+        game.apply(1, fortify, &rules(), TickRules::default())
+            .unwrap();
+        assert!(game.marches.is_empty());
+    }
+
+    #[test]
+    fn others_see_only_the_part_of_a_walk_in_their_sight() {
+        let march = March {
+            unit: 9,
+            owner: 2,
+            kind: "infantry".into(),
+            path: (0..6).map(|x| Coord::new(x, 0)).collect(),
+        };
+        let sees = |p: Coord| (2..=3).contains(&p.x);
+        assert_eq!(march.seen_by(2, |_| false), Some(march.clone()));
+        let seen = march.seen_by(1, sees).unwrap();
+        assert_eq!(seen.path, vec![Coord::new(2, 0), Coord::new(3, 0)]);
+        assert_eq!(
+            march.seen_by(1, |p: Coord| p.x == 4),
+            None,
+            "one square is no walk"
+        );
+        assert_eq!(march.seen_by(1, |_| false), None);
+    }
 
     #[test]
     fn roads_and_rails_make_steps_cheaper() {
