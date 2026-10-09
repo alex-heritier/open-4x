@@ -1,5 +1,6 @@
-# Guidelines
+# Project layout
 
-Look for specific, technical inner workings and behaviors of CIV3 under `open-civ3/reverse-engineering/`.
-The Civ3 clone (game, reference implementations, tooling) lives under `open-civ3/`; the git-ignored
-Civ3 install and reverse-engineering scratch stay at `civ3/`, and `open-4x/` is reserved for future work.
+- `open-4x/`: Actively developed game.
+- `open-civ3/`: Civ3 clone, reference implementations, and tooling.
+- `open-civ3/reverse-engineering/`: Consult for Civ3 internals and behavior.
+- `civ3/`: Git-ignored Civ3 installation and reverse-engineering scratch files.
