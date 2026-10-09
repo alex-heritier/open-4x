@@ -13,10 +13,10 @@ This is a playable first slice, not a complete commercial 4X. Diplomacy, trade, 
 From this directory:
 
 ```sh
-cargo run -p fourx-client                              # the world in 1876, commanding Japan
-cargo run -p fourx-client -- --nation united-kingdom   # the same world as another nation
-cargo run -p fourx-client -- --scenario dawn-straits   # the compact two-empire starter
-cargo test                     # headless simulation, content, runtime, protocol tests
+cargo run                                            # the world in 1876, commanding Japan
+cargo run -- --nation united-kingdom                  # the same world as another nation
+cargo run -- --scenario dawn-straits                  # the compact two-empire starter
+cargo test --workspace                               # simulation, content, runtime, client, protocol, and tool tests
 cargo run -p fourx-server -- --list                    # scenarios and the nations you can command
 cargo run -p fourx-server -- --simulate 10 --seed 42
 ```
@@ -91,6 +91,8 @@ Known simplifications: no zones of control, no fortress or wall effects, rivers 
 | `art/` (Python) | Reproducible original PNG art: SVG scenes, painterly finishing, UI kit. See `art/README.md`. |
 
 This workspace has no dependency on `open-civ3/` or its reference code. Ordered containers, seeded integer combat, and explicit command/revision state make headless runs reproducible. Server snapshots mask uncharted terrain and enemies outside the player's vision. The spectator view reveals the campaign.
+
+The default desktop run uses one executable for the client and embedded authoritative server. It does not require a separate server process or open a network listener. Use `--server URL` to connect to a remote server instead.
 
 ## Server
 

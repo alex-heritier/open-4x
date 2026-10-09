@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/sim", "crates/content", "crates/runtime", "crates/server", "crates/client", "tools/asset-forge", "tools/scenario-forge"]
-default-members = ["crates/sim", "crates/content", "crates/runtime", "crates/server"]
+default-members = ["crates/sim", "crates/content", "crates/runtime", "crates/client"]
 
 [workspace.package]
 version = "0.1.0"
