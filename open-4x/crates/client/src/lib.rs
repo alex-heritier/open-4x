@@ -1,5 +1,8 @@
+mod bar;
+mod city;
 mod connection;
 mod presentation;
+mod route;
 mod stage;
 
 use bevy::{
@@ -35,10 +38,6 @@ struct Session {
     /// The camera starts on the player's capital once the first snapshot arrives.
     centered: bool,
     message: String,
-    /// The inspector shows the opening of the campaign brief, not all of it, until asked.
-    show_brief: bool,
-    /// The same for the key list.
-    show_keys: bool,
     asset_prefix: String,
     frames: u32,
     #[cfg(not(target_arch = "wasm32"))]
@@ -134,27 +133,10 @@ fn home(game: &Game, player: Id) -> Option<Coord> {
         .map(|c| c.position)
 }
 
-/// Move the camera onto a tile; `shift` moves the camera sideways off it (see `panel_shift`).
-fn focus(transform: &mut Transform, position: Coord, shift: f32) {
+/// Move the camera onto a tile.
+fn focus(transform: &mut Transform, position: Coord) {
     let (x, y) = position.screen();
-    transform.translation = Vec3::new(x + shift, y, transform.translation.z);
-}
-
-/// How far to move the camera off a target so that it sits in the middle of the map area
-/// the left-hand panel leaves free (world units; the panel is on the left, so this is
-/// negative). Narrow layouts keep their panel at the bottom and need no shift.
-fn panel_shift_for(window: &Window, scale: f32) -> f32 {
-    if window.width() < 900.0 {
-        0.0
-    } else {
-        -150.0 * scale
-    }
-}
-fn panel_shift(window: &Window, projection: &Projection) -> f32 {
-    match projection {
-        Projection::Orthographic(o) => panel_shift_for(window, o.scale),
-        _ => panel_shift_for(window, 1.0),
-    }
+    transform.translation = Vec3::new(x, y, transform.translation.z);
 }
 
 /// The overview image: one pixel per tile, rewritten when the game state changes.
@@ -264,6 +246,10 @@ struct WorldVisual;
 struct UiRoot;
 #[derive(Component)]
 struct Inspector;
+/// The pane at the bottom right that describes the selection (see `presentation::info`). It
+/// carries an `Interaction` so that a click on it is not a click on the map under it.
+#[derive(Component)]
+struct InfoPane;
 #[derive(Component, Clone)]
 enum Action {
     EndTurn,
@@ -279,11 +265,8 @@ enum Action {
     Save,
     SelectUnit(Id),
     SelectCity(Id),
-    Center,
-    /// Open or close the campaign brief in the inspector.
-    ToggleBrief,
-    /// Open or close the full key list.
-    ToggleKeys,
+    /// Close the city's detail view.
+    CloseCity,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -437,7 +420,7 @@ fn local_host(seed: u64) -> Host {
     .unwrap_or_else(|error| panic!("cannot start the campaign: {error}"))
 }
 
-/// `--select unit:ID` or `--select city:ID` starts with that piece selected, which is how the
+/// `--select unit:ID`, `--select city:ID` or `--select tile:X,Y` starts with that piece selected, which is how the
 /// inspector is captured in screenshots.
 fn initial_selection() -> Selection {
     let Some(text) = option("--select") else {
@@ -446,6 +429,10 @@ fn initial_selection() -> Selection {
     match text.split_once(':') {
         Some(("unit", id)) => id.parse().map_or(Selection::None, Selection::Unit),
         Some(("city", id)) => id.parse().map_or(Selection::None, Selection::City),
+        Some(("tile", at)) => at
+            .split_once(',')
+            .and_then(|(x, y)| Some(Coord::new(x.parse().ok()?, y.parse().ok()?)))
+            .map_or(Selection::None, Selection::Tile),
         _ => Selection::None,
     }
 }
@@ -502,8 +489,6 @@ pub fn run() {
             built: None,
             centered: false,
             message: "Connecting to the campaign...".into(),
-            show_brief: false,
-            show_keys: false,
             asset_prefix,
             frames: 0,
             #[cfg(not(target_arch = "wasm32"))]
@@ -538,6 +523,9 @@ pub fn run() {
             (
                 receive,
                 buttons,
+                bar::update,
+                city::update,
+                city::scroll,
                 scroll_inspector,
                 minimap_click,
                 controls,
@@ -554,6 +542,7 @@ pub fn run() {
             )
                 .chain(),
         );
+    app.insert_gizmo_config(route::RouteGizmos, route::gizmo_config());
     app.run();
 }
 
@@ -711,7 +700,7 @@ fn receive(
                     session.message = if player == 0 {
                         "Spectator | another client commands this campaign".into()
                     } else {
-                        "Select a unit; click a square to move, an enemy to attack. Space advances one day."
+                        "Select a unit; right-click a square to move, an enemy to attack. Space advances one day."
                             .into()
                     };
                 }
@@ -832,14 +821,10 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             session.dirty = true;
             None
         }
-        Action::Center => None,
-        Action::ToggleBrief => {
-            session.show_brief = !session.show_brief;
-            session.dirty = true;
-            None
-        }
-        Action::ToggleKeys => {
-            session.show_keys = !session.show_keys;
+        Action::CloseCity => {
+            if matches!(session.selection, Selection::City(_)) {
+                session.selection = Selection::None;
+            }
             session.dirty = true;
             None
         }
@@ -879,19 +864,29 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
         issue(session, connection, command);
     }
 }
+
+/// A button: what it does, its flat colour (the action bar's wear pictures instead), and
+/// whether it is one of the bar's.
+type Pressable = (
+    &'static Interaction,
+    &'static Action,
+    Option<&'static mut BackgroundColor>,
+    Option<&'static bar::BarButton>,
+);
+
 fn buttons(
     mut session: ResMut<Session>,
     mut connection: NonSendMut<Connection>,
-    mut buttons: Query<(&Interaction, &Action, &mut BackgroundColor), Changed<Interaction>>,
-    mut camera: Query<(&mut Transform, &Projection), With<Camera2d>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    mut buttons: Query<Pressable, Changed<Interaction>>,
+    mut camera: Query<&mut Transform, With<Camera2d>>,
     touches: Res<Touches>,
     mut touch_action: Local<Option<Action>>,
 ) {
     let mut activated = Vec::new();
-    for (interaction, action, mut color) in &mut buttons {
+    for (interaction, action, color, bar_button) in &mut buttons {
         // The day button wears the brass; everything else stays navy and warms as the
-        // pointer crosses it. See `presentation` for the materials.
+        // pointer crosses it. See `presentation` for the materials. The action bar's buttons
+        // are pictures and wear their own (see `bar`).
         use crate::presentation::{BRASS, BRASS_HOVER, BRASS_PRESSED};
         use crate::presentation::{NAVY, NAVY_HOVER, NAVY_PRESSED};
         let primary = matches!(action, Action::EndTurn);
@@ -900,11 +895,17 @@ fn buttons(
         } else {
             (NAVY, NAVY_HOVER, NAVY_PRESSED)
         };
-        color.0 = match interaction {
-            Interaction::Hovered => hover,
-            Interaction::Pressed => pressed,
-            _ => rest,
-        };
+        if let Some(mut color) = color {
+            color.0 = match interaction {
+                Interaction::Hovered => hover,
+                Interaction::Pressed => pressed,
+                _ => rest,
+            };
+        }
+        // A button that cannot do anything now still shows what it is, and does nothing.
+        if bar_button.is_some_and(|b| b.dormant) {
+            continue;
+        }
         if *interaction == Interaction::Pressed {
             if touches.iter().next().is_some() {
                 *touch_action = Some(action.clone());
@@ -921,16 +922,6 @@ fn buttons(
         }
     }
     for action in &activated {
-        let shift = match (windows.single(), camera.single()) {
-            (Ok(window), Ok((_, projection))) => panel_shift(window, projection),
-            _ => 0.0,
-        };
-        if matches!(action, Action::Center)
-            && let Some(position) = session.game.as_ref().and_then(|g| home(g, session.player))
-            && let Ok((mut transform, _)) = camera.single_mut()
-        {
-            focus(&mut transform, position, shift);
-        }
         act(action, &mut session, &mut connection);
         let pos = match action {
             Action::SelectUnit(id) => session
@@ -946,9 +937,9 @@ fn buttons(
             _ => None,
         };
         if let Some(pos) = pos
-            && let Ok((mut transform, _)) = camera.single_mut()
+            && let Ok(mut transform) = camera.single_mut()
         {
-            focus(&mut transform, pos, shift);
+            focus(&mut transform, pos);
         }
     }
 }
@@ -970,22 +961,18 @@ fn minimap_click(
         };
         let tile = Chart::of(&game.map).tile_at(normalized + Vec2::splat(0.5));
         if let Ok(mut transform) = camera.single_mut() {
-            focus(&mut transform, tile, 0.0);
+            focus(&mut transform, tile);
         }
     }
 }
+/// Whether a point of the window is over the inspector, which only a narrow window has (at the
+/// bottom); a wide one describes the selection in the pane at the bottom right (`InfoPane`).
 fn inspector_contains(window: &Window, pos: Vec2) -> bool {
-    if window.width() < 900.0 {
-        pos.x >= 8.0
-            && pos.x <= window.width() - 8.0
-            && pos.y >= window.height() - inspector_height(window.height()) - 44.0
-            && pos.y <= window.height() - 44.0
-    } else {
-        pos.x >= 16.0
-            && pos.x <= 292.0
-            && pos.y >= 62.0
-            && pos.y <= window.height() - presentation::chart_side(window.height()) - 92.0
-    }
+    window.width() < 900.0
+        && pos.x >= 8.0
+        && pos.x <= window.width() - 8.0
+        && pos.y >= window.height() - inspector_height(window.height()) - 44.0
+        && pos.y <= window.height() - 44.0
 }
 fn inspector_height(window_height: f32) -> f32 {
     (window_height * 0.30).clamp(110.0, 240.0)
@@ -1027,8 +1014,10 @@ fn controls(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut camera: Query<(&Camera, &GlobalTransform, &mut Transform, &mut Projection), With<Camera2d>>,
     ui: Query<&Interaction, With<Button>>,
+    info: Query<&Interaction, With<InfoPane>>,
     mut session: ResMut<Session>,
     mut connection: NonSendMut<Connection>,
+    mut last_click: Local<Option<(Coord, f64)>>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -1054,7 +1043,10 @@ fn controls(
     }
     let over_inspector = window
         .cursor_position()
-        .is_some_and(|p| inspector_contains(window, p));
+        .is_some_and(|p| inspector_contains(window, p))
+        || info.iter().any(|i| *i != Interaction::None)
+        // The city view is a window over the map; the wheel scrolls it (see `city::scroll`).
+        || matches!(session.selection, Selection::City(_));
     for scroll in wheel.read() {
         if !over_inspector {
             ortho.scale = (ortho.scale * (1.0 - scroll.y * 0.08)).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -1082,11 +1074,7 @@ fn controls(
     transform.translation.y = transform.translation.y.clamp(bottom - 100.0, top + 100.0);
     if keys.just_pressed(KeyCode::Home) || keys.just_pressed(KeyCode::KeyH) {
         if let Some(position) = home(game, session.player) {
-            focus(
-                &mut transform,
-                position,
-                panel_shift_for(window, ortho.scale),
-            );
+            focus(&mut transform, position);
         }
     }
     // While a fight is on stage Space skips it (see `stage::drive`) rather than ending the day.
@@ -1157,11 +1145,7 @@ fn controls(
             let id = ids[next];
             session.selection = Selection::Unit(id);
             if let Some(unit) = session.game.as_ref().and_then(|g| g.units.get(&id)) {
-                focus(
-                    &mut transform,
-                    unit.position,
-                    panel_shift_for(window, ortho.scale),
-                );
+                focus(&mut transform, unit.position);
             }
             session.dirty = true;
         }
@@ -1210,19 +1194,24 @@ fn controls(
     let clicked = mouse.just_pressed(MouseButton::Left)
         || mouse.just_pressed(MouseButton::Right)
         || touch.is_some();
-    if !clicked || fingers.len() > 1 || ui.iter().any(|i| *i != Interaction::None) {
+    if !clicked
+        || fingers.len() > 1
+        || ui
+            .iter()
+            .chain(info.iter())
+            .any(|i| *i != Interaction::None)
+    {
+        return;
+    }
+    // The city's detail view is a modal: nothing behind it takes clicks.
+    if matches!(session.selection, Selection::City(_)) {
         return;
     }
     let Some(cursor) = touch.or_else(|| window.cursor_position()) else {
         return;
     };
     // Panels also block map clicks in their empty space.
-    let narrow = window.width() < 900.0;
-    if cursor.y < 50.0
-        || cursor.y > window.height() - 34.0
-        || (!narrow && cursor.x < 300.0)
-        || inspector_contains(window, cursor)
-    {
+    if cursor.y < 50.0 || cursor.y > window.height() - 34.0 || inspector_contains(window, cursor) {
         return;
     }
     let Ok(world) = camera.viewport_to_world_2d(global, cursor) else {
@@ -1251,6 +1240,17 @@ fn controls(
         }
         return;
     }
+    // A second click on the same square soon after the first is a double click, which opens
+    // a city's detail view. A single click on a city is just a click on its square: it
+    // selects the units standing there and nothing else.
+    let now = time.elapsed_secs_f64();
+    let double = is_double_click(*last_click, position, now);
+    *last_click = if double { None } else { Some((position, now)) };
+    if double && let Some(id) = city {
+        session.selection = Selection::City(id);
+        session.dirty = true;
+        return;
+    }
     if !own.is_empty() {
         let next = if let Selection::Unit(id) = session.selection {
             (own.iter().position(|v| *v == id).unwrap_or(own.len() - 1) + 1) % own.len()
@@ -1258,16 +1258,29 @@ fn controls(
             0
         };
         session.selection = Selection::Unit(own[next]);
-    } else if let Selection::Unit(unit) = session.selection {
+    } else if touch.is_some()
+        && let Selection::Unit(unit) = session.selection
+    {
+        // Left-clicking only selects; orders go with the right button. A tap has no right
+        // button, so on a touch screen it is the order.
         if let Some(command) = order_for(&session, unit, position) {
             issue(&mut session, &mut connection, command);
         }
-    } else if let Some(id) = city {
-        session.selection = Selection::City(id);
+    } else if city.is_some() {
+        return;
     } else {
         session.selection = Selection::Tile(position);
     }
     session.dirty = true;
+}
+
+/// How long after a click another on the same square still makes a double click (seconds).
+const DOUBLE_CLICK: f64 = 0.4;
+
+/// Whether a click on `position` at time `now` follows the `last` click closely enough, on the
+/// same square, to be its second half.
+fn is_double_click(last: Option<(Coord, f64)>, position: Coord, now: f64) -> bool {
+    last.is_some_and(|(at, then)| at == position && (0.0..=DOUBLE_CLICK).contains(&(now - then)))
 }
 fn smoke(mut session: ResMut<Session>, mut _commands: Commands, mut exit: MessageWriter<AppExit>) {
     session.frames += 1;
@@ -1281,5 +1294,23 @@ fn smoke(mut session: ResMut<Session>, mut _commands: Commands, mut exit: Messag
     }
     if session.smoke && session.frames >= 200 {
         exit.write(AppExit::Success);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_click_on_the_same_square_soon_after_is_a_double_click() {
+        let here = Coord::new(4, 7);
+        assert!(!is_double_click(None, here, 10.0));
+        assert!(is_double_click(Some((here, 10.0)), here, 10.3));
+        assert!(!is_double_click(
+            Some((here, 10.0)),
+            here,
+            10.0 + DOUBLE_CLICK + 0.1
+        ));
+        assert!(!is_double_click(Some((here, 10.0)), Coord::new(5, 7), 10.2));
     }
 }

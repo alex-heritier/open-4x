@@ -88,7 +88,7 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 
 Nine-slice sources are drawn at 2x; `ui/nine_slice.json` lists the border inset (source px) that keeps corner ornaments undistorted.
 `parchment.png` is a seamless 512 px tile. Icons live in `ui/icons/` at 64 px (shown at 32).
-The current client UI is still built from flat colours; these are ready to be wired with Bevy `ImageNode` + `TextureSlicer`.
+The client's unit action bar wears `button_brass*.png` and the engraved icons through `ImageNode`; the rest of its UI is still built from flat colours, and these are ready to be wired with Bevy `ImageNode` + `TextureSlicer`.
 
 ## Relief surfaces and borders
 

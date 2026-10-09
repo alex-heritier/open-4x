@@ -305,6 +305,21 @@ impl Game {
         })
     }
 
+    /// Fill in, on the units of `view` (this game as `player` sees it), the squares each of the
+    /// player's marching units will step on. The route is found on the true map: the player's
+    /// own chart has gaps, but the unit will walk the real ground (and round whatever stands
+    /// on it), so this is the route it will take.
+    pub fn show_routes(&self, view: &mut Game, player: Id, rules: &Rules) {
+        for unit in view.units.values_mut().filter(|u| u.owner == player) {
+            if let Some(goal) = unit.goto {
+                let domain = rules.def(unit).domain;
+                unit.route = self
+                    .path(player, domain, unit.position, goal, usize::MAX)
+                    .unwrap_or_default();
+            }
+        }
+    }
+
     /// Walk a unit toward `goal` as far as this turn's movement allows. Returns whether it
     /// moved at all. It stops short of a square held by another nation and never attacks.
     pub(crate) fn march(

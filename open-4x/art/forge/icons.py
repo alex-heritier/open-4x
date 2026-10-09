@@ -133,10 +133,57 @@ def g_hourglass(s: Svg, c):
     s.path("M22,50 C24,42 28,39 32,38 C36,39 40,42 42,50 Z", LIGHT, op=0.8)
 
 
+def g_shield(s: Svg, c):  # fortify: a heater shield with a boss
+    s.path("M32,6 L54,13 C54,35 46,48 32,58 C18,48 10,35 10,13 Z", c)
+    s.path("M32,13 L46,18 C46,33 40,42 32,49 C24,42 18,33 18,18 Z", LIGHT, op=0.8)
+    s.line((32, 18), (32, 46), c, 3.4)
+    s.line((22, 28), (42, 28), c, 3.4)
+
+
+def g_cancel(s: Svg, c):  # cancel orders: the "no" sign
+    s.circle(32, 32, 22, "none", stroke=c, sw=5.4)
+    s.line((17, 47), (47, 17), c, 5.4)
+
+
+def g_cross(s: Svg, c):  # disband: strike the unit from the rolls
+    s.line((15, 15), (49, 49), c, 7.0)
+    s.line((49, 15), (15, 49), c, 7.0)
+
+
+def g_road(s: Svg, c):  # a road running to the horizon
+    s.path("M27,10 L37,10 L56,56 L8,56 Z", c)
+    for y0, y1 in ((16, 22), (28, 36), (42, 53)):
+        s.line((32, y0), (32, y1), LIGHT, 2.2 + (y0 - 10) * 0.05, 0.9)
+
+
+def g_rails(s: Svg, c):  # a railroad: two rails and the ties between them
+    s.line((26, 8), (14, 56), c, 4.0)
+    s.line((38, 8), (50, 56), c, 4.0)
+    for y in (16, 26, 36, 46, 55):
+        half = 6 + (y - 8) * 0.25
+        s.line((32 - half - 4, y), (32 + half + 4, y), c, 3.0)
+
+
+def g_pickaxe(s: Svg, c):  # mine
+    s.line((12, 56), (40, 22), c, 4.6)
+    s.path("M8,26 C16,10 38,6 56,16 C44,14 34,18 28,26 C22,22 14,22 8,26 Z", c)
+
+
+def g_wheat(s: Svg, c):  # farm: an ear of wheat
+    s.line((32, 58), (32, 18), c, 3.2)
+    for k in range(5):
+        y = 14 + k * 8
+        s.ellipse(25, y + 3, 3.4, 6.4, c, rot=-32)
+        s.ellipse(39, y + 3, 3.4, 6.4, c, rot=32)
+    s.ellipse(32, 9, 3.2, 6.4, c)
+
+
 ENGRAVED = {
     "book": g_book, "city": g_city, "tools": g_tools, "laurel": g_laurel, "gear": g_gear,
     "globe": g_globe, "scroll": g_scroll, "target": g_target, "fire": g_fire, "shock": g_shock,
     "star": g_star, "banner": g_banner, "hourglass": g_hourglass,
+    "shield": g_shield, "cancel": g_cancel, "cross": g_cross, "road": g_road, "rails": g_rails,
+    "pickaxe": g_pickaxe, "wheat": g_wheat,
 }
 
 

@@ -152,6 +152,11 @@ pub struct Unit {
     /// Destination the unit keeps marching toward at the start of each turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goto: Option<Coord>,
+    /// The squares the standing march will step on, from the unit's own to its goal. Never
+    /// kept in the game itself (the march is planned again each turn): [`Game::show_routes`]
+    /// fills it in on a player's view so the client can draw the route the unit will take.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub route: Vec<Coord>,
     /// The ship this land unit is aboard. A passenger shares its ship's square, never defends
     /// on its own, and goes wherever the ship goes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -176,6 +181,7 @@ impl Unit {
             fired: false,
             promotion_failed: false,
             goto: None,
+            route: Vec::new(),
             carrier: None,
         }
     }

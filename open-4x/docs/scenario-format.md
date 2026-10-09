@@ -34,7 +34,7 @@ world on an upright Mercator map of 175,104 tiles (84°N to 58°S, no Antarctica
 | `description` | string | Up to 4000 characters. Not used by the simulation. |
 | `start_date` | date | Calendar date of turn 1. **One turn is one day.** |
 | `commander` | nation ID | The nation played unless the host picks another (`--nation`). |
-| `intro` | string | First dispatch and the idle-panel briefing. Up to 600 characters. |
+| `intro` | string | First dispatch. Up to 600 characters. |
 | `charted` | boolean | Optional, default `false`. When `true`, every nation starts with the whole map known: all terrain, borders, and cities. Enemy units are still only seen within sight of a friendly unit or city. |
 | `rules` | object | Optional overrides of pack rule values for this scenario only. |
 | `map` | object | Terrain and regions. See below. |

@@ -30,8 +30,6 @@ fn session() -> Session {
         }),
         centered: true,
         message: String::new(),
-        show_brief: false,
-        show_keys: false,
         asset_prefix: "packs/base/".into(),
         frames: 0,
         screenshot: None,

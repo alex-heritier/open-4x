@@ -537,6 +537,29 @@ impl Game {
         }
         Ok(unit)
     }
+    /// Whether `player` may found a city on `position`: on land, three tiles from every other
+    /// city, and not in another nation's territory. The pioneer's own state is not asked.
+    pub fn can_found_city(
+        &self,
+        player: Id,
+        position: Coord,
+    ) -> std::result::Result<(), &'static str> {
+        if self
+            .cities
+            .values()
+            .any(|c| c.position.distance(position) < 3)
+        {
+            return Err("Cities must be at least three tiles apart");
+        }
+        let tile = self.map.get(position).ok_or("Off the map")?;
+        if !tile.is_land() {
+            return Err("Cannot settle water");
+        }
+        if tile.owner != 0 && tile.owner != player {
+            return Err("Cannot found a city in foreign territory");
+        }
+        Ok(())
+    }
     fn own_city(&self, player: Id, id: Id) -> Result<&City> {
         let city = self.cities.get(&id).ok_or_else(|| error("Unknown city"))?;
         if city.owner != player {
@@ -618,21 +641,8 @@ impl Game {
                 if name.trim().is_empty() || name.chars().count() > 32 {
                     return Err(error("Use a city name of 1–32 characters"));
                 }
-                if self
-                    .cities
-                    .values()
-                    .any(|c| c.position.distance(u.position) < 3)
-                {
-                    return Err(error("Cities must be at least three tiles apart"));
-                }
                 let pos = u.position;
-                let tile = self.map.get(pos).unwrap();
-                if !tile.is_land() {
-                    return Err(error("Cannot settle water"));
-                }
-                if tile.owner != 0 && tile.owner != player {
-                    return Err(error("Cannot found a city in foreign territory"));
-                }
+                self.can_found_city(player, pos).map_err(error)?;
                 self.remove_unit(unit);
                 let id = self.add_city(player, pos, name.trim().into());
                 self.claim_for_new_city(id);

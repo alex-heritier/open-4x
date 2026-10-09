@@ -169,10 +169,12 @@ impl Host {
         }
     }
     pub fn snapshot(&self, player: Id) -> Response {
+        let mut game = self.game.view(player);
+        self.game.show_routes(&mut game, player, &self.rules);
         Response::Snapshot {
             version: PROTOCOL_VERSION,
             player,
-            game: self.game.view(player),
+            game,
             rules: self.rules.clone(),
         }
     }
@@ -897,5 +899,112 @@ mod tests {
         assert!(h.game.units[&guard].is_fortified());
         h.command(1, Command::Cancel { unit: guard }).unwrap();
         assert_eq!(h.game.units[&guard].order, Order::None);
+    }
+    /// The commander's infantry, and the farthest land square it can walk to along a route of
+    /// at most `longest` squares.
+    fn infantry_and_goal(host: &Host, longest: usize) -> (Id, Coord) {
+        let player = host.commander();
+        let unit = host
+            .game
+            .units
+            .values()
+            .find(|u| u.owner == player && u.kind == "infantry")
+            .expect("the commander starts with infantry");
+        let goal = host
+            .game
+            .map
+            .tiles
+            .iter()
+            .filter(|t| t.is_land() && !host.game.blocked_for(player, t.position))
+            .filter_map(|t| {
+                host.game
+                    .path(player, Domain::Land, unit.position, t.position, usize::MAX)
+                    .filter(|path| path.len() <= longest)
+                    .map(|path| (path.len(), t.position))
+            })
+            .max_by_key(|(len, _)| *len)
+            .expect("the starter has land to cross")
+            .1;
+        (unit.id, goal)
+    }
+    fn seen_by(host: &Host, player: Id) -> Game {
+        let Response::Snapshot { game, .. } = host.snapshot(player) else {
+            panic!("expected a snapshot");
+        };
+        game
+    }
+    #[test]
+    fn a_marching_unit_is_sent_with_the_route_it_will_walk() {
+        let mut h = dawn(1);
+        let player = h.commander();
+        let (unit, goal) = infantry_and_goal(&h, usize::MAX);
+        assert!(seen_by(&h, player).units[&unit].route.is_empty());
+        h.command(
+            player,
+            Command::Move {
+                unit,
+                destination: goal,
+            },
+        )
+        .unwrap();
+        let game = seen_by(&h, player);
+        let sent = &game.units[&unit];
+        assert_eq!(sent.route.first(), Some(&sent.position));
+        assert_eq!(sent.route.last(), Some(&goal));
+        for step in sent.route.windows(2) {
+            assert_eq!(step[0].distance(step[1]), 1, "{step:?} is not one square");
+        }
+        // It is the route the unit will take, over ground the nation has not charted yet.
+        let chart = &h.game.factions[&player].explored;
+        assert!(sent.route.iter().any(|p| !chart.contains(*p)));
+        // Only the view carries it: the campaign itself plans the march afresh each day.
+        assert!(h.game.units.values().all(|u| u.route.is_empty()));
+        assert!(!h.save().unwrap().contains("route"));
+        // The rival gets no one's route, and a unit that stands still has none.
+        let rival = game.units.values().find(|u| u.owner != player);
+        assert!(rival.is_none_or(|u| u.route.is_empty()));
+        let other = h
+            .game
+            .units
+            .values()
+            .find(|u| u.owner == player && u.id != unit)
+            .unwrap()
+            .id;
+        assert!(game.units[&other].route.is_empty());
+    }
+    #[test]
+    fn the_unit_walks_exactly_the_squares_it_was_sent() {
+        let mut h = dawn(1);
+        let player = h.commander();
+        let (unit, goal) = infantry_and_goal(&h, 5);
+        h.command(
+            player,
+            Command::Move {
+                unit,
+                destination: goal,
+            },
+        )
+        .unwrap();
+        let first = seen_by(&h, player).units[&unit].route.clone();
+        assert!(first.len() > 2, "{first:?}");
+        let mut days = 0;
+        while h.game.units[&unit].position != goal && days < 10 {
+            // Each day the route is sent again from where the unit stands: the rest of the last.
+            let again = seen_by(&h, player).units[&unit].route.clone();
+            assert!(
+                first.ends_with(&again),
+                "day {days}: {again:?} is not the end of {first:?}"
+            );
+            assert_eq!(again.first(), Some(&h.game.units[&unit].position));
+            h.command(player, Command::EndTurn).unwrap();
+            let at = h.game.units[&unit].position;
+            assert!(
+                first.contains(&at),
+                "day {days}: {at:?} is off the route {first:?}"
+            );
+            days += 1;
+        }
+        assert_eq!(h.game.units[&unit].position, goal, "it arrives");
+        assert!(seen_by(&h, player).units[&unit].route.is_empty());
     }
 }

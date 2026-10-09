@@ -10,11 +10,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// The HUD's materials, from the reference: cream parchment, a near-black navy for bars
 /// and buttons, and brass only where something should catch the eye.
-const PAPER: Color = Color::srgb(0.89, 0.85, 0.74);
+pub(crate) const PAPER: Color = Color::srgb(0.89, 0.85, 0.74);
 /// Parchment ink, and the plates world labels sit on.
-const INK: Color = Color::srgb(0.09, 0.15, 0.16);
+pub(crate) const INK: Color = Color::srgb(0.09, 0.15, 0.16);
 /// Brass: headings and the one primary action.
-const GOLD: Color = Color::srgb(0.80, 0.66, 0.40);
+pub(crate) const GOLD: Color = Color::srgb(0.80, 0.66, 0.40);
 /// Brass at hairline weight, for the edge of a panel that should not shout.
 pub(crate) const GOLD_LINE: Color = Color::srgba(0.80, 0.66, 0.40, 0.40);
 /// The fill of a bar or a secondary button: dark, but the map shows faintly through it.
@@ -38,9 +38,15 @@ const MAP_PLAINS: [u8; 3] = [166, 160, 92];
 const MAP_DESERT: [u8; 3] = [208, 178, 112];
 const MAP_TUNDRA: [u8; 3] = [150, 158, 140];
 const MAP_FOG: [u8; 3] = [20, 33, 38];
-const MAP_OWN_CITY: [u8; 3] = [191, 61, 51];
+const MAP_OWN_CITY: [u8; 3] = [244, 238, 220];
+const MAP_OWN_CITY_CORE: [u8; 3] = [24, 28, 30];
 
-fn text(parent: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, color: Color) {
+pub(crate) fn text(
+    parent: &mut ChildSpawnerCommands,
+    value: impl Into<String>,
+    size: f32,
+    color: Color,
+) {
     parent.spawn((
         Node {
             flex_shrink: 0.0,
@@ -55,7 +61,7 @@ fn text(parent: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, 
     ));
 }
 /// A rounded corner, for the `border_radius` of a node.
-fn rounded(radius: f32) -> BorderRadius {
+pub(crate) fn rounded(radius: f32) -> BorderRadius {
     BorderRadius::all(px(radius))
 }
 
@@ -189,7 +195,7 @@ fn nation_rgb(game: &Game, owner: Id) -> [u8; 3] {
         .get(&owner)
         .map_or([128, 128, 128], |f| f.color.0)
 }
-fn nation_color(game: &Game, owner: Id, alpha: f32) -> Color {
+pub(crate) fn nation_color(game: &Game, owner: Id, alpha: f32) -> Color {
     let [r, g, b] = nation_rgb(game, owner);
     Color::srgba(
         f32::from(r) / 255.0,
@@ -372,7 +378,7 @@ impl Sight {
 
 /// The city sprite for a nation: the one its flavor names, or the pack's western one for a
 /// nation the player has no record of.
-fn city_sprite<'a>(visuals: &'a Visuals, game: &Game, owner: Id) -> &'a str {
+pub(crate) fn city_sprite<'a>(visuals: &'a Visuals, game: &Game, owner: Id) -> &'a str {
     let flavor = game
         .factions
         .get(&owner)
@@ -618,7 +624,7 @@ pub(super) fn refresh(
             .map(|game| focus_option().or_else(|| home(game, session.player)));
         if let Some(target) = target {
             if let Some(position) = target {
-                focus(&mut transform, position, panel_shift(window, projection));
+                focus(&mut transform, position);
             }
             session.centered = true;
             session.dirty = true;
@@ -1070,7 +1076,7 @@ pub(super) fn refresh(
         }
     }
     if rebuild_ui {
-        build_ui(&mut commands, &session, size, &minimap);
+        build_ui(&mut commands, &session, size, &minimap, &assets);
     }
 }
 
@@ -1250,17 +1256,9 @@ fn moves_text(thirds: u32) -> String {
     }
 }
 
-fn job_key(job: Job) -> &'static str {
-    match job {
-        Job::Road | Job::Rail => "R",
-        Job::Mine => "M",
-        Job::Farm => "I",
-    }
-}
-
 /// Squares a selected unit can hit now: adjacent hostile squares for melee, anything hostile
 /// within range for a bombarding unit. Each is paired with whether it would be a bombardment.
-fn strike_targets(game: &Game, rules: &Rules, unit: &Unit) -> Vec<(Coord, bool)> {
+pub(super) fn strike_targets(game: &Game, rules: &Rules, unit: &Unit) -> Vec<(Coord, bool)> {
     let def = rules.def(unit);
     let ranged = def.can_bombard();
     if unit.moves_left(def) == 0 || !(ranged || def.can_attack()) {
@@ -1346,31 +1344,10 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
     if !mine {
         return;
     }
-    if def.domain == fourx_sim::Domain::Land && def.defense > 0 && u.order != Order::Fortified {
-        button(p, "FORTIFY  (F)", Action::Fortify);
-    }
-    if !u.order.is_none() || u.goto.is_some() {
-        button(p, "CANCEL ORDERS  (DEL)", Action::Cancel);
-    }
-    if def.settler {
-        button(p, "FOUND A CITY  (B)", Action::Found);
-    }
+    // The orders themselves are buttons in the bar at the foot of the map (see `bar`); what
+    // can be said in words stays here.
     if def.can_work() {
         let options = game.job_options(u.position);
-        for (job, option) in &options {
-            if let Ok(work) = option {
-                button(
-                    p,
-                    format!(
-                        "{}  ({} turns)  ({})",
-                        job.name().to_uppercase(),
-                        work.div_ceil(def.work),
-                        job_key(*job)
-                    ),
-                    Action::Work(*job),
-                );
-            }
-        }
         if options.values().all(Result::is_err) {
             let why = options
                 .get(&Job::Road)
@@ -1380,56 +1357,118 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
             text(p, format!("Nothing to build here: {why}."), 13.0, INK);
         }
     }
-    for (target, bombard) in strike_targets(game, &session.rules, u) {
-        // Say who is there, then offer the blow with its odds.
-        let holder = game.hostile_holder(target, u.owner);
-        let defender = game
-            .best_defender(target, holder.unwrap_or(0), &session.rules)
-            .and_then(|id| game.units.get(&id));
-        text(
-            p,
-            match (
-                defender,
-                game.city_at(target).and_then(|id| game.cities.get(&id)),
-            ) {
-                (Some(d), Some(city)) => format!(
-                    "{},{}: {} in {}",
-                    target.x,
-                    target.y,
-                    session.rules.def(d).name,
-                    city.name
-                ),
-                (Some(d), None) => {
-                    format!("{},{}: {}", target.x, target.y, session.rules.def(d).name)
-                }
-                (None, Some(city)) => {
-                    format!("{},{}: {} (no defenders)", target.x, target.y, city.name)
-                }
-                (None, None) => format!("{},{}: foreign units", target.x, target.y),
-            },
-            13.0,
-            INK,
-        );
-        let label = if bombard {
-            "BOMBARD".to_string()
-        } else {
-            match game.estimate_attack(u.id, target, &session.rules) {
-                Some(e) => format!("ATTACK  |  {:.0}% to win", e.win_chance * 100.0),
-                None => "TAKE IT (undefended)".to_string(),
-            }
-        };
-        button(p, label, Action::Strike(target));
+    for strike in crate::bar::strikes(game, &session.rules, u) {
+        text(p, strike.line(), 13.0, INK);
     }
-    button(p, "DISBAND", Action::Disband);
     text(
         p,
-        "Right-click a square to move there, or an enemy to attack it.",
+        "Right-click a square to send it there, or an enemy to attack it.",
         13.0,
         INK,
     );
 }
 
-fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Minimap) {
+/// What the player knows of a square: its terrain, who holds it, what stands on it, and what
+/// it yields.
+fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
+    heading(p, "TERRAIN");
+    let t = game.map.get(pos).unwrap();
+    text(p, t.terrain.name(), 19.0, INK);
+    let region = game.region_of(pos).map(|r| r.name.clone());
+    let owner = game
+        .factions
+        .get(&t.owner)
+        .filter(|_| t.owner != 0)
+        .map(|f| f.name.clone());
+    let border = game.cities.get(&t.claim).map(|c| c.name.clone());
+    let mut features = Vec::new();
+    match t.relief {
+        Relief::Hills => features.push("Hills"),
+        Relief::Mountains => features.push("Mountains"),
+        Relief::Flat => {}
+    }
+    match t.cover {
+        Cover::Forest => features.push("Forest"),
+        Cover::Jungle => features.push("Jungle"),
+        Cover::Marsh => features.push("Marsh"),
+        Cover::Bare => {}
+    }
+    if game.map.river_mask(pos) != 0 {
+        features.push("River");
+    }
+    for (flag, name) in [
+        (Tile::ROAD, "Road"),
+        (Tile::RAIL, "Railroad"),
+        (Tile::MINE, "Mine"),
+        (Tile::FARM, "Farm"),
+    ] {
+        if t.improvements & flag != 0 {
+            features.push(name);
+        }
+    }
+    text(
+        p,
+        format!(
+            "{}\n{}\n{}\nChart {}, {}\n{}\nMovement cost {} | Defense +{}%",
+            region.unwrap_or_else(|| "Open country".into()),
+            owner.map_or_else(|| "Unclaimed".into(), |o| format!("Claimed by {o}")),
+            border.map_or_else(String::new, |c| format!("Border of {c}")),
+            pos.x,
+            pos.y,
+            features.join(", "),
+            if t.is_land() { t.move_cost() } else { 1 },
+            t.defense_percent(),
+        ),
+        14.0,
+        INK,
+    );
+    let gathered = fourx_sim::economy::tile_yield(
+        t,
+        game.map.river_mask(pos) != 0,
+        game.city_at(pos).is_some(),
+    );
+    text(
+        p,
+        format!(
+            "Yields {} food | {} shields | {} gold",
+            gathered.food, gathered.shields, gathered.gold
+        ),
+        14.0,
+        INK,
+    );
+}
+
+/// The pane that describes the selection: the unit, the square, or, with nothing chosen, the
+/// latest dispatches.
+fn info(p: &mut ChildSpawnerCommands, game: &Game, session: &Session) {
+    match session.selection {
+        Selection::Unit(id) if game.units.contains_key(&id) => {
+            heading(p, "SELECTED UNIT");
+            unit_panel(p, game, session, &game.units[&id]);
+        }
+        Selection::Tile(pos) if game.map.get(pos).is_some() => tile_panel(p, game, pos),
+        _ => {
+            heading(p, "DISPATCHES FROM THE FRONT");
+            // The newest line is the darkest; the rest fade back.
+            for (age, line) in game.log.iter().rev().take(3).enumerate() {
+                text(
+                    p,
+                    clipped(line, 170),
+                    13.0,
+                    INK.with_alpha(0.95 - 0.2 * age as f32),
+                );
+            }
+        }
+    }
+}
+
+fn build_ui(
+    commands: &mut Commands,
+    session: &Session,
+    size: Vec2,
+    minimap: &Minimap,
+    assets: &AssetServer,
+) {
     let game = session.game.as_ref().unwrap();
     let narrow = size.x < 900.0;
     let me = if session.player == 0 {
@@ -1527,259 +1566,47 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     stat(p, "Industry", faction.industry.to_string());
                 });
             }
-            button(
-                p,
-                if session.pending {
-                    "Waiting...".into()
-                } else {
-                    format!("End day  |  {}  >", short_date(date))
-                },
-                Action::EndTurn,
-            );
-        });
-    let mut sidebar = panel();
-    if narrow {
-        sidebar.left = px(8);
-        sidebar.right = px(8);
-        sidebar.bottom = px(44);
-        sidebar.height = px(inspector_height(size.y));
-        sidebar.padding = UiRect::all(px(10));
-        sidebar.overflow = Overflow::scroll_y();
-    } else {
-        sidebar.left = px(16);
-        sidebar.top = px(62);
-        sidebar.width = px(276);
-        sidebar.bottom = px(chart_side(size.y) + 92.0);
-        sidebar.overflow = Overflow::scroll_y();
-    }
-    commands
-        .spawn((
-            sidebar,
-            BackgroundColor(PAPER),
-            BorderColor::all(GOLD_LINE),
-            UiRoot,
-            Inspector,
-            ScrollPosition::default(),
-        ))
-        .with_children(|p| {
-            heading(p, "CAMPAIGN COMMAND");
-            match session.selection {
-                Selection::Unit(id) if game.units.contains_key(&id) => {
-                    unit_panel(p, game, session, &game.units[&id]);
+            p.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: px(8),
+                ..default()
+            })
+            .with_children(|p| {
+                if !narrow {
+                    button(p, "Save", Action::Save);
                 }
-                Selection::City(id) if game.cities.contains_key(&id) => {
-                    let c = &game.cities[&id];
-                    text(p, &c.name, 19.0, INK);
-                    text(
-                        p,
-                        format!(
-                            "Population {} | Industry {}\nFood {} - {} eaten = {:+}\nGranary {} / {}\nShields {} ({} land + {} industry)\nGold +{}\nBorder level {} | {} squares of territory\nProduction: {} ({})",
-                            c.population,
-                            c.industry,
-                            c.harvest.food,
-                            c.food_eaten(),
-                            c.food_surplus(),
-                            c.granary,
-                            c.granary_size(),
-                            c.shields(),
-                            c.harvest.shields,
-                            c.industry,
-                            c.harvest.gold,
-                            c.border,
-                            game.territory_of(c.id).len(),
-                            c.production.as_deref().unwrap_or("idle"),
-                            c.progress
-                        ),
-                        14.0,
-                        INK,
-                    );
-                    if c.owner == session.player {
-                        button(p, "DEVELOP INDUSTRY (40g)", Action::Develop);
-                        for (i, u) in session.rules.units.values().enumerate() {
-                            button(
-                                p,
-                                format!("{}: {} / {}", i + 1, u.name, u.cost),
-                                Action::Produce(u.id.clone()),
-                            );
-                        }
-                    } else if let Some(owner) = game.factions.get(&c.owner) {
-                        text(p, format!("Held by {}", owner.name), 13.0, INK);
-                    }
-                    text(
-                        p,
-                        "Its border never changes. Whoever holds the city holds the land.",
-                        13.0,
-                        INK,
-                    );
-                }
-                Selection::Tile(pos) => {
-                    let t = game.map.get(pos).unwrap();
-                    text(p, t.terrain.name(), 19.0, INK);
-                    let region = game.region_of(pos).map(|r| r.name.clone());
-                    let owner = game
-                        .factions
-                        .get(&t.owner)
-                        .filter(|_| t.owner != 0)
-                        .map(|f| f.name.clone());
-                    let border = game.cities.get(&t.claim).map(|c| c.name.clone());
-                    let mut features = Vec::new();
-                    match t.relief {
-                        Relief::Hills => features.push("Hills"),
-                        Relief::Mountains => features.push("Mountains"),
-                        Relief::Flat => {}
-                    }
-                    match t.cover {
-                        Cover::Forest => features.push("Forest"),
-                        Cover::Jungle => features.push("Jungle"),
-                        Cover::Marsh => features.push("Marsh"),
-                        Cover::Bare => {}
-                    }
-                    if game.map.river_mask(pos) != 0 {
-                        features.push("River");
-                    }
-                    for (flag, name) in [
-                        (Tile::ROAD, "Road"),
-                        (Tile::RAIL, "Railroad"),
-                        (Tile::MINE, "Mine"),
-                        (Tile::FARM, "Farm"),
-                    ] {
-                        if t.improvements & flag != 0 {
-                            features.push(name);
-                        }
-                    }
-                    text(
-                        p,
-                        format!(
-                            "{}\n{}\n{}\nChart {}, {}\n{}\nMovement cost {} | Defense +{}%",
-                            region.unwrap_or_else(|| "Open country".into()),
-                            owner.map_or_else(|| "Unclaimed".into(), |o| format!("Claimed by {o}")),
-                            border.map_or_else(String::new, |c| format!("Border of {c}")),
-                            pos.x,
-                            pos.y,
-                            features.join(", "),
-                            if t.is_land() { t.move_cost() } else { 1 },
-                            t.defense_percent(),
-                        ),
-                        14.0,
-                        INK,
-                    );
-                    let gathered = fourx_sim::economy::tile_yield(
-                        t,
-                        game.map.river_mask(pos) != 0,
-                        game.city_at(pos).is_some(),
-                    );
-                    text(
-                        p,
-                        format!(
-                            "Yields {} food | {} shields | {} gold",
-                            gathered.food, gathered.shields, gathered.gold
-                        ),
-                        14.0,
-                        INK,
-                    );
-                }
-                _ => {
-                    text(p, faction.name.clone(), 20.0, INK);
-                    text(
-                        p,
-                        format!(
-                            "{}\n{} | {:?}",
-                            faction.leader, faction.government, faction.status
-                        ),
-                        12.5,
-                        INK,
-                    );
-                    // The brief is long. Show its opening and let the reader open it.
-                    text(
-                        p,
-                        if session.show_brief {
-                            game.briefing.clone()
-                        } else {
-                            clipped(&game.briefing, 150)
-                        },
-                        13.0,
-                        INK,
-                    );
-                    button(
-                        p,
-                        if session.show_brief { "HIDE BRIEF" } else { "SHOW FULL BRIEF" },
-                        Action::ToggleBrief,
-                    );
-                }
-            }
-            if !narrow {
-                let cities: Vec<_> = game
-                    .cities
-                    .values()
-                    .filter(|c| c.owner == session.player)
-                    .collect();
-                heading(p, &format!("YOUR CITIES ({})", cities.len()));
-                for c in cities.iter().take(12) {
-                    button(
-                        p,
-                        format!(
-                            "{}\nPop {} | {} shields | +{}g",
-                            c.name,
-                            c.population,
-                            c.shields(),
-                            c.harvest.gold
-                        ),
-                        Action::SelectCity(c.id),
-                    );
-                }
-                if cities.len() > 12 {
-                    text(
-                        p,
-                        format!(
-                            "and {} more. Press C to cycle through them.",
-                            cities.len() - 12
-                        ),
-                        11.5,
-                        INK,
-                    );
-                }
-                let units: Vec<_> = game
-                    .units
-                    .values()
-                    .filter(|u| u.owner == session.player)
-                    .collect();
-                heading(p, &format!("YOUR UNITS ({})", units.len()));
-                for u in units.iter().take(6) {
-                    let def = session.rules.def(u);
-                    button(
-                        p,
-                        format!("{}   HP {}/{}", def.name, u.hp(def), u.max_hp(def)),
-                        Action::SelectUnit(u.id),
-                    );
-                }
-                if units.len() > 6 {
-                    text(
-                        p,
-                        format!("and {} more. Press Tab to cycle through them.", units.len() - 6),
-                        11.5,
-                        INK,
-                    );
-                }
-                heading(p, "COMMAND");
-                button(p, "SAVE CAMPAIGN", Action::Save);
-                button(p, "CENTER MAP", Action::Center);
-                // The full key list is long; keep a line and a toggle.
-                text(
-                    p,
-                    if session.show_keys {
-                        "WASD / arrows: pan | Wheel: zoom\nTab: next idle unit | Right-click: move or attack\nF: fortify | B: build a city\nR: road, then railroad | M: mine | I: farm\nDel: cancel orders\nC: next city | 1-6: produce\nSpace: next day | E: develop\nF5: save | H: capital | Esc: clear"
-                    } else {
-                        "Tab: next unit | C: next city | Space: next day"
-                    },
-                    11.5,
-                    INK,
-                );
                 button(
                     p,
-                    if session.show_keys { "HIDE KEYS" } else { "SHOW ALL KEYS" },
-                    Action::ToggleKeys,
+                    if session.pending {
+                        "Waiting...".into()
+                    } else {
+                        format!("End day  |  {}  >", short_date(date))
+                    },
+                    Action::EndTurn,
                 );
-            } else {
+            });
+        });
+    if narrow {
+        // The inspector sits under the map: what the selection is, then quick ways to pick
+        // another city or unit.
+        let mut inspector = panel();
+        inspector.left = px(8);
+        inspector.right = px(8);
+        inspector.bottom = px(44);
+        inspector.height = px(inspector_height(size.y));
+        inspector.padding = UiRect::all(px(10));
+        inspector.overflow = Overflow::scroll_y();
+        commands
+            .spawn((
+                inspector,
+                BackgroundColor(PAPER),
+                BorderColor::all(GOLD_LINE),
+                UiRoot,
+                Inspector,
+                ScrollPosition::default(),
+            ))
+            .with_children(|p| {
+                info(p, game, session);
                 p.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     column_gap: px(5),
@@ -1801,33 +1628,50 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                         .filter(|u| u.owner == session.player)
                         .take(4)
                     {
-                        button(p, session.rules.def(u).name.clone(), Action::SelectUnit(u.id));
+                        button(
+                            p,
+                            session.rules.def(u).name.clone(),
+                            Action::SelectUnit(u.id),
+                        );
                     }
                     button(p, "Save", Action::Save);
                 });
-            }
-        });
+            });
+    } else {
+        // The selection is described at the bottom right, over the map.
+        let mut pane = panel();
+        pane.right = px(16);
+        pane.bottom = px(CHART_BOTTOM);
+        pane.width = px(330);
+        pane.max_height = px((size.y - 62.0 - CHART_BOTTOM).max(120.0));
+        pane.overflow = Overflow::clip();
+        commands
+            .spawn((
+                pane,
+                BackgroundColor(PAPER),
+                BorderColor::all(GOLD_LINE),
+                UiRoot,
+                InfoPane,
+                Interaction::default(),
+            ))
+            .with_children(|p| info(p, game, session));
+    }
     if !narrow {
-        let side = chart_side(size.y);
-        // keep the map's proportions; the framed panel itself stays square
-        let shape = Chart::of(&game.map);
-        let longest = shape.width.max(shape.height) as f32;
-        let (chart_width, chart_height) = (
-            side * shape.width as f32 / longest,
-            side * shape.height as f32 / longest,
-        );
+        // The panel is the map's own shape: the image and a hairline frame around it.
+        let image = chart_size(size.y, &game.map);
         let mut chart = panel();
-        chart.left = px(16);
-        chart.bottom = px(58);
-        chart.width = px(side + 16.0);
-        chart.height = px(side + 16.0);
-        chart.padding = UiRect::all(px(6));
-        chart.align_items = AlignItems::Center;
-        chart.justify_content = JustifyContent::Center;
+        chart.left = px(CHART_LEFT);
+        chart.bottom = px(CHART_BOTTOM);
+        chart.width = px(image.x + 2.0 * CHART_FRAME);
+        chart.height = px(image.y + 2.0 * CHART_FRAME);
+        chart.padding = UiRect::ZERO;
+        chart.border = UiRect::all(px(CHART_FRAME));
+        chart.border_radius = rounded(3.0);
+        chart.overflow = Overflow::clip();
         commands
             .spawn((
                 chart,
-                BackgroundColor(NAVY),
+                BackgroundColor(Color::BLACK),
                 BorderColor::all(GOLD_LINE),
                 UiRoot,
             ))
@@ -1838,8 +1682,8 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     RelativeCursorPosition::default(),
                     ImageNode::new(minimap.image.clone()),
                     Node {
-                        width: px(chart_width),
-                        height: px(chart_height),
+                        width: px(image.x),
+                        height: px(image.y),
                         ..default()
                     },
                 ))
@@ -1855,30 +1699,28 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     ));
                 });
             });
-        let mut report = panel();
-        report.right = px(16);
-        report.bottom = px(58);
-        report.width = px(330);
-        report.padding = UiRect::all(px(14));
-        commands
-            .spawn((
-                report,
-                BackgroundColor(NAVY),
-                BorderColor::all(GOLD_LINE),
-                UiRoot,
-            ))
-            .with_children(|p| {
-                heading(p, "DISPATCHES FROM THE FRONT");
-                // The newest line is the brightest; the rest fade back.
-                for (age, line) in game.log.iter().rev().take(3).enumerate() {
-                    text(
-                        p,
-                        clipped(line, 170),
-                        12.5,
-                        PAPER.with_alpha(0.92 - 0.22 * age as f32),
-                    );
-                }
-            });
+    }
+    // The selected unit's orders float over the foot of the map, in the space the minimap and
+    // the dispatches leave between them (the inspector is above the bar on a narrow screen).
+    if let Selection::Unit(id) = session.selection
+        && let Some(unit) = game.units.get(&id)
+    {
+        let place = if narrow {
+            crate::bar::Placement {
+                left: 8.0,
+                right: 8.0,
+                bottom: 44.0 + inspector_height(size.y) + 8.0,
+            }
+        } else {
+            let chart = chart_size(size.y, &game.map);
+            crate::bar::Placement {
+                left: CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
+                right: 16.0 + 330.0 + 12.0,
+                bottom: CHART_BOTTOM,
+            }
+        };
+        let rows = crate::bar::rows(game, &session.rules, unit, session.player);
+        crate::bar::spawn(commands, assets, &session.asset_prefix, rows, place);
     }
     commands
         .spawn((
@@ -1910,6 +1752,11 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                 PAPER.with_alpha(0.88),
             )
         });
+    if let Selection::City(id) = session.selection
+        && game.cities.contains_key(&id)
+    {
+        crate::city::spawn(commands, assets, session, game, id, narrow);
+    }
     if let Some(winner) = game.winner {
         commands
             .spawn((
@@ -1966,28 +1813,39 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
     }
 }
 
-/// Side length of the square minimap for a window height.
+/// Margin of the minimap panel from the left edge and from the bottom of the window (the
+/// message bar is 34 high).
+const CHART_LEFT: f32 = 12.0;
+const CHART_BOTTOM: f32 = 44.0;
+/// The panel is the image and its hairline frame, nothing more.
+const CHART_FRAME: f32 = 1.0;
+
+/// Length of the minimap's longer side on screen for a window height.
 pub(super) fn chart_side(window_height: f32) -> f32 {
-    (window_height * 0.30).clamp(120.0, 266.0)
+    (window_height * 0.24).clamp(120.0, 220.0)
 }
 
-/// Redraw the minimap image whenever the game state changes: one pixel per tile, tinted by
-/// the owning nation, with the player's own cities picked out.
-pub(super) fn update_minimap(
-    session: Res<Session>,
-    mut minimap: ResMut<Minimap>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    let Some(game) = &session.game else {
-        return;
-    };
-    if minimap.drawn == game.revision {
-        return;
-    }
-    minimap.drawn = game.revision;
+/// The minimap image on screen: the map's own proportions, its longer side `chart_side`.
+pub(super) fn chart_size(window_height: f32, map: &Map) -> Vec2 {
+    let shape = Chart::of(map);
+    let (width, height) = (shape.width as f32, shape.height as f32);
+    Vec2::new(width, height) * chart_side(window_height) / width.max(height)
+}
+
+/// A nation's territory is painted in its colour, over this much of the terrain's own.
+const NATION_FILL: f32 = 0.92;
+/// A nation's frontier is its colour pulled toward black by this much.
+const NATION_EDGE: f32 = 0.5;
+
+/// The minimap picture: one pixel per tile (see [`Chart`]), RGBA. Land held by a nation is
+/// filled with the nation's colour, with a darker line along every frontier it shares with
+/// another holder's land, and the player's own cities stand out. Tiles the player has not
+/// explored stay dark.
+fn minimap_pixels(game: &Game, player: Id) -> (u32, u32, Vec<u8>) {
     let chart = Chart::of(&game.map);
     let (width, height) = (chart.width, chart.height);
-    let explored = game.factions.get(&session.player).map(|f| &f.explored);
+    let explored = game.factions.get(&player).map(|f| &f.explored);
+    let known = |p: Coord| player == 0 || explored.is_some_and(|e| e.contains(p));
     let ink: BTreeMap<Id, [u8; 3]> = game
         .factions
         .keys()
@@ -2007,8 +1865,7 @@ pub(super) fn update_minimap(
         .iter()
         .filter(|tile| game.map.contains(tile.position))
     {
-        let known = session.player == 0 || explored.is_some_and(|e| e.contains(tile.position));
-        let rgb = if !known {
+        let rgb = if !known(tile.position) {
             MAP_FOG
         } else {
             let base = match tile.terrain {
@@ -2032,25 +1889,51 @@ pub(super) fn update_minimap(
                 Relief::Flat => base,
             };
             match ink.get(&tile.owner) {
-                Some(owner) if tile.is_land() => mix(base, *owner, 0.55),
+                Some(owner) if tile.is_land() && tile.owner != 0 => {
+                    let frontier = EDGE_NEIGHBORS.iter().any(|(dx, dy)| {
+                        let beyond = Coord::new(tile.position.x + dx, tile.position.y + dy);
+                        game.map
+                            .get(beyond)
+                            .is_some_and(|other| other.is_land() && other.owner != tile.owner)
+                    });
+                    if frontier {
+                        mix(*owner, [0, 0, 0], NATION_EDGE)
+                    } else {
+                        mix(base, *owner, NATION_FILL)
+                    }
+                }
                 _ => base,
             }
         };
         put(tile.position, rgb);
     }
-    for city in game.cities.values() {
+    for city in game.cities.values().filter(|c| c.owner == player) {
         let (x, y) = chart.pixel(city.position);
-        if city.owner == session.player {
-            // A 3 x 3 blot of pixels, which on a lattice chart is the tile's own neighbours.
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    put(chart.tile(x + dx, y + dy), MAP_OWN_CITY);
-                }
+        // A 3 x 3 blot of pixels, which on a lattice chart is the tile's own neighbours.
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                put(chart.tile(x + dx, y + dy), MAP_OWN_CITY);
             }
-        } else {
-            put(city.position, [240, 236, 220]);
         }
+        put(city.position, MAP_OWN_CITY_CORE);
     }
+    (width, height, data)
+}
+
+/// Redraw the minimap image whenever the game state changes.
+pub(super) fn update_minimap(
+    session: Res<Session>,
+    mut minimap: ResMut<Minimap>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(game) = &session.game else {
+        return;
+    };
+    if minimap.drawn == game.revision {
+        return;
+    }
+    minimap.drawn = game.revision;
+    let (width, height, data) = minimap_pixels(game, session.player);
     let Some(image) = images.get_mut(&minimap.image) else {
         return;
     };
@@ -2117,6 +2000,7 @@ pub(super) fn draw_overlays(
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Transform, &Projection), With<Camera2d>>,
     mut gizmos: Gizmos,
+    mut route_gizmos: Gizmos<crate::route::RouteGizmos>,
 ) {
     let Some(game) = &session.game else {
         return;
@@ -2166,11 +2050,9 @@ pub(super) fn draw_overlays(
     if let Selection::Unit(id) = session.selection
         && let Some(unit) = game.units.get(&id).filter(|u| u.owner == session.player)
     {
+        // Where it is heading: the exact squares it will walk (see `route`).
         if let Some(goal) = unit.goto {
-            let (from, to) = (unit.position.screen(), goal.screen());
-            let (from, to) = (Vec2::new(from.0, from.1), Vec2::new(to.0, to.1));
-            gizmos.line_2d(from, to, gold.with_alpha(0.6));
-            gizmos.circle_2d(to, 14.0, gold);
+            crate::route::draw(&mut route_gizmos, unit.position, goal, &unit.route, gold);
         }
         for (target, bombard) in strike_targets(game, &session.rules, unit) {
             let (x, y) = target.screen();
@@ -2184,6 +2066,101 @@ pub(super) fn draw_overlays(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn dawn() -> Game {
+        fourx_runtime::Host::base_scenario("dawn-straits", 42)
+            .expect("the starter scenario starts")
+            .game
+    }
+
+    #[test]
+    fn the_minimap_panel_has_the_maps_proportions_and_fits_its_longer_side() {
+        let game = dawn();
+        let chart = Chart::of(&game.map);
+        for height in [400.0, 900.0, 2000.0] {
+            let size = chart_size(height, &game.map);
+            assert!((size.x.max(size.y) - chart_side(height)).abs() < 1e-3);
+            let (w, h) = (chart.width as f32, chart.height as f32);
+            assert!((size.x / size.y - w / h).abs() < 1e-3);
+        }
+        assert!(
+            chart_side(900.0) < 266.0,
+            "smaller than the old square panel"
+        );
+    }
+
+    #[test]
+    fn the_minimap_fills_a_nations_land_and_darkens_its_frontier() {
+        let game = dawn();
+        let player = game.commander;
+        let (width, _, painted) = minimap_pixels(&game, player);
+        let mut bare = game.clone();
+        for tile in &mut bare.map.tiles {
+            tile.owner = 0;
+        }
+        let (_, _, unowned) = minimap_pixels(&bare, player);
+        let chart = Chart::of(&game.map);
+        let at = |data: &[u8], p: Coord| {
+            let (x, y) = chart.pixel(p);
+            let i = ((y as u32 * width + x as u32) * 4) as usize;
+            [data[i], data[i + 1], data[i + 2]]
+        };
+        // The player's cities are drawn over the territory, as a blot of pixels.
+        let covered: HashSet<(i32, i32)> = game
+            .cities
+            .values()
+            .filter(|c| c.owner == player)
+            .flat_map(|c| {
+                let (x, y) = chart.pixel(c.position);
+                (-1..=1).flat_map(move |dy| (-1..=1).map(move |dx| (x + dx, y + dy)))
+            })
+            .collect();
+        let mut filled = 0;
+        let mut frontier = 0;
+        for tile in game
+            .map
+            .tiles
+            .iter()
+            .filter(|t| game.map.contains(t.position))
+        {
+            let (a, b) = (at(&painted, tile.position), at(&unowned, tile.position));
+            if covered.contains(&chart.pixel(tile.position)) || b == MAP_FOG {
+                continue;
+            }
+            if tile.owner == 0 || !tile.is_land() {
+                assert_eq!(a, b, "{:?} is not a nation's land", tile.position);
+                continue;
+            }
+            let ink = nation_rgb(&game, tile.owner);
+            let edge = mix(ink, [0, 0, 0], NATION_EDGE);
+            if a == edge {
+                frontier += 1;
+            } else {
+                assert_eq!(a, mix(b, ink, NATION_FILL), "{:?}", tile.position);
+                filled += 1;
+            }
+        }
+        assert!(filled > 0, "some land is filled with its nation's colour");
+        assert!(frontier > 0, "each nation's land has a frontier line");
+    }
+
+    #[test]
+    fn only_the_players_own_cities_are_picked_out() {
+        let game = dawn();
+        let player = game.commander;
+        let (width, _, data) = minimap_pixels(&game, player);
+        let chart = Chart::of(&game.map);
+        for city in game.cities.values() {
+            let (x, y) = chart.pixel(city.position);
+            let i = ((y as u32 * width + x as u32) * 4) as usize;
+            let core = [data[i], data[i + 1], data[i + 2]];
+            assert_eq!(
+                core == MAP_OWN_CITY_CORE,
+                city.owner == player,
+                "{}",
+                city.name
+            );
+        }
+    }
 
     fn tile(terrain: Terrain, relief: Relief, cover: Cover) -> Tile {
         let mut tile = Tile::new(Coord::new(0, 0), terrain);
