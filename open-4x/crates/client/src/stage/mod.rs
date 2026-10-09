@@ -25,7 +25,6 @@ use std::collections::VecDeque;
 use std::f32::consts::PI;
 
 const PAPER: Color = Color::srgb(0.88, 0.83, 0.69);
-const GOLD: Color = Color::srgb(0.78, 0.64, 0.38);
 const INK: Color = Color::srgb(0.09, 0.15, 0.16);
 const RED: Color = Color::srgb(0.75, 0.24, 0.20);
 /// Sprites on stage stand above the map's own units (drawn at about 30).
@@ -395,14 +394,15 @@ fn spawn_skip_button(commands: &mut Commands) {
                 left: percent(50),
                 margin: UiRect::left(px(-110)),
                 width: px(220),
-                height: px(34),
+                height: px(32),
                 border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(6)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(INK),
-            BorderColor::all(GOLD),
+            BackgroundColor(crate::presentation::NAVY),
+            BorderColor::all(crate::presentation::GOLD_LINE),
             SkipButton,
             StageVisual,
         ))

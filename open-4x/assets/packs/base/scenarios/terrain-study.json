@@ -1,0 +1,145 @@
+{
+  "format": 3,
+  "id": "terrain-study",
+  "name": "Terrain surface study",
+  "description": "Deterministic visual fixture: relief overlap, climate/cover contexts and two-sided contour borders.",
+  "start_date": "1876-01-01",
+  "commander": "dawn-empire",
+  "intro": "Terrain study. Pan and zoom to inspect relief and border surfaces.",
+  "map": {
+    "width": 20,
+    "height": 20,
+    "terrain": [
+      "gggggggggggggggggggg",
+      "gggggggggggggggggggg",
+      "gggggggggggggggggggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "ggggggggdddddttttggg",
+      "gggggggggggggggggggg",
+      "gggggggggggggggggggg",
+      "gggggggggggggggggggg"
+    ],
+    "relief": [
+      "....................",
+      "....................",
+      "....................",
+      "...hhhhhhhhhhhhhh...",
+      "...^^^^^^^^^^^^^^...",
+      "...^^^^^^^^^^^^^^...",
+      "...hhhhhhhhhhhhhh...",
+      "...hhhh.hhhhhhhhh...",
+      "...^^^^^^^^^^^^^^...",
+      "...^^^^^^^^^^^^^^...",
+      "...hhhhhhhhhhhhhh...",
+      "...hhhhhhhhhhhhhh...",
+      "...^^^^^^^^^.^^^^...",
+      "...^^^^^^^^^^^^^^...",
+      "...hhhhhhhhhhhhhh...",
+      "...hhhhhhhhhhhhhh...",
+      "...^^^^^^^^^^^^^^...",
+      "....................",
+      "....................",
+      "...................."
+    ],
+    "cover": [
+      "....................",
+      "....................",
+      "....................",
+      "....................",
+      "....................",
+      "....................",
+      "....................",
+      "...ffff.fffffffff...",
+      "...ffffffffffffff...",
+      "...ffffffffffffff...",
+      "...ffffffffffffff...",
+      "...jjjjjjjjjjjjjj...",
+      "...jjjjjjjjj.jjjj...",
+      "...jjjjjjjjjjjjjj...",
+      "...jjjjjjjjjjjjjj...",
+      "....................",
+      "....................",
+      "....................",
+      "....................",
+      "...................."
+    ]
+  },
+  "nations": [
+    {
+      "id": "dawn-empire",
+      "name": "The Dawn Empire",
+      "adjective": "Imperial",
+      "color": "#bf3d33",
+      "flavor": "east_asian",
+      "status": "sovereign",
+      "government": "Imperial monarchy"
+    },
+    {
+      "id": "northern-league",
+      "name": "The Northern League",
+      "adjective": "League",
+      "color": "#597ac7",
+      "flavor": "western",
+      "status": "sovereign",
+      "government": "Confederation of free cities"
+    }
+  ],
+  "cities": [
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 7,
+        "y": 7
+      },
+      "name": "West study",
+      "population": 3,
+      "industry": 4,
+      "capital": true,
+      "border": 6
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 12,
+        "y": 12
+      },
+      "name": "East study",
+      "population": 3,
+      "industry": 4,
+      "capital": true,
+      "border": 6
+    }
+  ],
+  "units": [
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 7,
+        "y": 7
+      },
+      "kind": "infantry"
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 12,
+        "y": 12
+      },
+      "kind": "infantry"
+    }
+  ],
+  "wars": [],
+  "charted": true
+}

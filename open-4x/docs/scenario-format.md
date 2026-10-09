@@ -88,7 +88,7 @@ rivers on its edges.
 - `relief` is optional (omit it for a flat map): the same shape as `terrain`, with `.` flat, `h`
   hills, `^` mountains. Water has none.
 - `cover` is optional: `.` bare, `f` forest, `j` jungle, `m` marsh. Forest grows on any land
-  relief; jungle and marsh need flat ground. Water has none.
+  relief; jungle also grows on hills and mountains. Marsh needs flat ground. Water has none.
 - `rivers` is an optional run-length layer of the same shape as the others below: a flat list of
   `[edges, count, …]` pairs, one value per tile in row-major order. Bit 0 (`1`) is a river on
   the tile's east edge (between it and the tile at `x + 1`), bit 1 (`2`) on its south edge (the

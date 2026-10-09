@@ -18,8 +18,6 @@ Both are sheets of 2:1 tile diamonds (256 x 128 at 2x, drawn 128 x 64), like the
 import numpy as np
 from PIL import Image
 
-from .paint import render_sprite
-from .svgkit import Svg
 
 CELL_W, CELL_H = 256, 128
 # Opacity of black at a vertex that is never seen, remembered, or in sight.
@@ -52,30 +50,18 @@ def fog_sheet() -> Image.Image:
     return Image.fromarray(sheet, "RGBA")
 
 
-def border_svg() -> Svg:
-    svg = Svg(4 * CELL_W, CELL_H)
-    n, e, s, w = (CELL_W / 2, 0), (CELL_W, CELL_H / 2), (CELL_W / 2, CELL_H), (0, CELL_H / 2)
-    centre = (CELL_W / 2, CELL_H / 2)
-    inset, dashes = 9.0, 3
-    for cell, (a, b) in enumerate(((n, e), (e, s), (s, w), (w, n))):
-        ox = cell * CELL_W
-        length = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
-        ux, uy = (b[0] - a[0]) / length, (b[1] - a[1]) / length
-        # Inward normal: the one that points at the tile's centre.
-        nx, ny = -uy, ux
-        mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-        if (centre[0] - mid[0]) * nx + (centre[1] - mid[1]) * ny < 0:
-            nx, ny = -nx, -ny
-        period = length / dashes
-        for k in range(dashes):
-            # Centred in its period, so the half gaps at either end join up with the next tile's.
-            t0, t1 = (k + 0.5) * period - 16.5, (k + 0.5) * period + 16.5
-            p0 = (ox + a[0] + ux * t0 + nx * inset, a[1] + uy * t0 + ny * inset)
-            p1 = (ox + a[0] + ux * t1 + nx * inset, a[1] + uy * t1 + ny * inset)
-            svg.line(p0, p1, "#7d7d7d", 13.0, 0.95)
-            svg.line(p0, p1, "#ffffff", 8.5, 1.0)
-    return svg
-
-
 def border_sheet() -> Image.Image:
-    return render_sprite(border_svg().render(), 4 * CELL_W, CELL_H, ss=4, radius=0, grain=0.0, strokes=0.0, grade_kw=None)
+    """The same eight-bead paint as relief borders, on a flat diamond."""
+    from .relief import border_masks
+    ss = 4
+    ys, xs = np.mgrid[0:CELL_H*ss, 0:CELL_W*ss].astype(np.float32)
+    q = (ys + 0.5) / (CELL_H * ss / 2)
+    r = (xs + 0.5 - CELL_W * ss / 2) / (CELL_W * ss / 2)
+    u, v = (q+r)/2, (q-r)/2
+    inside = (u >= 0) & (u <= 1) & (v >= 0) & (v <= 1)
+    sheet = Image.new("RGBA", (4 * CELL_W, CELL_H))
+    for edge, (col, alpha) in enumerate(border_masks(u, v)):
+        pixels = np.dstack((col, alpha * inside))
+        layer = Image.fromarray((np.clip(pixels, 0, 1)*255).astype(np.uint8), "RGBA")
+        sheet.paste(layer.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS), (edge * CELL_W, 0))
+    return sheet

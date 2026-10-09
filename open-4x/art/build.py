@@ -2,7 +2,7 @@
 """Render every picture in the base pack: SVG scenes -> rsvg-convert -> painterly finishing -> PNG.
 
     python build.py                 # everything
-    python build.py terrain ui      # only some groups (terrain | overlays | sprites | ui | icons)
+    python build.py terrain ui      # only some groups (terrain | overlays | relief | sprites | ui | icons)
 
 Writes PNGs into ../assets/packs/base and the vector sources into ./svg.
 Needs: python3 + numpy + pillow (see requirements.txt) and `rsvg-convert` (librsvg) on PATH.
@@ -48,10 +48,19 @@ def build_overlays():
     sprite("pine", nature.build_pine_svg(), (256, 224), "sprites/pine.png", ss=4, seed=4, radius=1)
     sprite("jungle", nature.build_jungle_svg(), (256, 224), "sprites/jungle.png", ss=4, seed=5, radius=1)
     sprite("marsh", nature.build_marsh_svg(), (256, 224), "sprites/marsh.png", ss=4, seed=6, radius=1)
-    # the same relief in three climates: temperate green, arid ochre, cold grey with snow
-    for style, suffix, seed in (("temperate", "", 0), ("arid", "_dry", 1), ("arctic", "_cold", 2)):
-        relief_sprite(relief.build_mountain_layer(3 + seed, style), f"sprites/mountain{suffix}.png")
-        relief_sprite(relief.build_hills_layer(21 + seed, style), f"sprites/hills{suffix}.png")
+    build_relief()
+
+
+def build_relief():
+    """Relief and matching surface borders in all climate/vegetation contexts."""
+    for kind, base_seed in (("mountain", 3), ("hills", 21)):
+        for style, suffix, offset in (("temperate", "", 0), ("arid", "_dry", 1), ("arctic", "_cold", 2)):
+            for cover in ("bare", "forest", "jungle"):
+                name = f"{kind}{suffix}" + (f"_{cover}" if cover != "bare" else "")
+                layer, borders = relief.build_surface(kind, base_seed + offset, style, cover)
+                relief_sprite(layer, f"sprites/{name}.png")
+                save_png(borders, f"terrain/{name}_borders.png")
+                print(f"  {name}", flush=True)
 
 
 def build_sprites():
@@ -107,7 +116,7 @@ def build_icons():
         save_png(im, f"ui/icons/{name}.png")
 
 
-GROUPS = {"terrain": build_terrain, "overlays": build_overlays, "sprites": build_sprites, "ui": build_ui, "icons": build_icons}
+GROUPS = {"terrain": build_terrain, "overlays": build_overlays, "relief": build_relief, "sprites": build_sprites, "ui": build_ui, "icons": build_icons}
 
 
 def main(argv):

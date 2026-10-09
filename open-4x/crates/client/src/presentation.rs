@@ -8,10 +8,26 @@ use fourx_sim::{
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const PAPER: Color = Color::srgb(0.88, 0.83, 0.69);
-const GOLD: Color = Color::srgb(0.78, 0.64, 0.38);
+/// The HUD's materials, from the reference: cream parchment, a near-black navy for bars
+/// and buttons, and brass only where something should catch the eye.
+const PAPER: Color = Color::srgb(0.89, 0.85, 0.74);
+/// Parchment ink, and the plates world labels sit on.
 const INK: Color = Color::srgb(0.09, 0.15, 0.16);
+/// Brass: headings and the one primary action.
+const GOLD: Color = Color::srgb(0.80, 0.66, 0.40);
+/// Brass at hairline weight, for the edge of a panel that should not shout.
+pub(crate) const GOLD_LINE: Color = Color::srgba(0.80, 0.66, 0.40, 0.40);
+/// The fill of a bar or a secondary button: dark, but the map shows faintly through it.
+pub(crate) const NAVY: Color = Color::srgba(0.06, 0.10, 0.12, 0.90);
+pub(crate) const NAVY_HOVER: Color = Color::srgba(0.14, 0.19, 0.20, 0.94);
+pub(crate) const NAVY_PRESSED: Color = Color::srgba(0.22, 0.26, 0.24, 0.95);
+/// The day button is the one control that ends the turn: it wears the brass.
+pub(crate) const BRASS: Color = Color::srgb(0.80, 0.66, 0.40);
+pub(crate) const BRASS_HOVER: Color = Color::srgb(0.89, 0.78, 0.52);
+pub(crate) const BRASS_PRESSED: Color = Color::srgb(0.68, 0.55, 0.32);
 const RED: Color = Color::srgb(0.75, 0.24, 0.20);
+/// How far every piece of chrome is rounded.
+const RADIUS: f32 = 7.0;
 
 /// Minimap pixel colours.
 const MAP_OCEAN: [u8; 3] = [22, 52, 84];
@@ -38,35 +54,109 @@ fn text(parent: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, 
         TextColor(color),
     ));
 }
+/// A rounded corner, for the `border_radius` of a node.
+fn rounded(radius: f32) -> BorderRadius {
+    BorderRadius::all(px(radius))
+}
+
+/// The fill a button starts at; `buttons` repaints it as the pointer moves over it.
+fn resting_fill(action: &Action) -> Color {
+    if matches!(action, Action::EndTurn) {
+        BRASS
+    } else {
+        NAVY
+    }
+}
+
+/// A control. The day button is brass; every other button is a quiet navy that warms
+/// under the pointer.
 fn button(parent: &mut ChildSpawnerCommands, title: impl Into<String>, action: Action) {
+    let primary = matches!(action, Action::EndTurn);
+    let fill = resting_fill(&action);
     parent
         .spawn((
             Button,
             action,
             Node {
-                min_height: px(40),
+                min_height: px(34),
                 flex_shrink: 0.0,
-                padding: UiRect::axes(px(12), px(8)),
-                margin: UiRect::bottom(px(5)),
+                padding: UiRect::axes(px(11), px(6)),
+                margin: UiRect::bottom(px(4)),
                 border: UiRect::all(px(1)),
+                border_radius: rounded(5.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(INK),
-            BorderColor::all(GOLD),
+            BackgroundColor(fill),
+            BorderColor::all(if primary { GOLD } else { GOLD_LINE }),
         ))
-        .with_children(|p| text(p, title, 14.0, PAPER));
+        .with_children(|p| text(p, title, 13.0, if primary { INK } else { PAPER }));
 }
 fn panel() -> Node {
     Node {
         position_type: PositionType::Absolute,
-        padding: UiRect::all(px(18)),
-        border: UiRect::all(px(2)),
+        padding: UiRect::all(px(14)),
+        border: UiRect::all(px(1)),
         flex_direction: FlexDirection::Column,
-        row_gap: px(9),
+        row_gap: px(7),
+        border_radius: rounded(RADIUS),
         ..default()
     }
+}
+
+/// A section label, with the hairline the reference draws under its headings.
+fn heading(parent: &mut ChildSpawnerCommands, label: &str) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            flex_shrink: 0.0,
+            row_gap: px(3),
+            margin: UiRect::top(px(3)),
+            ..default()
+        })
+        .with_children(|p| {
+            text(p, label, 12.0, GOLD);
+            p.spawn((
+                Node {
+                    width: percent(100),
+                    height: px(1),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(GOLD_LINE),
+            ));
+        });
+}
+
+/// One readout of the top bar: a small brass label over the value it names.
+fn stat(parent: &mut ChildSpawnerCommands, label: &str, value: impl Into<String>) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            flex_shrink: 0.0,
+            row_gap: px(1),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|p| {
+            text(p, label.to_uppercase(), 9.5, GOLD);
+            text(p, value, 13.0, PAPER);
+        });
+}
+
+/// The first `chars` characters of `s`, cut at a word, with an ellipsis when cut. A
+/// panel that shows prose shows a readable excerpt of it, not a wall.
+fn clipped(s: &str, chars: usize) -> String {
+    if s.chars().count() <= chars {
+        return s.to_string();
+    }
+    let mut cut: String = s.chars().take(chars).collect();
+    if let Some(space) = cut.rfind(char::is_whitespace) {
+        cut.truncate(space);
+    }
+    cut.push_str("...");
+    cut
 }
 fn image_sprite(
     commands: &mut Commands,
@@ -143,18 +233,17 @@ const VARIANTS: usize = 6;
 /// Columns and rows of the fog sheet.
 pub(super) const FOG_COLUMNS: u32 = 9;
 
-/// Draw order, back to front. The bands are ten apart and `depth` stays under one on any map,
-/// so a band never reaches into the next: terrain, farms, roads, then relief and cover, then
-/// the fog over all of those, the culture borders over the fog, and cities and units over
-/// everything, as in Civ3.
+/// Ground and improvements, then a north-to-south painter band containing relief,
+/// cover, mines and borders together. A foreground mountain can obscure a border
+/// behind it. Fog covers that band; cities and units stay above fog.
 const Z_RELIEF: f32 = 10.0;
 const Z_FOG: f32 = 15.0;
-const Z_BORDER: f32 = 16.0;
+const Z_BORDER: f32 = Z_RELIEF + 3.0 * Z_STEP;
 const Z_CITY: f32 = 20.0;
 const Z_UNIT: f32 = 30.0;
 /// Gap that puts one sprite of a tile in front of another of the same tile without reaching
 /// past the next tile in line (neighbours differ by at least `depth(32.0)`).
-const Z_STEP: f32 = 0.0002;
+const Z_STEP: f32 = 0.00008;
 /// Where a piece standing at screen height `sy` sits within its band: lower on the screen is in
 /// front. Bounded by 0.7 for the largest world.
 fn depth(sy: f32) -> f32 {
@@ -322,6 +411,40 @@ pub(super) fn fit_terrain_atlas(
         session.asset_prefix, session.pack.visuals.borders
     ));
     let mut changed = false;
+    for path in session.pack.visuals.relief_borders.values() {
+        let image: Handle<Image> = assets.load(format!("{}{path}", session.asset_prefix));
+        let Some(sheet) = images.get(&image).map(Image::size) else {
+            continue;
+        };
+        if sheet.x == 0 || sheet.y == 0 || sheet.x % 4 != 0 {
+            continue;
+        }
+        let entry = art.relief_borders.entry(path.clone()).or_insert_with(|| {
+            (
+                UVec2::ZERO,
+                layouts.add(TextureAtlasLayout::from_grid(
+                    UVec2::new(sheet.x / 4, sheet.y),
+                    4,
+                    1,
+                    None,
+                    None,
+                )),
+            )
+        });
+        if entry.0 != sheet {
+            if let Some(layout) = layouts.get_mut(&entry.1) {
+                *layout = TextureAtlasLayout::from_grid(
+                    UVec2::new(sheet.x / 4, sheet.y),
+                    4,
+                    1,
+                    None,
+                    None,
+                );
+            }
+            entry.0 = sheet;
+            changed = true;
+        }
+    }
     if let Some(sheet) = images.get(&fog).map(Image::size) {
         let cell = sheet / FOG_COLUMNS;
         if sheet != art.fog_sheet && cell.min_element() > 0 {
@@ -390,19 +513,40 @@ fn varied(index: usize, p: Coord, variants: usize, first_digit: usize) -> usize 
     }
 }
 
-/// The sprite names that draw a tile's relief and cover. Forest on a slope or on tundra is
-/// conifers; a pack that lacks a named sprite falls back to its forest or mountain.
+/// Dedicated relief/cover art uses the tile's own layers, never a neighbour's cover.
+/// Snow and arid bases retain their climate when trees grow over them.
 fn overlay_names(tile: &Tile) -> (Option<&'static str>, Option<&'static str>) {
-    let relief = match (tile.relief, tile.terrain) {
-        (Relief::Flat, _) => None,
-        (Relief::Mountains, Terrain::Desert) => Some("mountain_dry"),
-        (Relief::Mountains, Terrain::Tundra) => Some("mountain_cold"),
-        (Relief::Mountains, _) => Some("mountain"),
-        (Relief::Hills, Terrain::Desert) => Some("hills_dry"),
-        (Relief::Hills, Terrain::Tundra) => Some("hills_cold"),
-        (Relief::Hills, _) => Some("hills"),
+    let relief = match (tile.relief, tile.terrain, tile.cover) {
+        (Relief::Flat, _, _) => None,
+        (Relief::Mountains, Terrain::Desert, Cover::Forest) => Some("mountain_dry_forest"),
+        (Relief::Mountains, Terrain::Tundra, Cover::Forest) => Some("mountain_cold_forest"),
+        (Relief::Mountains, _, Cover::Forest) => Some("mountain_forest"),
+        (Relief::Mountains, Terrain::Desert, Cover::Jungle) => Some("mountain_dry_jungle"),
+        (Relief::Mountains, Terrain::Tundra, Cover::Jungle) => Some("mountain_cold_jungle"),
+        (Relief::Mountains, _, Cover::Jungle) => Some("mountain_jungle"),
+        (Relief::Mountains, Terrain::Desert, _) => Some("mountain_dry"),
+        (Relief::Mountains, Terrain::Tundra, _) => Some("mountain_cold"),
+        (Relief::Mountains, _, _) => Some("mountain"),
+        (Relief::Hills, Terrain::Desert, Cover::Forest) => Some("hills_dry_forest"),
+        (Relief::Hills, Terrain::Tundra, Cover::Forest) => Some("hills_cold_forest"),
+        (Relief::Hills, _, Cover::Forest) => Some("hills_forest"),
+        (Relief::Hills, Terrain::Desert, Cover::Jungle) => Some("hills_dry_jungle"),
+        (Relief::Hills, Terrain::Tundra, Cover::Jungle) => Some("hills_cold_jungle"),
+        (Relief::Hills, _, Cover::Jungle) => Some("hills_jungle"),
+        (Relief::Hills, Terrain::Desert, _) => Some("hills_dry"),
+        (Relief::Hills, Terrain::Tundra, _) => Some("hills_cold"),
+        (Relief::Hills, _, _) => Some("hills"),
     };
-    let cover = match tile.cover {
+    let cover = if relief.is_some() {
+        None
+    } else {
+        cover_name(tile)
+    };
+    (relief, cover)
+}
+
+fn cover_name(tile: &Tile) -> Option<&'static str> {
+    match tile.cover {
         Cover::Bare => None,
         Cover::Forest if tile.relief != Relief::Flat || tile.terrain == Terrain::Tundra => {
             Some("pine")
@@ -410,7 +554,29 @@ fn overlay_names(tile: &Tile) -> (Option<&'static str>, Option<&'static str>) {
         Cover::Forest => Some("forest"),
         Cover::Jungle => Some("jungle"),
         Cover::Marsh => Some("marsh"),
-    };
+    }
+}
+
+/// Old packs still render both layers if they do not supply combined artwork. Border
+/// selection uses this resolved name so a ribbon never targets a different heightfield.
+fn resolved_overlay_names(
+    tile: &Tile,
+    visuals: &Visuals,
+) -> (Option<&'static str>, Option<&'static str>) {
+    let (mut relief, mut cover) = overlay_names(tile);
+    if let Some(name) = relief {
+        if !visuals.overlays.contains_key(name) && tile.cover != Cover::Bare {
+            let mut bare = tile.clone();
+            bare.cover = Cover::Bare;
+            relief = overlay_names(&bare).0;
+            cover = cover_name(tile);
+        }
+        if let Some(name) = relief {
+            if name != "mountain" && !visuals.overlays.contains_key(name) {
+                relief = Some("mountain");
+            }
+        }
+    }
     (relief, cover)
 }
 
@@ -579,13 +745,14 @@ pub(super) fn refresh(
             }
         }
     }
-    // Relief and cover stand on their tiles; forest on a hill is drawn smaller in front of it.
+    // Combined relief/cover sprites share their surface and anchor. Packs without them
+    // retain the separate cover fallback.
     for y in y0..=y1 {
         for x in x0..=x1 {
             let Some(tile) = game.map.get(Coord::new(x, y)) else {
                 continue;
             };
-            let (relief, cover) = overlay_names(tile);
+            let (relief, cover) = resolved_overlay_names(tile, visuals);
             if (relief.is_none() && cover.is_none()) || !is_known(tile.position) {
                 continue;
             }
@@ -666,7 +833,7 @@ pub(super) fn refresh(
     draw_roads(&mut commands, game, &city_tiles, built, (x0, y0, x1, y1));
 
     // The fog of war lies over the terrain, the relief and the improvements, and under the
-    // borders, the cities and the units: Civ3 does not hide a city or an army beneath it.
+    // cities and units. Borders belong to their terrain surface and dim with it.
     // Its tiles are blended across their corners, so the edge of the known world and of what
     // is in sight this turn is a soft gradient. Past the edge of an upright world the cells
     // the terrain spills into are covered solid black.
@@ -706,6 +873,7 @@ pub(super) fn refresh(
     // tile that faces another nation's tile or nobody's, never an overlay on the whole
     // territory. Edges that face the unknown or the edge of the world get none.
     let mut inks: HashMap<Id, Color> = HashMap::new();
+    let mut contour_images: HashMap<&str, Handle<Image>> = HashMap::new();
     for y in y0..=y1 {
         for x in x0..=x1 {
             let Some(tile) = game.map.get(Coord::new(x, y)) else {
@@ -729,18 +897,38 @@ pub(super) fn refresh(
                 if other.owner == tile.owner || !is_known(beyond) {
                     continue;
                 }
-                let mut dashes = Sprite::from_atlas_image(
-                    border_sheet.clone(),
-                    TextureAtlas {
-                        layout: art.borders.clone(),
+                let surface = resolved_overlay_names(tile, visuals)
+                    .0
+                    .and_then(|name| visuals.relief_borders.get(name));
+                let (mut dashes, lift) = if let Some((path, (_, layout))) =
+                    surface.and_then(|path| art.relief_borders.get(path).map(|entry| (path, entry)))
+                {
+                    let image = contour_images
+                        .entry(path)
+                        .or_insert_with(|| assets.load(format!("{prefix}{path}")))
+                        .clone();
+                    let mut sprite = Sprite::from_image(image);
+                    sprite.texture_atlas = Some(TextureAtlas {
+                        layout: layout.clone(),
                         index,
-                    },
-                );
-                dashes.custom_size = Some(Vec2::new(128.0, 64.0));
+                    });
+                    sprite.custom_size = Some(Vec2::new(128.0, 112.0));
+                    (sprite, 24.0)
+                } else {
+                    let mut sprite = Sprite::from_atlas_image(
+                        border_sheet.clone(),
+                        TextureAtlas {
+                            layout: art.borders.clone(),
+                            index,
+                        },
+                    );
+                    sprite.custom_size = Some(Vec2::new(128.0, 64.0));
+                    (sprite, 0.0)
+                };
                 dashes.color = ink;
                 commands.spawn((
                     dashes,
-                    Transform::from_xyz(sx, sy, Z_BORDER + depth(sy)),
+                    Transform::from_xyz(sx, sy + lift, Z_BORDER + depth(sy)),
                     WorldVisual,
                 ));
             }
@@ -776,14 +964,14 @@ pub(super) fn refresh(
             tint,
         );
         commands.spawn((
-            Sprite::from_color(INK, Vec2::new(134.0, 24.0)),
+            Sprite::from_color(INK.with_alpha(0.88), Vec2::new(134.0, 23.0)),
             Transform::from_xyz(x, y - 24.0, z + 0.1),
             WorldVisual,
         ));
         commands.spawn((
             Text2d::new(format!("{}   {}", city.population, city.name)),
             TextFont {
-                font_size: 16.0,
+                font_size: 15.0,
                 ..default()
             },
             TextColor(PAPER),
@@ -1037,17 +1225,17 @@ fn draw_unit_badges(commands: &mut Commands, unit: &Unit, def: &UnitDef, stack: 
 
 fn badge(commands: &mut Commands, label: &str, at: Vec3, width: f32) {
     commands.spawn((
-        Sprite::from_color(INK, Vec2::new(width, 16.0)),
+        Sprite::from_color(INK.with_alpha(0.85), Vec2::new(width, 15.0)),
         Transform::from_translation(at + Vec3::Z * 0.3),
         WorldVisual,
     ));
     commands.spawn((
         Text2d::new(label),
         TextFont {
-            font_size: 12.0,
+            font_size: 11.0,
             ..default()
         },
-        TextColor(GOLD),
+        TextColor(PAPER),
         Transform::from_translation(at + Vec3::Z * 0.4),
         WorldVisual,
     ));
@@ -1107,7 +1295,7 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
         .factions
         .get(&u.owner)
         .map_or("Unknown", |f| f.adjective.as_str());
-    text(p, def.name.clone(), 22.0, INK);
+    text(p, def.name.clone(), 19.0, INK);
     let mut lines = vec![
         format!("{owner} | {}", u.level_name()),
         format!("HP {}/{}", u.hp(def), u.max_hp(def)),
@@ -1255,20 +1443,32 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
         position_type: PositionType::Absolute,
         top: px(0),
         width: percent(100),
-        height: px(72),
-        padding: UiRect::axes(px(20), px(10)),
-        border: UiRect::bottom(px(2)),
+        height: px(50),
+        padding: UiRect::axes(px(18), px(7)),
+        border: UiRect::bottom(px(1)),
+        border_radius: BorderRadius {
+            top_left: px(0),
+            top_right: px(0),
+            bottom_right: px(10),
+            bottom_left: px(10),
+        },
         justify_content: JustifyContent::SpaceBetween,
         align_items: AlignItems::Center,
-        column_gap: px(12),
+        column_gap: px(16),
         ..default()
     };
     commands
-        .spawn((top, BackgroundColor(INK), BorderColor::all(GOLD), UiRoot))
+        .spawn((
+            top,
+            BackgroundColor(NAVY),
+            BorderColor::all(GOLD_LINE),
+            UiRoot,
+        ))
         .with_children(|p| {
             p.spawn(Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: px(4),
+                row_gap: px(2),
+                flex_shrink: 0.0,
                 ..default()
             })
             .with_children(|p| {
@@ -1279,45 +1479,60 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     } else {
                         game.scenario_name.to_uppercase()
                     },
-                    if narrow { 15.0 } else { 22.0 },
+                    if narrow { 14.0 } else { 17.0 },
                     PAPER,
                 );
                 if !narrow {
                     text(
                         p,
                         format!(
-                            "{} / {}",
+                            "{}  |  {}",
                             faction.name.to_uppercase(),
                             long_date(date).to_uppercase()
                         ),
-                        11.0,
-                        GOLD,
+                        10.0,
+                        GOLD.with_alpha(0.8),
                     );
                 }
             });
-            text(
-                p,
-                if narrow {
-                    format!("{}g +{}", faction.gold, game.income(me))
-                } else {
-                    format!(
-                        "TREASURY  {} (+{})     RESEARCH  {}/{}     INDUSTRY  {}",
-                        faction.gold,
-                        game.income(me),
-                        faction.research,
-                        session.rules.research_cost * (faction.technology as i32 + 1),
-                        faction.industry,
-                    )
-                },
-                if narrow { 13.0 } else { 15.0 },
-                PAPER,
-            );
+            if narrow {
+                text(
+                    p,
+                    format!("{}g  +{}", faction.gold, game.income(me)),
+                    13.0,
+                    PAPER,
+                );
+            } else {
+                p.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(30),
+                    ..default()
+                })
+                .with_children(|p| {
+                    stat(
+                        p,
+                        "Treasury",
+                        format!("{} (+{})", faction.gold, game.income(me)),
+                    );
+                    stat(
+                        p,
+                        "Research",
+                        format!(
+                            "{}/{}",
+                            faction.research,
+                            session.rules.research_cost * (faction.technology as i32 + 1)
+                        ),
+                    );
+                    stat(p, "Industry", faction.industry.to_string());
+                });
+            }
             button(
                 p,
                 if session.pending {
                     "Waiting...".into()
                 } else {
-                    format!("{}  >", short_date(date))
+                    format!("End day  |  {}  >", short_date(date))
                 },
                 Action::EndTurn,
             );
@@ -1326,35 +1541,35 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
     if narrow {
         sidebar.left = px(8);
         sidebar.right = px(8);
-        sidebar.bottom = px(52);
+        sidebar.bottom = px(44);
         sidebar.height = px(inspector_height(size.y));
         sidebar.padding = UiRect::all(px(10));
         sidebar.overflow = Overflow::scroll_y();
     } else {
         sidebar.left = px(16);
-        sidebar.top = px(88);
-        sidebar.width = px(266);
-        sidebar.bottom = px(chart_side(size.y) + 96.0);
+        sidebar.top = px(62);
+        sidebar.width = px(276);
+        sidebar.bottom = px(chart_side(size.y) + 92.0);
         sidebar.overflow = Overflow::scroll_y();
     }
     commands
         .spawn((
             sidebar,
             BackgroundColor(PAPER),
-            BorderColor::all(GOLD),
+            BorderColor::all(GOLD_LINE),
             UiRoot,
             Inspector,
             ScrollPosition::default(),
         ))
         .with_children(|p| {
-            text(p, "CAMPAIGN COMMAND", 13.0, INK);
+            heading(p, "CAMPAIGN COMMAND");
             match session.selection {
                 Selection::Unit(id) if game.units.contains_key(&id) => {
                     unit_panel(p, game, session, &game.units[&id]);
                 }
                 Selection::City(id) if game.cities.contains_key(&id) => {
                     let c = &game.cities[&id];
-                    text(p, &c.name, 24.0, INK);
+                    text(p, &c.name, 19.0, INK);
                     text(
                         p,
                         format!(
@@ -1399,7 +1614,7 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                 }
                 Selection::Tile(pos) => {
                     let t = game.map.get(pos).unwrap();
-                    text(p, t.terrain.name(), 22.0, INK);
+                    text(p, t.terrain.name(), 19.0, INK);
                     let region = game.region_of(pos).map(|r| r.name.clone());
                     let owner = game
                         .factions
@@ -1464,17 +1679,32 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     );
                 }
                 _ => {
-                    text(p, faction.name.clone(), 22.0, INK);
+                    text(p, faction.name.clone(), 20.0, INK);
                     text(
                         p,
                         format!(
                             "{}\n{} | {:?}",
                             faction.leader, faction.government, faction.status
                         ),
+                        12.5,
+                        INK,
+                    );
+                    // The brief is long. Show its opening and let the reader open it.
+                    text(
+                        p,
+                        if session.show_brief {
+                            game.briefing.clone()
+                        } else {
+                            clipped(&game.briefing, 150)
+                        },
                         13.0,
                         INK,
                     );
-                    text(p, &game.briefing, 14.0, INK);
+                    button(
+                        p,
+                        if session.show_brief { "HIDE BRIEF" } else { "SHOW FULL BRIEF" },
+                        Action::ToggleBrief,
+                    );
                 }
             }
             if !narrow {
@@ -1483,12 +1713,12 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     .values()
                     .filter(|c| c.owner == session.player)
                     .collect();
-                text(p, format!("YOUR CITIES ({})", cities.len()), 12.0, INK);
+                heading(p, &format!("YOUR CITIES ({})", cities.len()));
                 for c in cities.iter().take(12) {
                     button(
                         p,
                         format!(
-                            "{}  |  Pop {}  Shields {}  Gold +{}",
+                            "{}\nPop {} | {} shields | +{}g",
                             c.name,
                             c.population,
                             c.shields(),
@@ -1504,7 +1734,7 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                             "and {} more. Press C to cycle through them.",
                             cities.len() - 12
                         ),
-                        12.0,
+                        11.5,
                         INK,
                     );
                 }
@@ -1513,12 +1743,12 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     .values()
                     .filter(|u| u.owner == session.player)
                     .collect();
-                text(p, format!("YOUR UNITS ({})", units.len()), 12.0, INK);
+                heading(p, &format!("YOUR UNITS ({})", units.len()));
                 for u in units.iter().take(6) {
                     let def = session.rules.def(u);
                     button(
                         p,
-                        format!("{}  |  HP {}/{}", def.name, u.hp(def), u.max_hp(def)),
+                        format!("{}   HP {}/{}", def.name, u.hp(def), u.max_hp(def)),
                         Action::SelectUnit(u.id),
                     );
                 }
@@ -1526,17 +1756,28 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     text(
                         p,
                         format!("and {} more. Press Tab to cycle through them.", units.len() - 6),
-                        12.0,
+                        11.5,
                         INK,
                     );
                 }
+                heading(p, "COMMAND");
                 button(p, "SAVE CAMPAIGN", Action::Save);
                 button(p, "CENTER MAP", Action::Center);
+                // The full key list is long; keep a line and a toggle.
                 text(
                     p,
-                    "WASD / arrows: pan | Wheel: zoom\nTab: next idle unit | Right-click: move or attack\nF: fortify | B: build a city\nR: road, then railroad | M: mine | I: farm\nDel: cancel orders\nC: next city | 1-6: produce\nSpace: next day | E: develop\nF5: save | H: capital | Esc: clear",
-                    12.0,
+                    if session.show_keys {
+                        "WASD / arrows: pan | Wheel: zoom\nTab: next idle unit | Right-click: move or attack\nF: fortify | B: build a city\nR: road, then railroad | M: mine | I: farm\nDel: cancel orders\nC: next city | 1-6: produce\nSpace: next day | E: develop\nF5: save | H: capital | Esc: clear"
+                    } else {
+                        "Tab: next unit | C: next city | Space: next day"
+                    },
+                    11.5,
                     INK,
+                );
+                button(
+                    p,
+                    if session.show_keys { "HIDE KEYS" } else { "SHOW ALL KEYS" },
+                    Action::ToggleKeys,
                 );
             } else {
                 p.spawn(Node {
@@ -1577,14 +1818,19 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
         );
         let mut chart = panel();
         chart.left = px(16);
-        chart.bottom = px(64);
+        chart.bottom = px(58);
         chart.width = px(side + 16.0);
         chart.height = px(side + 16.0);
         chart.padding = UiRect::all(px(6));
         chart.align_items = AlignItems::Center;
         chart.justify_content = JustifyContent::Center;
         commands
-            .spawn((chart, BackgroundColor(INK), BorderColor::all(GOLD), UiRoot))
+            .spawn((
+                chart,
+                BackgroundColor(NAVY),
+                BorderColor::all(GOLD_LINE),
+                UiRoot,
+            ))
             .with_children(|p| {
                 p.spawn((
                     Button,
@@ -1611,20 +1857,26 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
             });
         let mut report = panel();
         report.right = px(16);
-        report.bottom = px(66);
-        report.width = px(345);
-        report.padding = UiRect::all(px(16));
+        report.bottom = px(58);
+        report.width = px(330);
+        report.padding = UiRect::all(px(14));
         commands
             .spawn((
                 report,
-                BackgroundColor(Color::srgba(0.06, 0.12, 0.14, 0.95)),
-                BorderColor::all(GOLD),
+                BackgroundColor(NAVY),
+                BorderColor::all(GOLD_LINE),
                 UiRoot,
             ))
             .with_children(|p| {
-                text(p, "DISPATCHES FROM THE FRONT", 13.0, GOLD);
-                for line in game.log.iter().rev().take(4) {
-                    text(p, line, 13.0, PAPER);
+                heading(p, "DISPATCHES FROM THE FRONT");
+                // The newest line is the brightest; the rest fade back.
+                for (age, line) in game.log.iter().rev().take(3).enumerate() {
+                    text(
+                        p,
+                        clipped(line, 170),
+                        12.5,
+                        PAPER.with_alpha(0.92 - 0.22 * age as f32),
+                    );
                 }
             });
     }
@@ -1634,17 +1886,30 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                 position_type: PositionType::Absolute,
                 bottom: px(0),
                 width: percent(100),
-                height: px(48),
-                padding: UiRect::axes(px(20), px(8)),
+                height: px(34),
+                padding: UiRect::axes(px(18), px(5)),
                 align_items: AlignItems::Center,
                 border: UiRect::top(px(1)),
+                border_radius: BorderRadius {
+                    top_left: px(10),
+                    top_right: px(10),
+                    bottom_right: px(0),
+                    bottom_left: px(0),
+                },
                 ..default()
             },
-            BackgroundColor(INK),
-            BorderColor::all(GOLD),
+            BackgroundColor(Color::srgba(0.06, 0.10, 0.12, 0.72)),
+            BorderColor::all(GOLD_LINE),
             UiRoot,
         ))
-        .with_children(|p| text(p, &session.message, if narrow { 12.0 } else { 14.0 }, PAPER));
+        .with_children(|p| {
+            text(
+                p,
+                &session.message,
+                if narrow { 11.5 } else { 12.5 },
+                PAPER.with_alpha(0.88),
+            )
+        });
     if let Some(winner) = game.winner {
         commands
             .spawn((
@@ -1664,14 +1929,15 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                     Node {
                         width: percent(70),
                         max_width: px(600),
-                        padding: UiRect::all(px(40)),
-                        border: UiRect::all(px(3)),
+                        padding: UiRect::all(px(34)),
+                        border: UiRect::all(px(1)),
+                        border_radius: rounded(12.0),
                         flex_direction: FlexDirection::Column,
-                        row_gap: px(16),
+                        row_gap: px(14),
                         ..default()
                     },
                     BackgroundColor(PAPER),
-                    BorderColor::all(GOLD),
+                    BorderColor::all(GOLD_LINE),
                 ))
                 .with_children(|p| {
                     text(
@@ -1681,7 +1947,7 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                         } else {
                             "THE CAMPAIGN IS LOST"
                         },
-                        30.0,
+                        28.0,
                         INK,
                     );
                     text(
@@ -1691,7 +1957,7 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
                             game.factions[&winner].name,
                             long_date(date)
                         ),
-                        20.0,
+                        17.0,
                         INK,
                     );
                     button(p, "SAVE THIS CAMPAIGN", Action::Save);
@@ -1701,7 +1967,7 @@ fn build_ui(commands: &mut Commands, session: &Session, size: Vec2, minimap: &Mi
 }
 
 /// Side length of the square minimap for a window height.
-fn chart_side(window_height: f32) -> f32 {
+pub(super) fn chart_side(window_height: f32) -> f32 {
     (window_height * 0.30).clamp(120.0, 266.0)
 }
 
@@ -1970,11 +2236,50 @@ mod tests {
             overlay_names(&tile(Tundra, Mountains, Bare)),
             (Some("mountain_cold"), None)
         );
-        // Trees on a slope are conifers, drawn with the slope.
+        // The cover is part of the relief surface, not a second floating sprite.
         assert_eq!(
             overlay_names(&tile(Grass, Hills, Forest)),
-            (Some("hills"), Some("pine"))
+            (Some("hills_forest"), None)
         );
+    }
+
+    #[test]
+    fn every_relief_context_resolves_to_matching_art_and_surface_borders() {
+        let pack = fourx_content::Pack::base();
+        let mut names = HashSet::new();
+        for ground in [Terrain::Grass, Terrain::Desert, Terrain::Tundra] {
+            for relief in [Relief::Hills, Relief::Mountains] {
+                for cover in [Cover::Bare, Cover::Forest, Cover::Jungle] {
+                    let tile = tile(ground, relief, cover);
+                    assert!(tile.layers_valid());
+                    let (name, separate_cover) = resolved_overlay_names(&tile, &pack.visuals);
+                    let name = name.unwrap();
+                    assert!(separate_cover.is_none(), "{name}");
+                    assert!(pack.visuals.relief_borders.contains_key(name), "{name}");
+                    assert!(name == "mountain" || pack.visuals.overlays.contains_key(name));
+                    names.insert(name);
+                }
+            }
+        }
+        assert_eq!(names.len(), 18);
+    }
+
+    #[test]
+    fn older_packs_keep_their_cover_and_use_borders_for_the_actual_relief() {
+        let mut visuals = fourx_content::Pack::base().visuals;
+        visuals.overlays.remove("mountain_cold_forest");
+        let tile = tile(Terrain::Tundra, Relief::Mountains, Cover::Forest);
+        assert_eq!(
+            resolved_overlay_names(&tile, &visuals),
+            (Some("mountain_cold"), Some("pine"))
+        );
+        visuals.overlays.remove("mountain_cold");
+        assert_eq!(
+            resolved_overlay_names(&tile, &visuals),
+            (Some("mountain"), Some("pine"))
+        );
+        visuals.relief_borders.clear();
+        assert!(visuals.relief_borders.is_empty());
     }
 
     fn sight(states: &[&str]) -> Sight {
@@ -2076,8 +2381,9 @@ mod tests {
         let deepest = depth(-30_048.0);
         assert!(deepest > 0.0 && deepest < 1.0, "{deepest}");
         // Lower on screen is in front, by more than the gap used within one tile.
-        assert!(depth(-64.0) - depth(-32.0) > Z_STEP * 2.0);
-        const { assert!(Z_RELIEF + 1.0 < Z_FOG && Z_FOG < Z_BORDER && Z_BORDER + 1.0 < Z_CITY) };
+        assert!(depth(-64.0) - depth(-32.0) > Z_STEP * 3.0);
+        assert!(Z_RELIEF + depth(-32.0) > Z_BORDER + depth(0.0));
+        const { assert!(Z_BORDER + 1.0 < Z_FOG && Z_FOG < Z_CITY) };
         const { assert!(Z_CITY + 1.0 < Z_UNIT) };
     }
 

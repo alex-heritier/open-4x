@@ -26,3 +26,18 @@ The smoke scripts leave screenshots, logs, and saved state in unique temporary d
 Native Android/iOS device builds have **not** been performed: the Android SDK/NDK and Apple SDK/signing/device environment are not installed here. Native mobile launch/build configuration is provided under the client manifest and `platforms/`. Mobile browser layouts have been rendered, but these do not substitute for native device tests. Windows/macOS native builds are likewise not tested in this Linux environment. Audio device output could not be checked because the container has no sound device.
 
 The starter supports one human commander against AI plus remote spectators. It does not yet offer multi-faction multiplayer, full diplomacy/trade, script-defined custom commands/UI, or finished painted/animated artwork. Pack definitions, scenario data, PNG/WAV assets, and bounded turn effects are moddable today.
+
+Terrain surfaces (2026-10-09, Linux/software Vulkan): the headless workspace suite
+(`cargo test --workspace --exclude fourx-client --profile quick`, 179 tests) and client
+suite (`cargo test -p fourx-client --lib --profile quick`, 59 tests) pass. After the
+scenario-forge jungle change, its 15 tests and the 103 simulation/24 content tests were
+rerun successfully. All three `art/tests/test_relief.py` checks pass, including an
+analytical transparent-mask occluder test and contracts for all 18 context/border pairs.
+Regenerating `hills_cold_forest` produces identical relief and border pixels. The
+`wasm32-unknown-unknown` client check with desktop features disabled passes. The real
+Bevy `terrain-study` capture under Xvfb/llvmpipe exits successfully after 200 frames; its
+PNG was inspected for overlap, climate/vegetation styles, two-sided ownership borders,
+and lifted/occluded border segments. Rust formatting of changed files and the scoped
+whitespace check pass. See `docs/terrain-surfaces.md` for reproduction and the known
+limits; the shipped historical world was not regenerated and browser rendering was
+not exercised in this terrain check.

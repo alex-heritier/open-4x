@@ -35,6 +35,10 @@ struct Session {
     /// The camera starts on the player's capital once the first snapshot arrives.
     centered: bool,
     message: String,
+    /// The inspector shows the opening of the campaign brief, not all of it, until asked.
+    show_brief: bool,
+    /// The same for the key list.
+    show_keys: bool,
     asset_prefix: String,
     frames: u32,
     #[cfg(not(target_arch = "wasm32"))]
@@ -276,6 +280,10 @@ enum Action {
     SelectUnit(Id),
     SelectCity(Id),
     Center,
+    /// Open or close the campaign brief in the inspector.
+    ToggleBrief,
+    /// Open or close the full key list.
+    ToggleKeys,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -337,6 +345,8 @@ struct Art {
     fog: Handle<TextureAtlasLayout>,
     /// Layout of the culture-border sheet: four diamonds, one per edge.
     borders: Handle<TextureAtlasLayout>,
+    /// Each surface-border sheet can have its own resolution.
+    relief_borders: std::collections::HashMap<String, (UVec2, Handle<TextureAtlasLayout>)>,
     /// Image sizes the layouts were last cut for.
     ground_sheet: UVec2,
     river_sheet: UVec2,
@@ -492,6 +502,8 @@ pub fn run() {
             built: None,
             centered: false,
             message: "Connecting to the campaign...".into(),
+            show_brief: false,
+            show_keys: false,
             asset_prefix,
             frames: 0,
             #[cfg(not(target_arch = "wasm32"))]
@@ -590,6 +602,7 @@ fn setup(
         drawn: u64::MAX,
     });
     commands.insert_resource(Art {
+        relief_borders: Default::default(),
         fog: layouts.add(TextureAtlasLayout::from_grid(
             UVec2::new(256, 128),
             presentation::FOG_COLUMNS,
@@ -820,6 +833,16 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             None
         }
         Action::Center => None,
+        Action::ToggleBrief => {
+            session.show_brief = !session.show_brief;
+            session.dirty = true;
+            None
+        }
+        Action::ToggleKeys => {
+            session.show_keys = !session.show_keys;
+            session.dirty = true;
+            None
+        }
         Action::Save => {
             match connection.save() {
                 Ok(json) => {
@@ -867,10 +890,20 @@ fn buttons(
 ) {
     let mut activated = Vec::new();
     for (interaction, action, mut color) in &mut buttons {
+        // The day button wears the brass; everything else stays navy and warms as the
+        // pointer crosses it. See `presentation` for the materials.
+        use crate::presentation::{BRASS, BRASS_HOVER, BRASS_PRESSED};
+        use crate::presentation::{NAVY, NAVY_HOVER, NAVY_PRESSED};
+        let primary = matches!(action, Action::EndTurn);
+        let (rest, hover, pressed) = if primary {
+            (BRASS, BRASS_HOVER, BRASS_PRESSED)
+        } else {
+            (NAVY, NAVY_HOVER, NAVY_PRESSED)
+        };
         color.0 = match interaction {
-            Interaction::Hovered => Color::srgb(0.32, 0.36, 0.29),
-            Interaction::Pressed => Color::srgb(0.45, 0.37, 0.20),
-            _ => Color::srgb(0.12, 0.19, 0.20),
+            Interaction::Hovered => hover,
+            Interaction::Pressed => pressed,
+            _ => rest,
         };
         if *interaction == Interaction::Pressed {
             if touches.iter().next().is_some() {
@@ -943,10 +976,15 @@ fn minimap_click(
 }
 fn inspector_contains(window: &Window, pos: Vec2) -> bool {
     if window.width() < 900.0 {
-        pos.y > window.height() - inspector_height(window.height()) - 52.0
-            && pos.y < window.height() - 52.0
+        pos.x >= 8.0
+            && pos.x <= window.width() - 8.0
+            && pos.y >= window.height() - inspector_height(window.height()) - 44.0
+            && pos.y <= window.height() - 44.0
     } else {
-        pos.x >= 16.0 && pos.x <= 282.0 && pos.y >= 88.0 && pos.y <= window.height() - 166.0
+        pos.x >= 16.0
+            && pos.x <= 292.0
+            && pos.y >= 62.0
+            && pos.y <= window.height() - presentation::chart_side(window.height()) - 92.0
     }
 }
 fn inspector_height(window_height: f32) -> f32 {
@@ -1180,10 +1218,10 @@ fn controls(
     };
     // Panels also block map clicks in their empty space.
     let narrow = window.width() < 900.0;
-    if cursor.y < 76.0
-        || cursor.y > window.height() - 56.0
+    if cursor.y < 50.0
+        || cursor.y > window.height() - 34.0
         || (!narrow && cursor.x < 300.0)
-        || (narrow && cursor.y > window.height() - inspector_height(window.height()) - 56.0)
+        || inspector_contains(window, cursor)
     {
         return;
     }

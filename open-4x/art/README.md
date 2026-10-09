@@ -10,7 +10,7 @@ dark painted forests, snow-capped relief, gritty brick-and-slate industrial citi
 cd art
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # numpy, pillow
 brew install librsvg                                                   # provides rsvg-convert
-.venv/bin/python build.py              # everything (~20 s)
+.venv/bin/python build.py              # all groups
 .venv/bin/python build.py terrain      # or: terrain | overlays | sprites | ui | icons
 ```
 
@@ -30,7 +30,7 @@ Art is authored at **2x** the size the game draws, so it stays crisp on high-DPI
 | --- | --- | --- | --- |
 | ground, water, river cell | 192x96 (1.5x) | 128x64 | one dual-grid diamond |
 | city (one per flavor), forest, pine, jungle, marsh, hills, mountain (and the dry and cold variants) | 256x224 | 128x112 | ground-diamond centre at (128, 160) |
-| fog sheet cell, border sheet cell | 256x128 | 128x64 | one diamond, drawn over the tile |
+| fog sheet cell, flat border sheet cell | 256x128 | 128x64 | one diamond, drawn over the tile |
 | infantry, pioneer, worker, cavalry, artillery | 160x160 | 70x70 | tile centre about (80, 108) |
 | farm, mine overlays | 256x128 | 128x64 | one diamond, drawn over the tile |
 | ironclad, transport, battleship, protected cruiser, torpedo boat | 256x192 | 112x84 | tile centre about (128, 123) |
@@ -89,3 +89,17 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 Nine-slice sources are drawn at 2x; `ui/nine_slice.json` lists the border inset (source px) that keeps corner ornaments undistorted.
 `parchment.png` is a seamless 512 px tile. Icons live in `ui/icons/` at 64 px (shown at 32).
 The current client UI is still built from flat colours; these are ready to be wired with Bevy `ImageNode` + `TextureSlicer`.
+
+## Relief surfaces and borders
+
+`python build.py relief` builds 18 relief/vegetation contexts (mountain or hills × temperate,
+dry, cold × bare, forest, jungle), with embedded tree crowns and a matched four-edge border
+sheet for each. `terrain/<relief-name>_borders.png` contains four 256×224 cells, with exactly
+the relief sprite's ground anchor at (128,160). The runtime tints these grayscale ribbons
+with the owner's color and depth-sorts them with the terrain. Flat borders share their eight
+beads and thread pattern. Regenerate relief and border pairs together; do not restyle the
+heightfield without rebuilding its ribbons. The `overlays` group includes `relief`.
+
+Run `python -m unittest discover -s tests` to check geometry, overlap and analytical
+occlusion. See [terrain surfaces](../docs/terrain-surfaces.md) for the behavioral evidence,
+pack fields, fallback handling, and deterministic game fixture.

@@ -483,11 +483,7 @@ pub fn classify(
         };
         let r = rank[i];
         cover[i] = if r < jungle {
-            if relief[i] == Relief::Flat {
-                Cover::Jungle
-            } else {
-                Cover::Forest
-            }
+            Cover::Jungle
         } else if r < (forest * weight).max(jungle) && forest > 0.0 {
             Cover::Forest
         } else {
@@ -540,8 +536,8 @@ pub fn classify(
                 relief[i] = r;
             }
             if let Some(c) = patch.cover {
-                // Jungle and marsh only grow on flat ground.
-                let needs_flat = matches!(c, Cover::Jungle | Cover::Marsh);
+                // Forest and jungle retain their identity on slopes; marsh needs flat ground.
+                let needs_flat = c == Cover::Marsh;
                 if !needs_flat || relief[i] == Relief::Flat {
                     cover[i] = c;
                 }
@@ -554,7 +550,7 @@ pub fn classify(
 
     // Layers that cannot coexist, and the flat ground every city stands on.
     for i in (0..count).filter(|&i| land[i]) {
-        if relief[i] != Relief::Flat && matches!(cover[i], Cover::Jungle | Cover::Marsh) {
+        if relief[i] != Relief::Flat && cover[i] == Cover::Marsh {
             cover[i] = Cover::Forest;
         }
         if cities.contains(&i) {

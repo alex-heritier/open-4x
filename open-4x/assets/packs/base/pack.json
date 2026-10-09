@@ -34,7 +34,39 @@
       "hills_dry": "sprites/hills_dry.png",
       "hills_cold": "sprites/hills_cold.png",
       "mountain_dry": "sprites/mountain_dry.png",
-      "mountain_cold": "sprites/mountain_cold.png"
+      "mountain_cold": "sprites/mountain_cold.png",
+      "mountain_forest": "sprites/mountain_forest.png",
+      "mountain_jungle": "sprites/mountain_jungle.png",
+      "mountain_dry_forest": "sprites/mountain_dry_forest.png",
+      "mountain_dry_jungle": "sprites/mountain_dry_jungle.png",
+      "mountain_cold_forest": "sprites/mountain_cold_forest.png",
+      "mountain_cold_jungle": "sprites/mountain_cold_jungle.png",
+      "hills_forest": "sprites/hills_forest.png",
+      "hills_jungle": "sprites/hills_jungle.png",
+      "hills_dry_forest": "sprites/hills_dry_forest.png",
+      "hills_dry_jungle": "sprites/hills_dry_jungle.png",
+      "hills_cold_forest": "sprites/hills_cold_forest.png",
+      "hills_cold_jungle": "sprites/hills_cold_jungle.png"
+    },
+    "relief_borders": {
+      "mountain": "terrain/mountain_borders.png",
+      "mountain_forest": "terrain/mountain_forest_borders.png",
+      "mountain_jungle": "terrain/mountain_jungle_borders.png",
+      "mountain_dry": "terrain/mountain_dry_borders.png",
+      "mountain_dry_forest": "terrain/mountain_dry_forest_borders.png",
+      "mountain_dry_jungle": "terrain/mountain_dry_jungle_borders.png",
+      "mountain_cold": "terrain/mountain_cold_borders.png",
+      "mountain_cold_forest": "terrain/mountain_cold_forest_borders.png",
+      "mountain_cold_jungle": "terrain/mountain_cold_jungle_borders.png",
+      "hills": "terrain/hills_borders.png",
+      "hills_forest": "terrain/hills_forest_borders.png",
+      "hills_jungle": "terrain/hills_jungle_borders.png",
+      "hills_dry": "terrain/hills_dry_borders.png",
+      "hills_dry_forest": "terrain/hills_dry_forest_borders.png",
+      "hills_dry_jungle": "terrain/hills_dry_jungle_borders.png",
+      "hills_cold": "terrain/hills_cold_borders.png",
+      "hills_cold_forest": "terrain/hills_cold_forest_borders.png",
+      "hills_cold_jungle": "terrain/hills_cold_jungle_borders.png"
     },
     "cities": {
       "western": "sprites/city_western.png",
@@ -70,7 +102,8 @@
   },
   "scenarios": [
     {"id": "world-1876", "path": "scenarios/world-1876.json"},
-    {"id": "dawn-straits", "path": "scenarios/dawn-straits.json"}
+    {"id": "dawn-straits", "path": "scenarios/dawn-straits.json"},
+    {"id": "terrain-study", "path": "scenarios/terrain-study.json"}
   ],
   "default_scenario": "world-1876"
 }

@@ -24,6 +24,10 @@ pub const BASE_SCENARIOS: &[(&str, &str)] = &[
         "scenarios/dawn-straits.json",
         include_str!("../../../assets/packs/base/scenarios/dawn-straits.json"),
     ),
+    (
+        "scenarios/terrain-study.json",
+        include_str!("../../../assets/packs/base/scenarios/terrain-study.json"),
+    ),
 ];
 const MAX_SCENARIO_BYTES: u64 = 32 * 1024 * 1024;
 /// Most land units one ship may carry.
@@ -41,9 +45,9 @@ pub struct Visuals {
     pub rivers: String,
     pub forest: String,
     pub mountain: String,
-    /// More overlay sprites by name: `pine`, `jungle`, `marsh`, `hills`, `hills_dry`,
-    /// `hills_cold`, `mountain_dry`, `mountain_cold`. A missing name falls back to `forest`
-    /// (any cover) or `mountain` (any relief).
+    /// Named cover and relief sprites. Relief names accept `_dry` or `_cold`, followed
+    /// by `_forest` or `_jungle` for combined relief/vegetation art. Missing combined
+    /// sprites use separate relief and cover; missing basic sprites use forest/mountain.
     #[serde(default)]
     pub overlays: BTreeMap<String, String>,
     /// City sprites by [`fourx_sim::Flavor`] key (`western`, `east_asian`, ...): every flavor
@@ -57,6 +61,11 @@ pub struct Visuals {
     /// edge, in the order up-right, down-right, down-left, up-left. The client tints them with
     /// the nation's colour.
     pub borders: String,
+    /// Optional surface-projected borders keyed by the relief sprite name. Each sheet
+    /// has four 256x224 cells (or uniformly scaled equivalents) in the same edge order
+    /// as `borders`, anchored exactly like its matching relief. Omission uses flat borders.
+    #[serde(default)]
+    pub relief_borders: BTreeMap<String, String>,
     /// Overlay drawn on tiles with a mine.
     pub mine: String,
     /// Overlay drawn on tiles with a farm.
@@ -84,6 +93,7 @@ impl Visuals {
         ]
         .into_iter()
         .chain(self.overlays.values())
+        .chain(self.relief_borders.values())
         .chain(self.cities.values())
         .chain(self.combat.paths())
     }
@@ -389,6 +399,23 @@ mod tests {
         let mut pack = Pack::base();
         pack.scenarios[0].path = "../outside.json".into();
         assert!(pack.validate().is_err());
+        let mut pack = Pack::base();
+        pack.visuals
+            .relief_borders
+            .insert("mountain".into(), "../outside.png".into());
+        assert!(pack.validate().is_err());
+    }
+    #[test]
+    fn surface_borders_are_optional_and_the_bundled_assets_all_exist() {
+        let mut json: serde_json::Value = serde_json::from_str(BASE_JSON).unwrap();
+        json["visuals"]
+            .as_object_mut()
+            .unwrap()
+            .remove("relief_borders");
+        let pack = Pack::parse(&json.to_string()).unwrap();
+        assert!(pack.visuals.relief_borders.is_empty());
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/packs/base");
+        load_directory(&root).unwrap().validate().unwrap();
     }
     #[test]
     fn dangerous_numbers_rejected() {

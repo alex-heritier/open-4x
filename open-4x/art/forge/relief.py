@@ -233,3 +233,88 @@ def build_mountain_layer(seed=3, style="temperate") -> Image.Image:
     h, u, v = mountain_height(seed)
     col, alpha = shade_height(h, u, v, seed, style)
     return _finish(project(h, col, alpha))
+
+
+def vegetation_surface(h, u, v, col, alpha, seed, cover, style):
+    """Trees rooted in the heightfield, painted and occluded with the rock beneath them.
+
+    Each crown replaces a patch of the surface, rather than overlaying a flat tree sprite.
+    Forest is pointed evergreen growth; jungle is round, dense broadleaf growth. Summit
+    and steep cliff exclusions leave the relief legible even in a dense woodland.
+    """
+    rng = np.random.default_rng(seed + 701)
+    base = h.copy()
+    gy, gx = np.gradient(base, 400.0 / GRID)
+    steep = np.hypot(gx, gy)
+    tree_top = base.copy()
+    leaves = np.zeros_like(h)
+    light = np.zeros_like(h)
+    jungle = cover == "jungle"
+    for _ in range(105 if jungle else 85):
+        cu, cv = rng.uniform(0.09, 0.91, 2)
+        i, j = int(cu * (GRID - 1)), int(cv * (GRID - 1))
+        if base[i, j] < 3 or base[i, j] > (105 if jungle else 90) or steep[i, j] > 1.1:
+            continue
+        radius = rng.uniform(0.028, 0.050) if jungle else rng.uniform(0.021, 0.036)
+        r = np.hypot(u - cu, v - cv) / radius
+        crown = np.clip(1 - r, 0, 1) ** (0.55 if jungle else 1.15)
+        height = rng.uniform(7, 14) if jungle else rng.uniform(10, 19)
+        top = base[i, j] + crown * height
+        visible = (r < 1) & (top > tree_top)
+        tree_top = np.where(visible, top, tree_top)
+        leaves = np.where(visible, smoothstep(0.0, 0.20, crown), leaves)
+        light = np.where(visible, np.clip(0.55 + (cv - v) / radius * 0.22 + (cu - u) / radius * 0.12 + crown * 0.22, 0, 1), light)
+    colors = ("#153e28", "#548635") if jungle else ("#1d382b", "#527149")
+    if style == "arctic":
+        colors = ("#233f3d", "#83988a")
+    canopy = P.mix(P.hx(colors[0]), P.hx(colors[1]), light)
+    col = P.mix(col, canopy, leaves)
+    alpha = np.maximum(alpha, leaves)
+    return tree_top, col, alpha
+
+
+def scene(kind, seed, style, cover="bare"):
+    """The single source of geometry for both the visible relief and its border ribbons."""
+    height, shader = (mountain_height, shade_height) if kind == "mountain" else (hills_height, shade_hills)
+    h, u, v = height(seed)
+    col, alpha = shader(h, u, v, seed, style)
+    if cover != "bare":
+        h, col, alpha = vegetation_surface(h, u, v, col, alpha, seed, cover, style)
+    return h, u, v, col, alpha
+
+
+def border_layers(h, u, v):
+    """Four dashed white ribbons draped over the actual heightfield, including occlusion.
+
+    The footprint edge bows inward across a slope, returns to the same inset at its
+    ends, and is displaced vertically by h. Dash phase is measured in footprint space
+    so changing height does not stretch or renumber the beads. Transparent foreground
+    samples still occlude hidden parts of a rear ribbon in `project`.
+    """
+    for col, alpha in border_masks(u, v, bow=0.12):
+        yield _finish(project(h, col, alpha))
+
+
+def border_masks(u, v, bow=0.0):
+    """Shared bead/thread paint for flat and lifted borders; eight periods per edge."""
+    # Orient parameters clockwise N->E->S->W->N, matching the client's edge neighbours.
+    for t, distance in ((u, v), (v, 1-u), (1-u, 1-v), (1-v, u)):
+        inset = 0.055 + bow * np.sin(np.pi * t) ** 2
+        delta = np.abs(distance - inset) * 143.1  # source pixels normal to an edge
+        phase = (t * 143.1) % 18.0
+        bead = (phase >= 5) & (phase < 16)
+        rim = 1 - smoothstep(2.0, 3.2, delta)
+        core = 1 - smoothstep(0.9, 1.8, delta)
+        alpha = np.where(bead, rim, (1 - smoothstep(0.35, 0.8, delta)) * 0.65)
+        alpha *= smoothstep(0.025, 0.05, t) * (1-smoothstep(0.95, 0.975, t))
+        col = np.ones((*u.shape, 3), dtype=np.float32) * (0.34 + 0.66 * core)[..., None]
+        yield col, alpha
+
+
+def build_surface(kind, seed, style, cover="bare"):
+    h, u, v, col, alpha = scene(kind, seed, style, cover)
+    image = _finish(project(h, col, alpha))
+    sheet = Image.new("RGBA", (4 * W, H))
+    for edge, layer in enumerate(border_layers(h, u, v)):
+        sheet.paste(layer.resize((W, H), Image.Resampling.LANCZOS), (edge * W, 0))
+    return image, sheet

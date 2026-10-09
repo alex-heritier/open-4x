@@ -157,7 +157,7 @@ impl Terrain {
     }
 }
 
-/// How the ground rises. Mountains and hills can carry a forest; jungle and marsh need flat ground.
+/// How the ground rises. Mountains and hills can carry forest or jungle; marsh needs flat ground.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Relief {
     #[default]
@@ -327,7 +327,7 @@ impl Tile {
             other => (Terrain::from_glyph(other)?, Flat, Bare),
         })
     }
-    /// Whether the layers can coexist: water carries nothing, and jungle and marsh need flat ground.
+    /// Whether the layers can coexist: water carries nothing, and marsh needs flat ground.
     pub fn layers_valid(&self) -> bool {
         if self.is_water() {
             return self.relief == Relief::Flat
@@ -335,7 +335,7 @@ impl Tile {
                 && self.river == 0
                 && self.improvements == 0;
         }
-        !(matches!(self.cover, Cover::Jungle | Cover::Marsh) && self.relief != Relief::Flat)
+        !(self.cover == Cover::Marsh && self.relief != Relief::Flat)
     }
 }
 
@@ -540,7 +540,7 @@ impl TryFrom<MapRepr> for Map {
             }
             if !tile.layers_valid() {
                 return Err(format!(
-                    "tile {x},{y} mixes layers that cannot coexist: water holds no relief, cover, river, or improvement, and jungle and marsh need flat ground"
+                    "tile {x},{y} mixes layers that cannot coexist: water holds no relief, cover, river, or improvement, and marsh needs flat ground"
                 ));
             }
             if bits & Tile::RAIL != 0 && bits & Tile::ROAD == 0 {
@@ -1220,7 +1220,7 @@ mod tests {
         assert!(!parse(
             r#"{"width":2,"height":1,"terrain":["~~"],"regions":[1,2]}"#
         ));
-        // relief and cover: right shape, known glyphs, no water relief, no hilly jungle or marsh
+        // relief and cover: right shape, known glyphs, no water relief or sloping marsh
         assert!(parse(
             r#"{"width":2,"height":1,"terrain":["gg"],"relief":["h"]}"#
         ));
@@ -1233,8 +1233,11 @@ mod tests {
         assert!(parse(
             r#"{"width":2,"height":1,"terrain":["gs"],"cover":[".f"]}"#
         ));
-        assert!(parse(
+        assert!(!parse(
             r#"{"width":2,"height":1,"terrain":["gg"],"relief":["h."],"cover":["j."]}"#
+        ));
+        assert!(!parse(
+            r#"{"width":2,"height":1,"terrain":["gg"],"relief":["^."],"cover":["j."]}"#
         ));
         assert!(parse(
             r#"{"width":2,"height":1,"terrain":["gg"],"relief":["^."],"cover":["m."]}"#
