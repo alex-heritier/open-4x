@@ -1,0 +1,200 @@
+{
+  "format": 3,
+  "id": "dawn-straits",
+  "name": "Dawn over the Straits",
+  "description": "The original starter campaign: two rival powers on a 24x18 archipelago, laid out upright like the world map. A compact scenario for learning the rules and for fast tests.",
+  "start_date": "1892-01-01",
+  "commander": "dawn-empire",
+  "intro": "The straits are open. An empire awaits your orders.",
+  "map": {
+    "width": 30,
+    "height": 30,
+    "lattice": {
+      "columns": 12,
+      "rows": 36
+    },
+    "terrain": [
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~f~fn,..~~~~~~~~~~~~~",
+      "~~~~~~~~~.,nm.Ff.Mf~~~~~~~~~~~",
+      "~~~~~~~~..fff.n,,fff~~~~~~~~~~",
+      "~~~~~F~~~,Ff..,.ff...~~~~~~~~~",
+      "~~~~N,.~n,mm,,f,..nmFF~~~~~~~~",
+      "~~~..fm..ff.,f,fFF,,,,fF~~~~~~",
+      "~~~~.,,,.f,.f..F.n.fff,.f.~~~~",
+      "~~~~~f.....F..f.,fm,.FffFff~~~",
+      "~~~~~~f.ffMff..FffFn,..Ff.F.~~",
+      "~~~~~~~..Mffnm,,.f.ff,,~..,.~~",
+      "~~~~~~~~~F.n..FF,m,,f..,~..f~~",
+      "~~~~~~~~~~FffMF,.F,f...~~~~~~~",
+      "~~~~~~~~~~~.M,ff.....N,~~~~~~~",
+      "~~~~~~~~~~~~FF,,,fF.n.M~~~~~~~",
+      "~~~~~~~~~~~~~.F.,f,f.,~~~~~~~~",
+      "~~~~~~~~~~~~~~~~,~F~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+      "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    ]
+  },
+  "nations": [
+    {
+      "id": "dawn-empire",
+      "name": "The Dawn Empire",
+      "adjective": "Imperial",
+      "color": "#bf3d33",
+      "flavor": "east_asian",
+      "status": "sovereign",
+      "government": "Imperial monarchy"
+    },
+    {
+      "id": "northern-league",
+      "name": "The Northern League",
+      "adjective": "League",
+      "color": "#597ac7",
+      "flavor": "western",
+      "status": "sovereign",
+      "government": "Confederation of free cities"
+    }
+  ],
+  "cities": [
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 13,
+        "y": 17
+      },
+      "name": "Akatsuki",
+      "population": 3,
+      "industry": 4,
+      "capital": true
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 18,
+        "y": 11
+      },
+      "name": "Northwatch",
+      "population": 3,
+      "industry": 4,
+      "capital": true
+    }
+  ],
+  "units": [
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 13,
+        "y": 17
+      },
+      "kind": "infantry",
+      "fortified": true
+    },
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 13,
+        "y": 17
+      },
+      "kind": "cavalry"
+    },
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 13,
+        "y": 17
+      },
+      "kind": "artillery"
+    },
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 13,
+        "y": 17
+      },
+      "kind": "pioneer"
+    },
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 13,
+        "y": 17
+      },
+      "kind": "worker"
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 18,
+        "y": 11
+      },
+      "kind": "infantry",
+      "fortified": true
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 18,
+        "y": 11
+      },
+      "kind": "cavalry"
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 18,
+        "y": 11
+      },
+      "kind": "artillery"
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 18,
+        "y": 11
+      },
+      "kind": "pioneer"
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 18,
+        "y": 11
+      },
+      "kind": "worker"
+    },
+    {
+      "nation": "dawn-empire",
+      "position": {
+        "x": 15,
+        "y": 23
+      },
+      "kind": "ironclad"
+    },
+    {
+      "nation": "northern-league",
+      "position": {
+        "x": 18,
+        "y": 26
+      },
+      "kind": "ironclad"
+    }
+  ],
+  "wars": [
+    {
+      "a": "dawn-empire",
+      "b": "northern-league",
+      "name": "The Straits War"
+    }
+  ]
+}

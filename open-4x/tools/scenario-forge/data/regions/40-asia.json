@@ -1,0 +1,83 @@
+[
+  {"id":"siberia","name":"Siberia and the Russian Far East","nation":"russia","paint":[
+    {"country":"RUS","bbox":[60.0,40.0,180.0,80.0]},{"country":"RUS","bbox":[-180.0,60.0,-165.0,75.0]}]},
+  {"id":"turkestan","name":"Russian Turkestan and the Steppe","nation":"russia","paint":[{"country":"KAZ"},{"country":"UZB"},{"country":"KGZ"}]},
+  {"id":"kokand","name":"Kokand","nation":"kokand","paint":[
+    {"poly":[[70.7,40.2],[71.0,41.3],[73.0,41.7],[74.5,41.6],[75.0,40.2],[73.5,39.3],[71.5,39.5]]}]},
+  {"id":"bukhara","name":"Bukhara","nation":"bukhara","paint":[
+    {"poly":[[62.5,38.5],[63.0,40.0],[64.5,40.5],[65.7,40.0],[66.4,39.2],[67.5,38.6],[68.0,39.0],[69.5,39.2],[70.5,39.0],[71.5,38.2],[71.5,37.2],[69.2,37.1],[67.8,37.2],[66.4,37.4],[65.5,37.8]]}]},
+  {"id":"khiva","name":"Khiva","nation":"khiva","paint":[{"poly":[[59.5,40.8],[60.0,42.2],[61.8,42.0],[61.8,40.9]]}]},
+  {"id":"turkmen-steppe","name":"Turkmen country","nation":"turkmen","paint":[{"country":"TKM"}]},
+  {"id":"transcaspia","name":"Russian Transcaspia","nation":"russia","paint":[{"poly":[[52.5,38.7],[53.7,40.6],[54.3,40.4],[54.0,39.0]]}]},
+  {"id":"china","name":"Qing Empire","nation":"qing-china","paint":[{"country":"CHN"},{"country":"TWN"}]},
+  {"id":"mongolia","name":"Outer Mongolia","nation":"mongolia","paint":[{"country":"MNG"},{"poly":[[88.5,49.5],[99.5,49.5],[99.5,52.5],[88.5,52.5]]}]},
+  {"id":"tibet","name":"Tibet","nation":"tibet","paint":[
+    {"poly":[[79.0,30.5],[79.2,34.5],[90.0,35.5],[98.0,34.0],[98.5,30.0],[98.5,28.5],[92.0,27.8],[88.0,27.8],[82.0,29.5]]}]},
+  {"id":"kashgaria","name":"Yettishar","nation":"kashgaria","paint":[
+    {"poly":[[74.0,36.5],[74.5,40.5],[81.0,42.0],[85.0,42.5],[89.5,43.0],[89.5,41.0],[88.0,39.0],[84.0,37.5],[79.0,36.0],[76.0,35.8]]}]},
+  {"id":"ili","name":"Ili (Kuldja)","nation":"russia","paint":[
+    {"poly":[[79.8,43.0],[81.8,43.0],[83.0,43.5],[83.0,44.3],[81.0,44.8],[79.8,44.2]]}]},
+  {"id":"korea","name":"Korea","nation":"korea","paint":[{"country":"PRK"},{"country":"KOR"}]},
+  {"id":"japan","name":"Japan","nation":"japan","paint":[{"country":"JPN"},{"rect":[145.0,43.2,156.4,50.9]}]},
+  {"id":"ryukyu","name":"Ryukyu Islands","nation":"ryukyu","paint":[
+    {"poly":[[122.8,24.0],[128.5,24.0],[128.5,27.2],[126.5,27.8],[122.8,26.0]]},{"tiles":[[127.72,26.22]]}]},
+  {"id":"hong-kong","name":"Hong Kong","nation":"united-kingdom","paint":[{"country":"HKG"},{"tiles":[[114.17,22.28]]}]},
+  {"id":"macau","name":"Macau","nation":"portugal","paint":[{"country":"MAC"},{"tiles":[[113.54,22.2]]}]},
+  {"id":"vietnam","name":"Dai Nam","nation":"vietnam","paint":[{"country":"VNM"}]},
+  {"id":"cochinchina","name":"French Cochinchina","nation":"france","paint":[
+    {"poly":[[104.4,10.4],[104.9,11.0],[106.0,11.7],[107.4,11.5],[107.6,10.4],[106.2,8.5],[104.8,8.6]]}]},
+  {"id":"cambodia","name":"Cambodia","nation":"cambodia","paint":[{"country":"KHM"}]},
+  {"id":"siam","name":"Siam","nation":"siam","paint":[
+    {"country":"THA"},{"country":"LAO"},{"poly":[[99.5,5.5],[103.5,5.5],[103.5,6.8],[99.5,6.8]]}]},
+  {"id":"burma","name":"Burma","nation":"burma","paint":[{"country":"MMR"}]},
+  {"id":"british-burma","name":"British Burma","nation":"united-kingdom","paint":[
+    {"poly":[[92.0,20.9],[93.5,21.0],[94.5,19.8],[94.4,18.5],[95.2,19.4],[96.5,19.4],[97.4,18.7],[97.9,17.8],[98.6,16.0],[99.2,14.5],[98.7,12.0],[98.5,9.8],[94.0,9.8],[92.0,15.0]]}]},
+  {"id":"british-india","name":"British India","nation":"united-kingdom","paint":[{"country":"IND"},{"country":"PAK"},{"country":"BGD"}]},
+  {"id":"kalat","name":"Kalat","nation":"kalat","paint":[{"poly":[[63.5,25.2],[68.0,25.2],[68.0,31.0],[65.5,31.0],[63.5,29.0]]}]},
+  {"id":"nepal","name":"Nepal","nation":"nepal","paint":[{"country":"NPL"}]},
+  {"id":"bhutan","name":"Bhutan","nation":"bhutan","paint":[{"country":"BTN"}]},
+  {"id":"hyderabad","name":"Hyderabad","nation":"hyderabad","paint":[
+    {"poly":[[76.0,15.7],[77.5,15.7],[79.0,16.0],[80.8,16.8],[81.2,18.5],[80.3,19.8],[79.0,20.2],[77.5,20.1],[76.0,20.0],[75.0,19.2],[75.5,17.5]]}]},
+  {"id":"kashmir","name":"Jammu and Kashmir","nation":"kashmir","paint":[
+    {"poly":[[73.3,32.8],[75.5,32.4],[77.2,32.5],[79.0,32.8],[80.2,34.5],[79.5,35.8],[77.0,35.6],[75.0,36.8],[74.0,36.9],[72.5,36.0],[73.0,34.5]]}]},
+  {"id":"mysore","name":"Mysore","nation":"mysore","paint":[{"poly":[[75.5,11.8],[78.4,11.8],[78.4,14.5],[77.0,15.0],[75.5,14.5]]}]},
+  {"id":"gwalior","name":"Gwalior","nation":"gwalior","paint":[{"poly":[[75.5,22.5],[79.5,23.5],[79.5,26.8],[77.0,26.9],[76.5,24.5],[75.5,23.8]]}]},
+  {"id":"baroda","name":"Baroda","nation":"baroda","paint":[{"poly":[[72.5,21.5],[73.8,21.5],[73.8,23.2],[72.5,23.2]]}]},
+  {"id":"jaipur","name":"Jaipur","nation":"jaipur","paint":[{"poly":[[74.8,26.0],[77.0,26.0],[77.0,28.2],[74.8,28.0]]}]},
+  {"id":"jodhpur","name":"Marwar","nation":"jodhpur","paint":[{"poly":[[70.5,24.8],[74.8,24.8],[74.8,27.8],[72.0,28.0],[70.3,26.5]]}]},
+  {"id":"udaipur","name":"Mewar","nation":"udaipur","paint":[{"poly":[[73.5,23.8],[75.0,23.8],[75.0,25.5],[73.5,25.5]]}]},
+  {"id":"travancore","name":"Travancore","nation":"travancore","paint":[{"poly":[[76.2,8.0],[77.6,8.0],[77.2,9.8],[76.5,10.2]]}]},
+  {"id":"ceylon","name":"Ceylon","nation":"united-kingdom","paint":[{"country":"LKA"}]},
+  {"id":"goa","name":"Portuguese India","nation":"portugal","paint":[{"rect":[73.7,14.9,74.35,15.8]},{"tiles":[[73.84,15.5]]}]},
+  {"id":"french-india","name":"French India","nation":"france","paint":[{"tiles":[[79.83,11.93]]}]},
+  {"id":"aden","name":"Aden","nation":"united-kingdom","paint":[{"tiles":[[45.0,12.8]]}]},
+  {"id":"maldives","name":"Maldives","nation":"maldives","paint":[{"tiles":[[73.5,4.17]]}]},
+  {"id":"persia","name":"Persia","nation":"persia","paint":[{"country":"IRN"}]},
+  {"id":"afghanistan","name":"Afghanistan","nation":"afghanistan","paint":[{"country":"AFG"}]},
+  {"id":"ottoman-asia","name":"Ottoman Asia","nation":"ottoman-empire","paint":[
+    {"country":"TUR"},{"country":"SYR"},{"country":"LBN"},{"country":"ISR"},{"country":"PSX"},{"country":"JOR"},{"country":"IRQ"},{"country":"CYP"},{"country":"CYN"},
+    {"poly":[[41.3,41.3],[42.5,41.3],[42.5,42.0],[41.3,42.0]]}]},
+  {"id":"hejaz","name":"Hejaz and Asir","nation":"ottoman-empire","paint":[
+    {"poly":[[34.5,29.6],[37.5,29.2],[38.8,27.5],[39.5,26.0],[41.0,24.0],[41.8,21.0],[42.8,19.0],[43.2,17.0],[42.6,16.2],[36.0,16.2],[34.0,28.0]]}]},
+  {"id":"hasa","name":"Hasa","nation":"ottoman-empire","paint":[{"poly":[[48.0,28.5],[50.0,28.5],[52.0,25.0],[51.2,24.0],[49.0,24.0],[48.5,26.0]]}]},
+  {"id":"yemen","name":"Ottoman Yemen","nation":"ottoman-empire","paint":[
+    {"poly":[[42.4,12.7],[44.0,12.7],[45.3,14.0],[45.3,16.8],[43.3,17.2],[42.7,16.3]]}]},
+  {"id":"najd","name":"Najd","nation":"najd","paint":[{"poly":[[44.0,22.0],[48.4,22.0],[48.4,26.2],[44.0,26.2]]}]},
+  {"id":"jabal-shammar","name":"Jabal Shammar","nation":"jabal-shammar","paint":[
+    {"poly":[[38.0,26.8],[43.0,26.0],[44.0,28.5],[40.5,30.5],[38.0,29.5]]}]},
+  {"id":"oman","name":"Oman","nation":"oman","paint":[{"country":"OMN"}]},
+  {"id":"kuwait","name":"Kuwait","nation":"kuwait","paint":[{"country":"KWT"},{"tiles":[[47.98,29.37]]}]},
+  {"id":"bahrain","name":"Bahrain","nation":"bahrain","paint":[{"country":"BHR"},{"tiles":[[50.55,26.15]]}]},
+  {"id":"straits-settlements","name":"Straits Settlements","nation":"united-kingdom","paint":[
+    {"country":"SGP"},{"tiles":[[103.82,1.29],[100.33,5.41],[102.25,2.2]]}]},
+  {"id":"malay-residencies","name":"British Malay residencies","nation":"united-kingdom","paint":[{"poly":[[100.2,2.6],[102.3,2.6],[102.3,5.0],[100.2,5.0]]}]},
+  {"id":"johor","name":"Johor","nation":"johor","paint":[{"poly":[[102.5,1.3],[104.2,1.3],[104.2,2.8],[102.5,2.8]]}]},
+  {"id":"dutch-east-indies","name":"Dutch East Indies","nation":"netherlands","paint":[{"country":"IDN"}]},
+  {"id":"aceh","name":"Aceh","nation":"aceh","paint":[{"poly":[[94.8,3.9],[98.0,3.9],[98.5,4.5],[97.5,5.9],[95.0,5.9]]}]},
+  {"id":"sarawak","name":"Sarawak","nation":"sarawak","paint":[
+    {"poly":[[109.5,0.8],[111.5,0.8],[114.5,2.5],[115.2,4.6],[114.0,4.7],[111.0,3.2],[109.5,2.2]]}]},
+  {"id":"brunei","name":"Brunei","nation":"brunei","paint":[{"country":"BRN"},{"tiles":[[114.94,4.89]]}]},
+  {"id":"philippines","name":"Spanish Philippines","nation":"spain","paint":[{"country":"PHL"}]},
+  {"id":"sulu","name":"Sulu","nation":"sulu","paint":[{"poly":[[119.4,4.8],[122.0,4.8],[122.0,6.6],[119.4,6.6]]},{"tiles":[[121.0,6.05],[120.0,5.9],[119.5,5.0]]}]},
+  {"id":"timor-leste","name":"Portuguese Timor","nation":"portugal","paint":[{"country":"TLS"},{"tiles":[[125.57,-8.56]]}]}
+]

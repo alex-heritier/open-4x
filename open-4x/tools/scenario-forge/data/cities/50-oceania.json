@@ -1,0 +1,17 @@
+[
+  {"nation":"united-kingdom","name":"Sydney","lon":151.21,"lat":-33.87,"pop":220,"dev":5},
+  {"nation":"united-kingdom","name":"Melbourne","lon":144.96,"lat":-37.81,"pop":260,"dev":5},
+  {"nation":"united-kingdom","name":"Brisbane","lon":153.03,"lat":-27.47,"pop":30,"dev":3},
+  {"nation":"united-kingdom","name":"Adelaide","lon":138.60,"lat":-34.93,"pop":100,"dev":4},
+  {"nation":"united-kingdom","name":"Perth","lon":115.86,"lat":-31.95,"pop":7,"dev":3},
+  {"nation":"united-kingdom","name":"Hobart","lon":147.33,"lat":-42.88,"pop":25,"dev":3},
+  {"nation":"united-kingdom","name":"Auckland","lon":174.76,"lat":-36.85,"pop":30,"dev":3},
+  {"nation":"united-kingdom","name":"Wellington","lon":174.78,"lat":-41.29,"pop":21,"dev":3},
+  {"nation":"united-kingdom","name":"Christchurch","lon":172.64,"lat":-43.53,"pop":14,"dev":3},
+  {"nation":"united-kingdom","name":"Dunedin","lon":170.50,"lat":-45.87,"pop":25,"dev":3},
+  {"nation":"united-kingdom","name":"Levuka","lon":178.83,"lat":-17.68,"pop":2,"dev":2},
+  {"nation":"maori-king","name":"Te Kuiti","lon":175.17,"lat":-38.33,"pop":2,"capital":true},
+  {"nation":"tonga","name":"Nuku'alofa","lon":-175.20,"lat":-21.14,"pop":5,"capital":true},
+  {"nation":"samoa","name":"Apia","lon":-171.75,"lat":-13.83,"pop":3,"capital":true},
+  {"nation":"tahiti","name":"Papeete","lon":-149.57,"lat":-17.53,"pop":4,"capital":true}
+]

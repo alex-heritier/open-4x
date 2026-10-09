@@ -1,7 +1,7 @@
 //! Both embedded and remote transports accept the exact same request/response protocol.
 use fourx_content::Pack;
 use fourx_runtime::Host;
-use fourx_sim::{Request, Response};
+use fourx_sim::{Id, Request, Response};
 use std::collections::VecDeque;
 
 pub enum Event {
@@ -25,6 +25,9 @@ fn decode(text: &str) -> Event {
 }
 pub struct Connection {
     host: Option<Host>,
+    /// The nation an embedded host plays as (the scenario's commander, or the one chosen with
+    /// `--nation`). A remote server assigns its own.
+    player: Id,
     inbox: VecDeque<Event>,
     #[cfg(not(target_arch = "wasm32"))]
     remote: Option<NativeRemote>,
@@ -33,12 +36,14 @@ pub struct Connection {
 }
 impl Connection {
     pub fn local(host: Host) -> Self {
+        let player = host.commander();
         let inbox = VecDeque::from([
             Event::Content(host.pack.clone()),
-            Event::Response(host.snapshot(1)),
+            Event::Response(host.snapshot(player)),
         ]);
         Self {
             host: Some(host),
+            player,
             inbox,
             remote: None,
         }
@@ -46,6 +51,7 @@ impl Connection {
     pub fn remote(url: String, token: String) -> Self {
         let mut connection = Self {
             host: None,
+            player: 0,
             inbox: VecDeque::new(),
             remote: None,
         };
@@ -58,7 +64,7 @@ impl Connection {
     pub fn send(&mut self, request: Request) {
         if let Some(host) = &mut self.host {
             self.inbox
-                .push_back(Event::Response(host.request(1, request)));
+                .push_back(Event::Response(host.request(self.player, request)));
         } else if let Some(remote) = &mut self.remote {
             if let Err(e) = remote.send(serde_json::to_string(&request).unwrap()) {
                 self.inbox.push_back(Event::Error(e));

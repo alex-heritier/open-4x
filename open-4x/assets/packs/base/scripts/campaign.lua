@@ -3,9 +3,5 @@
 function on_turn(context)
     local industrial_boom = 100
     if context.turn % 12 == 0 then industrial_boom = 120 end
-    return {
-        income_percent = industrial_boom,
-        fire_percent = 100,
-        shock_percent = 100,
-    }
+    return { income_percent = industrial_boom }
 end

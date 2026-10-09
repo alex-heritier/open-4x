@@ -1,0 +1,62 @@
+[
+  {"id":"british-isles","name":"British Isles","nation":"united-kingdom","paint":[{"country":"GBR"},{"country":"IRL"},{"country":"IMN"},{"country":"JEY"},{"country":"GGY"}]},
+  {"id":"iceland","name":"Iceland","nation":"denmark","paint":[{"country":"ISL"}]},
+  {"id":"faroe-islands","name":"Faroe Islands","nation":"denmark","paint":[{"country":"FRO"},{"tiles":[[-6.8,62.0]]}]},
+  {"id":"greenland","name":"Greenland","nation":"denmark","paint":[{"country":"GRL"}]},
+  {"id":"denmark","name":"Denmark","nation":"denmark","paint":[{"country":"DNK","bbox":[7.5,54.4,15.5,58.0]}]},
+  {"id":"norway","name":"Norway","nation":"norway","paint":[{"country":"NOR","bbox":[4.0,57.0,32.0,72.0]}]},
+  {"id":"sweden","name":"Sweden","nation":"sweden","paint":[{"country":"SWE"}]},
+  {"id":"russia","name":"Russian Empire","nation":"russia","paint":[
+    {"country":"RUS","bbox":[18.0,40.0,70.0,77.0]},{"country":"BLR"},{"country":"UKR"},{"country":"MDA"},
+    {"country":"EST"},{"country":"LVA"},{"country":"LTU"},{"country":"GEO"},{"country":"ARM"},{"country":"AZE"}]},
+  {"id":"finland","name":"Grand Duchy of Finland","nation":"finland","paint":[
+    {"country":"FIN"},{"poly":[[27.9,60.2],[30.0,60.2],[31.1,60.6],[31.6,61.6],[31.6,62.9],[27.9,62.9]]}]},
+  {"id":"france","name":"France","nation":"france","paint":[{"country":"FRA","bbox":[-5.5,41.0,10.0,51.5]}]},
+  {"id":"french-guiana","name":"French Guiana","nation":"france","paint":[{"country":"FRA","bbox":[-55.0,2.0,-51.0,6.0]}]},
+  {"id":"french-antilles","name":"French Antilles","nation":"france","paint":[{"country":"FRA","bbox":[-62.0,14.0,-60.5,16.6]},{"tiles":[[-61.05,14.65],[-61.5,16.2]]}]},
+  {"id":"reunion","name":"Reunion and Mayotte","nation":"france","paint":[{"country":"FRA","bbox":[55.0,-21.5,56.0,-20.8]},{"tiles":[[45.15,-12.8]]}]},
+  {"id":"saint-pierre","name":"Saint-Pierre and Miquelon","nation":"france","paint":[{"country":"SPM"},{"tiles":[[-56.2,46.8]]}]},
+  {"id":"new-caledonia","name":"New Caledonia","nation":"france","paint":[{"country":"NCL"}]},
+  {"id":"tahiti","name":"Tahiti and the French Polynesian islands","nation":"tahiti","paint":[{"country":"PYF"},{"tiles":[[-149.57,-17.55]]}]},
+  {"id":"belgium","name":"Belgium","nation":"belgium","paint":[{"country":"BEL"}]},
+  {"id":"netherlands","name":"Netherlands","nation":"netherlands","paint":[{"country":"NLD"}]},
+  {"id":"germany","name":"German Empire","nation":"germany","paint":[
+    {"country":"DEU"},{"country":"POL"},
+    {"poly":[[5.9,49.55],[6.4,49.5],[8.3,49.05],[8.1,48.5],[7.7,47.9],[7.58,47.55],[7.0,47.5],[6.9,47.75],[6.95,48.2],[6.3,48.65],[5.9,49.0]]},
+    {"country":"RUS","bbox":[19.3,54.2,23.0,55.5]},
+    {"country":"LTU","bbox":[20.5,55.0,22.0,55.85]},
+    {"rect":[8.0,54.4,10.6,55.4]}]},
+  {"id":"russian-poland","name":"Vistula Land","nation":"russia","paint":[
+    {"poly":[[19.0,53.1],[20.2,53.3],[21.5,53.5],[22.4,53.9],[22.8,54.35],[24.5,54.35],[24.5,50.4],[23.0,50.4],[21.7,50.55],[20.5,50.4],[19.15,50.3],[18.5,51.0],[18.2,51.3],[17.95,51.6],[18.2,52.0],[18.5,52.4],[19.0,52.7]]}]},
+  {"id":"luxembourg","name":"Luxembourg","nation":"luxembourg","paint":[{"country":"LUX"},{"tiles":[[6.1,49.6]]}]},
+  {"id":"switzerland","name":"Switzerland","nation":"switzerland","paint":[{"country":"CHE"}]},
+  {"id":"italy","name":"Italy","nation":"italy","paint":[{"country":"ITA"}]},
+  {"id":"austria-hungary","name":"Austria-Hungary","nation":"austria-hungary","paint":[
+    {"country":"AUT"},{"country":"HUN"},{"country":"CZE"},{"country":"SVK"},{"country":"SVN"},{"country":"HRV"},
+    {"poly":[[19.2,50.25],[20.5,50.4],[21.7,50.55],[23.0,50.4],[24.5,50.4],[25.3,50.0],[26.0,49.5],[26.0,48.0],[19.0,48.0],[19.0,50.2]]},
+    {"rect":[10.4,45.75,12.5,47.1]},
+    {"rect":[13.5,45.4,14.3,46.2]},
+    {"poly":[[20.2,45.0],[22.4,44.6],[23.0,45.0],[24.2,45.5],[25.5,45.5],[26.3,45.8],[26.3,46.8],[25.3,47.4],[24.8,47.9],[24.0,48.1],[22.8,48.1],[20.2,48.1]]},
+    {"poly":[[24.8,48.3],[25.3,47.4],[26.2,47.4],[27.6,47.9],[26.8,48.5],[25.5,48.7]]}]},
+  {"id":"liechtenstein","name":"Liechtenstein","nation":"liechtenstein","paint":[{"country":"LIE"},{"tiles":[[9.55,47.15]]}]},
+  {"id":"san-marino","name":"San Marino","nation":"san-marino","paint":[{"country":"SMR"},{"tiles":[[12.45,43.94]]}]},
+  {"id":"romania","name":"Romania","nation":"romania","paint":[
+    {"country":"ROU"},{"poly":[[27.7,45.4],[30.2,45.2],[30.2,46.0],[28.3,46.25],[27.7,46.0]]}]},
+  {"id":"ottoman-europe","name":"Rumelia","nation":"ottoman-empire","paint":[
+    {"country":"ALB"},{"country":"KOS"},{"country":"MKD"},{"country":"BGR"},{"country":"GRC"},{"country":"BIH"},{"country":"SRB"},{"country":"MNE"},
+    {"poly":[[27.9,44.0],[28.2,43.7],[29.8,43.7],[29.8,45.5],[28.9,45.55],[28.05,45.43],[27.85,44.7]]}]},
+  {"id":"vojvodina","name":"Vojvodina and Slavonia","nation":"austria-hungary","paint":[{"poly":[[18.8,44.95],[21.4,44.8],[21.4,46.0],[18.8,46.0]]}]},
+  {"id":"serbia","name":"Serbia","nation":"serbia","paint":[
+    {"poly":[[19.1,44.9],[21.0,44.9],[21.7,44.7],[22.6,44.7],[22.6,43.9],[22.0,43.5],[21.4,43.3],[20.5,43.4],[19.9,43.7],[19.4,44.0],[19.1,44.3]]}]},
+  {"id":"montenegro","name":"Montenegro","nation":"montenegro","paint":[{"country":"MNE","bbox":[18.4,42.2,19.2,43.1]},{"tiles":[[18.92,42.39]]}]},
+  {"id":"greece","name":"Greece","nation":"greece","paint":[
+    {"country":"GRC","bbox":[19.3,36.1,26.0,39.25]},{"country":"GRC","bbox":[19.3,39.3,20.2,39.9]}]},
+  {"id":"spain","name":"Spain","nation":"spain","paint":[{"country":"ESP"}]},
+  {"id":"carlist-spain","name":"Carlist Navarre and Basque country","nation":"carlist-spain","paint":[
+    {"poly":[[-3.0,43.35],[-1.4,43.3],[-1.3,42.2],[-2.5,42.4],[-3.0,42.9]]}]},
+  {"id":"portugal","name":"Portugal","nation":"portugal","paint":[{"country":"PRT"}]},
+  {"id":"andorra","name":"Andorra","nation":"andorra","paint":[{"country":"AND"},{"tiles":[[1.52,42.55]]}]},
+  {"id":"monaco","name":"Monaco","nation":"monaco","paint":[{"country":"MCO"},{"tiles":[[7.42,43.74]]}]},
+  {"id":"gibraltar","name":"Gibraltar","nation":"united-kingdom","paint":[{"tiles":[[-5.35,36.13]]}]},
+  {"id":"malta","name":"Malta","nation":"united-kingdom","paint":[{"country":"MLT"},{"tiles":[[14.5,35.9]]}]}
+]

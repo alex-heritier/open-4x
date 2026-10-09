@@ -1,0 +1,20 @@
+{
+  "patches": [
+    {"name":"Pripet Marshes","bbox":[24.0,51.2,31.5,53.2],"cover":"Marsh","density":0.5},
+    {"name":"Sudd","bbox":[29.5,6.0,32.8,9.8],"cover":"Marsh","density":0.6},
+    {"name":"Okavango","bbox":[22.0,-20.2,23.8,-18.6],"cover":"Marsh","density":0.7},
+    {"name":"Inner Niger delta","bbox":[-5.4,14.0,-3.4,16.4],"cover":"Marsh","density":0.5},
+    {"name":"Everglades","bbox":[-81.6,25.0,-80.3,26.4],"cover":"Marsh","density":0.7},
+    {"name":"Pantanal","bbox":[-58.5,-19.8,-56.0,-16.4],"cover":"Marsh","density":0.5},
+    {"name":"Mesopotamian marshes","bbox":[46.3,30.4,47.8,31.6],"cover":"Marsh","density":0.7},
+    {"name":"Hudson Bay lowlands","bbox":[-88.0,50.8,-80.5,55.5],"cover":"Marsh","density":0.4},
+    {"name":"West Siberian lowland","bbox":[68.0,56.0,84.0,64.0],"cover":"Marsh","density":0.3},
+    {"name":"Mackenzie delta","bbox":[-136.5,67.5,-133.0,69.5],"cover":"Marsh","density":0.5},
+    {"name":"Rann of Kutch","bbox":[68.5,23.2,71.0,24.6],"cover":"Marsh","density":0.5},
+    {"name":"Nile delta","bbox":[29.9,30.0,32.4,31.7],"terrain":"Plains","density":0.9},
+    {"name":"Mesopotamian plain","poly":[[43.8,33.8],[45.6,34.0],[47.0,32.2],[48.0,30.6],[47.0,30.0],[45.6,30.6],[44.0,32.0]],"terrain":"Plains","density":0.85},
+    {"name":"Indus plain","poly":[[70.2,30.2],[72.6,31.2],[74.0,32.0],[72.4,32.4],[70.4,31.4],[68.0,27.6],[67.8,25.2],[69.6,24.6]],"terrain":"Plains","density":0.85}
+  ],
+  "land": [],
+  "water": [[29.12,41.18],[28.477,41.245],[28.2,40.75],[27.4,40.65],[26.6,40.25],[26.367,40.714],[26.2,40.05],[42.539,12.897],[43.35,12.7],[43.242,12.211],[32.35,31.15],[32.38,30.75],[32.45,30.35],[32.55,30.0],[32.695,29.229],[32.695,28.613],[33.398,28.613],[33.398,27.994],[33.398,27.372]]
+}

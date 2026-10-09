@@ -1,138 +1,13 @@
-//! Reproducible original starter art. No Civ3 files or reference-image pixels are used.
-use image::{Rgba, RgbaImage};
+//! Generates the base pack's synthesized audio.  All pictures come from the Python pipeline in
+//! `art/` (see `art/README.md`); this tool deliberately writes no PNGs.
+//!
+//! Every sound is computed from scratch (sines, filtered noise and envelopes) with a fixed noise
+//! seed, so running the tool twice writes identical files. The combat cues are the eight names
+//! of `docs/combat-animation.md` §7.
 use std::{f32::consts::PI, path::PathBuf};
 
-type Color = [u8; 4];
-const INK: Color = [30, 38, 35, 255];
-const GOLD: Color = [204, 167, 93, 255];
-fn pixel(im: &mut RgbaImage, x: i32, y: i32, c: Color) {
-    if x >= 0 && y >= 0 && (x as u32) < im.width() && (y as u32) < im.height() {
-        im.put_pixel(x as u32, y as u32, Rgba(c));
-    }
-}
-fn rect(im: &mut RgbaImage, x: i32, y: i32, w: i32, h: i32, c: Color) {
-    for yy in y..y + h {
-        for xx in x..x + w {
-            pixel(im, xx, yy, c);
-        }
-    }
-}
-fn ellipse(im: &mut RgbaImage, cx: i32, cy: i32, rx: i32, ry: i32, c: Color) {
-    for y in cy - ry..=cy + ry {
-        for x in cx - rx..=cx + rx {
-            if ((x - cx) as f32 / rx as f32).powi(2) + ((y - cy) as f32 / ry as f32).powi(2) <= 1.0
-            {
-                pixel(im, x, y, c);
-            }
-        }
-    }
-}
-fn poly(im: &mut RgbaImage, points: &[(i32, i32)], c: Color) {
-    let min_y = points.iter().map(|p| p.1).min().unwrap();
-    let max_y = points.iter().map(|p| p.1).max().unwrap();
-    for y in min_y..=max_y {
-        let mut xs = Vec::new();
-        for i in 0..points.len() {
-            let (x1, y1) = points[i];
-            let (x2, y2) = points[(i + 1) % points.len()];
-            if (y1 <= y && y2 > y) || (y2 <= y && y1 > y) {
-                xs.push(x1 + (y - y1) * (x2 - x1) / (y2 - y1));
-            }
-        }
-        xs.sort();
-        for pair in xs.chunks_exact(2) {
-            for x in pair[0]..=pair[1] {
-                pixel(im, x, y, c);
-            }
-        }
-    }
-}
-fn line(im: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32, c: Color) {
-    let steps = (x2 - x1).abs().max((y2 - y1).abs()).max(1);
-    for i in 0..=steps {
-        pixel(
-            im,
-            x1 + (x2 - x1) * i / steps,
-            y1 + (y2 - y1) * i / steps,
-            c,
-        );
-    }
-}
-fn noise(x: u32, y: u32, seed: u32) -> f32 {
-    let mut v = x
-        .wrapping_mul(374761393)
-        .wrapping_add(y.wrapping_mul(668265263))
-        .wrapping_add(seed.wrapping_mul(1274126177));
-    v = (v ^ (v >> 13)).wrapping_mul(1274126177);
-    (v ^ (v >> 16)) as f32 / u32::MAX as f32
-}
-fn tree(im: &mut RgbaImage, x: i32, y: i32, size: i32) {
-    ellipse(im, x + 2, y + 2, size, size / 3, [20, 40, 26, 80]);
-    rect(im, x - 1, y - size / 2, 3, size / 2, [96, 76, 46, 255]);
-    for (i, c) in [[27, 62, 38, 255], [47, 83, 43, 255], [76, 111, 48, 255]]
-        .into_iter()
-        .enumerate()
-    {
-        let sy = y - size / 2 - i as i32 * size / 3;
-        poly(
-            im,
-            &[(x - size / 2, sy), (x + size / 2, sy), (x, sy - size)],
-            c,
-        );
-    }
-    line(
-        im,
-        x,
-        y - size * 2,
-        x - size / 3,
-        y - size,
-        [112, 130, 61, 255],
-    );
-}
-fn soldier(im: &mut RgbaImage, x: i32, y: i32, coat: Color) {
-    ellipse(im, x, y + 1, 6, 2, [12, 20, 20, 100]);
-    line(im, x - 2, y - 5, x - 3, y, INK);
-    line(im, x + 2, y - 5, x + 3, y, INK);
-    rect(im, x - 3, y - 15, 7, 10, coat);
-    line(im, x - 3, y - 13, x + 3, y - 8, GOLD);
-    rect(im, x - 2, y - 19, 5, 5, [208, 173, 133, 255]);
-    rect(im, x - 3, y - 22, 7, 4, INK);
-    line(im, x + 5, y - 20, x + 5, y - 3, [89, 66, 42, 255]);
-    line(im, x + 5, y - 25, x + 5, y - 20, [184, 191, 177, 255]);
-}
-fn building(im: &mut RgbaImage, x: i32, y: i32, w: i32, h: i32) {
-    poly(
-        im,
-        &[(x, y), (x + w, y - 5), (x + w, y - h - 5), (x, y - h)],
-        [155, 141, 108, 255],
-    );
-    poly(
-        im,
-        &[
-            (x, y),
-            (x - w / 2, y - 5),
-            (x - w / 2, y - h - 5),
-            (x, y - h),
-        ],
-        [86, 91, 75, 255],
-    );
-    poly(
-        im,
-        &[
-            (x - w / 2 - 2, y - h - 5),
-            (x, y - h - 12),
-            (x + w + 2, y - h - 5),
-            (x, y - h + 1),
-        ],
-        [49, 61, 57, 255],
-    );
-    for xx in (x + 3..x + w - 2).step_by(5) {
-        for yy in (y - h + 4..y - 2).step_by(7) {
-            rect(im, xx, yy, 2, 3, [46, 50, 40, 255]);
-        }
-    }
-    rect(im, x + 2, y - 7, 4, 7, [54, 46, 34, 255]);
-}
+const RATE: u32 = 22_050;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::args()
         .nth(1)
@@ -140,228 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/packs/base")
         });
-    for dir in ["terrain", "sprites", "audio", "ui"] {
-        std::fs::create_dir_all(root.join(dir))?;
-    }
-    let mut atlas = RgbaImage::new(128 * 9, 64 * 9);
-    let palette = [
-        [112.0, 130.0, 67.0],
-        [192.0, 170.0, 109.0],
-        [36.0, 104.0, 123.0],
-    ];
-    for cell in 0..81usize {
-        let row = cell / 9;
-        let col = cell % 9;
-        let digits = [col % 3, row % 3, row / 3, col / 3];
-        for y in 0..64u32 {
-            for x in 0..128u32 {
-                let sx = (x as f32 + 0.5 - 64.0) / 64.0;
-                let sy = (y as f32 + 0.5 - 32.0) / 32.0;
-                if sx.abs() + sy.abs() > 1.025 {
-                    continue;
-                }
-                // Linear interpolation in four center-to-edge triangles: exact vertex colors.
-                let weights = [(-sy).max(0.0), sx.max(0.0), sy.max(0.0), (-sx).max(0.0)];
-                let center = (1.0 - sx.abs() - sy.abs()).max(0.0);
-                let mut type_weight = [0.0f32; 3];
-                for i in 0..4 {
-                    type_weight[digits[i]] += weights[i] + center / 4.0;
-                }
-                let water = type_weight[2];
-                let sample = noise(x, y, cell as u32);
-                let mut rgb = [0u8; 4];
-                rgb[3] = 255;
-                for channel in 0..3 {
-                    let base = (0..3)
-                        .map(|t| palette[t][channel] * type_weight[t])
-                        .sum::<f32>();
-                    let surf = if water > 0.12 && water < 0.65 {
-                        (1.0 - (water - 0.35).abs() * 3.0) * 22.0
-                    } else {
-                        0.0
-                    };
-                    let ripples = if water > 0.5 {
-                        ((x as f32 * 0.2 + y as f32 * 0.8).sin() + 1.0) * 4.0
-                    } else {
-                        0.0
-                    };
-                    rgb[channel] =
-                        (base + (sample - 0.5) * 22.0 + surf + ripples).clamp(0.0, 255.0) as u8;
-                }
-                atlas.put_pixel(col as u32 * 128 + x, row as u32 * 64 + y, Rgba(rgb));
-            }
-        }
-    }
-    atlas.save(root.join("terrain/temperate.png"))?;
-    let mut forest = RgbaImage::new(128, 112);
-    for (x, y, s) in [
-        (38, 79, 18),
-        (75, 78, 20),
-        (53, 67, 19),
-        (87, 63, 17),
-        (30, 60, 17),
-        (65, 49, 15),
-    ] {
-        tree(&mut forest, x, y, s);
-    }
-    forest.save(root.join("sprites/forest.png"))?;
-    let mut mountain = RgbaImage::new(128, 112);
-    ellipse(&mut mountain, 66, 89, 51, 12, [27, 38, 27, 80]);
-    poly(
-        &mut mountain,
-        &[(15, 88), (53, 25), (98, 89)],
-        [98, 108, 92, 255],
-    );
-    poly(
-        &mut mountain,
-        &[(53, 25), (61, 74), (98, 89)],
-        [63, 76, 67, 255],
-    );
-    poly(
-        &mut mountain,
-        &[(49, 33), (53, 25), (68, 48), (59, 44), (55, 49)],
-        [222, 223, 199, 255],
-    );
-    poly(
-        &mut mountain,
-        &[(45, 91), (88, 47), (119, 87)],
-        [136, 137, 109, 255],
-    );
-    poly(
-        &mut mountain,
-        &[(88, 47), (96, 82), (119, 87)],
-        [76, 90, 78, 255],
-    );
-    for i in 0..24 {
-        let x = 23 + i * 3;
-        let y = 84 - (i % 5) * 2;
-        line(&mut mountain, x, y, x + 4, y - 4, [109, 113, 83, 255]);
-    }
-    mountain.save(root.join("sprites/mountain.png"))?;
-    let mut city = RgbaImage::new(128, 112);
-    ellipse(&mut city, 64, 91, 48, 15, [43, 49, 35, 100]);
-    poly(
-        &mut city,
-        &[(15, 83), (64, 63), (116, 83), (64, 107)],
-        [153, 139, 96, 255],
-    );
-    for (x, y, w, h) in [
-        (41, 74, 14, 19),
-        (65, 71, 15, 23),
-        (83, 78, 18, 18),
-        (27, 85, 14, 19),
-        (54, 92, 20, 25),
-        (85, 93, 19, 26),
-    ] {
-        building(&mut city, x, y, w, h);
-    }
-    rect(&mut city, 77, 42, 7, 37, [79, 74, 63, 255]);
-    rect(&mut city, 75, 40, 11, 4, [47, 53, 48, 255]);
-    for i in 0..4 {
-        ellipse(
-            &mut city,
-            79 - i * 4,
-            34 - i * 6,
-            5 + i,
-            3 + i,
-            [147, 152, 144, 90],
-        );
-    }
-    building(&mut city, 53, 60, 16, 27);
-    rect(&mut city, 53, 15, 2, 18, GOLD);
-    rect(&mut city, 55, 16, 15, 9, [243, 225, 191, 255]);
-    ellipse(&mut city, 61, 20, 3, 3, [170, 54, 44, 255]);
-    city.save(root.join("sprites/city.png"))?;
-    for (kind, coat) in [
-        ("infantry", [34, 51, 65, 255]),
-        ("pioneer", [137, 104, 55, 255]),
-    ] {
-        let mut im = RgbaImage::new(80, 80);
-        for (x, y) in [(28, 60), (50, 57), (40, 43)] {
-            soldier(&mut im, x, y, coat);
-        }
-        im.save(root.join(format!("sprites/{kind}.png")))?;
-    }
-    let mut cavalry = RgbaImage::new(80, 80);
-    ellipse(&mut cavalry, 41, 58, 24, 6, [20, 29, 23, 90]);
-    ellipse(&mut cavalry, 38, 48, 18, 7, [95, 65, 44, 255]);
-    poly(
-        &mut cavalry,
-        &[(48, 49), (51, 30), (59, 29), (62, 35), (57, 44), (56, 51)],
-        [112, 79, 51, 255],
-    );
-    for x in [25, 33, 44, 51] {
-        line(&mut cavalry, x, 49, x - 2, 62, INK);
-        line(&mut cavalry, x + 1, 49, x - 1, 62, INK);
-    }
-    soldier(&mut cavalry, 39, 43, [42, 63, 83, 255]);
-    cavalry.save(root.join("sprites/cavalry.png"))?;
-    let mut gun = RgbaImage::new(80, 80);
-    ellipse(&mut gun, 42, 57, 25, 7, [20, 27, 22, 80]);
-    poly(
-        &mut gun,
-        &[(20, 46), (55, 38), (66, 44), (32, 54)],
-        [68, 79, 65, 255],
-    );
-    ellipse(&mut gun, 33, 53, 8, 8, INK);
-    ellipse(&mut gun, 33, 53, 5, 5, GOLD);
-    ellipse(&mut gun, 57, 45, 7, 7, INK);
-    ellipse(&mut gun, 57, 45, 4, 4, GOLD);
-    poly(
-        &mut gun,
-        &[(35, 39), (62, 25), (66, 30), (42, 45)],
-        [90, 101, 92, 255],
-    );
-    soldier(&mut gun, 17, 57, [42, 55, 66, 255]);
-    gun.save(root.join("sprites/artillery.png"))?;
-    let mut ship = RgbaImage::new(128, 96);
-    ellipse(&mut ship, 65, 75, 56, 10, [126, 184, 184, 90]);
-    poly(
-        &mut ship,
-        &[(10, 65), (94, 43), (119, 55), (42, 82), (24, 78)],
-        [35, 49, 52, 255],
-    );
-    poly(
-        &mut ship,
-        &[(13, 61), (93, 41), (117, 52), (42, 73)],
-        [150, 153, 127, 255],
-    );
-    poly(
-        &mut ship,
-        &[(42, 55), (80, 45), (94, 50), (59, 63)],
-        [60, 77, 77, 255],
-    );
-    for x in [51, 66, 80] {
-        rect(&mut ship, x, 25 - (x - 50) / 4, 7, 28, INK);
-        rect(
-            &mut ship,
-            x - 1,
-            24 - (x - 50) / 4,
-            9,
-            4,
-            [174, 159, 118, 255],
-        );
-        ellipse(&mut ship, x - 4, 15 - (x - 50) / 4, 9, 5, [86, 99, 97, 115]);
-    }
-    line(&mut ship, 97, 46, 97, 14, GOLD);
-    rect(&mut ship, 98, 14, 17, 11, [239, 222, 189, 255]);
-    ellipse(&mut ship, 106, 19, 3, 3, [169, 57, 43, 255]);
-    ship.save(root.join("sprites/ironclad.png"))?;
-    let mut parchment = RgbaImage::new(256, 256);
-    for y in 0..256 {
-        for x in 0..256 {
-            let n = (noise(x, y, 99) - 0.5) * 12.0;
-            parchment.put_pixel(
-                x,
-                y,
-                Rgba([(221.0 + n) as u8, (206.0 + n) as u8, (166.0 + n) as u8, 255]),
-            );
-        }
-    }
-    parchment.save(root.join("ui/parchment.png"))?;
+    std::fs::create_dir_all(root.join("audio"))?;
     let spec = hound::WavSpec {
         channels: 1,
-        sample_rate: 22050,
+        sample_rate: RATE,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
@@ -373,9 +30,321 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         wav.write_sample((value * 16000.0) as i16)?;
     }
     wav.finalize()?;
-    println!(
-        "Generated original terrain, unit, city, relief, parchment, and WAV assets in {}",
-        root.display()
-    );
+    println!("Generated bell.wav in {}", root.display());
+    for (name, samples) in combat_sounds() {
+        let mut wav = hound::WavWriter::create(root.join(format!("audio/{name}.wav")), spec)?;
+        for sample in samples {
+            wav.write_sample((sample * f32::from(i16::MAX)) as i16)?;
+        }
+        wav.finalize()?;
+        println!("Generated {name}.wav in {}", root.display());
+    }
     Ok(())
+}
+
+/// A repeatable stream of white noise in `-1..1` (xorshift).
+struct Noise(u32);
+
+impl Noise {
+    fn next(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 17;
+        self.0 ^= self.0 << 5;
+        self.0 as f32 / u32::MAX as f32 * 2.0 - 1.0
+    }
+    /// A number in `from..to`.
+    fn between(&mut self, from: f32, to: f32) -> f32 {
+        from + (self.next() * 0.5 + 0.5) * (to - from)
+    }
+}
+
+/// Samples for `seconds`, one call of `voice(t)` per sample. A voice keeps its own state.
+fn render(seconds: f32, mut voice: impl FnMut(f32) -> f32) -> Vec<f32> {
+    (0..(seconds * RATE as f32) as usize)
+        .map(|i| voice(i as f32 / RATE as f32))
+        .collect()
+}
+
+/// Adds `layer` into `track` from `at` seconds, scaled by `gain`.
+fn mix(track: &mut [f32], at: f32, layer: &[f32], gain: f32) {
+    let start = (at * RATE as f32) as usize;
+    for (slot, sample) in track.iter_mut().skip(start).zip(layer) {
+        *slot += sample * gain;
+    }
+}
+
+/// A one-pole low-pass filter.
+struct LowPass {
+    state: f32,
+    k: f32,
+}
+
+impl LowPass {
+    fn new(cutoff: f32) -> Self {
+        Self {
+            state: 0.0,
+            k: 1.0 - (-2.0 * PI * cutoff / RATE as f32).exp(),
+        }
+    }
+    fn filter(&mut self, x: f32) -> f32 {
+        self.state += self.k * (x - self.state);
+        self.state
+    }
+}
+
+/// A sine whose pitch glides from `from` Hz toward `to` Hz at `rate` per second.
+fn glide(from: f32, to: f32, rate: f32) -> impl FnMut(f32) -> f32 {
+    let mut phase = 0.0f32;
+    move |t| {
+        let hz = to + (from - to) * (-t * rate).exp();
+        phase += 2.0 * PI * hz / RATE as f32;
+        phase.sin()
+    }
+}
+
+/// A crack of noise with the lows taken out.
+fn crack(noise: &mut Noise, seconds: f32, decay: f32) -> Vec<f32> {
+    let mut low = LowPass::new(1800.0);
+    render(seconds, |t| {
+        let n = noise.next();
+        (n - low.filter(n)) * (-t * decay).exp()
+    })
+}
+
+/// Noise with the highs taken out, fading as `exp(-decay t)`.
+fn rumble(noise: &mut Noise, seconds: f32, cutoff: f32, decay: f32) -> Vec<f32> {
+    let mut low = LowPass::new(cutoff);
+    render(seconds, |t| low.filter(noise.next()) * (-t * decay).exp())
+}
+
+/// A low thump that drops in pitch.
+fn thump(seconds: f32, from: f32, to: f32, decay: f32) -> Vec<f32> {
+    let mut tone = glide(from, to, 30.0);
+    render(seconds, |t| tone(t) * (-t * decay).exp())
+}
+
+fn rifle(noise: &mut Noise) -> Vec<f32> {
+    let mut shot = crack(noise, 0.16, 38.0);
+    for (s, b) in shot.iter_mut().zip(thump(0.16, 140.0, 70.0, 28.0)) {
+        *s += b * 0.35;
+    }
+    shot
+}
+
+fn cannon(noise: &mut Noise, seconds: f32, pitch: f32) -> Vec<f32> {
+    let mut track = vec![0.0; (seconds * RATE as f32) as usize];
+    mix(&mut track, 0.0, &crack(noise, 0.2, 30.0), 0.8);
+    mix(
+        &mut track,
+        0.0,
+        &thump(seconds, 120.0 * pitch, 36.0 * pitch, 7.0),
+        0.9,
+    );
+    mix(&mut track, 0.0, &rumble(noise, seconds, 420.0, 5.0), 1.6);
+    track
+}
+
+fn volley(noise: &mut Noise) -> Vec<f32> {
+    let mut track = vec![0.0; (0.55 * RATE as f32) as usize];
+    for k in 0..6 {
+        let at = noise.between(0.0, 0.1) + k as f32 * 0.012;
+        let gain = noise.between(0.5, 1.0);
+        let shot = rifle(noise);
+        mix(&mut track, at, &shot, gain);
+    }
+    mix(&mut track, 0.0, &rumble(noise, 0.55, 700.0, 9.0), 0.5);
+    track
+}
+
+fn charge(noise: &mut Noise) -> Vec<f32> {
+    let mut track = vec![0.0; (0.95 * RATE as f32) as usize];
+    // Three strides of three hoofbeats, the beats coming closer and louder.
+    for (k, at) in [0.0, 0.09, 0.17, 0.31, 0.39, 0.47, 0.60, 0.68, 0.75]
+        .into_iter()
+        .enumerate()
+    {
+        let beat = rumble(noise, 0.14, 1100.0, 34.0);
+        let gain = 0.45 + 0.1 * k as f32;
+        mix(&mut track, at, &beat, gain * 3.0);
+        mix(&mut track, at, &thump(0.14, 130.0, 80.0, 30.0), gain);
+    }
+    track
+}
+
+fn broadside(noise: &mut Noise) -> Vec<f32> {
+    let mut track = vec![0.0; (1.6 * RATE as f32) as usize];
+    for (at, pitch, gain) in [(0.0, 1.0, 1.0), (0.17, 1.15, 0.85), (0.33, 0.9, 0.95)] {
+        let shot = cannon(noise, 1.0, pitch);
+        mix(&mut track, at, &shot, gain);
+    }
+    mix(&mut track, 0.2, &rumble(noise, 1.4, 250.0, 2.2), 1.2);
+    track
+}
+
+fn hit(noise: &mut Noise) -> Vec<f32> {
+    let mut track = vec![0.0; (0.32 * RATE as f32) as usize];
+    mix(&mut track, 0.0, &rumble(noise, 0.3, 2600.0, 26.0), 2.0);
+    mix(&mut track, 0.0, &thump(0.3, 220.0, 70.0, 15.0), 0.9);
+    track
+}
+
+fn fall(noise: &mut Noise) -> Vec<f32> {
+    let mut track = vec![0.0; (0.95 * RATE as f32) as usize];
+    // Cloth and gear shifting as the figure topples, then the ground.
+    let mut low = LowPass::new(1500.0);
+    let rustle = render(0.5, |t| {
+        let swell = (t / 0.5 * PI).sin().powi(2);
+        let n = noise.next();
+        (n - low.filter(n)) * swell * 0.35
+    });
+    mix(&mut track, 0.0, &rustle, 1.0);
+    mix(&mut track, 0.5, &thump(0.45, 90.0, 42.0, 11.0), 1.0);
+    mix(&mut track, 0.5, &rumble(noise, 0.3, 700.0, 18.0), 1.4);
+    track
+}
+
+fn sink(noise: &mut Noise) -> Vec<f32> {
+    let seconds = 1.9;
+    let mut track = vec![0.0; (seconds * RATE as f32) as usize];
+    // The hull groaning downward as it goes under.
+    let mut tone = glide(190.0, 38.0, 1.6);
+    let groan = render(seconds, |t| {
+        let swell = (t / seconds * PI).sin();
+        tone(t) * swell * swell * 0.45
+    });
+    mix(&mut track, 0.0, &groan, 1.0);
+    // Water rushing in, then closing over.
+    let mut wash = LowPass::new(520.0);
+    let water = render(seconds, |t| {
+        let swell = (t / seconds * PI).sin().powf(0.7);
+        wash.filter(noise.next()) * swell * (1.0 - 0.5 * t / seconds)
+    });
+    mix(&mut track, 0.0, &water, 3.2);
+    // Bubbles rising.
+    for _ in 0..16 {
+        let at = noise.between(0.3, 1.6);
+        let (hz, gain) = (noise.between(280.0, 900.0), noise.between(0.1, 0.3));
+        let mut tone = glide(hz, hz * 1.3, 40.0);
+        let bubble = render(0.09, |t| tone(t) * (-t * 55.0).exp());
+        mix(&mut track, at, &bubble, gain);
+    }
+    track
+}
+
+fn surrender() -> Vec<f32> {
+    let mut track = vec![0.0; (0.95 * RATE as f32) as usize];
+    // Two soft falling notes: a bugle's retreat, without the bugle.
+    for (at, hz) in [(0.0, 392.0), (0.38, 293.7)] {
+        let note = render(0.55, |t| {
+            let attack = (t / 0.02).min(1.0);
+            let tone = (2.0 * PI * hz * t).sin() + 0.35 * (4.0 * PI * hz * t).sin();
+            tone * attack * (-t * 4.5).exp()
+        });
+        mix(&mut track, at, &note, 0.6);
+    }
+    track
+}
+
+/// Scales a sound so its loudest sample reaches `peak`, with a few milliseconds of fade at both
+/// ends so it starts and stops without a click.
+fn finish(mut samples: Vec<f32>, peak: f32) -> Vec<f32> {
+    let loudest = samples.iter().fold(0.0f32, |m, s| m.max(s.abs())).max(1e-6);
+    let fade = (0.006 * RATE as f32) as usize;
+    let last = samples.len();
+    for (i, s) in samples.iter_mut().enumerate() {
+        let edge = i.min(last - 1 - i);
+        let ramp = (edge as f32 / fade as f32).min(1.0);
+        *s *= peak / loudest * ramp;
+    }
+    samples
+}
+
+/// Every combat cue by pack file name.
+fn combat_sounds() -> Vec<(&'static str, Vec<f32>)> {
+    let mut noise = Noise(0x9E37_79B9);
+    vec![
+        ("volley", finish(volley(&mut noise), 0.55)),
+        ("charge", finish(charge(&mut noise), 0.5)),
+        ("gun", finish(cannon(&mut noise, 1.1, 1.0), 0.65)),
+        ("broadside", finish(broadside(&mut noise), 0.7)),
+        ("hit", finish(hit(&mut noise), 0.6)),
+        ("fall", finish(fall(&mut noise), 0.5)),
+        ("sink", finish(sink(&mut noise), 0.55)),
+        ("yield", finish(surrender(), 0.4)),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seconds(samples: &[f32]) -> f32 {
+        samples.len() as f32 / RATE as f32
+    }
+
+    #[test]
+    fn every_cue_the_pack_names_is_made() {
+        let names: Vec<_> = combat_sounds().into_iter().map(|(name, _)| name).collect();
+        assert_eq!(
+            names,
+            [
+                "volley",
+                "charge",
+                "gun",
+                "broadside",
+                "hit",
+                "fall",
+                "sink",
+                "yield"
+            ]
+        );
+    }
+
+    #[test]
+    fn sounds_are_audible_but_never_clip() {
+        for (name, samples) in combat_sounds() {
+            let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+            assert!((0.35..=0.75).contains(&peak), "{name}: peak {peak}");
+            let energy = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
+            assert!(energy.sqrt() > 0.02, "{name} is nearly silent");
+            assert!(samples.iter().all(|s| s.is_finite()), "{name}");
+        }
+    }
+
+    #[test]
+    fn sounds_start_and_stop_without_a_click() {
+        for (name, samples) in combat_sounds() {
+            assert!(samples[0].abs() < 0.01, "{name} starts with a click");
+            assert!(
+                samples[samples.len() - 1].abs() < 0.01,
+                "{name} ends with a click"
+            );
+        }
+    }
+
+    #[test]
+    fn lengths_suit_the_motions_they_accompany() {
+        // Bounds follow the motion lengths of docs/combat-animation.md §7.
+        let bounds = [
+            ("volley", 0.4, 0.8),
+            ("charge", 0.7, 1.1),
+            ("gun", 0.8, 1.4),
+            ("broadside", 1.2, 2.0),
+            ("hit", 0.15, 0.5),
+            ("fall", 0.7, 1.1),
+            ("sink", 1.5, 2.2),
+            ("yield", 0.7, 1.1),
+        ];
+        let sounds = combat_sounds();
+        for (name, low, high) in bounds {
+            let samples = &sounds.iter().find(|(n, _)| *n == name).unwrap().1;
+            let length = seconds(samples);
+            assert!((low..=high).contains(&length), "{name}: {length} s");
+        }
+    }
+
+    #[test]
+    fn generation_is_repeatable() {
+        assert_eq!(combat_sounds(), combat_sounds());
+    }
 }

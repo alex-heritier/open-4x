@@ -20,7 +20,8 @@ const server=createServer(async(req,res)=>{
   }catch{res.writeHead(404);res.end();}
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const url=`http://127.0.0.1:${server.address().port}/`;
+// The assertions below are written for the compact two-empire starter, not the world scenario.
+const url=`http://127.0.0.1:${server.address().port}/?scenario=dawn-straits`;
 const chrome=spawn(process.env.FOURX_CHROMIUM||'/usr/bin/chromium-browser',[
   '--headless','--no-sandbox','--disable-dev-shm-usage','--use-angle=swiftshader','--enable-unsafe-swiftshader',
   '--remote-debugging-port=0',`--user-data-dir=${evidence}/profile`,'about:blank',
@@ -65,7 +66,7 @@ try {
   assert.ok(save,'Browser save was not written');
   const game=JSON.parse(save).game;
   assert.equal(game.turn,3);assert.equal(Object.values(game.cities).find(c=>c.owner===1).industry,6);
-  assert.equal(Object.values(game.armies).filter(a=>a.owner===1).length,4);
+  assert.equal(Object.values(game.units).filter(u=>u.owner===1).length,7);
   assert.equal(errors.length,0);
   const shot=await call('Page.captureScreenshot',{format:'png'});
   await writeFile(`${evidence}/campaign.png`,Buffer.from(shot.data,'base64'));

@@ -4,7 +4,8 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
 evidence_dir="$(mktemp -d -t open4x-smoke.XXXXXX)"
 cd "$evidence_dir"
-"$project_dir/target/quick/fourx-client" --smoke --screenshot "$evidence_dir/campaign.png" > "$evidence_dir/client.log" 2>&1 &
+# The assertions below are written for the compact two-empire starter, not the world scenario.
+"$project_dir/target/quick/fourx-client" --smoke --scenario dawn-straits --screenshot "$evidence_dir/campaign.png" > "$evidence_dir/client.log" 2>&1 &
 client_pid=$!
 trap 'kill "$client_pid" 2>/dev/null || true' EXIT
 window_id="$(timeout 30 xdotool search --sync --name 'Open 4X')"
@@ -20,7 +21,7 @@ node -e '
   const capital=Object.values(g.cities).find(c=>c.owner===1);
   if(g.turn!==3 || capital.industry!==6 || capital.production!==null)
     throw new Error("UI orders failed: "+JSON.stringify({turn:g.turn,capital}));
-  if(Object.values(g.armies).filter(a=>a.owner===1).length!==4)
+  if(Object.values(g.units).filter(u=>u.owner===1).length!==7)
     throw new Error("Recruitment did not finish");
   console.log("PASS: UI development, recruitment, turns, and saved authoritative state");
 '

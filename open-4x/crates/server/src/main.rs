@@ -7,9 +7,9 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use fourx_content::{Pack, load_directory};
-use fourx_runtime::Host;
-use fourx_sim::{Request, Response};
+use fourx_content::{Content, Pack, load_directory};
+use fourx_runtime::{Host, Start};
+use fourx_sim::{Id, Request, Response};
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{Mutex, broadcast};
 use tower_http::services::ServeDir;
@@ -17,6 +17,8 @@ use tower_http::services::ServeDir;
 #[derive(Clone)]
 struct Shared {
     host: Arc<Mutex<Host>>,
+    /// The nation the commander connection controls.
+    commander_id: Id,
     changed: broadcast::Sender<()>,
     commander: Arc<Mutex<bool>>,
     token: Option<String>,
@@ -28,26 +30,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let value = |flag: &str| args.windows(2).find(|a| a[0] == flag).map(|a| a[1].clone());
     if args.iter().any(|a| a == "--help") {
         println!(
-            "fourx-server [--bind 127.0.0.1:7878] [--seed 42] [--pack DIRECTORY] [--load SAVE] [--save SAVE] [--simulate DAYS]\nSet FOURX_TOKEN to require a commander token. GET /health /pack /assets/*; WebSocket /ws."
+            "fourx-server [--bind 127.0.0.1:7878] [--seed 42] [--pack DIRECTORY] [--scenario ID] [--nation ID] [--list] [--load SAVE] [--save SAVE] [--simulate DAYS]\nSet FOURX_TOKEN to require a commander token. GET /health /pack /assets/*; WebSocket /ws."
         );
         return Ok(());
     }
     let asset_dir = value("--pack").map(PathBuf::from).unwrap_or_else(|| {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/packs/base")
     });
-    let (pack, script) = load_directory(&asset_dir)?;
+    let content = load_directory(&asset_dir)?;
     let seed = value("--seed").unwrap_or("42".into()).parse()?;
+    let scenario = value("--scenario");
+    let nation = value("--nation");
+    if args.iter().any(|a| a == "--list") {
+        print_catalog(&content, scenario.as_deref())?;
+        return Ok(());
+    }
     let mut host = if let Some(path) = value("--load") {
         Host::load(&std::fs::read_to_string(path)?)?
     } else {
-        Host::new(pack, script, seed)?
+        Host::start(
+            content,
+            Start {
+                scenario: scenario.as_deref(),
+                nation: nation.as_deref(),
+                seed,
+            },
+        )?
     };
     if let Some(days) = value("--simulate") {
+        let commander = host.commander();
         for _ in 0..days.parse::<u32>()? {
             if host.game.winner.is_some() {
                 break;
             }
-            host.command(1, fourx_sim::Command::EndTurn)?;
+            host.command(commander, fourx_sim::Command::EndTurn)?;
         }
         println!("{}", serde_json::to_string_pretty(&host.game)?);
         if let Some(path) = value("--save") {
@@ -56,12 +72,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     // Asset directory and saved pack must agree, otherwise clients would render different rules.
-    if serde_json::to_value(&host.pack)? != serde_json::to_value(load_directory(&asset_dir)?.0)? {
+    if serde_json::to_value(&host.pack)? != serde_json::to_value(load_directory(&asset_dir)?.pack)?
+    {
         return Err("Saved pack does not match --pack directory".into());
     }
     let bind = value("--bind").unwrap_or("127.0.0.1:7878".into());
     let (changed, _) = broadcast::channel(32);
+    let banner = format!(
+        "{} ({}) • {} • listening on",
+        host.game.scenario_name,
+        host.game.scenario,
+        host.game.date()
+    );
     let shared = Shared {
+        commander_id: host.commander(),
         host: Arc::new(Mutex::new(host)),
         changed,
         commander: Arc::new(Mutex::new(false)),
@@ -70,7 +94,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route(
             "/health",
-            get(|| async { "open-4x authoritative server / protocol 1" }),
+            get(|| async {
+                format!(
+                    "open-4x authoritative server / protocol {}",
+                    fourx_sim::PROTOCOL_VERSION
+                )
+            }),
         )
         .route("/pack", get(pack_route))
         .route("/ws", get(ws_route))
@@ -82,10 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .with_state(shared.clone());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
-    println!(
-        "Dawn over the Straits • listening on {}",
-        listener.local_addr()?
-    );
+    println!("{banner} {}", listener.local_addr()?);
     let save_path = value("--save");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
@@ -94,6 +120,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     if let Some(path) = save_path {
         std::fs::write(path, shared.host.lock().await.save()?)?;
+    }
+    Ok(())
+}
+/// Print the pack's scenarios and, for one of them, the nations that can be commanded.
+fn print_catalog(
+    content: &Content,
+    scenario: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "Scenarios in pack {:?} (default: {}):",
+        content.pack.id, content.pack.default_scenario
+    );
+    for (id, s) in &content.scenarios {
+        println!(
+            "  {id:<16} {} | starts {} | {} nations | {}x{}",
+            s.name,
+            s.start_date,
+            s.nations.len(),
+            s.map.width,
+            s.map.height
+        );
+    }
+    let s = content.scenario(scenario)?;
+    println!(
+        "\nNations in {:?} (default commander: {}):",
+        s.id, s.commander
+    );
+    for n in &s.nations {
+        println!("  {:<28} {}", n.id, n.name);
     }
     Ok(())
 }
@@ -135,9 +190,10 @@ async fn session(mut socket: WebSocket, shared: Shared) {
         .as_ref()
         .is_none_or(|expected| expected == &token);
     let mut occupied = shared.commander.lock().await;
+    let commander_id = shared.commander_id;
     let player = if authorized && !*occupied {
         *occupied = true;
-        1
+        commander_id
     } else {
         0
     };
@@ -149,13 +205,13 @@ async fn session(mut socket: WebSocket, shared: Shared) {
         .await
         .is_err()
     {
-        if player == 1 {
+        if player == commander_id {
             *shared.commander.lock().await = false;
         }
         return;
     }
     if !send(&mut socket, shared.host.lock().await.snapshot(player)).await {
-        if player == 1 {
+        if player == commander_id {
             *shared.commander.lock().await = false;
         }
         return;
@@ -188,7 +244,7 @@ async fn session(mut socket: WebSocket, shared: Shared) {
             }
         }
     }
-    if player == 1 {
+    if player == commander_id {
         *shared.commander.lock().await = false;
     }
 }
@@ -227,7 +283,8 @@ mod tests {
     async fn websocket_authority_revision_replay_and_spectators() {
         let (changed, _) = broadcast::channel(32);
         let shared = Shared {
-            host: Arc::new(Mutex::new(Host::base(42).unwrap())),
+            host: Arc::new(Mutex::new(Host::base_scenario("dawn-straits", 42).unwrap())),
+            commander_id: 1,
             changed,
             commander: Arc::new(Mutex::new(false)),
             token: Some("test-token".into()),
@@ -259,7 +316,7 @@ mod tests {
             snapshot(&mut spectator).await,
             Response::Snapshot { player: 0, .. }
         ));
-        let request=serde_json::json!({"version":1,"sequence":1,"revision":0,"command":{"type":"end_turn"}}).to_string();
+        let request=serde_json::json!({"version":fourx_sim::PROTOCOL_VERSION,"sequence":1,"revision":0,"command":{"type":"end_turn"}}).to_string();
         spectator
             .send(WireMessage::Text(request.clone()))
             .await
@@ -282,7 +339,7 @@ mod tests {
         ));
         host.send(WireMessage::Text(request)).await.unwrap();
         assert!(rejection(&mut host).await.contains("Duplicate"));
-        let stale=serde_json::json!({"version":1,"sequence":2,"revision":0,"command":{"type":"end_turn"}}).to_string();
+        let stale=serde_json::json!({"version":fourx_sim::PROTOCOL_VERSION,"sequence":2,"revision":0,"command":{"type":"end_turn"}}).to_string();
         host.send(WireMessage::Text(stale)).await.unwrap();
         assert!(rejection(&mut host).await.contains("Stale"));
         host.close(None).await.unwrap();

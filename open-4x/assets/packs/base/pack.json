@@ -1,45 +1,76 @@
 {
-  "format": 1,
-  "id": "dawn-straits",
-  "name": "Dawn over the Straits",
+  "format": 4,
+  "id": "open-4x-base",
+  "name": "Open 4X base pack",
   "rules": {
-    "combat_width": 4,
-    "victory_industry": 500,
+    "victory_industry": 2500,
     "research_cost": 60,
     "starting_gold": 120,
     "units": {
-      "infantry": {"id":"infantry","name":"Line Infantry","cost":36,"fire":5,"shock":3,"speed":3,"naval":false,"settler":false,"sprite":"sprites/infantry.png"},
-      "cavalry": {"id":"cavalry","name":"Dragoon Cavalry","cost":54,"fire":2,"shock":7,"speed":5,"naval":false,"settler":false,"sprite":"sprites/cavalry.png"},
-      "artillery": {"id":"artillery","name":"Field Artillery","cost":72,"fire":9,"shock":1,"speed":2,"naval":false,"settler":false,"sprite":"sprites/artillery.png"},
-      "pioneer": {"id":"pioneer","name":"Pioneers","cost":60,"fire":1,"shock":1,"speed":3,"naval":false,"settler":true,"sprite":"sprites/pioneer.png"},
-      "ironclad": {"id":"ironclad","name":"Ironclad Squadron","cost":90,"fire":10,"shock":4,"speed":5,"naval":true,"settler":false,"sprite":"sprites/ironclad.png"}
+      "infantry": {"id":"infantry","name":"Line Infantry","cost":36,"sprite":"sprites/infantry.png","domain":"land","attack":4,"defense":4,"hp":1,"moves":2},
+      "cavalry": {"id":"cavalry","name":"Dragoon Cavalry","cost":54,"sprite":"sprites/cavalry.png","domain":"land","attack":8,"defense":2,"blitz":true,"moves":3},
+      "artillery": {"id":"artillery","name":"Field Artillery","cost":72,"sprite":"sprites/artillery.png","domain":"land","attack":0,"defense":0,"bombard":8,"range":1,"rate_of_fire":2,"moves":2},
+      "worker": {"id":"worker","name":"Workers","cost":30,"sprite":"sprites/worker.png","domain":"land","attack":0,"defense":0,"work":2,"moves":2},
+      "pioneer": {"id":"pioneer","name":"Pioneers","cost":60,"sprite":"sprites/pioneer.png","domain":"land","attack":0,"defense":0,"work":1,"settler":true,"moves":2},
+      "ironclad": {"id":"ironclad","name":"Ironclad Squadron","cost":90,"sprite":"sprites/ironclad.png","domain":"sea","attack":4,"defense":4,"hp":1,"moves":4},
+      "transport": {"id":"transport","name":"Steam Transport","cost":80,"sprite":"sprites/transport.png","domain":"sea","attack":0,"defense":3,"hp":1,"moves":4,"capacity":8},
+      "battleship": {"id":"battleship","name":"Battleship","cost":240,"sprite":"sprites/battleship.png","domain":"sea","attack":12,"defense":8,"hp":2,"moves":3},
+      "protected-cruiser": {"id":"protected-cruiser","name":"Protected Cruiser","cost":120,"sprite":"sprites/protected-cruiser.png","domain":"sea","attack":6,"defense":6,"hp":1,"moves":5},
+      "torpedo-boat": {"id":"torpedo-boat","name":"Torpedo Boat","cost":90,"sprite":"sprites/torpedo-boat.png","domain":"sea","attack":8,"defense":2,"moves":3,"bombard":8,"range":1,"rate_of_fire":2,"lethal_land":true,"lethal_sea":true}
     }
-  },
-  "scenario": {
-    "width": 24,
-    "height": 18,
-    "player_name": "The Dawn Empire",
-    "enemy_name": "The Northern League",
-    "cities": [
-      {"owner":1,"position":{"x":8,"y":9},"name":"Akatsuki","population":3,"industry":4},
-      {"owner":2,"position":{"x":16,"y":8},"name":"Northwatch","population":3,"industry":4}
-    ],
-    "armies": [
-      {"owner":1,"position":{"x":8,"y":9},"name":"Imperial Guard","kinds":["infantry","cavalry","artillery"],"general":2},
-      {"owner":1,"position":{"x":8,"y":9},"name":"First Pioneers","kinds":["pioneer"],"general":0},
-      {"owner":2,"position":{"x":16,"y":8},"name":"League Expedition","kinds":["infantry","cavalry","artillery"],"general":2},
-      {"owner":2,"position":{"x":16,"y":8},"name":"League Pioneers","kinds":["pioneer"],"general":0},
-      {"owner":1,"position":{"x":4,"y":13},"name":"Southern Fleet","kinds":["ironclad"],"general":2},
-      {"owner":2,"position":{"x":4,"y":16},"name":"League Squadron","kinds":["ironclad"],"general":2}
-    ],
-    "tiles": []
   },
   "script": "scripts/campaign.lua",
   "visuals": {
-    "terrain": "terrain/temperate.png",
+    "terrain": "terrain/ground.png",
+    "water": "terrain/water.png",
+    "rivers": "terrain/rivers.png",
     "forest": "sprites/forest.png",
     "mountain": "sprites/mountain.png",
-    "city": "sprites/city.png",
-    "turn_sound": "audio/bell.wav"
-  }
+    "overlays": {
+      "pine": "sprites/pine.png",
+      "jungle": "sprites/jungle.png",
+      "marsh": "sprites/marsh.png",
+      "hills": "sprites/hills.png",
+      "hills_dry": "sprites/hills_dry.png",
+      "hills_cold": "sprites/hills_cold.png",
+      "mountain_dry": "sprites/mountain_dry.png",
+      "mountain_cold": "sprites/mountain_cold.png"
+    },
+    "cities": {
+      "western": "sprites/city_western.png",
+      "latin": "sprites/city_latin.png",
+      "orthodox": "sprites/city_orthodox.png",
+      "arab": "sprites/city_arab.png",
+      "east_asian": "sprites/city_east_asian.png",
+      "south_asian": "sprites/city_south_asian.png",
+      "southeast_asian": "sprites/city_southeast_asian.png",
+      "african": "sprites/city_african.png",
+      "steppe": "sprites/city_steppe.png",
+      "native": "sprites/city_native.png",
+      "oceanic": "sprites/city_oceanic.png"
+    },
+    "fog": "terrain/fog.png",
+    "borders": "terrain/borders.png",
+    "mine": "sprites/mine.png",
+    "farm": "sprites/farm.png",
+    "turn_sound": "audio/bell.wav",
+    "combat": {
+      "sounds": {
+        "volley": "audio/volley.wav",
+        "charge": "audio/charge.wav",
+        "gun": "audio/gun.wav",
+        "broadside": "audio/broadside.wav",
+        "hit": "audio/hit.wav",
+        "fall": "audio/fall.wav",
+        "sink": "audio/sink.wav",
+        "yield": "audio/yield.wav"
+      },
+      "styles": {"cavalry": "charge"}
+    }
+  },
+  "scenarios": [
+    {"id": "world-1876", "path": "scenarios/world-1876.json"},
+    {"id": "dawn-straits", "path": "scenarios/dawn-straits.json"}
+  ],
+  "default_scenario": "world-1876"
 }

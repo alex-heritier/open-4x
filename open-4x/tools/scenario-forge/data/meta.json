@@ -1,0 +1,23 @@
+{
+  "id": "world-1876",
+  "name": "The World, 1 January 1876",
+  "description": "The world from 84°N to 58°S on an upright Web Mercator map of 175,104 tiles (about 78 km per tile at the equator, Antarctica left off), with its real climates, mountains, forests, and rivers, as it stood on Saturday 1 January 1876. Empires, kingdoms, republics, vassals, protectorates, and the independent and unrecognised peoples that still held land: 119 polities in all. Turns are days. Borders are approximate to a tile; colonial claims show who held the coast and the river routes, not paper claims. Several wars are already under way: the Third Carlist War and the Ten Years' War against Spain, the Aceh War, the Egyptian-Ethiopian War, the Russian suppression of Kokand, the Qing campaign against Kashgaria, Chile's pacification of Araucania, and the Caste War of Yucatan.",
+  "start_date": "1876-01-01",
+  "charted": true,
+  "commander": "japan",
+  "intro": "1 January 1876. Steam, the telegraph, and rifled guns are reshaping the world, and the great powers are carving up what is left of it. Queen Victoria's empire spans the globe, the Qing court faces rebellion and encroachment, and Meiji Japan has just abolished its domains and is about to press a treaty on Korea. Japan is the default command; any nation can be played with --nation.",
+  "rules": {
+    "victory_industry": 1000000,
+    "research_cost": 3000
+  },
+  "wars": [
+    { "a": "spain", "b": "carlist-spain", "name": "Third Carlist War" },
+    { "a": "spain", "b": "cuba-in-arms", "name": "Ten Years' War" },
+    { "a": "netherlands", "b": "aceh", "name": "Aceh War" },
+    { "a": "egypt", "b": "ethiopia", "name": "Egyptian-Ethiopian War" },
+    { "a": "russia", "b": "kokand", "name": "Russian suppression of Kokand" },
+    { "a": "qing-china", "b": "kashgaria", "name": "Qing reconquest of Xinjiang" },
+    { "a": "chile", "b": "mapuche", "name": "Occupation of Araucania" },
+    { "a": "mexico", "b": "chan-santa-cruz", "name": "Caste War of Yucatan" }
+  ]
+}

@@ -1,0 +1,11 @@
+[
+  {"id":"australia","name":"Australian colonies","nation":"united-kingdom","paint":[{"country":"AUS"}]},
+  {"id":"new-zealand","name":"New Zealand","nation":"united-kingdom","paint":[{"country":"NZL"}]},
+  {"id":"king-country","name":"King Country","nation":"maori-king","paint":[
+    {"poly":[[174.6,-39.0],[176.0,-38.0],[176.3,-38.9],[175.2,-39.5]]}]},
+  {"id":"fiji","name":"Fiji","nation":"united-kingdom","paint":[{"country":"FJI"},{"tiles":[[178.83,-17.68]]}]},
+  {"id":"tonga","name":"Tonga","nation":"tonga","paint":[{"country":"TON"},{"tiles":[[-175.2,-21.14]]}]},
+  {"id":"samoa","name":"Samoa","nation":"samoa","paint":[{"country":"WSM"},{"country":"ASM"},{"tiles":[[-171.75,-13.83]]}]},
+  {"id":"marianas","name":"Spanish Micronesia","nation":"spain","paint":[
+    {"country":"GUM"},{"country":"MNP"},{"country":"FSM"},{"country":"PLW"},{"tiles":[[144.75,13.47]]}]}
+]

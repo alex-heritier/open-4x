@@ -1,0 +1,15 @@
+[package]
+name = "scenario-forge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Builds the upright 512x342 Mercator world scenario from curated 1876 history tables and public geographic data."
+
+[dependencies]
+fourx-sim.workspace = true
+fourx-content.workspace = true
+serde.workspace = true
+# preserve_order keeps struct field order in the generated JSON.
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = "0.10"
+png = "0.17"
