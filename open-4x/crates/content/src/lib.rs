@@ -3,6 +3,7 @@
 //! A *pack* (`pack.json`) defines rules, art, and the campaign script. A *scenario*
 //! (see [`fourx_sim::Scenario`]) defines a map, nations, and a start date. A pack lists the
 //! scenario files it ships and names one as the default.
+pub mod animation;
 pub mod combat;
 pub mod scenario;
 
@@ -74,6 +75,10 @@ pub struct Visuals {
     /// How fights look and sound; every part is optional.
     #[serde(default)]
     pub combat: combat::CombatVisuals,
+    /// Frame-by-frame clips by unit design id (idle, run, attack, victory, death, each in
+    /// eight facings). A design left out is drawn from its single sprite.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub units: BTreeMap<String, animation::UnitAnimation>,
 }
 
 impl Visuals {
@@ -96,6 +101,7 @@ impl Visuals {
         .chain(self.relief_borders.values())
         .chain(self.cities.values())
         .chain(self.combat.paths())
+        .chain(animation::paths(&self.units))
     }
 }
 
@@ -233,6 +239,7 @@ impl Pack {
             }
         }
         self.visuals.combat.validate(&self.rules)?;
+        animation::validate(&self.visuals.units, &self.rules)?;
         if self.scenarios.is_empty() || self.scenarios.len() > 64 {
             return Err(invalid("A pack needs 1–64 scenarios"));
         }

@@ -1,7 +1,8 @@
 use super::*;
+use crate::puppet::Puppet;
 use bevy::image::{ImageLoaderSettings, ImageSampler};
 use bevy::ui::RelativeCursorPosition;
-use fourx_content::Visuals;
+use fourx_content::{Visuals, animation::Clip};
 use fourx_sim::{
     Date, Flavor, Order, Unit, UnitDef, VISION_RADIUS,
     terrain::{Cover, Relief, Terrain, Tile},
@@ -240,13 +241,13 @@ const Z_RELIEF: f32 = 10.0;
 const Z_FOG: f32 = 15.0;
 const Z_BORDER: f32 = Z_RELIEF + 3.0 * Z_STEP;
 const Z_CITY: f32 = 20.0;
-const Z_UNIT: f32 = 30.0;
+pub(super) const Z_UNIT: f32 = 30.0;
 /// Gap that puts one sprite of a tile in front of another of the same tile without reaching
 /// past the next tile in line (neighbours differ by at least `depth(32.0)`).
 const Z_STEP: f32 = 0.00008;
 /// Where a piece standing at screen height `sy` sits within its band: lower on the screen is in
 /// front. Bounded by 0.7 for the largest world.
-fn depth(sy: f32) -> f32 {
+pub(super) fn depth(sy: f32) -> f32 {
     -sy / 50_000.0
 }
 
@@ -595,6 +596,8 @@ pub(super) fn refresh(
     mut camera: Query<(&mut Transform, &Projection), With<Camera2d>>,
     mut previous_size: Local<Vec2>,
     stage: Res<crate::stage::Stage>,
+    walks: Res<crate::march::Walks>,
+    mut puppetry: crate::puppet::Puppetry,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -984,8 +987,9 @@ pub(super) fn refresh(
     let mut stacks: BTreeMap<(i32, i32), Vec<Id>> = BTreeMap::new();
     for unit in game.units.values() {
         let (x, y) = unit.position.screen();
-        // A fight is being played out on this square: its units are on the stage instead.
-        if built.has(Vec2::new(x, y)) && !stage.hides(unit.position) {
+        // A fight is being played out on this square, or the unit is walking: the stage or
+        // a walker stands in for it.
+        if built.has(Vec2::new(x, y)) && !stage.hides(unit.position) && !walks.hides(unit.id) {
             stacks
                 .entry((unit.position.x, unit.position.y))
                 .or_default()
@@ -1025,27 +1029,46 @@ pub(super) fn refresh(
             y += 24.0;
         }
         let z = Z_UNIT + depth(y);
-        let sprite = unit_images
-            .entry(def.sprite.clone())
-            .or_insert_with(|| assets.load(format!("{prefix}{}", def.sprite)));
         let spent = unit.owner == session.player && unit.moves_left(def) == 0;
-        image_sprite(
-            &mut commands,
-            sprite,
-            Vec3::new(x, y + 12.0, z),
-            if def.is_naval() {
-                Vec2::new(112.0, 84.0)
-            } else {
-                Vec2::splat(70.0)
-            },
-            if unit.owner != session.player {
-                tinted(game, unit.owner)
-            } else if spent {
-                Color::srgb(0.66, 0.66, 0.70)
-            } else {
-                Color::WHITE
-            },
-        );
+        let color = if unit.owner != session.player {
+            tinted(game, unit.owner)
+        } else if spent {
+            Color::srgb(0.66, 0.66, 0.70)
+        } else {
+            Color::WHITE
+        };
+        let at = Vec3::new(x, y + 12.0, z);
+        let mut clip = |kind: &str, which: Clip| {
+            puppetry.art.clip(
+                prefix,
+                &session.pack.id,
+                visuals,
+                &assets,
+                &mut puppetry.layouts,
+                kind,
+                which,
+            )
+        };
+        match clip(&unit.kind, Clip::Idle) {
+            Some(idle) => {
+                // Fetch the walk now, so the unit's first steps are not blank.
+                clip(&unit.kind, Clip::Run);
+                let facing = puppetry.facings.of(unit.id);
+                let puppet = Puppet::new(&idle, facing, unit.id);
+                commands.spawn((
+                    idle.sprite(facing, 0, unit_size(def), color),
+                    Transform::from_translation(at),
+                    puppet,
+                    WorldVisual,
+                ));
+            }
+            None => {
+                let sprite = unit_images
+                    .entry(def.sprite.clone())
+                    .or_insert_with(|| assets.load(format!("{prefix}{}", def.sprite)));
+                image_sprite(&mut commands, sprite, at, unit_size(def), color);
+            }
+        }
         draw_unit_badges(&mut commands, unit, def, ids.len(), Vec3::new(x, y, z));
     }
     // Unhurried map typography echoes printed campaign charts.
@@ -1071,6 +1094,15 @@ pub(super) fn refresh(
     }
     if rebuild_ui {
         build_ui(&mut commands, &session, size, &minimap);
+    }
+}
+
+/// How big a design's sprite is drawn: ships are wider than they are tall.
+pub(super) fn unit_size(def: &UnitDef) -> Vec2 {
+    if def.is_naval() {
+        Vec2::new(112.0, 84.0)
+    } else {
+        Vec2::splat(70.0)
     }
 }
 

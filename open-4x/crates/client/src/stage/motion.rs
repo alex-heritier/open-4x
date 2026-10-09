@@ -1,8 +1,10 @@
 //! Procedural motion: where a sprite is, and how it looks, part-way through a motion.
 //!
-//! Art is one image per design, so every motion is a *pose* (offset, tilt, scale, opacity, a
-//! white flash, a tint toward another nation) sampled from a progress `u` in `0..=1`. Poses add
-//! up, so a unit can flinch while it swings. See `docs/combat-animation.md` §7.
+//! Every motion is a *pose* (offset, tilt, scale, opacity, a white flash, a tint toward another
+//! nation) sampled from a progress `u` in `0..=1`. Poses add up, so a unit can flinch while it
+//! swings. A design drawn from a single image moves by its pose alone; a design with clips plays
+//! the clip and keeps only the part of the pose the clip cannot show (see [`Motion::under_clip`]).
+//! See `docs/combat-animation.md` §7.
 use bevy::math::Vec2;
 use fourx_content::combat::Style;
 use std::f32::consts::PI;
@@ -122,6 +124,20 @@ impl Motion {
             self,
             Motion::Fall | Motion::Sink | Motion::Yield | Motion::Step { .. }
         )
+    }
+
+    /// What is left of a pose when the unit's own clip plays the motion: the clip draws the
+    /// stance, the swing, the cheer and the fall, so the sprite is never tilted, and a fall,
+    /// a sinking or a cheer does not move it either. Shifts between and toward squares, flashes,
+    /// fading and the captor's colour stay.
+    pub fn under_clip(&self, pose: Pose) -> Pose {
+        let still = matches!(self, Motion::Fall | Motion::Sink | Motion::Cheer { .. });
+        Pose {
+            tilt: 0.0,
+            offset: if still { Vec2::ZERO } else { pose.offset },
+            scale: if still { 1.0 } else { pose.scale },
+            ..pose
+        }
     }
 
     /// The pose at progress `u` (clamped to `0..=1`). `toward` is a unit vector pointing at the
@@ -455,6 +471,42 @@ mod tests {
         let left = Motion::Fall.sample(1.0, -RIGHT);
         assert!(right.tilt > 0.0 && left.tilt < 0.0);
         assert!(right.offset.x < 0.0 && left.offset.x > 0.0);
+    }
+
+    #[test]
+    fn a_clip_keeps_the_fade_and_the_travel_but_not_the_tilt() {
+        for motion in every_motion() {
+            for i in 0..=20 {
+                let u = i as f32 / 20.0;
+                let full = motion.sample(u, RIGHT);
+                let kept = motion.under_clip(full);
+                assert_eq!(kept.tilt, 0.0, "{motion:?}");
+                assert_eq!(
+                    (kept.alpha, kept.flash, kept.tint),
+                    (full.alpha, full.flash, full.tint)
+                );
+                assert_eq!(kept.travel, full.travel, "{motion:?}");
+            }
+        }
+        // The clip lies down, sinks or hops in place; a lunge and a step still move the sprite.
+        assert_eq!(
+            Motion::Fall
+                .under_clip(Motion::Fall.sample(1.0, RIGHT))
+                .offset,
+            Vec2::ZERO
+        );
+        assert_eq!(
+            Motion::Sink
+                .under_clip(Motion::Sink.sample(0.8, RIGHT))
+                .offset,
+            Vec2::ZERO
+        );
+        let charge = Motion::Attack {
+            style: Style::Charge,
+            variant: 0,
+        };
+        let lunge = charge.under_clip(charge.sample(STRIKE_AT, RIGHT));
+        assert!(lunge.offset.x > 25.0);
     }
 
     #[test]

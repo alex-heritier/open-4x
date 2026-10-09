@@ -10,7 +10,9 @@ mod headless;
 mod motion;
 mod script;
 
-use super::presentation::tinted;
+use super::march::Walks;
+use super::presentation::{tinted, unit_size};
+use super::puppet::{ClipSet, Puppetry};
 use super::{Session, WorldRect, camera_rect, option};
 use bevy::{
     asset::RenderAssetUsages,
@@ -18,9 +20,10 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
     window::PrimaryWindow,
 };
+use fourx_content::animation::facing;
 use fourx_sim::{Battle, Id, terrain::Coord};
 use motion::Pose;
-use script::{Event as Moment, LEAD_IN, Script, Setting};
+use script::{Event as Moment, LEAD_IN, Script, Setting, Showing};
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 
@@ -83,6 +86,9 @@ struct Playing {
     next: usize,
     parts: Vec<Parts>,
     looks: Vec<Look>,
+    /// Each actor's clips, when its design has them. Holding them keeps the fighting sheets
+    /// loaded for as long as the fight plays.
+    arts: Vec<Option<ClipSet>>,
 }
 
 struct Parts {
@@ -212,6 +218,8 @@ pub(super) fn drive(
     mut parts: Sprites,
     visuals: Query<Entity, (With<StageVisual>, Without<SkipButton>)>,
     buttons: Query<Entity, With<SkipButton>>,
+    mut puppetry: Puppetry,
+    walks: Res<Walks>,
 ) {
     stage.step = 0.0;
     if session.game.is_none() {
@@ -246,12 +254,14 @@ pub(super) fn drive(
         stage.playing = None;
         take_down(&mut commands, &mut stage, &mut session, &visuals, &buttons);
     }
-    if stage.playing.is_none() {
+    // Fights wait for the walks that brought the fighters together.
+    if stage.playing.is_none() && !walks.busy() {
         start_next(
             &mut commands,
             &mut stage,
             &mut session,
             &assets,
+            &mut puppetry,
             &windows,
             &cameras,
         );
@@ -279,7 +289,7 @@ pub(super) fn drive(
                 due.event,
             );
         }
-        paint(&playing, &mut parts);
+        paint(&playing, &mut parts, &puppetry.images);
         stage.step = step;
         if playing.clock < playing.script.length {
             stage.playing = Some(playing);
@@ -295,6 +305,7 @@ pub(super) fn drive(
                 &mut stage,
                 &mut session,
                 &assets,
+                &mut puppetry,
                 &windows,
                 &cameras,
             );
@@ -339,6 +350,7 @@ fn start_next(
     stage: &mut Stage,
     session: &mut Session,
     assets: &AssetServer,
+    puppetry: &mut Puppetry,
     windows: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Transform, &Projection), With<Camera2d>>,
 ) {
@@ -352,15 +364,24 @@ fn start_next(
         }
         let game = session.game.as_ref().unwrap();
         let city = |at: Coord| game.city_at(at).is_some();
+        let animated = |kind: &str| session.pack.visuals.units.contains_key(kind);
         let script = Script::build(
             &battle,
             &Setting {
                 rules: &session.rules,
                 combat: &session.pack.visuals.combat,
                 city: &city,
+                animated: &animated,
             },
         );
-        let (parts, looks) = spawn_actors(commands, session, assets, &script);
+        let (parts, looks, arts) = spawn_actors(commands, session, assets, puppetry, &script);
+        // Whoever survives keeps looking the way the fight left it.
+        for (i, actor) in script.actors.iter().enumerate() {
+            let heading = script.heading_at(i, script.length);
+            puppetry
+                .facings
+                .turn(actor.fighter.id, facing(heading.x, heading.y));
+        }
         if !stage.button {
             spawn_skip_button(commands);
             stage.button = true;
@@ -373,6 +394,7 @@ fn start_next(
             next: 0,
             parts,
             looks,
+            arts,
         });
         return;
     }
@@ -437,17 +459,19 @@ fn spawn_actors(
     commands: &mut Commands,
     session: &Session,
     assets: &AssetServer,
+    puppetry: &mut Puppetry,
     script: &Script,
-) -> (Vec<Parts>, Vec<Look>) {
+) -> (Vec<Parts>, Vec<Look>, Vec<Option<ClipSet>>) {
     let game = session.game.as_ref().unwrap();
     let mut parts = Vec::new();
     let mut looks = Vec::new();
+    let mut arts = Vec::new();
     for (i, actor) in script.actors.iter().enumerate() {
         let fighter = &actor.fighter;
-        let size = if actor.sea {
-            Vec2::new(112.0, 84.0)
-        } else {
-            Vec2::splat(70.0)
+        let size = match session.rules.units.get(&fighter.kind) {
+            Some(def) => unit_size(def),
+            None if actor.sea => Vec2::new(112.0, 84.0),
+            None => Vec2::splat(70.0),
         };
         // A unit that is still there looks as the map will draw it when the fight is over, so
         // the hand-over is seamless.
@@ -471,15 +495,37 @@ fn spawn_actors(
             .map(|id| now.unwrap_or_else(|| unit_color(session, id, false)))
             .unwrap_or(start);
         looks.push(Look { start, captor });
-        let mut sprite = Sprite {
-            custom_size: Some(size),
-            color: start.with_alpha(0.0),
-            flip_x: actor.flip,
-            ..default()
+        let art = actor
+            .animated
+            .then(|| {
+                puppetry
+                    .art
+                    .set(session, assets, &mut puppetry.layouts, &fighter.kind)
+            })
+            .flatten();
+        let mut sprite = match &art {
+            Some(art) => {
+                let toward = actor.toward;
+                art.get(fourx_content::animation::Clip::Idle).sprite(
+                    facing(toward.x, toward.y),
+                    0,
+                    size,
+                    start.with_alpha(0.0),
+                )
+            }
+            None => Sprite {
+                custom_size: Some(size),
+                color: start.with_alpha(0.0),
+                flip_x: actor.flip,
+                ..default()
+            },
         };
-        if let Some(def) = session.rules.units.get(&fighter.kind) {
+        if art.is_none()
+            && let Some(def) = session.rules.units.get(&fighter.kind)
+        {
             sprite.image = assets.load(format!("{}{}", session.asset_prefix, def.sprite));
         }
+        arts.push(art);
         let z = STAGE_Z - actor.anchor.y / 1000.0 + i as f32 * 0.01;
         let place = |dz: f32| Transform::from_xyz(actor.anchor.x, actor.anchor.y + LIFT, z + dz);
         let sprite = commands.spawn((sprite, place(0.0), Part, StageVisual)).id();
@@ -505,7 +551,7 @@ fn spawn_actors(
             fill,
         });
     }
-    (parts, looks)
+    (parts, looks, arts)
 }
 
 fn mix(from: f32, to: f32, by: f32) -> f32 {
@@ -539,7 +585,7 @@ fn bar_color(fraction: f32) -> Color {
 }
 
 /// Poses every actor, and its hit-point bar, for the clock's moment.
-fn paint(playing: &Playing, sprites: &mut Sprites) {
+fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
     let (script, t) = (&playing.script, playing.clock);
     let fade = (t / LEAD_IN).clamp(0.0, 1.0);
     for (i, actor) in script.actors.iter().enumerate() {
@@ -547,6 +593,9 @@ fn paint(playing: &Playing, sprites: &mut Sprites) {
         let parts = &playing.parts[i];
         let z = STAGE_Z - actor.anchor.y / 1000.0 + i as f32 * 0.01;
         if let Ok((mut transform, mut sprite)) = sprites.get_mut(parts.sprite) {
+            if let Some(art) = &playing.arts[i] {
+                show_clip(art, script, i, t, &mut sprite, images);
+            }
             let at = actor.anchor + pose.offset + Vec2::Y * LIFT;
             *transform = Transform {
                 translation: at.extend(z),
@@ -570,6 +619,32 @@ fn paint(playing: &Playing, sprites: &mut Sprites) {
             transform.translation = Vec3::new(base.x - (BAR_WIDTH - width) * 0.5, base.y, z + 0.2);
             sprite.custom_size = Some(Vec2::new(width.max(0.01), 5.0));
             sprite.color = bar_color(fraction).with_alpha(visible);
+        }
+    }
+}
+
+/// Puts the frame of the clip an actor is playing on its sprite, turned the way it looks. A
+/// sheet still on its way leaves the actor standing.
+fn show_clip(
+    art: &ClipSet,
+    script: &Script,
+    actor: usize,
+    t: f32,
+    sprite: &mut Sprite,
+    images: &Assets<Image>,
+) {
+    let heading = script.heading_at(actor, t);
+    let face = facing(heading.x, heading.y);
+    let (clip, frame) = match script.showing(actor, t) {
+        Showing::Once { clip, progress } => (art.get(clip), art.get(clip).once(progress)),
+        Showing::Looping { clip, seconds } => (art.get(clip), art.get(clip).looping(seconds)),
+    };
+    if images.contains(&clip.image) {
+        clip.show(sprite, face, frame);
+    } else {
+        let idle = art.get(fourx_content::animation::Clip::Idle);
+        if images.contains(&idle.image) {
+            idle.show(sprite, face, idle.looping(t));
         }
     }
 }

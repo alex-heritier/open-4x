@@ -1,5 +1,7 @@
 mod connection;
+mod march;
 mod presentation;
+mod puppet;
 mod stage;
 
 use bevy::{
@@ -513,6 +515,9 @@ pub fn run() {
             staging: false,
         })
         .insert_resource(stage::Stage::new())
+        .init_resource::<march::Walks>()
+        .init_resource::<puppet::UnitArt>()
+        .init_resource::<puppet::Facings>()
         .insert_non_send_resource(connection)
         .add_plugins(
             DefaultPlugins
@@ -541,6 +546,9 @@ pub fn run() {
                 scroll_inspector,
                 minimap_click,
                 controls,
+                // Before the stage, which waits for the walks; before `refresh`, so the walking
+                // units are hidden in the frame their walk begins.
+                march::walk,
                 // After the input, so a Space that skips a fight is not also an order; before
                 // `refresh`, so the real units are hidden in the frame a fight begins.
                 stage::drive,
@@ -550,6 +558,7 @@ pub fn run() {
                 presentation::update_minimap,
                 presentation::minimap_viewport,
                 presentation::draw_overlays,
+                puppet::animate,
                 smoke,
             )
                 .chain(),
@@ -643,6 +652,7 @@ fn receive(
     mut session: ResMut<Session>,
     mut connection: NonSendMut<Connection>,
     mut stage: ResMut<stage::Stage>,
+    mut walks: ResMut<march::Walks>,
     mut commands: Commands,
     mut clear: ResMut<ClearColor>,
     assets: Res<AssetServer>,
@@ -701,6 +711,10 @@ fn receive(
                 if newer && session.game.is_some() && !game.battles.is_empty() {
                     stage.enqueue(&game.battles);
                     session.staging = true;
+                }
+                // Likewise its walks, which play before its fights.
+                if newer && session.game.is_some() && !game.marches.is_empty() {
+                    walks.enqueue(&game.marches);
                 }
                 session.player = player;
                 session.game = Some(game);

@@ -98,6 +98,108 @@
         "yield": "audio/yield.wav"
       },
       "styles": {"cavalry": "charge"}
+    },
+    "units": {
+      "infantry": {
+        "frame": [160, 160],
+        "clips": {
+          "idle": {"sheet": "units/infantry/idle.png", "frames": 8, "ms": 160},
+          "run": {"sheet": "units/infantry/run.png", "frames": 8, "ms": 60},
+          "attack": {"sheet": "units/infantry/attack.png", "frames": 10, "ms": 80},
+          "victory": {"sheet": "units/infantry/victory.png", "frames": 8, "ms": 90},
+          "death": {"sheet": "units/infantry/death.png", "frames": 10, "ms": 90}
+        }
+      },
+      "cavalry": {
+        "frame": [160, 160],
+        "clips": {
+          "idle": {"sheet": "units/cavalry/idle.png", "frames": 8, "ms": 160},
+          "run": {"sheet": "units/cavalry/run.png", "frames": 8, "ms": 60},
+          "attack": {"sheet": "units/cavalry/attack.png", "frames": 10, "ms": 80},
+          "victory": {"sheet": "units/cavalry/victory.png", "frames": 8, "ms": 90},
+          "death": {"sheet": "units/cavalry/death.png", "frames": 10, "ms": 90}
+        }
+      },
+      "artillery": {
+        "frame": [160, 160],
+        "clips": {
+          "idle": {"sheet": "units/artillery/idle.png", "frames": 8, "ms": 160},
+          "run": {"sheet": "units/artillery/run.png", "frames": 8, "ms": 60},
+          "attack": {"sheet": "units/artillery/attack.png", "frames": 10, "ms": 80},
+          "victory": {"sheet": "units/artillery/victory.png", "frames": 8, "ms": 90},
+          "death": {"sheet": "units/artillery/death.png", "frames": 10, "ms": 90}
+        }
+      },
+      "worker": {
+        "frame": [160, 160],
+        "clips": {
+          "idle": {"sheet": "units/worker/idle.png", "frames": 8, "ms": 160},
+          "run": {"sheet": "units/worker/run.png", "frames": 8, "ms": 60},
+          "attack": {"sheet": "units/worker/attack.png", "frames": 10, "ms": 80},
+          "victory": {"sheet": "units/worker/victory.png", "frames": 8, "ms": 90},
+          "death": {"sheet": "units/worker/death.png", "frames": 10, "ms": 90}
+        }
+      },
+      "pioneer": {
+        "frame": [160, 160],
+        "clips": {
+          "idle": {"sheet": "units/pioneer/idle.png", "frames": 8, "ms": 160},
+          "run": {"sheet": "units/pioneer/run.png", "frames": 8, "ms": 60},
+          "attack": {"sheet": "units/pioneer/attack.png", "frames": 10, "ms": 80},
+          "victory": {"sheet": "units/pioneer/victory.png", "frames": 8, "ms": 90},
+          "death": {"sheet": "units/pioneer/death.png", "frames": 10, "ms": 90}
+        }
+      },
+      "ironclad": {
+        "frame": [256, 192],
+        "clips": {
+          "idle": {"sheet": "units/ironclad/idle.png", "frames": 8, "ms": 170},
+          "run": {"sheet": "units/ironclad/run.png", "frames": 8, "ms": 90},
+          "attack": {"sheet": "units/ironclad/attack.png", "frames": 8, "ms": 120},
+          "victory": {"sheet": "units/ironclad/victory.png", "frames": 8, "ms": 110},
+          "death": {"sheet": "units/ironclad/death.png", "frames": 8, "ms": 220}
+        }
+      },
+      "transport": {
+        "frame": [256, 192],
+        "clips": {
+          "idle": {"sheet": "units/transport/idle.png", "frames": 8, "ms": 170},
+          "run": {"sheet": "units/transport/run.png", "frames": 8, "ms": 90},
+          "attack": {"sheet": "units/transport/attack.png", "frames": 8, "ms": 120},
+          "victory": {"sheet": "units/transport/victory.png", "frames": 8, "ms": 110},
+          "death": {"sheet": "units/transport/death.png", "frames": 8, "ms": 220}
+        }
+      },
+      "battleship": {
+        "frame": [256, 192],
+        "clips": {
+          "idle": {"sheet": "units/battleship/idle.png", "frames": 8, "ms": 170},
+          "run": {"sheet": "units/battleship/run.png", "frames": 8, "ms": 90},
+          "attack": {"sheet": "units/battleship/attack.png", "frames": 8, "ms": 120},
+          "victory": {"sheet": "units/battleship/victory.png", "frames": 8, "ms": 110},
+          "death": {"sheet": "units/battleship/death.png", "frames": 8, "ms": 220}
+        }
+      },
+      "protected-cruiser": {
+        "frame": [256, 192],
+        "clips": {
+          "idle": {"sheet": "units/protected-cruiser/idle.png", "frames": 8, "ms": 170},
+          "run": {"sheet": "units/protected-cruiser/run.png", "frames": 8, "ms": 90},
+          "attack": {"sheet": "units/protected-cruiser/attack.png", "frames": 8, "ms": 120},
+          "victory": {"sheet": "units/protected-cruiser/victory.png", "frames": 8, "ms": 110},
+          "death": {"sheet": "units/protected-cruiser/death.png", "frames": 8, "ms": 220}
+        }
+      },
+      "torpedo-boat": {
+        "frame": [256, 192],
+        "clips": {
+          "idle": {"sheet": "units/torpedo-boat/idle.png", "frames": 8, "ms": 170},
+          "run": {"sheet": "units/torpedo-boat/run.png", "frames": 8, "ms": 90},
+          "attack": {"sheet": "units/torpedo-boat/attack.png", "frames": 8, "ms": 120},
+          "victory": {"sheet": "units/torpedo-boat/victory.png", "frames": 8, "ms": 110},
+          "death": {"sheet": "units/torpedo-boat/death.png", "frames": 8, "ms": 220}
+        }
+      }
     }
   },
   "scenarios": [

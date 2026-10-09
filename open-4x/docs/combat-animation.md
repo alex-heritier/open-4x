@@ -29,7 +29,6 @@ hit-point bars during a fight, sound cues, pacing, and skipping.
 
 Excluded, and not to be built before a need is shown:
 
-- Per-frame sprite sheets or a clip format. Art stays one image per design; motion is procedural.
 - Camera moves to follow a fight. A fight outside the view is not played (§6).
 - Replaying a fight after the fact, or a battle history screen.
 - Multi-tile projectiles with terrain collision, weather, or wind.
@@ -140,7 +139,8 @@ capturer advancing), and fades with it.
 - **Seen only.** A battle is played only when some fighter's tile is inside the camera view
   (grown by one tile). Any other battle is dropped without a trace. The record has already been
   filtered by `Game::view` for what the player may know.
-- **Order.** Battles play one at a time in record order.
+- **Order.** Battles play one at a time in record order, after the walks of the same snapshot
+  (see the README's *Fights on screen*): a fight never starts while a unit is still walking.
 - **Backlog.** With more than two battles waiting, playback speeds up by 25% per extra battle,
   capped at 4×, so a turn of computer play does not hold the player for minutes.
 - **Speed.** `--combat-speed N` (or `FOURX_COMBAT_SPEED`) scales the clock; `N > 0`, default 1.
@@ -157,9 +157,29 @@ capturer advancing), and fades with it.
 
 ## 7. Motion and effects
 
-Art is one image per design, so motion is a procedural *pose* (offset, rotation, scale, alpha,
-white flash) sampled from a motion's progress `u` in `0..=1`. A design's **style** chooses its
-attack motion; the default follows the design, a pack may override it per design.
+Every motion is a procedural *pose* (offset, rotation, scale, alpha, white flash) sampled from a
+motion's progress `u` in `0..=1`. A design's **style** chooses its attack motion; the default
+follows the design, a pack may override it per design.
+
+A design may also have **clips** (`visuals.units` in the pack; see the README): frame-by-frame
+sheets of eight facings for standing (`idle`), walking (`run`), `attack`, `victory`, and `death`.
+An actor with clips plays them, turned to the nearest of eight facings toward its foe (or along
+the step it is taking), and keeps only what its clip cannot show of the pose:
+
+| Motion | Clip played | What stays of the pose |
+| --- | --- | --- |
+| Attack | `attack`, once over the motion's length | offset and scale (a lunge or a recoil), no tilt |
+| Fall, Sink | `death`, once over the motion's length; the last frame holds | the fade |
+| Cheer | `victory`, once over the motion's length | nothing but colour |
+| Step | `run`, looping at its own speed; the actor faces along the step | the move between squares |
+| Flinch, Yield, Withdraw | whatever is already playing (standing otherwise) | all but the tilt |
+
+Of two clip motions under way, the one begun later shows, except that a death is never undone.
+Clips are authored to agree with the timing constants: a firing clip shoots `FIRE_AT` of the way
+through, a charge connects at `STRIKE_AT`. A sheet that has not loaded yet leaves the actor
+standing. When a fight starts, every unit in it is turned to face the way the fight leaves it, so
+the survivors keep looking at the foe on the map. A design without clips is drawn from its single
+image, flipped to face its foe, and moves by its pose alone.
 
 | Style | Default for | Attack motion (length) | Cues |
 | --- | --- | --- | --- |
