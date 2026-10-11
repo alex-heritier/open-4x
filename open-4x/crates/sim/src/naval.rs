@@ -64,7 +64,7 @@ impl Game {
         if unit.carrier.is_some() {
             return Err(error("Already aboard a ship"));
         }
-        if unit.position.distance(at) != 1 {
+        if self.map.distance(unit.position, at) != 1 {
             return Err(error("A ship must be next to you before you can board it"));
         }
         let left = unit.moves_left(rules.def(unit));

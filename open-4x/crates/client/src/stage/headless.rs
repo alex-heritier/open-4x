@@ -56,6 +56,8 @@ fn app() -> App {
         .init_resource::<crate::puppet::Facings>()
         .add_systems(Startup, setup)
         .add_systems(Update, (crate::march::walk, drive, fx).chain());
+    let shapes = crate::theme::Shapes::new(&mut app.world_mut().resource_mut::<Assets<Image>>());
+    app.insert_resource(shapes);
     app.world_mut().spawn((Window::default(), PrimaryWindow));
     app.world_mut().spawn((
         Camera2d,

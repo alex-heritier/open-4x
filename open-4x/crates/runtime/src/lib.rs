@@ -278,9 +278,18 @@ mod tests {
     }
 
     #[test]
-    fn the_default_scenario_is_the_whole_world_in_1876() {
+    fn the_default_scenario_is_age_of_imperialism() {
         let h = Host::base(1).unwrap();
-        assert_eq!(h.pack.default_scenario, "world-1876");
+        assert_eq!(h.pack.default_scenario, "age-of-imperialism");
+        let lattice = h.game.map.lattice.expect("the map stands upright");
+        assert_eq!((lattice.columns, lattice.rows), (90, 180));
+        assert_eq!(h.game.date().iso(), "1895-01-01");
+        assert!(h.game.factions.len() >= 30);
+        assert_eq!(h.game.factions[&h.commander()].tag, "japan");
+    }
+    #[test]
+    fn the_whole_world_in_1876_can_be_chosen() {
+        let h = Host::base_scenario("world-1876", 1).unwrap();
         // An upright rectangle of 256 x 684 tiles, held in the 598 x 598 square the sim runs on.
         let lattice = h.game.map.lattice.expect("the world stands upright");
         assert_eq!((lattice.columns, lattice.rows), (256, 684));
@@ -322,7 +331,7 @@ mod tests {
             h
         };
         let (a, b) = (play(7), play(7));
-        assert_eq!(a.game.date().iso(), "1876-01-31");
+        assert_eq!(a.game.date().iso(), "1895-01-31");
         assert_eq!(a.game, b.game);
         // The AI garrisons and recruits, so the world is visibly alive after a month.
         let start = Host::base(7).unwrap().game.units.len();
@@ -411,8 +420,9 @@ mod tests {
         let Response::Snapshot { game, .. } = h.snapshot(commander) else {
             panic!("expected a snapshot");
         };
-        // 1876 geography is common knowledge: every tile, border and city is on the chart.
-        assert_eq!(game.factions[&commander].explored.len(), 512 * 342);
+        // The geography is common knowledge: every tile, border and city is on the chart.
+        let explored = &game.factions[&commander].explored;
+        assert!(h.game.map.positions().all(|p| explored.contains(p)));
         assert_eq!(game.cities.len(), h.game.cities.len());
         for (a, b) in game.map.tiles.iter().zip(&h.game.map.tiles) {
             assert_eq!(
@@ -424,7 +434,8 @@ mod tests {
                     a.owner,
                     a.claim,
                     a.region,
-                    a.improvements
+                    a.improvements,
+                    a.resource
                 ),
                 (
                     b.terrain,
@@ -434,7 +445,8 @@ mod tests {
                     b.owner,
                     b.claim,
                     b.region,
-                    b.improvements
+                    b.improvements,
+                    b.resource
                 )
             );
         }

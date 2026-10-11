@@ -1257,3 +1257,83 @@ fn computer_nations_fight_wars_and_the_world_keeps_turning() {
         game.log
     );
 }
+
+/// An upright world with cities away from the seam used by the movement tests.
+fn wrapped_arena() -> (Game, terrain::Lattice) {
+    let lattice = terrain::Lattice {
+        columns: 12,
+        rows: 16,
+    };
+    let mut game = arena(lattice.side(), lattice.side());
+    game.map = terrain::Map::embedded(lattice, terrain::Terrain::Grass);
+    for city in game.cities.values_mut() {
+        city.position = if city.owner == RED {
+            lattice.cell(8, 4)
+        } else {
+            lattice.cell(16, 12)
+        };
+    }
+    for faction in game.factions.values_mut() {
+        faction.explored = terrain::Explored::new(game.map.width, game.map.height);
+    }
+    game.assign_start_territory();
+    game.reindex();
+    (game, lattice)
+}
+
+#[test]
+fn units_take_one_step_across_the_horizontal_seam_and_save_canonical_positions() {
+    let (mut game, lattice) = wrapped_arena();
+    let west = lattice.cell(0, 8);
+    let east = lattice.cell(22, 8);
+    let id = spawn(&mut game, RED, "infantry", west.x, west.y);
+    assert_eq!(
+        game.path(RED, Domain::Land, west, east, usize::MAX),
+        Some(vec![west, east])
+    );
+    run(
+        &mut game,
+        RED,
+        Command::Move {
+            unit: id,
+            destination: west.offset(-1, 1),
+        },
+    )
+    .unwrap();
+    assert_eq!(game.units[&id].position, east);
+    assert_eq!(game.units[&id].moves_used, MOVE_UNIT);
+    assert_eq!(game.units[&id].goto, None);
+    assert_eq!(game.marches.last().unwrap().path, vec![west, east]);
+    assert_eq!(game.unit_ids_at(west.offset(-1, 1)), vec![id]);
+    let saved: Game = serde_json::from_str(&serde_json::to_string(&game).unwrap()).unwrap();
+    assert_eq!(saved.units[&id].position, east);
+    assert_eq!(saved.map.neighbors(west), game.map.neighbors(west));
+}
+
+#[test]
+fn sight_borders_and_attacks_cross_the_horizontal_seam() {
+    let (mut game, lattice) = wrapped_arena();
+    let west = lattice.cell(0, 8);
+    let east = lattice.cell(22, 8);
+    let red_city = game.cities.values().find(|c| c.owner == RED).unwrap().id;
+    game.cities.get_mut(&red_city).unwrap().position = west;
+    game.assign_start_territory();
+    game.reindex();
+    assert_eq!(game.map.get(east).unwrap().claim, red_city);
+    let attacker = spawn(&mut game, RED, "infantry", west.x, west.y);
+    let captive = spawn(&mut game, BLUE, "worker", east.x, east.y);
+    game.reveal();
+    assert!(game.factions[&RED].explored.contains(east));
+    assert!(game.view(RED).units.contains_key(&captive));
+    run(
+        &mut game,
+        RED,
+        Command::Attack {
+            unit: attacker,
+            target: east,
+        },
+    )
+    .unwrap();
+    assert_eq!(game.units[&captive].owner, RED);
+    assert_eq!(game.units[&attacker].position, west);
+}

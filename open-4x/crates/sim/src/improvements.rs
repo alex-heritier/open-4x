@@ -100,7 +100,9 @@ impl Game {
         };
         by_water(position)
             || Coord::NEIGHBORS.iter().any(|&(dx, dy)| {
-                let p = position.offset(dx, dy);
+                let Some(p) = self.map.normalize(position.offset(dx, dy)) else {
+                    return false;
+                };
                 self.map
                     .get(p)
                     .is_some_and(|t| t.improvements & Tile::FARM != 0)

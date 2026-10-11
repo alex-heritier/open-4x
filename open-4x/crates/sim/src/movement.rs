@@ -105,11 +105,17 @@ impl Game {
         };
     }
     fn tile_key(&self, p: Coord) -> Option<u32> {
-        self.map.index(p).map(|i| i as u32)
+        self.map
+            .normalize(p)
+            .and_then(|p| self.map.index(p))
+            .map(|i| i as u32)
     }
 
     /// IDs of the units on a square, oldest first.
     pub fn unit_ids_at(&self, p: Coord) -> Vec<Id> {
+        let Some(p) = self.map.normalize(p) else {
+            return Vec::new();
+        };
         if self.index.built {
             self.tile_key(p)
                 .and_then(|k| self.index.units.get(&k))
@@ -130,6 +136,7 @@ impl Game {
             .collect()
     }
     pub fn city_at(&self, p: Coord) -> Option<Id> {
+        let p = self.map.normalize(p)?;
         if self.index.built {
             self.tile_key(p)
                 .and_then(|k| self.index.cities.get(&k))
@@ -140,6 +147,9 @@ impl Game {
     }
     /// A city or unit that belongs to someone other than `owner` stands here.
     pub fn blocked_for(&self, owner: Id, p: Coord) -> bool {
+        let Some(p) = self.map.normalize(p) else {
+            return false;
+        };
         if self
             .city_at(p)
             .is_some_and(|c| self.cities[&c].owner != owner)
@@ -211,6 +221,7 @@ impl Game {
     /// this rather than writing `position` directly. A ship takes its passengers along, and a
     /// passenger that moves away from its ship's square is no longer aboard.
     pub fn set_position(&mut self, id: Id, to: Coord) {
+        let to = self.map.normalize(to).unwrap_or(to);
         let Some(from) = self.units.get(&id).map(|u| u.position) else {
             return;
         };
@@ -281,6 +292,8 @@ impl Game {
         goal: Coord,
         limit: usize,
     ) -> Option<Vec<Coord>> {
+        let goal = self.map.normalize(goal)?;
+        let start = self.map.normalize(start)?;
         let goal_index = self.map.index(goal)?;
         let start_index = self.map.index(start)?;
         let width = self.map.width;
@@ -311,7 +324,9 @@ impl Game {
                 }
                 let here = at(current);
                 for (dx, dy) in Coord::NEIGHBORS {
-                    let next = here.offset(dx, dy);
+                    let Some(next) = self.map.normalize(here.offset(dx, dy)) else {
+                        continue;
+                    };
                     let Some(i) = self.map.index(next) else {
                         continue;
                     };
@@ -425,6 +440,10 @@ impl Game {
         rules: &Rules,
         budget: usize,
     ) -> Result<()> {
+        let destination = self
+            .map
+            .normalize(destination)
+            .ok_or_else(|| error("Off the map"))?;
         let unit = self.units.get(&id).ok_or_else(|| error("Unknown unit"))?;
         if unit.owner != player {
             return Err(error("You do not command this unit"));
@@ -445,7 +464,7 @@ impl Game {
             return Err(error("Ships stay at sea or in their own coastal cities"));
         }
         let held = self.blocked_for(player, destination);
-        if held && unit.position.distance(destination) == 1 {
+        if held && self.map.distance(unit.position, destination) == 1 {
             return Err(error("Another nation holds that square; attack it instead"));
         }
         let left = unit.moves_left(def);
@@ -466,7 +485,8 @@ impl Game {
     fn finish_march(&mut self, id: Id, goal: Coord) {
         let unit = &self.units[&id];
         let arrived = unit.position == goal;
-        let held = unit.position.distance(goal) == 1 && self.blocked_for(unit.owner, goal);
+        let held =
+            self.map.distance(unit.position, goal) == 1 && self.blocked_for(unit.owner, goal);
         if arrived || held {
             self.units.get_mut(&id).unwrap().goto = None;
         }

@@ -1,16 +1,20 @@
-"""Icons, 64 x 64 (shown at 32 logical px).  Two families, as in the reference:
+"""Icons, 64 x 64 (shown at 16 to 32 logical px).
 
-* engraved ink glyphs for the beige brass command buttons (book, city, tools, laurel, gear, ...);
-* small full-colour HUD badges (gold, research, industry, people, morale).
+Flat glyphs, one shape each, drawn in white on transparent so the client can tint them any colour
+(`ImageNode::color`).  A glyph's detail lines are cut out of it rather than painted over it: they
+are drawn in `CUT` and become holes (alpha) when the sheet is rendered, so a tint never leaves a
+second colour behind.  `icon_*` are the command glyphs of the action bar and the city view;
+`hud_*` are the readouts of the top bar and the city's economy.
 """
 
 import math
 
-from .paint import render_sprite
+from .util import downsample, rasterize
 from .svgkit import Svg
 
-INK = "#2a2017"
-LIGHT = "#fff1c4"
+INK = "#ffffff"
+# Drawn over a glyph, this is a hole in it once rendered (see `render_flat`).
+CUT = "#000000"
 
 
 def cog_pts(cx, cy, r_out, r_in, teeth=8, tw=0.16):
@@ -31,14 +35,14 @@ def star_pts(cx, cy, r_out, r_in, n=5):
     return pts
 
 
-# ---- engraved glyphs: draw(svg, c) paints the glyph in colour c ----------------------------------
+# ---- glyphs: draw(svg, c) paints the glyph in colour c ---------------------------------------------
 def g_book(s: Svg, c):
     s.path("M32,19 C24,14 14,15 8,18 L8,48 C14,45 24,45 32,50 Z", c)
     s.path("M32,19 C40,14 50,15 56,18 L56,48 C50,45 40,45 32,50 Z", c)
     for y in (24, 29, 34, 39):
-        s.line((13, y), (27, y + 1.5), LIGHT, 1.3, 0.8)
-        s.line((51, y), (37, y + 1.5), LIGHT, 1.3, 0.8)
-    s.line((32, 19), (32, 50), LIGHT, 1.2, 0.9)
+        s.line((13, y), (27, y + 1.5), CUT, 1.3, 0.8)
+        s.line((51, y), (37, y + 1.5), CUT, 1.3, 0.8)
+    s.line((32, 19), (32, 50), CUT, 1.2, 0.9)
 
 
 def g_city(s: Svg, c):
@@ -46,7 +50,7 @@ def g_city(s: Svg, c):
         s.rect(x, y, w, h, c)
     s.rect(40, 7, 3.5, 8, c)
     for x, y in [(8.5, 33), (8.5, 40), (19.5, 26), (19.5, 33), (19.5, 40), (29.5, 36), (29.5, 43), (40, 22), (40, 30), (40, 38), (50, 32), (50, 40), (54, 32)]:
-        s.rect(x, y, 3, 3.6, LIGHT, op=0.85)
+        s.rect(x, y, 3, 3.6, CUT, op=0.85)
     s.rect(4, 52, 56, 3, c)
 
 
@@ -70,7 +74,7 @@ def g_laurel(s: Svg, c):
 
 def g_gear(s: Svg, c):
     s.poly(cog_pts(32, 32, 24, 18, 8, 0.17), c)
-    s.circle(32, 32, 8, LIGHT, stroke=c, sw=2.2)
+    s.circle(32, 32, 8, CUT, stroke=c, sw=2.2)
 
 
 def g_globe(s: Svg, c):
@@ -85,9 +89,9 @@ def g_scroll(s: Svg, c):
     s.path("M16,12 L50,12 L50,44 L16,44 Z", c)
     s.ellipse(16, 28, 5, 16.5, c)
     s.ellipse(50, 28, 5, 16.5, c)
-    s.ellipse(16, 28, 2.4, 12, LIGHT, op=0.6)
+    s.ellipse(16, 28, 2.4, 12, CUT, op=0.6)
     for y in (20, 27, 34):
-        s.line((22, y), (44, y), LIGHT, 1.8, 0.85)
+        s.line((22, y), (44, y), CUT, 1.8, 0.85)
     s.path("M26,44 L26,58 L32,53 L38,58 L38,44 Z", c)
 
 
@@ -122,20 +126,20 @@ def g_star(s: Svg, c):
 def g_banner(s: Svg, c):
     s.rect(14, 8, 3.6, 50, c)
     s.path("M17.6,12 C28,6 36,18 48,12 L48,34 C36,40 28,28 17.6,34 Z", c)
-    s.circle(32, 24, 4, LIGHT, op=0.85)
+    s.circle(32, 24, 4, CUT, op=0.85)
 
 
 def g_hourglass(s: Svg, c):
     s.rect(14, 8, 36, 5, c)
     s.rect(14, 51, 36, 5, c)
     s.path("M18,13 L46,13 C46,26 36,28 36,32 C36,36 46,38 46,51 L18,51 C18,38 28,36 28,32 C28,28 18,26 18,13 Z", c)
-    s.path("M24,18 L40,18 C38,24 34,27 32,28 C30,27 26,24 24,18 Z", LIGHT, op=0.8)
-    s.path("M22,50 C24,42 28,39 32,38 C36,39 40,42 42,50 Z", LIGHT, op=0.8)
+    s.path("M24,18 L40,18 C38,24 34,27 32,28 C30,27 26,24 24,18 Z", CUT, op=0.8)
+    s.path("M22,50 C24,42 28,39 32,38 C36,39 40,42 42,50 Z", CUT, op=0.8)
 
 
 def g_shield(s: Svg, c):  # fortify: a heater shield with a boss
     s.path("M32,6 L54,13 C54,35 46,48 32,58 C18,48 10,35 10,13 Z", c)
-    s.path("M32,13 L46,18 C46,33 40,42 32,49 C24,42 18,33 18,18 Z", LIGHT, op=0.8)
+    s.path("M32,13 L46,18 C46,33 40,42 32,49 C24,42 18,33 18,18 Z", CUT, op=0.8)
     s.line((32, 18), (32, 46), c, 3.4)
     s.line((22, 28), (42, 28), c, 3.4)
 
@@ -153,7 +157,7 @@ def g_cross(s: Svg, c):  # disband: strike the unit from the rolls
 def g_road(s: Svg, c):  # a road running to the horizon
     s.path("M27,10 L37,10 L56,56 L8,56 Z", c)
     for y0, y1 in ((16, 22), (28, 36), (42, 53)):
-        s.line((32, y0), (32, y1), LIGHT, 2.2 + (y0 - 10) * 0.05, 0.9)
+        s.line((32, y0), (32, y1), CUT, 2.2 + (y0 - 10) * 0.05, 0.9)
 
 
 def g_rails(s: Svg, c):  # a railroad: two rails and the ties between them
@@ -178,86 +182,70 @@ def g_wheat(s: Svg, c):  # farm: an ear of wheat
     s.ellipse(32, 9, 3.2, 6.4, c)
 
 
-ENGRAVED = {
+
+
+def flat(draw) -> Svg:
+    s = Svg(64, 64)
+    draw(s, INK)
+    return s
+
+
+# ---- readouts --------------------------------------------------------------------------------------
+def g_coin(s: Svg, c):
+    s.circle(32, 32, 26, c)
+    s.circle(32, 32, 18, "none", stroke=CUT, sw=3.2)
+    s.line((32, 22), (32, 42), CUT, 4.0)
+
+
+def g_flask(s: Svg, c):  # research
+    s.rect(24, 6, 16, 6, c, rx=3)
+    s.path("M26,12 L38,12 L38,26 L55,52 Q58,58 51,58 L13,58 Q6,58 9,52 L26,26 Z", c)
+    s.path("M17,42 L47,42", "none", CUT, 3.2)
+    for x, y, r in ((27, 50, 2.6), (37, 48, 1.9)):
+        s.circle(x, y, r, CUT)
+
+
+def g_people(s: Svg, c):
+    for x, y, k in ((22, 26, 0.9), (42, 22, 1.0)):
+        s.circle(x, y, 8.6 * k, c)
+        s.path(f"M{x - 15*k},{y + 32*k} C{x - 15*k},{y + 11*k} {x + 15*k},{y + 11*k} {x + 15*k},{y + 32*k} Z", c)
+    s.path("M28,24 C34,22 36,28 34,32", "none", CUT, 2.4)
+
+
+def g_smile(s: Svg, c):  # morale
+    s.circle(32, 32, 26, c)
+    s.circle(23, 26, 3.4, CUT)
+    s.circle(41, 26, 3.4, CUT)
+    s.path("M19,37 Q32,51 45,37", "none", CUT, 3.8)
+
+
+GLYPHS = {
     "book": g_book, "city": g_city, "tools": g_tools, "laurel": g_laurel, "gear": g_gear,
     "globe": g_globe, "scroll": g_scroll, "target": g_target, "fire": g_fire, "shock": g_shock,
     "star": g_star, "banner": g_banner, "hourglass": g_hourglass,
     "shield": g_shield, "cancel": g_cancel, "cross": g_cross, "road": g_road, "rails": g_rails,
     "pickaxe": g_pickaxe, "wheat": g_wheat,
 }
+HUD = {"gold": g_coin, "research": g_flask, "industry": g_gear, "people": g_people, "morale": g_smile}
 
 
-def engraved(name) -> Svg:
-    s = Svg(64, 64)
-    s.begin('transform="translate(1.2 1.4)"')
-    ENGRAVED[name](s, "#fff3cc")  # sunlit lower lip
-    s.end()
-    ENGRAVED[name](s, INK)
-    return s
+def render_flat(svg: Svg, size=64, ss=4):
+    """White on transparent, with `CUT` shapes punched out."""
+    from PIL import Image
+    import numpy as np
 
-
-# ---- HUD badges ----------------------------------------------------------------------------------
-def hud_gold() -> Svg:
-    s = Svg(64, 64)
-    s.ellipse(34, 57, 20, 4, "#000", op=0.3, blur=s.blur(2))
-    g = s.rad([(0, "#ffe27a"), (0.55, "#e0a92a"), (1, "#9a6412")], 0.38, 0.32, 0.8)
-    s.path("M24,16 C14,28 9,40 14,50 C20,57 44,57 50,50 C55,40 50,28 40,16 Z", g, "#4a2e0a", 2)
-    s.path("M22,16 Q32,23 42,16 L40,10 Q32,14 24,10 Z", "#c8891e", "#4a2e0a", 2)
-    s.line((24, 17), (40, 17), "#6b3f0b", 2.4)
-    s.circle(32, 38, 9.5, "none", op=0.8, stroke="#fff0a0", sw=1.8)
-    s.path("M28,38 Q32,33 36,38 Q32,43 28,38", "#fff0a0", op=0.8)
-    s.ellipse(22, 30, 3, 8, "#fff7c8", op=0.5, rot=22)
-    return s
-
-
-def hud_research() -> Svg:
-    s = Svg(64, 64)
-    s.ellipse(32, 57, 18, 3.5, "#000", op=0.3, blur=s.blur(2))
-    s.path("M26,8 L38,8 L38,24 L52,50 Q54,56 48,56 L16,56 Q10,56 12,50 L26,24 Z", "#cfeff0", "#0f3a40", 2.2, op=0.55)
-    s.path("M21,40 L43,40 L52,50 Q54,56 48,56 L16,56 Q10,56 12,50 Z", s.lin([(0, "#58e0d0"), (1, "#127c80")], 0, 0, 0, 1), "#0f3a40", 2.0)
-    s.rect(24, 5, 16, 5, "#8a6a3a", rx=2, stroke="#2a1a0a", sw=1.6)
-    for x, y, r in ((26, 47, 2.6), (35, 45, 1.8), (31, 51, 2.0)):
-        s.circle(x, y, r, "#e8fff9", op=0.85)
-    s.path("M27,12 L27,24 L16,46", "none", "#fff", 2.2, op=0.45)
-    return s
-
-
-def hud_industry() -> Svg:
-    s = Svg(64, 64)
-    s.ellipse(32, 57, 20, 3.6, "#000", op=0.3, blur=s.blur(2))
-    s.poly(cog_pts(32, 34, 25, 19, 8, 0.17), s.lin([(0, "#f0dc9c"), (0.5, "#b99a58"), (1, "#6e5628")], 0, 0, 1, 1), "#2a1d0a", 2)
-    s.circle(32, 34, 11, "#1e242a", stroke="#0b0f12", sw=1.6)
-    s.circle(32, 34, 6, s.lin([(0, "#7a8791"), (1, "#2b343b")], 0, 0, 1, 1), stroke="#0b0f12", sw=1.2)
-    return s
-
-
-def hud_people() -> Svg:
-    s = Svg(64, 64)
-    col = s.lin([(0, "#f7d778"), (1, "#c28d1c")], 0, 0, 1, 1)
-    for x, y, k in ((22, 26, 0.85), (40, 22, 1.0)):
-        s.circle(x, y, 8.5 * k, col, stroke="#4a300a", sw=1.8)
-        s.path(f"M{x - 15*k},{y + 32*k} C{x - 15*k},{y + 12*k} {x + 15*k},{y + 12*k} {x + 15*k},{y + 32*k} Z", col, "#4a300a", 1.8)
-    return s
-
-
-def hud_morale() -> Svg:
-    s = Svg(64, 64)
-    s.ellipse(33, 57, 18, 3.4, "#000", op=0.3, blur=s.blur(2))
-    s.circle(32, 31, 24, s.rad([(0, "#fff08a"), (0.6, "#f2c320"), (1, "#b27d0a")], 0.38, 0.3, 0.85), stroke="#4a2e0a", sw=2.2)
-    s.ellipse(24, 26, 2.8, 4.2, "#3a2308")
-    s.ellipse(40, 26, 2.8, 4.2, "#3a2308")
-    s.path("M19,36 Q32,52 45,36", "none", "#3a2308", 3.2)
-    return s
-
-
-HUD = {"gold": hud_gold, "research": hud_research, "industry": hud_industry, "people": hud_people, "morale": hud_morale}
+    big = rasterize(svg.render(), size * ss, size * ss)
+    a = np.asarray(big.convert("RGBA"), dtype=np.float32) / 255.0
+    # Cut shapes are black over white: the red channel is how much of the glyph survives.
+    alpha = a[..., 3] * a[..., 0]
+    out = np.dstack([np.ones_like(alpha), np.ones_like(alpha), np.ones_like(alpha), alpha])
+    return downsample(Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA"), size, size)
 
 
 def render_all():
     out = {}
-    kw = dict(ss=4, seed=5, radius=0, grain=0.03, strokes=0.0, grade_kw=None)
-    for name in ENGRAVED:
-        out[f"icon_{name}"] = render_sprite(engraved(name).render(), 64, 64, **kw)
-    for name, fn in HUD.items():
-        out[f"hud_{name}"] = render_sprite(fn().render(), 64, 64, **kw)
+    for name, draw in GLYPHS.items():
+        out[f"icon_{name}"] = render_flat(flat(draw))
+    for name, draw in HUD.items():
+        out[f"hud_{name}"] = render_flat(flat(draw))
     return out

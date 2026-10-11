@@ -2,7 +2,7 @@
 
 Every picture in `assets/packs/base/` is generated here: **procedural SVG scenes -> `rsvg-convert` -> painterly finishing (NumPy) -> PNG.**
 The target look is a hand-painted, saturated "Civ-style" strategy-game finish: olive land, tan beaches, deep teal sea with turquoise shallows,
-dark painted forests, snow-capped relief, gritty brick-and-slate industrial cities, near-black navy UI panels in brass frames, cream parchment.
+dark painted forests, snow-capped relief, gritty brick-and-slate industrial cities, a flat, light UI: cream cards, dark navy pill plates, white glyphs.
 
 ## Regenerate
 
@@ -11,7 +11,7 @@ cd art
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # numpy, pillow
 brew install librsvg                                                   # provides rsvg-convert
 .venv/bin/python build.py              # all groups
-.venv/bin/python build.py terrain      # or: terrain | overlays | relief | sprites | units | ui | icons
+.venv/bin/python build.py terrain      # or: terrain | roads | overlays | relief | sprites | units | icons | resources
 ```
 
 Output goes to `assets/packs/base/`; the vector sources of the sprites are written to `art/svg/` (git-ignored, reproducible). Builds are deterministic (fixed seeds).
@@ -33,6 +33,7 @@ Art is authored at **2x** the size the game draws, so it stays crisp on high-DPI
 | fog sheet cell, flat border sheet cell | 256x128 | 128x64 | one diamond, drawn over the tile |
 | infantry, pioneer, worker, cavalry, artillery (and each cell of their animation sheets) | 160x160 | 70x70 | tile centre about (80, 108) |
 | farm, mine overlays | 256x128 | 128x64 | one diamond, drawn over the tile |
+| `farm_shore.png` | 8 x 4 pieces of 256x128 | 128x64 each | the farm cut by the shoreline of the water sheet, one piece per dual cell round a tile (see `forge/improvements.py`); a farm beside water is drawn from four of these instead of the whole diamond |
 | ironclad, transport, battleship, protected cruiser, torpedo boat (and each cell of their sheets) | 256x192 | 112x84 | tile centre about (128, 123) |
 
 All light comes from the upper left, in every module.
@@ -55,6 +56,8 @@ A square is drawn as layers, like a Civ3 tile: **ground**, the **water** over it
   equal pixels equal and makes the sheets about eight times smaller.
 * Coasts: the shoreline is the 0.5 isoline of the blended vertex weights, pushed by noise that fades to zero away from the boundary.
   Beach sand, turquoise shallows and a foam line are layered around it.
+
+**Roads** (`terrain/roads.png`, `terrain/railroads.png`, `forge/roads.py`, `python build.py roads`, about 40 s): 16 columns of 192x96 cells, one per mask of the eight neighbours a tile is joined to (bit order NE, E, SE, S, SW, W, NW, N), then variants of the masks with at most two links. Exits sit at the same eight points of every cell, at the same width, so neighbours join; wander and swell fade to nothing toward them. Roads are bezier routes with a worn edge, junctions branch tangentially; railroads add a ballast bed, sleepers at even spacing, and turnouts. The contract is in `docs/roads.md`.
 
 Map overlays (`terrain/fog.png`, `terrain/borders.png`, built by `forge/overlay.py` with `python build.py terrain`):
 
@@ -79,11 +82,13 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 | `buildings.py` | isometric kit for the city: gable/hip/flat roofs, windows, brick chimneys, pagoda, flag |
 | `kit.py` | round and organic primitives in the same light: drums, cones, domes, onion domes, minarets, palms, palisades, stilts, tents, canoes |
 | `cities.py` | the eleven city skins, one per flavor: `western`, `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, `oceanic` (`sprites/city_<flavor>.png`). They share one camera, ground disc and light, and carry no flag: the client tints the nation's plate over them |
+| `roads.py` | the road and railroad sheets: routes paired through each cell, junction branches, sleepers and rails, seamless exits |
 | `overlay.py` | the fog-of-war and culture-border sheets |
 | `rig.py` | a small 3D puppet renderer that writes SVG: the game's 2:1 camera, painter-sorted polygons, tubes, tapered limbs and balls, Lambert light from the upper left, two-bone IK, the eight facings |
 | `troops.py` | the land units as puppets: riflemen, pioneers and workers, horse and dragoon, field gun and gunner, and their five clips |
 | `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, deck) with boxes, funnels, turrets, masts, ensign, wake and smoke, and their five clips |
-| `ui.py`, `icons.py` | brass-framed panels, plates, buttons, bars, flags, parchment; engraved and HUD icons |
+| `icons.py` | flat white glyph icons (`icon_*`, `hud_*`) |
+| `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (ore heaps, crops, animals, a derrick, flags for the colonial markers; no frame or outline, only a contact shadow), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
 
 ## Unit animation (`units/`)
 
@@ -107,11 +112,9 @@ and barrels, boxes for packs and deckhouses. Sheets are palette PNGs, one palett
 cannot be told from full colour and is about five times smaller. `preview_anim.py <design> <clip>` draws a quick
 contact sheet of one clip into `preview/`.
 
-## UI kit (`ui/`)
+## UI glyphs (`ui/icons/`)
 
-Nine-slice sources are drawn at 2x; `ui/nine_slice.json` lists the border inset (source px) that keeps corner ornaments undistorted.
-`parchment.png` is a seamless 512 px tile. Icons live in `ui/icons/` at 64 px (shown at 32).
-The client's unit action bar wears `button_brass*.png` and the engraved icons through `ImageNode`; the rest of its UI is still built from flat colours, and these are ready to be wired with Bevy `ImageNode` + `TextureSlicer`.
+Flat white glyphs at 64 px, drawn by `forge/icons.py`; detail is cut out as transparent holes. The client tints them with `ImageNode` colours. Panels, buttons, plates and bars are not textures: they are drawn in code in `crates/client/src/theme.rs`.
 
 ## Relief surfaces and borders
 

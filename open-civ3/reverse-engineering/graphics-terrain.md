@@ -50,8 +50,8 @@ every entry in the table below reproduces byte-exact from disk.
 |---|---|---|---|---|
 | `x*.pcx` base land, `w*.pcx` water, `FogOfWar.pcx` | 1152x576 | 9x9 | 81 | border-blend transition matrix |
 | `irrigation*.pcx` | 512x256 | 4x4 | 16 | edge-mask overlay table (2^4); 6 of 16 tile centers are magenta-transparent empties |
-| `roads.pcx` | 2048x1024 | 16x16 | 256 | neighbor-mask table (2^8 — hypothesis, exact power match) |
-| `railroads.pcx` | 2048x1088 | 16x17 | 272 | 256 mask tiles + 16 extra row (use unknown) |
+| `roads.pcx` | 2048x1024 | 16x16 | 256 | neighbor-mask table, verified on all 256 cells: cell index = 8-bit mask, bit 0 NE, 1 E, 2 SE, 3 S, 4 SW, 5 W, 6 NW, 7 N (the order of the neighbours clockwise from north-east); roads leave each 128x64 cell at the midpoints of its four sides (NE, SE, SW, NW) and at its four vertices (E, S, W, N) |
+| `railroads.pcx` | 2048x1088 | 16x17 | 272 | 256 mask tiles (same layout as roads.pcx) + an extra row of 16 whose cells are drawn with every exit joined (use unknown) |
 | `goodyhuts.pcx` | 384x192 | 3x3 | 9 | 8 hut variants; cell (2,2) is 100 % magenta (empty) |
 | `pollution.pcx` | 640x320 | 5x5 | 25 | variants |
 | `delta/mtnRivers.pcx` | 512x256 | 4x4 | 16 | river segments: 16 = 2^4 edge-mask table, matching the `RiverMask` nibble hypothesis in `rivers.md` |

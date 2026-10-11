@@ -13,7 +13,7 @@ use super::*;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub(super) struct RouteGizmos;
 
-/// How the route is drawn: a heavy gold line with rounded bends.
+/// How the route is drawn: a heavy white line with rounded bends.
 pub(super) fn gizmo_config() -> GizmoConfig {
     GizmoConfig {
         line: GizmoLineConfig {
@@ -30,23 +30,40 @@ pub(super) fn gizmo_config() -> GizmoConfig {
 /// straight, fainter line to it.
 pub(super) fn draw(
     gizmos: &mut Gizmos<RouteGizmos>,
+    map: &Map,
+    view: WorldRect,
     from: Coord,
     goal: Coord,
     route: &[Coord],
     colour: Color,
 ) {
-    let centre = |p: Coord| {
-        let (x, y) = p.screen();
-        Vec2::new(x, y)
-    };
-    if route.len() < 2 {
-        gizmos.line_2d(centre(from), centre(goal), colour.with_alpha(0.45));
+    let squares = if route.len() < 2 {
+        vec![from, goal]
     } else {
-        gizmos.linestrip_2d(route.iter().map(|&p| centre(p)), colour);
-        for &p in &route[1..route.len() - 1] {
-            gizmos.circle_2d(centre(p), 4.5, colour);
+        route.to_vec()
+    };
+    let path = continuous_path(map, &squares);
+    // Every image of the path that can intersect the view, including paths crossing its edge.
+    let reach = path
+        .iter()
+        .map(|p| (p.screen().0 - path[0].screen().0).abs())
+        .fold(0.0, f32::max);
+    for first in view.grow(reach).copies(map, path[0]) {
+        let shift = first.screen().0 - path[0].screen().0;
+        let centre = |p: Coord| {
+            let (x, y) = p.screen();
+            Vec2::new(x + shift, y)
+        };
+        if route.len() < 2 {
+            gizmos.line_2d(centre(path[0]), centre(path[1]), colour.with_alpha(0.45));
+        } else {
+            gizmos.linestrip_2d(path.iter().map(|&p| centre(p)), colour);
+            for &p in &path[1..path.len() - 1] {
+                gizmos.circle_2d(centre(p), 4.5, colour);
+            }
         }
+        let goal = map.nearest(*path.last().unwrap(), goal);
+        gizmos.circle_2d(centre(goal), 14.0, colour);
+        gizmos.circle_2d(centre(goal), 7.0, colour);
     }
-    gizmos.circle_2d(centre(goal), 14.0, colour);
-    gizmos.circle_2d(centre(goal), 7.0, colour);
 }

@@ -101,16 +101,34 @@ pub(super) fn walk(
         };
         let view = camera_rect(camera, projection, window).grow(VIEW_MARGIN);
         for march in marches {
-            if let Some(walker) = start(
-                &mut commands,
-                &session,
-                &assets,
-                &mut puppetry,
-                &march,
-                view,
-            ) {
-                walks.hidden.insert(walker.unit);
-                walks.walking.push(walker);
+            let Some(game) = session.game.as_ref() else {
+                continue;
+            };
+            let path = super::continuous_path(&game.map, &march.path);
+            let Some(&first) = path.first() else {
+                continue;
+            };
+            let reach = path
+                .iter()
+                .map(|p| (p.screen().0 - first.screen().0).abs())
+                .fold(0.0, f32::max);
+            for copy in view.grow(reach).copies(&game.map, first) {
+                let mut image = march.clone();
+                image.path = path
+                    .iter()
+                    .map(|p| p.offset(copy.x - first.x, copy.y - first.y))
+                    .collect();
+                if let Some(walker) = start(
+                    &mut commands,
+                    &session,
+                    &assets,
+                    &mut puppetry,
+                    &image,
+                    view,
+                ) {
+                    walks.hidden.insert(walker.unit);
+                    walks.walking.push(walker);
+                }
             }
         }
         walks.clock = 0.0;

@@ -6,7 +6,9 @@ content pack. The pack supplies rules (unit designs, costs, research), art, soun
 turn script; the scenario supplies the world. A pack can ship several scenarios and names one as
 the default.
 
-The bundled default is [`world-1876`](../assets/packs/base/scenarios/world-1876.json): the whole
+The bundled default is [`age-of-imperialism`](../assets/packs/base/scenarios/age-of-imperialism.json):
+the Civ3 *Age of Imperialism 5.0* map (90 × 180 upright, 43 resource kinds) on 1 January 1895,
+converted by `tools/biq-import`. The pack also holds [`world-1876`](../assets/packs/base/scenarios/world-1876.json): the whole
 world on an upright Mercator map of 175,104 tiles (84°N to 58°S, no Antarctica) on **Saturday, 1 January 1876**, with 119 nations. The compact
 `dawn-straits` scenario is the small fixture the tests use.
 
@@ -62,7 +64,9 @@ the two-empire starter.
   "cover": ["..........", "..ff..jj.."],
   "rivers": [0, 10958, 2, 1, 0, 44],
   "regions": [0, 10958, 44, 1, 0, 1],
-  "improvements": [0, 5000, 3, 12, 0, 1]
+  "improvements": [0, 5000, 3, 12, 0, 1],
+  "resource_types": [{"id": "wheat", "name": "Wheat", "class": "bonus", "food": 2}],
+  "resources": [0, 5000, 1, 3, 0, 20]
 }
 ```
 
@@ -102,6 +106,13 @@ rivers on its edges.
 - `improvements` is an optional run-length layer of the same shape holding worker improvements
   as a bit set: `1` road, `2` railroad, `4` mine, `8` farm. Only land can hold them, a railroad
   needs a road, and a tile has a mine or a farm but not both. Omit it for an unimproved map.
+- `resource_types` is an optional list of the natural resources the map uses, each `{id, name,
+  class, food, shields, gold}` (`class` is `bonus`, `luxury`, or `strategic`; the three yields
+  are optional and each at most 25). At most 255 kinds, with unique ids. `resources` is a
+  run-length layer of the same shape as `improvements`: `0` for none, *n* for the *n*th kind.
+  A square with a resource adds the kind's yields to the square's own, and the client draws the
+  pack's `visuals.resources[id]` icon on it. A tile may not name a kind that is not declared.
+  Unexplored tiles hide their resource in a snapshot.
 - There is **no owner layer in the document**, and no layer for border claims. Territory is
   derived from the cities when the game is built: each city claims the tiles within its border
   level's reach (see [Cities](#regions-cities-units-wars)), and a tile's owner is the nation
@@ -222,15 +233,16 @@ A pack lists its scenarios and the default in `pack.json`:
 
 ```json
 "scenarios": [
+  {"id": "age-of-imperialism", "path": "scenarios/age-of-imperialism.json"},
   {"id": "world-1876", "path": "scenarios/world-1876.json"},
   {"id": "dawn-straits", "path": "scenarios/dawn-straits.json"}
 ],
-"default_scenario": "world-1876"
+"default_scenario": "age-of-imperialism"
 ```
 
 ```sh
 cargo run -p fourx-server -- --list                          # scenarios and their nations
-cargo run -p fourx-client                                    # the default: world-1876, as Japan
+cargo run -p fourx-client                                    # the default: age-of-imperialism, as Japan
 cargo run -p fourx-client -- --nation united-kingdom         # same world, another nation
 cargo run -p fourx-client -- --scenario dawn-straits         # the compact starter
 cargo run -p fourx-server -- --scenario world-1876 --nation russia --simulate 30
@@ -297,3 +309,5 @@ earlier ones, so colonial claims are layered over the modern country outlines.
 Borders are approximate to a tile. Colonial claims show who held the coast and the river routes,
 not paper claims. Where 1876 history is contested, the tables record what the forge's author
 judged most defensible; correcting an entry means editing a table and rebuilding.
+
+Upright `lattice` maps wrap horizontally: native columns repeat every `2 * columns`, while north and south remain bounded. Unit and city positions use canonical tiles inside the lattice. Movement, combat, sight, terrain blending, and borders cross the east/west seam. Plain diamond maps remain bounded.

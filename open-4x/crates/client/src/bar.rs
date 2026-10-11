@@ -1,7 +1,7 @@
-//! The action bar: what the selected unit can be ordered to do, as brass buttons floating at
-//! the foot of the map, the way Civ3 lays out its unit commands.
+//! The action bar: what the selected unit can be ordered to do, as a tray of glyph buttons
+//! floating at the foot of the map, the way Civ3 lays out its unit commands.
 //!
-//! Two rows, packed edge to edge and centred. Above go the orders of the unit's own trade:
+//! Two rows, packed close and centred. Above go the orders of the unit's own trade:
 //! found a city, build a road, a mine or a farm, and every blow it can strike from where it
 //! stands. Below go the standing orders every unit can be given: fortify, cancel its orders,
 //! disband it. A button appears for every order the design can give at all; one that cannot be
@@ -11,13 +11,15 @@
 //! Right-clicking the map is how a unit is sent somewhere or at an enemy (see `controls`);
 //! the strike buttons offer the same blows from the bar.
 use super::*;
-use crate::presentation::{GOLD_LINE, INK, NAVY, PAPER};
+use crate::theme::{
+    BAD, CARD, EDGE, INK, INK_SOFT, ON_PLATE, PLATE, Tone, card, glyph, lift_small, rounded,
+};
 use fourx_sim::{Domain, Order, Unit};
 
-/// Side of a button on screen. The art is 96 px, drawn at 2x for crisp scaling.
-const BUTTON: f32 = 46.0;
-/// Side of the engraving on it. The glyphs are 64 px drawn at half.
-const GLYPH: f32 = 32.0;
+/// Side of a button on screen.
+const BUTTON: f32 = 44.0;
+/// Side of the glyph on it. The glyphs are 64 px, drawn at under half for crisp scaling.
+const GLYPH: f32 = 26.0;
 
 /// One button of the bar.
 #[derive(Clone)]
@@ -199,15 +201,13 @@ pub(super) fn strikes(game: &Game, rules: &Rules, unit: &Unit) -> Vec<Strike> {
         .collect()
 }
 
-/// A button on the bar. The art follows the pointer (see [`update`]).
+/// A button on the bar. Its fill follows the pointer (see `theme::paint`).
 #[derive(Component)]
 pub(super) struct BarButton {
     /// What the pointer resting here reads, with the reason when the order is blocked.
     caption: String,
-    /// Cannot be given now: drawn dim, and the click does nothing.
+    /// Cannot be given now: drawn faint, and the click does nothing.
     pub dormant: bool,
-    rest: Handle<Image>,
-    pressed: Handle<Image>,
 }
 
 /// The line above the bar that names the button under the pointer.
@@ -221,9 +221,6 @@ pub(super) struct Placement {
     pub bottom: f32,
 }
 
-const DIM_FACE: Color = Color::srgb(0.52, 0.49, 0.46);
-const REST_FACE: Color = Color::srgb(0.92, 0.92, 0.92);
-
 /// Build the bar. `prefix` is where the pack's files are served from.
 pub(super) fn spawn(
     commands: &mut Commands,
@@ -235,8 +232,6 @@ pub(super) fn spawn(
     if rows.is_empty() {
         return;
     }
-    let face: Handle<Image> = assets.load(format!("{prefix}ui/button_brass.png"));
-    let pressed: Handle<Image> = assets.load(format!("{prefix}ui/button_brass_pressed.png"));
     commands
         .spawn((
             Node {
@@ -246,7 +241,7 @@ pub(super) fn spawn(
                 bottom: px(place.bottom),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                row_gap: px(2),
+                row_gap: px(8),
                 ..default()
             },
             UiRoot,
@@ -255,120 +250,111 @@ pub(super) fn spawn(
             bar.spawn((
                 Node {
                     display: Display::None,
-                    padding: UiRect::axes(px(10), px(4)),
-                    margin: UiRect::bottom(px(4)),
-                    border: UiRect::all(px(1)),
-                    border_radius: BorderRadius::all(px(5)),
+                    padding: UiRect::axes(px(12), px(5)),
+                    border_radius: rounded(999.0),
                     ..default()
                 },
-                BackgroundColor(NAVY),
-                BorderColor::all(GOLD_LINE),
+                BackgroundColor(PLATE),
+                lift_small(),
+                BarHint,
                 Text::new(""),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: 12.5,
                     ..default()
                 },
-                TextColor(PAPER),
-                BarHint,
+                TextColor(ON_PLATE),
             ));
-            for row in rows {
-                bar.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                })
-                .with_children(|row_node| {
-                    for entry in row {
-                        button(row_node, assets, prefix, &face, &pressed, entry);
-                    }
-                });
-            }
+            let mut tray = card();
+            tray.position_type = PositionType::Relative;
+            tray.padding = UiRect::all(px(6));
+            tray.row_gap = px(4);
+            tray.border_radius = rounded(16.0);
+            bar.spawn((
+                tray,
+                BackgroundColor(CARD),
+                BorderColor::all(EDGE),
+                lift_small(),
+            ))
+            .with_children(|tray| {
+                for row in rows {
+                    tray.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        justify_content: JustifyContent::Center,
+                        column_gap: px(4),
+                        row_gap: px(4),
+                        ..default()
+                    })
+                    .with_children(|row_node| {
+                        for entry in row {
+                            button(row_node, assets, prefix, entry);
+                        }
+                    });
+                }
+            });
         });
 }
 
-fn button(
-    row: &mut ChildSpawnerCommands,
-    assets: &AssetServer,
-    prefix: &str,
-    face: &Handle<Image>,
-    pressed: &Handle<Image>,
-    entry: Entry,
-) {
+fn button(row: &mut ChildSpawnerCommands, assets: &AssetServer, prefix: &str, entry: Entry) {
     let dormant = entry.blocked.is_some();
     let caption = match (&entry.key, &entry.blocked) {
         (Some(key), None) => format!("{} ({key})", entry.label),
         (None, None) => entry.label.clone(),
         (_, Some(why)) => format!("{}: {why}", entry.label),
     };
+    let tone = if dormant { Tone::Dormant } else { Tone::Quiet };
+    // A blow is red, so that the bar reads at a glance as where the fighting is.
+    let face = match (&entry.action, dormant) {
+        (_, true) => tone.ink(),
+        (Action::Strike(_), false) => BAD,
+        _ => INK,
+    };
     row.spawn((
         Button,
         entry.action,
-        BarButton {
-            caption,
-            dormant,
-            rest: face.clone(),
-            pressed: pressed.clone(),
-        },
-        ImageNode::new(face.clone()).with_color(if dormant { DIM_FACE } else { REST_FACE }),
+        BarButton { caption, dormant },
+        tone,
+        BackgroundColor(tone.fill(Interaction::None)),
         Node {
             width: px(BUTTON),
             height: px(BUTTON),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            border_radius: rounded(11.0),
             ..default()
         },
     ))
     .with_children(|b| {
-        b.spawn((
-            ImageNode::new(assets.load(format!("{prefix}ui/icons/icon_{}.png", entry.icon)))
-                .with_color(Color::WHITE.with_alpha(if dormant { 0.4 } else { 1.0 })),
-            Node {
-                width: px(GLYPH),
-                height: px(GLYPH),
-                ..default()
-            },
-        ));
+        glyph(b, assets, prefix, entry.icon, GLYPH, face);
         if let Some(key) = entry.key {
             b.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    right: px(2),
+                    right: px(5),
                     bottom: px(2),
-                    padding: UiRect::axes(px(3), px(0)),
-                    border_radius: BorderRadius::all(px(3)),
                     ..default()
                 },
-                BackgroundColor(INK.with_alpha(if dormant { 0.5 } else { 0.85 })),
                 Text::new(key),
                 TextFont {
-                    font_size: 10.0,
+                    font_size: 9.5,
+                    weight: bevy::text::FontWeight::SEMIBOLD,
                     ..default()
                 },
-                TextColor(PAPER),
+                TextColor(if dormant {
+                    INK.with_alpha(0.28)
+                } else {
+                    INK_SOFT
+                }),
             ));
         }
     });
 }
 
-/// Press and rest art for the buttons, and the name of the one under the pointer.
+/// The name of the button under the pointer.
 pub(super) fn update(
-    mut changed: Query<(&Interaction, &BarButton, &mut ImageNode), Changed<Interaction>>,
     all: Query<(&Interaction, &BarButton)>,
     mut hint: Query<(&mut Text, &mut Node), With<BarHint>>,
 ) {
-    for (interaction, button, mut image) in &mut changed {
-        let held = *interaction == Interaction::Pressed && !button.dormant;
-        let face = if held { &button.pressed } else { &button.rest };
-        if image.image != *face {
-            image.image = face.clone();
-        }
-        image.color = match (button.dormant, interaction) {
-            (true, _) => DIM_FACE,
-            (false, Interaction::None) => REST_FACE,
-            (false, _) => Color::WHITE,
-        };
-    }
     let Ok((mut text, mut node)) = hint.single_mut() else {
         return;
     };

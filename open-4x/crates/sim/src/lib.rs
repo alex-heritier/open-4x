@@ -8,6 +8,7 @@ pub mod economy;
 pub mod improvements;
 pub mod movement;
 pub mod naval;
+pub mod resources;
 pub mod scenario;
 pub mod terrain;
 pub mod units;
@@ -32,7 +33,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use terrain::{Coord, Explored, Map, Terrain};
 
 pub type Id = u32;
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 /// Tiles revealed around every city and unit (Chebyshev distance).
 pub const VISION_RADIUS: i32 = 5;
 /// Dispatches kept for the interface.
@@ -553,7 +554,7 @@ impl Game {
         if self
             .cities
             .values()
-            .any(|c| c.position.distance(position) < 3)
+            .any(|c| self.map.distance(c.position, position) < 3)
         {
             return Err("Cities must be at least three tiles apart");
         }
@@ -815,14 +816,20 @@ impl Game {
     }
 
     fn reveal(&mut self) {
-        for city in self.cities.values() {
-            if let Some(f) = self.factions.get_mut(&city.owner) {
-                f.explored.reveal(city.position, VISION_RADIUS);
-            }
-        }
-        for unit in self.units.values() {
-            if let Some(f) = self.factions.get_mut(&unit.owner) {
-                f.explored.reveal(unit.position, VISION_RADIUS);
+        let sources = self
+            .cities
+            .values()
+            .map(|c| (c.owner, c.position))
+            .chain(self.units.values().map(|u| (u.owner, u.position)));
+        for (owner, position) in sources {
+            if let Some(f) = self.factions.get_mut(&owner) {
+                for dy in -VISION_RADIUS..=VISION_RADIUS {
+                    for dx in -VISION_RADIUS..=VISION_RADIUS {
+                        if let Some(p) = self.map.normalize(position.offset(dx, dy)) {
+                            f.explored.insert(p);
+                        }
+                    }
+                }
             }
         }
     }
@@ -847,7 +854,11 @@ impl Game {
                     .map(|c| c.position),
             )
             .collect();
-        let visible = |pos: Coord| sources.iter().any(|p| p.distance(pos) <= VISION_RADIUS);
+        let visible = |pos: Coord| {
+            sources
+                .iter()
+                .any(|p| self.map.distance(*p, pos) <= VISION_RADIUS)
+        };
         let mut map = self.map.clone();
         for tile in &mut map.tiles {
             if !me.explored.contains(tile.position) {
@@ -856,6 +867,7 @@ impl Game {
                 tile.claim = 0;
                 tile.region = 0;
                 tile.improvements = 0;
+                tile.resource = 0;
             }
         }
         let units = self

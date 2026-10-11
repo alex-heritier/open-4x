@@ -38,8 +38,10 @@ impl Game {
         let mut tiles = Vec::new();
         for y in city.position.y - radius..=city.position.y + radius {
             for x in city.position.x - radius..=city.position.x + radius {
-                let p = Coord::new(x, y);
-                let d = p.distance_squared(city.position);
+                let Some(p) = self.map.normalize(Coord::new(x, y)) else {
+                    continue;
+                };
+                let d = self.map.distance_squared(p, city.position);
                 let Some(tile) = self.map.get(p) else {
                     continue;
                 };

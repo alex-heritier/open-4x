@@ -101,3 +101,83 @@ def build_mine() -> Svg:
     svg.line((172, 100), (160, 62), "#6a4a2c", 2.6)
     svg.path("M153,60 Q160,54 168,60 L167,62 Q160,58 155,63 Z", "#8c949a", INK, 0.7)
     return svg
+
+
+# --- the farm, cut along the shore -------------------------------------------------------------------
+# A farm fills its tile's diamond, but the shoreline of the terrain does not follow tile edges: it
+# runs through the four dual cells around a coastal tile. So the farm is also shipped as a sheet of
+# cell-sized pieces, one per (role, shore) pair, that stop where the water layer starts.
+SHORE_COLUMNS = 8  # one column per combination of water among the three other vertices of a cell
+CELL_W, CELL_H = 256, 128  # a piece, drawn 128 x 64 on the cell the way the terrain cells are
+CELL_MARGIN = 1.03  # pieces overlap a little so no hairline shows between them
+HEDGE = (0x35 / 255, 0x59 / 255, 0x2A / 255)
+
+
+def _water_alpha(water, n, e, s, w):
+    """Water coverage of the dual cell with vertex digits n, e, s, w (0 land, 1 coast), 0..1,
+    resampled to the piece size."""
+    import numpy as np
+    from PIL import Image
+
+    index = (4 * s + e) * 16 + 4 * w + n
+    cw = water.width // 16
+    ch = cw // 2
+    x, y = (index % 16) * cw, (index // 16) * ch
+    cell = water.crop((x, y, x + cw, y + ch)).getchannel("A").resize((CELL_W, CELL_H), Image.Resampling.BICUBIC)
+    return np.asarray(cell, dtype=np.float32) / 255.0
+
+
+def _cell_mask():
+    import numpy as np
+
+    yy, xx = np.mgrid[0:CELL_H, 0:CELL_W].astype(np.float32)
+    d = np.abs(xx + 0.5 - CELL_W / 2) / (CELL_W / 2) + np.abs(yy + 0.5 - CELL_H / 2) / (CELL_H / 2)
+    return np.clip((CELL_MARGIN - d) * 24.0, 0.0, 1.0)
+
+
+def farm_shore_sheet(farm, water):
+    """Sheet of farm pieces; `farm` is the 256 x 128 sprite and `water` the water terrain sheet.
+
+    Piece `role * 8 + mask`: the part of the farm inside the dual cell that has the tile as its
+    north (role 0), east (1), south (2) or west (3) vertex, cut where the water layer begins.
+    Bit i of `mask` says that the i-th other vertex of the cell, in north, east, south, west
+    order, is water.
+    """
+    import numpy as np
+    from PIL import Image, ImageFilter
+
+    from .util import to_array, to_image
+
+    art = to_array(farm)
+    cell = _cell_mask()
+    # where the tile centre lies in a cell frame, for each role: the farm canvas is moved there
+    centre = [(CELL_W // 2, 0), (CELL_W, CELL_H // 2), (CELL_W // 2, CELL_H), (0, CELL_H // 2)]
+    sheet = Image.new("RGBA", (CELL_W * SHORE_COLUMNS, CELL_H * 4), (0, 0, 0, 0))
+    for role in range(4):
+        cx, cy = centre[role]
+        framed = np.zeros((CELL_H, CELL_W, 4), dtype=np.float32)
+        dx, dy = cx - CELL_W // 2, cy - CELL_H // 2  # farm pixel (fx, fy) lands at (fx + dx, fy + dy)
+        for fy in range(farm.height):
+            y = fy + dy
+            if 0 <= y < CELL_H:
+                x0, x1 = max(0, dx), min(CELL_W, farm.width + dx)
+                if x1 > x0:
+                    framed[y, x0:x1] = art[fy, x0 - dx : x1 - dx]
+        others = [v for v in range(4) if v != role]
+        for mask in range(SHORE_COLUMNS):
+            digits = [0, 0, 0, 0]
+            for bit, vertex in enumerate(others):
+                digits[vertex] = (mask >> bit) & 1
+            water_a = _water_alpha(water, *digits)
+            # keep a little ground between the field and the beach, then soften the cut
+            land = Image.fromarray(((1.0 - np.clip(water_a * 6.0, 0, 1)) * 255).astype(np.uint8))
+            land = land.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.GaussianBlur(1.6))
+            land = np.asarray(land, dtype=np.float32) / 255.0
+            land = np.clip((land - 0.35) * 3.0, 0.0, 1.0)
+            # a hedge along the new edge, as along the old ones
+            edge = np.clip(1.0 - np.abs(land - 0.5) * 2.0, 0.0, 1.0) * (land > 0.02)
+            out = framed.copy()
+            out[..., :3] = out[..., :3] * (1 - edge[..., None] * 0.85) + np.array(HEDGE, dtype=np.float32) * edge[..., None] * 0.85
+            out[..., 3] = out[..., 3] * land * cell
+            sheet.paste(to_image(out), (mask * CELL_W, role * CELL_H))
+    return sheet

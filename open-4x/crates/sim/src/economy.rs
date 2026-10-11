@@ -14,7 +14,7 @@
 //! and a conquered city takes its harvest to its new owner along with its land.
 use crate::{
     City, Game, Id,
-    terrain::{Cover, Terrain, Tile},
+    terrain::{Cover, Map, Terrain, Tile},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -154,6 +154,16 @@ pub fn tile_yield(tile: &Tile, river: bool, city_centre: bool) -> Yield {
     total
 }
 
+/// What one square of `map` yields: [`tile_yield`] plus the bonus of the resource lying on it.
+/// The river is looked up on the map, so this is the number to use wherever a square is counted.
+pub fn square_yield(map: &Map, tile: &Tile, city_centre: bool) -> Yield {
+    let mut total = tile_yield(tile, map.river_mask(tile.position) != 0, city_centre);
+    if let Some(resource) = map.resource(tile) {
+        total += resource.bonus();
+    }
+    total
+}
+
 /// What a city's population did over a day.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
@@ -209,9 +219,8 @@ impl Game {
             let Some(city) = self.cities.get(&tile.claim) else {
                 continue;
             };
-            let river = self.map.river_mask(tile.position) != 0;
             *totals.entry(city.id).or_default() +=
-                tile_yield(tile, river, city.position == tile.position);
+                square_yield(&self.map, tile, city.position == tile.position);
         }
         totals
     }
@@ -343,6 +352,24 @@ mod tests {
             tile_yield(tile, map.river_mask(tile.position) != 0, false).gold
         };
         assert_eq!([harvest(0), harvest(1), harvest(2)], [1, 1, 0]);
+    }
+
+    #[test]
+    fn a_natural_resource_adds_its_bonus_to_the_square_it_lies_on() {
+        use crate::resources::{ResourceClass, ResourceKind};
+        let mut map = Map::filled(2, 1, Terrain::Plains);
+        map.resources = vec![ResourceKind {
+            id: "wheat".into(),
+            name: "Wheat".into(),
+            class: ResourceClass::Bonus,
+            food: 2,
+            shields: 0,
+            gold: 1,
+        }];
+        map.get_mut(Coord::new(0, 0)).unwrap().resource = 1;
+        let at = |x| square_yield(&map, map.get(Coord::new(x, 0)).unwrap(), false);
+        assert_eq!(at(0), PLAINS + Yield::new(2, 0, 1));
+        assert_eq!(at(1), PLAINS);
     }
 
     #[test]

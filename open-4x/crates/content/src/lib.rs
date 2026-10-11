@@ -18,6 +18,10 @@ pub const BASE_SCRIPT: &str = include_str!("../../../assets/packs/base/scripts/c
 /// Scenario files embedded in the binary, keyed by their pack-relative path.
 pub const BASE_SCENARIOS: &[(&str, &str)] = &[
     (
+        "scenarios/age-of-imperialism.json",
+        include_str!("../../../assets/packs/base/scenarios/age-of-imperialism.json"),
+    ),
+    (
         "scenarios/world-1876.json",
         include_str!("../../../assets/packs/base/scenarios/world-1876.json"),
     ),
@@ -67,10 +71,29 @@ pub struct Visuals {
     /// as `borders`, anchored exactly like its matching relief. Omission uses flat borders.
     #[serde(default)]
     pub relief_borders: BTreeMap<String, String>,
+    /// Icon drawn on tiles that carry a natural resource, by the resource's id (see
+    /// [`fourx_sim::resources`]). A resource without an icon is still listed when its square is
+    /// inspected, only not drawn.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub resources: BTreeMap<String, String>,
     /// Overlay drawn on tiles with a mine.
     pub mine: String,
     /// Overlay drawn on tiles with a farm.
     pub farm: String,
+    /// Optional: the farm cut along the shore, so it stops where the water starts instead of
+    /// spilling over it. A sheet of 8 x 4 pieces, each the size of a terrain cell (the cell
+    /// layout of `fourx_sim::terrain::Map::shore_pieces`). Without it the whole farm is drawn.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub farm_shore: String,
+    /// Optional: roads. A 16-column sheet of tile-sized cells, one per set of neighbours the
+    /// road joins (bit `i` of the cell number is `Coord::NEIGHBORS[i]`: NE, E, SE, S, SW, W, NW,
+    /// N), then further variants of the cells with at most two links; see `docs/roads.md`.
+    /// Without it roads are not drawn.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub roads: String,
+    /// Optional: railroads, a sheet laid out like `roads`, drawn over them.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub railroads: String,
     pub turn_sound: String,
     /// How fights look and sound; every part is optional.
     #[serde(default)]
@@ -97,8 +120,12 @@ impl Visuals {
             &self.turn_sound,
         ]
         .into_iter()
+        .chain((!self.farm_shore.is_empty()).then_some(&self.farm_shore))
+        .chain((!self.roads.is_empty()).then_some(&self.roads))
+        .chain((!self.railroads.is_empty()).then_some(&self.railroads))
         .chain(self.overlays.values())
         .chain(self.relief_borders.values())
+        .chain(self.resources.values())
         .chain(self.cities.values())
         .chain(self.combat.paths())
         .chain(animation::paths(&self.units))
@@ -629,11 +656,10 @@ mod tests {
         }
     }
     #[test]
-    fn the_default_scenario_is_the_world_of_january_1876() {
+    fn the_world_of_january_1876_is_still_shipped() {
         use fourx_sim::Status;
         let content = Content::base();
-        assert_eq!(content.pack.default_scenario, "world-1876");
-        let world = content.scenario(None).unwrap();
+        let world = content.scenario(Some("world-1876")).unwrap();
         assert_eq!(world.id, "world-1876");
         assert_eq!(world.start_date.iso(), "1876-01-01");
         world_is_painted_with_layered_terrain(world);
@@ -716,10 +742,49 @@ mod tests {
         assert!(unknown.validate().is_err());
     }
     #[test]
+    fn the_default_scenario_is_the_age_of_imperialism_map() {
+        let content = Content::base();
+        assert_eq!(content.pack.default_scenario, "age-of-imperialism");
+        let scenario = content.scenario(None).unwrap();
+        assert_eq!(scenario.id, "age-of-imperialism");
+        let map = &scenario.map;
+        assert_eq!(map.lattice.map(|l| (l.columns, l.rows)), Some((90, 180)));
+        // Every resource of the original map is present except its two era markers.
+        assert_eq!(map.resources.len(), 43);
+        for gone in ["industry", "colonialism"] {
+            assert!(map.resources.iter().all(|r| r.id != gone), "{gone}");
+        }
+        let used: std::collections::BTreeSet<_> = map.tiles.iter().map(|t| t.resource).collect();
+        assert!(used.len() > 30, "resources are spread over the map");
+        for kind in &map.resources {
+            assert!(
+                content.pack.visuals.resources.contains_key(&kind.id),
+                "{} has no icon",
+                kind.id
+            );
+        }
+        assert!(
+            map.tiles
+                .iter()
+                .filter(|t| map.river_mask(t.position) != 0)
+                .count()
+                > 500,
+            "rivers carried over"
+        );
+        for nation in &scenario.nations {
+            let capitals = scenario
+                .cities
+                .iter()
+                .filter(|c| c.nation == nation.id && c.capital)
+                .count();
+            assert_eq!(capitals, 1, "{} needs exactly one capital", nation.id);
+        }
+    }
+    #[test]
     fn nations_are_dealt_the_architecture_of_their_part_of_the_world() {
         use fourx_sim::Flavor::*;
         let content = Content::base();
-        let world = content.scenario(None).unwrap();
+        let world = content.scenario(Some("world-1876")).unwrap();
         let flavor = |id: &str| world.nations.iter().find(|n| n.id == id).expect(id).flavor;
         for (id, wanted) in [
             ("united-kingdom", Western),

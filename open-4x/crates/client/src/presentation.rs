@@ -9,26 +9,7 @@ use fourx_sim::{
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// The HUD's materials, from the reference: cream parchment, a near-black navy for bars
-/// and buttons, and brass only where something should catch the eye.
-pub(crate) const PAPER: Color = Color::srgb(0.89, 0.85, 0.74);
-/// Parchment ink, and the plates world labels sit on.
-pub(crate) const INK: Color = Color::srgb(0.09, 0.15, 0.16);
-/// Brass: headings and the one primary action.
-pub(crate) const GOLD: Color = Color::srgb(0.80, 0.66, 0.40);
-/// Brass at hairline weight, for the edge of a panel that should not shout.
-pub(crate) const GOLD_LINE: Color = Color::srgba(0.80, 0.66, 0.40, 0.40);
-/// The fill of a bar or a secondary button: dark, but the map shows faintly through it.
-pub(crate) const NAVY: Color = Color::srgba(0.06, 0.10, 0.12, 0.90);
-pub(crate) const NAVY_HOVER: Color = Color::srgba(0.14, 0.19, 0.20, 0.94);
-pub(crate) const NAVY_PRESSED: Color = Color::srgba(0.22, 0.26, 0.24, 0.95);
-/// The day button is the one control that ends the turn: it wears the brass.
-pub(crate) const BRASS: Color = Color::srgb(0.80, 0.66, 0.40);
-pub(crate) const BRASS_HOVER: Color = Color::srgb(0.89, 0.78, 0.52);
-pub(crate) const BRASS_PRESSED: Color = Color::srgb(0.68, 0.55, 0.32);
-const RED: Color = Color::srgb(0.75, 0.24, 0.20);
-/// How far every piece of chrome is rounded.
-const RADIUS: f32 = 7.0;
+use crate::theme::*;
 
 /// Minimap pixel colours.
 const MAP_OCEAN: [u8; 3] = [22, 52, 84];
@@ -42,113 +23,29 @@ const MAP_FOG: [u8; 3] = [20, 33, 38];
 const MAP_OWN_CITY: [u8; 3] = [244, 238, 220];
 const MAP_OWN_CITY_CORE: [u8; 3] = [24, 28, 30];
 
-pub(crate) fn text(
+/// One readout of the top bar: a glyph and its figure, in a soft pill.
+fn stat(
     parent: &mut ChildSpawnerCommands,
+    assets: &AssetServer,
+    prefix: &str,
+    icon: &str,
     value: impl Into<String>,
-    size: f32,
-    color: Color,
 ) {
-    parent.spawn((
-        Node {
-            flex_shrink: 0.0,
-            ..default()
-        },
-        Text::new(value),
-        TextFont {
-            font_size: size,
-            ..default()
-        },
-        TextColor(color),
-    ));
-}
-/// A rounded corner, for the `border_radius` of a node.
-pub(crate) fn rounded(radius: f32) -> BorderRadius {
-    BorderRadius::all(px(radius))
-}
-
-/// The fill a button starts at; `buttons` repaints it as the pointer moves over it.
-fn resting_fill(action: &Action) -> Color {
-    if matches!(action, Action::EndTurn) {
-        BRASS
-    } else {
-        NAVY
-    }
-}
-
-/// A control. The day button is brass; every other button is a quiet navy that warms
-/// under the pointer.
-fn button(parent: &mut ChildSpawnerCommands, title: impl Into<String>, action: Action) {
-    let primary = matches!(action, Action::EndTurn);
-    let fill = resting_fill(&action);
     parent
         .spawn((
-            Button,
-            action,
             Node {
-                min_height: px(34),
-                flex_shrink: 0.0,
-                padding: UiRect::axes(px(11), px(6)),
-                margin: UiRect::bottom(px(4)),
-                border: UiRect::all(px(1)),
-                border_radius: rounded(5.0),
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                column_gap: px(8),
+                padding: UiRect::axes(px(12), px(6)),
+                border_radius: rounded(999.0),
+                flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(fill),
-            BorderColor::all(if primary { GOLD } else { GOLD_LINE }),
+            BackgroundColor(WELL),
         ))
-        .with_children(|p| text(p, title, 13.0, if primary { INK } else { PAPER }));
-}
-fn panel() -> Node {
-    Node {
-        position_type: PositionType::Absolute,
-        padding: UiRect::all(px(14)),
-        border: UiRect::all(px(1)),
-        flex_direction: FlexDirection::Column,
-        row_gap: px(7),
-        border_radius: rounded(RADIUS),
-        ..default()
-    }
-}
-
-/// A section label, with the hairline the reference draws under its headings.
-fn heading(parent: &mut ChildSpawnerCommands, label: &str) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            flex_shrink: 0.0,
-            row_gap: px(3),
-            margin: UiRect::top(px(3)),
-            ..default()
-        })
         .with_children(|p| {
-            text(p, label, 12.0, GOLD);
-            p.spawn((
-                Node {
-                    width: percent(100),
-                    height: px(1),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BackgroundColor(GOLD_LINE),
-            ));
-        });
-}
-
-/// One readout of the top bar: a small brass label over the value it names.
-fn stat(parent: &mut ChildSpawnerCommands, label: &str, value: impl Into<String>) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            flex_shrink: 0.0,
-            row_gap: px(1),
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(|p| {
-            text(p, label.to_uppercase(), 9.5, GOLD);
-            text(p, value, 13.0, PAPER);
+            glyph(p, assets, prefix, icon, 18.0, INK.with_alpha(0.72));
+            bold(p, value, 13.5, INK);
         });
 }
 
@@ -178,8 +75,14 @@ fn image_sprite(
     commands.spawn((sprite, Transform::from_translation(position), WorldVisual));
 }
 
+/// "Jan 1, 1876".
 fn short_date(date: Date) -> String {
-    format!("{} {} {}", date.day(), &date.month_name()[..3], date.year())
+    format!(
+        "{} {}, {}",
+        &date.month_name()[..3],
+        date.day(),
+        date.year()
+    )
 }
 fn long_date(date: Date) -> String {
     format!(
@@ -237,6 +140,10 @@ pub(super) const SHEET_COLUMNS: u32 = 16;
 /// (1..=6) of a pure cell with digit `d` is cell `256 + 4*(k-1) + d`.
 const VARIANTS: usize = 6;
 
+/// Columns of the shore-cut farm sheet (rows are the four roles of a cell, see
+/// `Map::shore_pieces`).
+pub(super) const FARM_SHORE_COLUMNS: u32 = 8;
+
 /// Columns and rows of the fog sheet.
 pub(super) const FOG_COLUMNS: u32 = 9;
 
@@ -248,6 +155,11 @@ const Z_FOG: f32 = 15.0;
 const Z_BORDER: f32 = Z_RELIEF + 3.0 * Z_STEP;
 const Z_CITY: f32 = 20.0;
 pub(super) const Z_UNIT: f32 = 30.0;
+/// Corner offsets, from a tile, of the dual cells that have it as their north, east, south and
+/// west vertex.
+const FARM_CELLS: [(i32, i32); 4] = [(0, 0), (-1, 0), (-1, -1), (0, -1)];
+/// Side of a resource picture on the map, in map pixels.
+const RESOURCE_ICON: f32 = 60.0;
 /// Gap that puts one sprite of a tile in front of another of the same tile without reaching
 /// past the next tile in line (neighbours differ by at least `depth(32.0)`).
 const Z_STEP: f32 = 0.00008;
@@ -304,10 +216,10 @@ impl Sight {
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let p = Coord::new(x, y);
-                if game.map.contains(p) {
+                if let Some(canonical) = game.map.normalize(p) {
                     let state = if player == 0 {
                         IN_SIGHT
-                    } else if explored.is_some_and(|e| e.contains(p)) {
+                    } else if explored.is_some_and(|e| e.contains(canonical)) {
                         REMEMBERED
                     } else {
                         UNSEEN
@@ -333,11 +245,20 @@ impl Sight {
                     .map(|u| u.position),
             );
         for source in sources {
-            for y in (source.y - VISION_RADIUS).max(y0)..=(source.y + VISION_RADIUS).min(y1) {
-                for x in (source.x - VISION_RADIUS).max(x0)..=(source.x + VISION_RADIUS).min(x1) {
-                    let p = Coord::new(x, y);
-                    if game.map.contains(p) {
-                        sight.set(p, IN_SIGHT);
+            let columns = game.map.lattice.map(|l| l.columns);
+            let copies = columns.map_or(0..=0, |c| {
+                (x0 - source.x - VISION_RADIUS).div_euclid(c)
+                    ..=(x1 - source.x + VISION_RADIUS).div_euclid(c)
+            });
+            for k in copies {
+                let source = columns.map_or(source, |c| source.offset(k * c, -k * c));
+                for y in (source.y - VISION_RADIUS).max(y0)..=(source.y + VISION_RADIUS).min(y1) {
+                    for x in (source.x - VISION_RADIUS).max(x0)..=(source.x + VISION_RADIUS).min(x1)
+                    {
+                        let p = Coord::new(x, y);
+                        if game.map.normalize(p).is_some() {
+                            sight.set(p, IN_SIGHT);
+                        }
                     }
                 }
             }
@@ -452,6 +373,35 @@ pub(super) fn fit_terrain_atlas(
             changed = true;
         }
     }
+    if !session.pack.visuals.farm_shore.is_empty() {
+        // Kept in `Art`: nothing draws with the sheet until it has loaded, and a handle that
+        // is dropped before then would cancel the load.
+        let image = art
+            .farm_shore_image
+            .get_or_insert_with(|| {
+                assets.load(format!(
+                    "{}{}",
+                    session.asset_prefix, session.pack.visuals.farm_shore
+                ))
+            })
+            .clone();
+        if let Some(sheet) = images.get(&image).map(Image::size) {
+            let cell = UVec2::new(sheet.x / FARM_SHORE_COLUMNS, sheet.y / 4);
+            if sheet != art.farm_shore_sheet && cell.min_element() > 0 {
+                if let Some(layout) = layouts.get_mut(&art.farm_shore) {
+                    *layout =
+                        TextureAtlasLayout::from_grid(cell, FARM_SHORE_COLUMNS, 4, None, None);
+                }
+                art.farm_shore_sheet = sheet;
+                changed = true;
+            }
+        }
+    }
+    let (prefix, visuals) = (&session.asset_prefix, &session.pack.visuals);
+    changed |= art.roads.fit(prefix, &visuals.roads, &assets, &images, &mut layouts)
+        | art
+            .rails
+            .fit(prefix, &visuals.railroads, &assets, &images, &mut layouts);
     if let Some(sheet) = images.get(&fog).map(Image::size) {
         let cell = sheet / FOG_COLUMNS;
         if sheet != art.fog_sheet && cell.min_element() > 0 {
@@ -603,6 +553,7 @@ pub(super) fn refresh(
     mut previous_size: Local<Vec2>,
     stage: Res<crate::stage::Stage>,
     walks: Res<crate::march::Walks>,
+    shapes: Res<Shapes>,
     mut puppetry: crate::puppet::Puppetry,
 ) {
     let Ok(window) = windows.single() else {
@@ -662,7 +613,7 @@ pub(super) fn refresh(
                 },
                 UiRoot,
             ))
-            .with_children(|p| text(p, &session.message, 24.0, PAPER));
+            .with_children(|p| text(p, &session.message, 24.0, ON_PLATE));
         return;
     }
     // Build a generous margin so a pan does not rebuild every frame.
@@ -693,8 +644,8 @@ pub(super) fn refresh(
     // ground, the water over it, and the rivers over both. A cell shows through the fog as far
     // as the fog of any tile it covers does, which is as far as a tile away from the known
     // world, so a cell with nothing known within that reach has nothing to show.
-    for y in (y0 - 1).max(-1)..=y1.min(game.map.height - 1) {
-        for x in (x0 - 1).max(-1)..=x1.min(game.map.width - 1) {
+    for y in (y0 - 1)..=y1 {
+        for x in (x0 - 1)..=x1 {
             let p = Coord::new(x, y);
             let (wx, wy) = p.screen();
             if !built.has(Vec2::new(wx, wy)) {
@@ -708,15 +659,16 @@ pub(super) fn refresh(
             if upright
                 && ![(0, 0), (1, 0), (0, 1), (1, 1)]
                     .iter()
-                    .any(|&(dx, dy)| game.map.contains(p.offset(dx, dy)))
+                    .any(|&(dx, dy)| game.map.normalize(p.offset(dx, dy)).is_some())
             {
                 continue;
             }
+            let art_position = game.map.nearest(Coord::default(), p);
             let layers = [
                 (
                     game.map
                         .ground_cell(p)
-                        .map(|i| varied(i, p, art.variants, 0)),
+                        .map(|i| varied(i, art_position, art.variants, 0)),
                     &ground,
                     &art.cells,
                     0.0,
@@ -724,7 +676,7 @@ pub(super) fn refresh(
                 (
                     game.map
                         .water_cell(p)
-                        .map(|i| varied(i, p, art.variants, 1)),
+                        .map(|i| varied(i, art_position, art.variants, 1)),
                     &water,
                     &art.cells,
                     0.05,
@@ -732,7 +684,7 @@ pub(super) fn refresh(
                 (
                     Some(game.map.river_cell(p))
                         .filter(|&mask| mask != 0)
-                        .map(|mask| scatter(p) % art.meanders.max(1) * 16 + mask),
+                        .map(|mask| scatter(art_position) % art.meanders.max(1) * 16 + mask),
                     &rivers,
                     &art.rivers,
                     0.1,
@@ -758,14 +710,15 @@ pub(super) fn refresh(
     // retain the separate cover fallback.
     for y in y0..=y1 {
         for x in x0..=x1 {
-            let Some(tile) = game.map.get(Coord::new(x, y)) else {
+            let p = Coord::new(x, y);
+            let Some(tile) = game.map.get(p) else {
                 continue;
             };
             let (relief, cover) = resolved_overlay_names(tile, visuals);
-            if (relief.is_none() && cover.is_none()) || !is_known(tile.position) {
+            if (relief.is_none() && cover.is_none()) || !is_known(p) {
                 continue;
             }
-            let (sx, sy) = tile.position.screen();
+            let (sx, sy) = p.screen();
             if !built.has(Vec2::new(sx, sy)) {
                 continue;
             }
@@ -809,24 +762,64 @@ pub(super) fn refresh(
         city_tiles.insert(city.position);
     }
     let farm: Handle<Image> = assets.load(format!("{prefix}{}", session.pack.visuals.farm));
+    let farm_shore: Option<Handle<Image>> = art.farm_shore_image.clone();
     let mine: Handle<Image> = assets.load(format!("{prefix}{}", session.pack.visuals.mine));
+    // Resource icons, in the order of the map's kinds; a kind the pack has no art for is not drawn.
+    let resource_icons: Vec<Option<Handle<Image>>> = game
+        .map
+        .resources
+        .iter()
+        .map(|kind| {
+            visuals
+                .resources
+                .get(&kind.id)
+                .map(|path| assets.load(format!("{prefix}{path}")))
+        })
+        .collect();
     for y in y0..=y1 {
         for x in x0..=x1 {
-            let Some(tile) = game.map.get(Coord::new(x, y)) else {
+            let p = Coord::new(x, y);
+            let Some(tile) = game.map.get(p) else {
                 continue;
             };
-            let (sx, sy) = tile.position.screen();
-            if !is_known(tile.position) || !built.has(Vec2::new(sx, sy)) {
+            let (sx, sy) = p.screen();
+            if !is_known(p) || !built.has(Vec2::new(sx, sy)) {
                 continue;
             }
             if tile.improvements & Tile::FARM != 0 {
-                image_sprite(
-                    &mut commands,
-                    &farm,
-                    Vec3::new(sx, sy, 2.0),
-                    Vec2::new(128.0, 64.0),
-                    Color::WHITE,
-                );
+                let pieces = game.map.shore_pieces(tile.position);
+                match &farm_shore {
+                    // Beside water the farm is drawn as four terrain-cell pieces that stop at
+                    // the shore; the sheet is only usable once its layout has been cut.
+                    Some(sheet)
+                        if art.farm_shore_sheet != UVec2::ZERO
+                            && pieces.iter().any(|piece| piece % 8 != 0) =>
+                    {
+                        for (piece, (dx, dy)) in pieces.into_iter().zip(FARM_CELLS) {
+                            let (cx, cy) = p.offset(dx, dy).screen();
+                            let mut sprite = Sprite::from_atlas_image(
+                                sheet.clone(),
+                                TextureAtlas {
+                                    layout: art.farm_shore.clone(),
+                                    index: piece,
+                                },
+                            );
+                            sprite.custom_size = Some(Vec2::new(128.0, 64.0));
+                            commands.spawn((
+                                sprite,
+                                Transform::from_xyz(cx, cy - 32.0, 2.0),
+                                WorldVisual,
+                            ));
+                        }
+                    }
+                    _ => image_sprite(
+                        &mut commands,
+                        &farm,
+                        Vec3::new(sx, sy, 2.0),
+                        Vec2::new(128.0, 64.0),
+                        Color::WHITE,
+                    ),
+                }
             }
             if tile.improvements & Tile::MINE != 0 {
                 image_sprite(
@@ -837,9 +830,32 @@ pub(super) fn refresh(
                     Color::WHITE,
                 );
             }
+            // A city stands over its own square, so only open squares show their resource.
+            if let Some(Some(icon)) = usize::from(tile.resource)
+                .checked_sub(1)
+                .and_then(|i| resource_icons.get(i))
+                .filter(|_| !city_tiles.contains(&tile.position))
+            {
+                image_sprite(
+                    &mut commands,
+                    icon,
+                    // The picture stands on a point 40/128 of its height below its centre.
+                    Vec3::new(sx, sy + 16.0, Z_RELIEF + depth(sy) + 4.0 * Z_STEP),
+                    Vec2::splat(RESOURCE_ICON),
+                    Color::WHITE,
+                );
+            }
         }
     }
-    draw_roads(&mut commands, game, &city_tiles, built, (x0, y0, x1, y1));
+    roads::draw(
+        &mut commands,
+        game,
+        &city_tiles,
+        built,
+        is_known,
+        &art.roads,
+        &art.rails,
+    );
 
     // The fog of war lies over the terrain, the relief and the improvements, and under the
     // cities and units. Borders belong to their terrain surface and dim with it.
@@ -853,12 +869,12 @@ pub(super) fn refresh(
             if !built.has(Vec2::new(sx, sy)) {
                 continue;
             }
-            let index = if game.map.contains(p) {
+            let index = if game.map.normalize(p).is_some() {
                 sight.fog_cell(p)
             } else if upright
                 && Coord::NEIGHBORS
                     .iter()
-                    .any(|&(dx, dy)| game.map.contains(p.offset(dx, dy)))
+                    .any(|&(dx, dy)| game.map.normalize(p.offset(dx, dy)).is_some())
             {
                 FOG_BLACK
             } else {
@@ -885,13 +901,14 @@ pub(super) fn refresh(
     let mut contour_images: HashMap<&str, Handle<Image>> = HashMap::new();
     for y in y0..=y1 {
         for x in x0..=x1 {
-            let Some(tile) = game.map.get(Coord::new(x, y)) else {
+            let p = Coord::new(x, y);
+            let Some(tile) = game.map.get(p) else {
                 continue;
             };
-            if tile.owner == 0 || !is_known(tile.position) {
+            if tile.owner == 0 || !is_known(p) {
                 continue;
             }
-            let (sx, sy) = tile.position.screen();
+            let (sx, sy) = p.screen();
             if !built.has(Vec2::new(sx, sy)) {
                 continue;
             }
@@ -945,61 +962,87 @@ pub(super) fn refresh(
     }
 
     for city in game.cities.values() {
-        let (x, y) = city.position.screen();
-        if !built.has(Vec2::new(x, y)) {
-            continue;
+        for position in built.copies(&game.map, city.position) {
+            let (x, y) = position.screen();
+            if !built.has(Vec2::new(x, y)) {
+                continue;
+            }
+            let z = Z_CITY + depth(y);
+            let path = city_sprite(visuals, game, city.owner);
+            let sprite = city_images
+                .entry(path)
+                .or_insert_with(|| assets.load(format!("{prefix}{path}")));
+            let tint = if city.owner == session.player {
+                Color::WHITE
+            } else {
+                tinted(game, city.owner)
+            };
+            // A city seen once and since out of sight is shown as it was, dimmed.
+            let tint = if sight.state(position) == IN_SIGHT {
+                tint
+            } else {
+                dimmed(tint, REMEMBERED_LIGHT)
+            };
+            image_sprite(
+                &mut commands,
+                sprite,
+                Vec3::new(x, y + 24.0, z),
+                Vec2::new(128.0, 112.0),
+                tint,
+            );
+            // The plate: the nation's flag at one end, the city's size at the other, its name between.
+            let width = text_width(city.name.chars().count(), 14.0) + 54.0;
+            let plate = Vec3::new(x, y - 26.0, z + 0.1);
+            pill(&mut commands, &shapes, plate, Vec2::new(width, 24.0), PLATE);
+            let ours = city.owner == session.player;
+            map_flag(
+                &mut commands,
+                &shapes,
+                plate + Vec3::new(5.0 - width / 2.0, 0.0, 0.1),
+                26.0,
+                nation_color(game, city.owner, 1.0),
+            );
+            map_text(
+                &mut commands,
+                &city.name,
+                14.0,
+                ON_PLATE,
+                plate + Vec3::Z * 0.3,
+            );
+            disc(
+                &mut commands,
+                &shapes,
+                plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.1),
+                26.0,
+                if ours {
+                    ACCENT
+                } else {
+                    Color::srgb(0.20, 0.27, 0.37)
+                },
+            );
+            map_text(
+                &mut commands,
+                city.population.to_string(),
+                13.0,
+                ON_ACCENT,
+                plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.3),
+            );
         }
-        let z = Z_CITY + depth(y);
-        let path = city_sprite(visuals, game, city.owner);
-        let sprite = city_images
-            .entry(path)
-            .or_insert_with(|| assets.load(format!("{prefix}{path}")));
-        let tint = if city.owner == session.player {
-            Color::WHITE
-        } else {
-            tinted(game, city.owner)
-        };
-        // A city seen once and since out of sight is shown as it was, dimmed.
-        let tint = if sight.state(city.position) == IN_SIGHT {
-            tint
-        } else {
-            dimmed(tint, REMEMBERED_LIGHT)
-        };
-        image_sprite(
-            &mut commands,
-            sprite,
-            Vec3::new(x, y + 24.0, z),
-            Vec2::new(128.0, 112.0),
-            tint,
-        );
-        commands.spawn((
-            Sprite::from_color(INK.with_alpha(0.88), Vec2::new(134.0, 23.0)),
-            Transform::from_xyz(x, y - 24.0, z + 0.1),
-            WorldVisual,
-        ));
-        commands.spawn((
-            Text2d::new(format!("{}   {}", city.population, city.name)),
-            TextFont {
-                font_size: 15.0,
-                ..default()
-            },
-            TextColor(PAPER),
-            Transform::from_xyz(x, y - 24.0, z + 0.2),
-            WorldVisual,
-        ));
     }
     // One piece stands for a stack, as in Civ3: the selected unit if it is there, otherwise
     // the best defender, with a count when others stand beneath it.
     let mut stacks: BTreeMap<(i32, i32), Vec<Id>> = BTreeMap::new();
     for unit in game.units.values() {
-        let (x, y) = unit.position.screen();
-        // A fight is being played out on this square, or the unit is walking: the stage or
-        // a walker stands in for it.
-        if built.has(Vec2::new(x, y)) && !stage.hides(unit.position) && !walks.hides(unit.id) {
-            stacks
-                .entry((unit.position.x, unit.position.y))
-                .or_default()
-                .push(unit.id);
+        for position in built.copies(&game.map, unit.position) {
+            let (x, y) = position.screen();
+            // A fight is being played out on this square, or the unit is walking: the stage or
+            // a walker stands in for it.
+            if built.has(Vec2::new(x, y)) && !stage.hides(unit.position) && !walks.hides(unit.id) {
+                stacks
+                    .entry((position.x, position.y))
+                    .or_default()
+                    .push(unit.id);
+            }
         }
     }
     let mut unit_images: HashMap<String, Handle<Image>> = HashMap::new();
@@ -1007,7 +1050,7 @@ pub(super) fn refresh(
         Selection::Unit(id) => Some(id),
         _ => None,
     };
-    for ids in stacks.values() {
+    for (&(px, py), ids) in &stacks {
         let top = ids
             .iter()
             .copied()
@@ -1029,7 +1072,7 @@ pub(super) fn refresh(
         let Some(def) = session.rules.units.get(&unit.kind) else {
             continue;
         };
-        let (mut x, mut y) = unit.position.screen();
+        let (mut x, mut y) = Coord::new(px, py).screen();
         if city_tiles.contains(&unit.position) {
             x += 62.0;
             y += 24.0;
@@ -1075,7 +1118,14 @@ pub(super) fn refresh(
                 image_sprite(&mut commands, sprite, at, unit_size(def), color);
             }
         }
-        draw_unit_badges(&mut commands, unit, def, ids.len(), Vec3::new(x, y, z));
+        draw_unit_badges(
+            &mut commands,
+            &shapes,
+            unit,
+            def,
+            ids.len(),
+            Vec3::new(x, y, z),
+        );
     }
     // Unhurried map typography echoes printed campaign charts.
     if game.scenario == "dawn-straits" {
@@ -1085,17 +1135,19 @@ pub(super) fn refresh(
             ("THE JADE STRAITS", chart.tile(14, 2)),
             ("SOUTHERN SEA", chart.tile(4, 15)),
         ] {
-            let (x, y) = pos.screen();
-            commands.spawn((
-                Text2d::new(label),
-                TextFont {
-                    font_size: 24.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(0.67, 0.81, 0.81, 0.55)),
-                Transform::from_xyz(x, y, 2.0),
-                WorldVisual,
-            ));
+            for position in built.copies(&game.map, pos) {
+                let (x, y) = position.screen();
+                commands.spawn((
+                    Text2d::new(label),
+                    TextFont {
+                        font_size: 24.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.67, 0.81, 0.81, 0.55)),
+                    Transform::from_xyz(x, y, 2.0),
+                    WorldVisual,
+                ));
+            }
         }
     }
     if rebuild_ui {
@@ -1112,127 +1164,41 @@ pub(super) fn unit_size(def: &UnitDef) -> Vec2 {
     }
 }
 
-/// A straight strip of colour between two world points.
-fn strip(commands: &mut Commands, from: Vec2, to: Vec2, width: f32, color: Color, z: f32) {
-    let along = to - from;
-    commands.spawn((
-        Sprite::from_color(color, Vec2::new(along.length(), width)),
-        Transform::from_translation(((from + to) * 0.5).extend(z))
-            .with_rotation(Quat::from_rotation_z(along.y.atan2(along.x))),
-        WorldVisual,
-    ));
-}
-
-/// Roads and railroads join the centres of neighbouring squares. A city counts as both, as it
-/// does for movement, so a road that reaches a city is drawn into it. Each pair of squares is
-/// visited once, from the square whose direction is in the first half of the eight.
-fn draw_roads(
-    commands: &mut Commands,
-    game: &Game,
-    cities: &HashSet<Coord>,
-    built: WorldRect,
-    (x0, y0, x1, y1): (i32, i32, i32, i32),
-) {
-    const ROAD_EDGE: Color = Color::srgb(0.30, 0.22, 0.12);
-    const ROAD: Color = Color::srgb(0.72, 0.58, 0.36);
-    const RAIL_BED: Color = Color::srgb(0.18, 0.18, 0.20);
-    const RAIL: Color = Color::srgb(0.78, 0.78, 0.80);
-    const TIE: Color = Color::srgb(0.38, 0.27, 0.16);
-    // 0 none, 1 road, 2 rail
-    let kind = |p: Coord| -> u8 {
-        if cities.contains(&p) {
-            return 2;
-        }
-        match game.map.get(p) {
-            Some(t) if t.has_rail() => 2,
-            Some(t) if t.has_road() => 1,
-            _ => 0,
-        }
-    };
-    let mut segments: Vec<(Vec2, Vec2, u8)> = Vec::new();
-    for y in y0..=y1 {
-        for x in x0..=x1 {
-            let here = Coord::new(x, y);
-            let own = kind(here);
-            let (sx, sy) = here.screen();
-            if own == 0 || !built.has(Vec2::new(sx, sy)) {
-                continue;
-            }
-            let centre = Vec2::new(sx, sy);
-            let mut joined = cities.contains(&here);
-            for &(dx, dy) in &Coord::NEIGHBORS {
-                let there = here.offset(dx, dy);
-                joined |= kind(there) > 0;
-            }
-            if !joined {
-                // A lone stretch of road shows as a short track so it can be seen.
-                segments.push((
-                    centre - Vec2::new(14.0, 0.0),
-                    centre + Vec2::new(14.0, 0.0),
-                    own,
-                ));
-            }
-            for &(dx, dy) in &Coord::NEIGHBORS[..4] {
-                let there = here.offset(dx, dy);
-                let shared = own.min(kind(there));
-                if shared > 0 {
-                    let (tx, ty) = there.screen();
-                    segments.push((centre, Vec2::new(tx, ty), shared));
-                }
-            }
-        }
-    }
-    // Every road's dark edge goes down before any light surface, so junctions read cleanly.
-    for &(a, b, kind) in &segments {
-        let (color, width) = if kind == 2 {
-            (RAIL_BED, 9.0)
-        } else {
-            (ROAD_EDGE, 8.0)
-        };
-        strip(commands, a, b, width, color, 3.0);
-    }
-    for &(a, b, kind) in &segments {
-        if kind == 2 {
-            let along = b - a;
-            let ties = (along.length() / 15.0).floor().max(1.0) as i32;
-            let across = Vec2::new(-along.y, along.x).normalize_or_zero() * 5.5;
-            for i in 0..=ties {
-                let at = a + along * (i as f32 / ties as f32);
-                strip(commands, at - across, at + across, 2.5, TIE, 3.1);
-            }
-            strip(commands, a, b, 2.0, RAIL, 3.2);
-        } else {
-            strip(commands, a, b, 4.5, ROAD, 3.1);
-        }
-    }
-}
-
 /// A unit's hit-point bar, its standing order, its experience, and the size of its stack.
-fn draw_unit_badges(commands: &mut Commands, unit: &Unit, def: &UnitDef, stack: usize, at: Vec3) {
+fn draw_unit_badges(
+    commands: &mut Commands,
+    shapes: &Shapes,
+    unit: &Unit,
+    def: &UnitDef,
+    stack: usize,
+    at: Vec3,
+) {
     let (x, y, z) = (at.x, at.y, at.z);
     let (hp, max) = (unit.hp(def).max(0), unit.max_hp(def));
     let fraction = hp as f32 / max as f32;
-    let width = 46.0;
-    commands.spawn((
-        Sprite::from_color(INK, Vec2::new(width + 4.0, 9.0)),
-        Transform::from_xyz(x, y - 22.0, z + 0.1),
-        WorldVisual,
-    ));
-    commands.spawn((
-        Sprite::from_color(
-            if fraction > 0.66 {
-                Color::srgb(0.30, 0.72, 0.32)
-            } else if fraction > 0.33 {
-                Color::srgb(0.88, 0.70, 0.22)
-            } else {
-                RED
-            },
-            Vec2::new(width * fraction, 5.0),
-        ),
-        // anchored to the left edge of the bar
-        Transform::from_xyz(x - width * (1.0 - fraction) * 0.5, y - 22.0, z + 0.2),
-        WorldVisual,
-    ));
+    // A dark track with a coloured pill in it.
+    let (width, inner) = (50.0, 42.0);
+    pill(
+        commands,
+        shapes,
+        Vec3::new(x, y - 22.0, z + 0.1),
+        Vec2::new(width, 10.0),
+        PLATE,
+    );
+    let fill = (inner * fraction).max(6.0);
+    pill(
+        commands,
+        shapes,
+        Vec3::new(x - inner / 2.0 + fill / 2.0, y - 22.0, z + 0.2),
+        Vec2::new(fill, 6.0),
+        if fraction > 0.66 {
+            GOOD
+        } else if fraction > 0.33 {
+            AMBER
+        } else {
+            BAD
+        },
+    );
     // Experience stars, then the order glyph: F fortified, f digging in, W working, > marching.
     let order = match unit.order {
         Order::Fortified => "F",
@@ -1246,37 +1212,32 @@ fn draw_unit_badges(commands: &mut Commands, unit: &Unit, def: &UnitDef, stack: 
     if !mark.is_empty() {
         badge(
             commands,
+            shapes,
             &mark,
             Vec3::new(x - 28.0, y + 38.0, z),
-            14.0 + 7.0 * mark.len() as f32,
+            text_width(mark.len(), 11.0) + 12.0,
         );
     }
     if stack > 1 {
         badge(
             commands,
+            shapes,
             &format!("x{stack}"),
             Vec3::new(x + 28.0, y + 38.0, z),
-            30.0,
+            text_width(2, 11.0) + 14.0,
         );
     }
 }
 
-fn badge(commands: &mut Commands, label: &str, at: Vec3, width: f32) {
-    commands.spawn((
-        Sprite::from_color(INK.with_alpha(0.85), Vec2::new(width, 15.0)),
-        Transform::from_translation(at + Vec3::Z * 0.3),
-        WorldVisual,
-    ));
-    commands.spawn((
-        Text2d::new(label),
-        TextFont {
-            font_size: 11.0,
-            ..default()
-        },
-        TextColor(PAPER),
-        Transform::from_translation(at + Vec3::Z * 0.4),
-        WorldVisual,
-    ));
+fn badge(commands: &mut Commands, shapes: &Shapes, label: &str, at: Vec3, width: f32) {
+    pill(
+        commands,
+        shapes,
+        at + Vec3::Z * 0.3,
+        Vec2::new(width, 16.0),
+        PLATE,
+    );
+    map_text(commands, label, 11.0, ON_PLATE, at + Vec3::Z * 0.4);
 }
 
 /// Movement counted in thirds, shown as whole moves and fractions: 7 is "2 1/3".
@@ -1300,7 +1261,9 @@ pub(super) fn strike_targets(game: &Game, rules: &Rules, unit: &Unit) -> Vec<(Co
     let mut targets = Vec::new();
     for dy in -reach..=reach {
         for dx in -reach..=reach {
-            let target = unit.position.offset(dx, dy);
+            let Some(target) = game.map.normalize(unit.position.offset(dx, dy)) else {
+                continue;
+            };
             let Some(tile) = game.map.get(target) else {
                 continue;
             };
@@ -1317,6 +1280,27 @@ pub(super) fn strike_targets(game: &Game, rules: &Rules, unit: &Unit) -> Vec<(Co
     targets
 }
 
+/// A unit's title: its nation's flag, its name, and who it belongs to.
+fn title(p: &mut ChildSpawnerCommands, color: Color, name: String, subtitle: String) {
+    p.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: px(10),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|p| {
+        nation_flag(p, color, 26.0);
+        p.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            ..default()
+        })
+        .with_children(|p| {
+            bold(p, name, 17.0, INK);
+            text(p, subtitle, 12.0, INK_SOFT);
+        });
+    });
+}
+
 /// Everything about a selected unit: its numbers, its orders, and what it can do from here.
 fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &Unit) {
     let def = session.rules.def(u);
@@ -1325,54 +1309,92 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
         .factions
         .get(&u.owner)
         .map_or("Unknown", |f| f.adjective.as_str());
-    text(p, def.name.clone(), 19.0, INK);
-    let mut lines = vec![
-        format!("{owner} | {}", u.level_name()),
-        format!("HP {}/{}", u.hp(def), u.max_hp(def)),
-    ];
+    title(
+        p,
+        nation_color(game, u.owner, 1.0),
+        def.name.clone(),
+        format!("{owner} · {}", u.level_name()),
+    );
+    rule(p);
     if def.is_defenseless() && !def.can_attack() {
-        lines.push("Cannot attack or defend; captured if caught.".into());
+        text(
+            p,
+            "Cannot attack or defend; captured if caught.",
+            13.0,
+            INK_SOFT,
+        );
     } else {
-        lines.push(format!("Attack {}   Defense {}", def.attack, def.defense));
+        row(p, "Attack", def.attack.to_string(), INK);
+        row(p, "Defense", def.defense.to_string(), INK);
     }
     if def.can_bombard() {
-        lines.push(format!(
-            "Bombard {} | range {} | {} shots",
-            def.bombard, def.range, def.rate_of_fire
-        ));
+        row(
+            p,
+            "Bombard",
+            format!(
+                "{} · range {} · {} shots",
+                def.bombard, def.range, def.rate_of_fire
+            ),
+            INK,
+        );
     }
-    if def.blitz {
-        lines.push("Attacks again while moves remain.".into());
-    }
+    // Hit points are the reference's morale bar: a figure over a meter.
+    let (hp, max) = (u.hp(def).max(0), u.max_hp(def));
+    let fraction = hp as f32 / max.max(1) as f32;
+    row(p, "Hit points", format!("{hp} / {max}"), INK);
+    meter(
+        p,
+        fraction,
+        if fraction > 0.66 {
+            GOOD
+        } else if fraction > 0.33 {
+            AMBER
+        } else {
+            BAD
+        },
+        8.0,
+    );
     if mine {
-        lines.push(format!(
-            "Moves {} of {}",
-            moves_text(u.moves_left(def)),
-            def.moves
-        ));
+        row(
+            p,
+            "Moves",
+            format!("{} of {}", moves_text(u.moves_left(def)), def.moves),
+            INK,
+        );
         if def.defense > 0 {
-            lines.push(format!(
-                "Defends at +{}% here",
-                game.defender_percent(u, def)
-            ));
+            heading(p, "Modifiers");
+            row(
+                p,
+                "Terrain and works here",
+                format!("+{}%", game.defender_percent(u, def)),
+                GOOD,
+            );
         }
     }
-    lines.push(match u.order {
-        Order::Fortified => "Fortified".to_string(),
-        Order::Fortifying => "Digging in".to_string(),
-        Order::Work(job) => format!(
-            "Building a {}: {}/{} work",
-            job.name().to_lowercase(),
-            u.work,
-            game.work_required(u.position, job)
-        ),
-        Order::None => match u.goto {
-            Some(goal) => format!("Marching to {},{}", goal.x, goal.y),
-            None if u.attacked => "Has fought this turn".into(),
-            None => "Awaiting orders".into(),
+    if def.blitz {
+        text(p, "Attacks again while moves remain.", 12.5, INK_SOFT);
+    }
+    heading(p, "Orders");
+    bold(
+        p,
+        match u.order {
+            Order::Fortified => "Fortified".to_string(),
+            Order::Fortifying => "Digging in".to_string(),
+            Order::Work(job) => format!(
+                "Building a {}: {}/{} work",
+                job.name().to_lowercase(),
+                u.work,
+                game.work_required(u.position, job)
+            ),
+            Order::None => match u.goto {
+                Some(goal) => format!("Marching to {},{}", goal.x, goal.y),
+                None if u.attacked => "Has fought this turn".into(),
+                None => "Awaiting orders".into(),
+            },
         },
-    });
-    text(p, lines.join("\n"), 14.0, INK);
+        13.0,
+        INK,
+    );
     if !mine {
         return;
     }
@@ -1386,26 +1408,28 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
                 .and_then(|o| o.as_ref().err())
                 .copied()
                 .unwrap_or("Nothing to build here");
-            text(p, format!("Nothing to build here: {why}."), 13.0, INK);
+            text(p, format!("Nothing to build here: {why}."), 12.5, INK_SOFT);
         }
     }
-    for strike in crate::bar::strikes(game, &session.rules, u) {
-        text(p, strike.line(), 13.0, INK);
+    let strikes = crate::bar::strikes(game, &session.rules, u);
+    if !strikes.is_empty() {
+        heading(p, "In reach");
+        for strike in strikes {
+            text(p, strike.line(), 12.5, INK);
+        }
     }
     text(
         p,
         "Right-click a square to send it there, or an enemy to attack it.",
-        13.0,
-        INK,
+        12.0,
+        INK_SOFT,
     );
 }
 
 /// What the player knows of a square: its terrain, who holds it, what stands on it, and what
 /// it yields.
 fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
-    heading(p, "TERRAIN");
     let t = game.map.get(pos).unwrap();
-    text(p, t.terrain.name(), 19.0, INK);
     let region = game.region_of(pos).map(|r| r.name.clone());
     let owner = game
         .factions
@@ -1413,6 +1437,32 @@ fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
         .filter(|_| t.owner != 0)
         .map(|f| f.name.clone());
     let border = game.cities.get(&t.claim).map(|c| c.name.clone());
+    p.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Baseline,
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|p| {
+        bold(p, t.terrain.name(), 18.0, INK);
+        text(p, format!("({}, {})", pos.x, pos.y), 12.5, INK_SOFT);
+    });
+    text(
+        p,
+        region.unwrap_or_else(|| "Open country".into()),
+        12.5,
+        INK_SOFT,
+    );
+    rule(p);
+    row(
+        p,
+        "Held by",
+        owner.map_or_else(|| "Unclaimed".into(), |o| o),
+        INK,
+    );
+    if let Some(city) = border {
+        row(p, "Border of", city, INK);
+    }
     let mut features = Vec::new();
     match t.relief {
         Relief::Hills => features.push("Hills"),
@@ -1438,36 +1488,35 @@ fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
             features.push(name);
         }
     }
-    text(
+    if !features.is_empty() {
+        row(p, "Features", features.join(", "), INK);
+    }
+    if let Some(resource) = game.map.resource(t) {
+        row(
+            p,
+            "Resource",
+            format!("{} ({})", resource.name, resource.class.name()),
+            INK,
+        );
+    }
+    row(
         p,
-        format!(
-            "{}\n{}\n{}\nChart {}, {}\n{}\nMovement cost {} | Defense +{}%",
-            region.unwrap_or_else(|| "Open country".into()),
-            owner.map_or_else(|| "Unclaimed".into(), |o| format!("Claimed by {o}")),
-            border.map_or_else(String::new, |c| format!("Border of {c}")),
-            pos.x,
-            pos.y,
-            features.join(", "),
-            if t.is_land() { t.move_cost() } else { 1 },
-            t.defense_percent(),
-        ),
-        14.0,
+        "Movement cost",
+        (if t.is_land() { t.move_cost() } else { 1 }).to_string(),
         INK,
     );
-    let gathered = fourx_sim::economy::tile_yield(
-        t,
-        game.map.river_mask(pos) != 0,
-        game.city_at(pos).is_some(),
-    );
-    text(
+    let defense = t.defense_percent();
+    row(
         p,
-        format!(
-            "Yields {} food | {} shields | {} gold",
-            gathered.food, gathered.shields, gathered.gold
-        ),
-        14.0,
-        INK,
+        "Defense bonus",
+        format!("+{defense}%"),
+        if defense > 0 { GOOD } else { INK },
     );
+    let gathered = fourx_sim::economy::square_yield(&game.map, t, game.city_at(pos).is_some());
+    heading(p, "Yields");
+    row(p, "Food", gathered.food.to_string(), INK);
+    row(p, "Shields", gathered.shields.to_string(), INK);
+    row(p, "Gold", gathered.gold.to_string(), INK);
 }
 
 /// The pane that describes the selection: the unit, the square, or, with nothing chosen, the
@@ -1475,23 +1524,30 @@ fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
 fn info(p: &mut ChildSpawnerCommands, game: &Game, session: &Session) {
     match session.selection {
         Selection::Unit(id) if game.units.contains_key(&id) => {
-            heading(p, "SELECTED UNIT");
             unit_panel(p, game, session, &game.units[&id]);
         }
         Selection::Tile(pos) if game.map.get(pos).is_some() => tile_panel(p, game, pos),
         _ => {
-            heading(p, "DISPATCHES FROM THE FRONT");
+            bold(p, "Dispatches", 17.0, INK);
             // The newest line is the darkest; the rest fade back.
             for (age, line) in game.log.iter().rev().take(3).enumerate() {
+                if age > 0 {
+                    rule(p);
+                }
                 text(
                     p,
                     clipped(line, 170),
-                    13.0,
-                    INK.with_alpha(0.95 - 0.2 * age as f32),
+                    12.5,
+                    INK.with_alpha(0.95 - 0.22 * age as f32),
                 );
             }
         }
     }
+}
+
+/// The face of a floating card: a surface, a hairline, and the shadow that lifts it.
+fn floating() -> (BackgroundColor, BorderColor, BoxShadow) {
+    (BackgroundColor(CARD), BorderColor::all(EDGE), lift())
 }
 
 fn build_ui(
@@ -1502,6 +1558,7 @@ fn build_ui(
     assets: &AssetServer,
 ) {
     let game = session.game.as_ref().unwrap();
+    let prefix = session.asset_prefix.as_str();
     let narrow = size.x < 900.0;
     let me = if session.player == 0 {
         game.commander
@@ -1514,15 +1571,9 @@ fn build_ui(
         position_type: PositionType::Absolute,
         top: px(0),
         width: percent(100),
-        height: px(50),
-        padding: UiRect::axes(px(18), px(7)),
+        height: px(TOP_BAR),
+        padding: UiRect::axes(px(if narrow { 12 } else { 20 }), px(0)),
         border: UiRect::bottom(px(1)),
-        border_radius: BorderRadius {
-            top_left: px(0),
-            top_right: px(0),
-            bottom_right: px(10),
-            bottom_left: px(10),
-        },
         justify_content: JustifyContent::SpaceBetween,
         align_items: AlignItems::Center,
         column_gap: px(16),
@@ -1531,108 +1582,134 @@ fn build_ui(
     commands
         .spawn((
             top,
-            BackgroundColor(NAVY),
-            BorderColor::all(GOLD_LINE),
+            BackgroundColor(BAR),
+            BorderColor::all(EDGE),
+            lift_small(),
+            GlobalZIndex(5),
             UiRoot,
         ))
         .with_children(|p| {
+            // Whose empire this is.
             p.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: px(2),
-                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                column_gap: px(12),
+                flex_basis: px(0),
+                flex_grow: 1.0,
                 ..default()
             })
             .with_children(|p| {
-                text(
-                    p,
-                    if narrow {
-                        short_date(date).to_uppercase()
-                    } else {
-                        game.scenario_name.to_uppercase()
-                    },
-                    if narrow { 14.0 } else { 17.0 },
-                    PAPER,
-                );
-                if !narrow {
-                    text(
+                nation_flag(p, nation_color(game, me, 1.0), 30.0);
+                p.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                })
+                .with_children(|p| {
+                    bold(
                         p,
-                        format!(
-                            "{}  |  {}",
-                            faction.name.to_uppercase(),
-                            long_date(date).to_uppercase()
-                        ),
-                        10.0,
-                        GOLD.with_alpha(0.8),
+                        clipped(&faction.name, if narrow { 18 } else { 34 }),
+                        16.0,
+                        INK,
                     );
-                }
+                    if !narrow {
+                        text(p, game.scenario_name.clone(), 11.5, INK_SOFT);
+                    }
+                });
             });
+            // What it holds: treasury, research, industry.
             if narrow {
-                text(
+                stat(
                     p,
-                    format!("{}g  +{}", faction.gold, game.income(me)),
-                    13.0,
-                    PAPER,
+                    assets,
+                    prefix,
+                    "hud_gold",
+                    format!("{} (+{})", faction.gold, game.income(me)),
                 );
             } else {
                 p.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
-                    column_gap: px(30),
+                    column_gap: px(10),
                     ..default()
                 })
                 .with_children(|p| {
                     stat(
                         p,
-                        "Treasury",
+                        assets,
+                        prefix,
+                        "hud_gold",
                         format!("{} (+{})", faction.gold, game.income(me)),
                     );
                     stat(
                         p,
-                        "Research",
+                        assets,
+                        prefix,
+                        "hud_research",
                         format!(
-                            "{}/{}",
+                            "{} / {}",
                             faction.research,
                             session.rules.research_cost * (faction.technology as i32 + 1)
                         ),
                     );
-                    stat(p, "Industry", faction.industry.to_string());
+                    stat(
+                        p,
+                        assets,
+                        prefix,
+                        "hud_industry",
+                        faction.industry.to_string(),
+                    );
                 });
             }
+            // The calendar and the one button that moves it on.
             p.spawn(Node {
                 align_items: AlignItems::Center,
-                column_gap: px(8),
+                justify_content: JustifyContent::FlexEnd,
+                column_gap: px(12),
+                flex_basis: px(0),
+                flex_grow: 1.0,
                 ..default()
             })
             .with_children(|p| {
                 if !narrow {
-                    button(p, "Save", Action::Save);
+                    p.spawn((
+                        Node {
+                            width: px(1),
+                            height: px(24),
+                            ..default()
+                        },
+                        BackgroundColor(RULE),
+                    ));
+                }
+                bold(p, short_date(date), 13.5, INK);
+                if !narrow {
+                    button(p, "Save", Action::Save, Tone::Quiet);
                 }
                 button(
                     p,
                     if session.pending {
-                        "Waiting...".into()
+                        "Waiting...".to_string()
                     } else {
-                        format!("End day  |  {}  >", short_date(date))
+                        "End Day".to_string()
                     },
                     Action::EndTurn,
+                    Tone::Primary,
                 );
             });
         });
     if narrow {
         // The inspector sits under the map: what the selection is, then quick ways to pick
         // another city or unit.
-        let mut inspector = panel();
+        let mut inspector = card();
         inspector.left = px(8);
         inspector.right = px(8);
         inspector.bottom = px(44);
         inspector.height = px(inspector_height(size.y));
-        inspector.padding = UiRect::all(px(10));
+        inspector.padding = UiRect::all(px(12));
+        inspector.border_radius = rounded(14.0);
         inspector.overflow = Overflow::scroll_y();
         commands
             .spawn((
                 inspector,
-                BackgroundColor(PAPER),
-                BorderColor::all(GOLD_LINE),
+                floating(),
                 UiRoot,
                 Inspector,
                 ScrollPosition::default(),
@@ -1641,7 +1718,8 @@ fn build_ui(
                 info(p, game, session);
                 p.spawn(Node {
                     flex_direction: FlexDirection::Row,
-                    column_gap: px(5),
+                    column_gap: px(6),
+                    row_gap: px(6),
                     flex_wrap: FlexWrap::Wrap,
                     ..default()
                 })
@@ -1652,7 +1730,7 @@ fn build_ui(
                         .filter(|c| c.owner == session.player)
                         .take(8)
                     {
-                        button(p, &c.name, Action::SelectCity(c.id));
+                        button(p, &c.name, Action::SelectCity(c.id), Tone::Quiet);
                     }
                     for u in game
                         .units
@@ -1664,71 +1742,70 @@ fn build_ui(
                             p,
                             session.rules.def(u).name.clone(),
                             Action::SelectUnit(u.id),
+                            Tone::Quiet,
                         );
                     }
-                    button(p, "Save", Action::Save);
+                    button(p, "Save", Action::Save, Tone::Quiet);
                 });
             });
     } else {
         // The selection is described at the bottom right, over the map.
-        let mut pane = panel();
+        let mut pane = card();
         pane.right = px(16);
         pane.bottom = px(CHART_BOTTOM);
-        pane.width = px(330);
-        pane.max_height = px((size.y - 62.0 - CHART_BOTTOM).max(120.0));
+        pane.width = px(INFO_WIDTH);
+        pane.max_height = px((size.y - TOP_BAR - 12.0 - CHART_BOTTOM).max(120.0));
         pane.overflow = Overflow::clip();
         commands
-            .spawn((
-                pane,
-                BackgroundColor(PAPER),
-                BorderColor::all(GOLD_LINE),
-                UiRoot,
-                InfoPane,
-                Interaction::default(),
-            ))
+            .spawn((pane, floating(), UiRoot, InfoPane, Interaction::default()))
             .with_children(|p| info(p, game, session));
     }
     if !narrow {
-        // The panel is the map's own shape: the image and a hairline frame around it.
+        // The minimap is the map's own shape, set in a card with a rounded frame.
         let image = chart_size(size.y, &game.map);
-        let mut chart = panel();
+        let mut chart = card();
         chart.left = px(CHART_LEFT);
         chart.bottom = px(CHART_BOTTOM);
         chart.width = px(image.x + 2.0 * CHART_FRAME);
         chart.height = px(image.y + 2.0 * CHART_FRAME);
-        chart.padding = UiRect::ZERO;
-        chart.border = UiRect::all(px(CHART_FRAME));
-        chart.border_radius = rounded(3.0);
-        chart.overflow = Overflow::clip();
+        chart.padding = UiRect::all(px(CHART_FRAME - 1.0));
+        chart.border_radius = rounded(14.0);
         commands
-            .spawn((
-                chart,
-                BackgroundColor(Color::BLACK),
-                BorderColor::all(GOLD_LINE),
-                UiRoot,
-            ))
+            .spawn((chart, floating(), UiRoot))
             .with_children(|p| {
-                p.spawn((
-                    Button,
-                    MinimapSurface,
-                    RelativeCursorPosition::default(),
-                    ImageNode::new(minimap.image.clone()),
-                    Node {
-                        width: px(image.x),
-                        height: px(image.y),
-                        ..default()
-                    },
-                ))
-                .with_children(|surface| {
-                    surface.spawn((
-                        MinimapView,
+                p.spawn(Node {
+                    width: px(image.x),
+                    height: px(image.y),
+                    border_radius: rounded(9.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                })
+                .with_children(|p| {
+                    p.spawn((
+                        Button,
+                        MinimapSurface,
+                        RelativeCursorPosition::default(),
+                        ImageNode::new(minimap.image.clone()),
                         Node {
-                            position_type: PositionType::Absolute,
-                            border: UiRect::all(px(1)),
+                            width: px(image.x),
+                            height: px(image.y),
                             ..default()
                         },
-                        BorderColor::all(Color::WHITE),
-                    ));
+                    ))
+                    .with_children(|surface| {
+                        for i in 0..2 {
+                            surface.spawn((
+                                MinimapView(i),
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    border: UiRect::all(px(2)),
+                                    border_radius: rounded(3.0),
+                                    ..default()
+                                },
+                                BorderColor::all(SELECT),
+                            ));
+                        }
+                    });
                 });
             });
     }
@@ -1747,42 +1824,57 @@ fn build_ui(
             let chart = chart_size(size.y, &game.map);
             crate::bar::Placement {
                 left: CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
-                right: 16.0 + 330.0 + 12.0,
-                bottom: CHART_BOTTOM,
+                right: 16.0 + INFO_WIDTH + 12.0,
+                bottom: CHART_BOTTOM + MESSAGE_HEIGHT + 10.0,
             }
         };
         let rows = crate::bar::rows(game, &session.rules, unit, session.player);
         crate::bar::spawn(commands, assets, &session.asset_prefix, rows, place);
     }
+    // What the game has to say, in a dark pill at the foot of the map between the minimap and
+    // the pane.
+    let (left, right, bottom) = if narrow {
+        (8.0, 8.0, 6.0)
+    } else {
+        let chart = chart_size(size.y, &game.map);
+        (
+            CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
+            16.0 + INFO_WIDTH + 16.0,
+            CHART_BOTTOM,
+        )
+    };
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                bottom: px(0),
-                width: percent(100),
-                height: px(34),
-                padding: UiRect::axes(px(18), px(5)),
-                align_items: AlignItems::Center,
-                border: UiRect::top(px(1)),
-                border_radius: BorderRadius {
-                    top_left: px(10),
-                    top_right: px(10),
-                    bottom_right: px(0),
-                    bottom_left: px(0),
-                },
+                left: px(left),
+                right: px(right),
+                bottom: px(bottom),
+                justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.06, 0.10, 0.12, 0.72)),
-            BorderColor::all(GOLD_LINE),
             UiRoot,
         ))
         .with_children(|p| {
-            text(
-                p,
-                &session.message,
-                if narrow { 11.5 } else { 12.5 },
-                PAPER.with_alpha(0.88),
-            )
+            p.spawn((
+                Node {
+                    min_height: px(MESSAGE_HEIGHT),
+                    padding: UiRect::axes(px(16), px(5)),
+                    align_items: AlignItems::Center,
+                    border_radius: rounded(999.0),
+                    ..default()
+                },
+                BackgroundColor(PLATE),
+                lift_small(),
+            ))
+            .with_children(|p| {
+                text(
+                    p,
+                    &session.message,
+                    if narrow { 11.5 } else { 12.5 },
+                    ON_PLATE,
+                );
+            });
         });
     if let Selection::City(id) = session.selection
         && game.cities.contains_key(&id)
@@ -1800,33 +1892,27 @@ fn build_ui(
                     justify_content: JustifyContent::Center,
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.02, 0.08, 0.10, 0.75)),
+                BackgroundColor(Color::srgba(0.03, 0.06, 0.10, 0.55)),
+                GlobalZIndex(60),
                 UiRoot,
             ))
             .with_children(|p| {
-                p.spawn((
-                    Node {
-                        width: percent(70),
-                        max_width: px(600),
-                        padding: UiRect::all(px(34)),
-                        border: UiRect::all(px(1)),
-                        border_radius: rounded(12.0),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: px(14),
-                        ..default()
-                    },
-                    BackgroundColor(PAPER),
-                    BorderColor::all(GOLD_LINE),
-                ))
-                .with_children(|p| {
-                    text(
+                let mut dialog = card();
+                dialog.position_type = PositionType::Relative;
+                dialog.width = percent(70);
+                dialog.max_width = px(560);
+                dialog.padding = UiRect::all(px(32));
+                dialog.row_gap = px(14);
+                dialog.border_radius = rounded(20.0);
+                p.spawn((dialog, floating())).with_children(|p| {
+                    bold(
                         p,
                         if winner == session.player {
-                            "THE CAMPAIGN IS WON"
+                            "The campaign is won"
                         } else {
-                            "THE CAMPAIGN IS LOST"
+                            "The campaign is lost"
                         },
-                        28.0,
+                        26.0,
                         INK,
                     );
                     text(
@@ -1836,21 +1922,30 @@ fn build_ui(
                             game.factions[&winner].name,
                             long_date(date)
                         ),
-                        17.0,
-                        INK,
+                        15.0,
+                        INK_SOFT,
                     );
-                    button(p, "SAVE THIS CAMPAIGN", Action::Save);
+                    p.spawn(Node {
+                        margin: UiRect::top(px(6)),
+                        ..default()
+                    })
+                    .with_children(|p| {
+                        button(p, "Save this campaign", Action::Save, Tone::Primary);
+                    });
                 });
             });
     }
 }
 
-/// Margin of the minimap panel from the left edge and from the bottom of the window (the
-/// message bar is 34 high).
+/// Margin of the minimap card from the left edge and of both cards from the foot of the window.
 const CHART_LEFT: f32 = 12.0;
-const CHART_BOTTOM: f32 = 44.0;
-/// The panel is the image and its hairline frame, nothing more.
-const CHART_FRAME: f32 = 1.0;
+const CHART_BOTTOM: f32 = 12.0;
+/// The card's rim and padding around the minimap picture.
+const CHART_FRAME: f32 = 6.0;
+/// Width of the pane that describes the selection, and height of the pill that carries the
+/// game's message (map clicks under both are blocked, see `controls`).
+const INFO_WIDTH: f32 = 340.0;
+pub(super) const MESSAGE_HEIGHT: f32 = 26.0;
 
 /// Length of the minimap's longer side on screen for a window height.
 pub(super) fn chart_side(window_height: f32) -> f32 {
@@ -1992,7 +2087,7 @@ pub(super) fn minimap_viewport(
     session: Res<Session>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Transform, &Projection), With<Camera2d>>,
-    mut marker: Query<&mut Node, With<MinimapView>>,
+    mut marker: Query<(&MinimapView, &mut Node)>,
 ) {
     let Some(game) = &session.game else {
         return;
@@ -2000,9 +2095,14 @@ pub(super) fn minimap_viewport(
     let (Ok(window), Ok((transform, projection))) = (windows.single(), camera.single()) else {
         return;
     };
-    let (lo, hi) = Chart::of(&game.map).view(camera_rect(transform, projection, window));
-    let ((x0, y0), (x1, y1)) = ((lo.x, lo.y), (hi.x, hi.y));
-    for mut node in &mut marker {
+    let parts = Chart::of(&game.map).view_parts(camera_rect(transform, projection, window));
+    for (part, mut node) in &mut marker {
+        let Some(&(lo, hi)) = parts.get(part.0) else {
+            node.display = Display::None;
+            continue;
+        };
+        node.display = Display::Flex;
+        let ((x0, y0), (x1, y1)) = ((lo.x, lo.y), (hi.x, hi.y));
         node.left = percent(x0 * 100.0);
         node.top = percent(y0 * 100.0);
         node.width = percent(((x1 - x0) * 100.0).max(2.0));
@@ -2045,10 +2145,10 @@ pub(super) fn draw_overlays(
     if let Selection::City(city) = session.selection {
         for y in y0..=y1 {
             for x in x0..=x1 {
-                let Some(t) = game.map.get(Coord::new(x, y)).filter(|t| t.claim == city) else {
+                let Some(_) = game.map.get(Coord::new(x, y)).filter(|t| t.claim == city) else {
                     continue;
                 };
-                let (sx, sy) = t.position.screen();
+                let (sx, sy) = Coord::new(x, y).screen();
                 if !view.has(Vec2::new(sx, sy)) {
                     continue;
                 }
@@ -2060,14 +2160,16 @@ pub(super) fn draw_overlays(
                         gizmos.line_2d(
                             points[i].lerp(centre, 0.14),
                             points[i + 1].lerp(centre, 0.14),
-                            Color::srgb(1.0, 0.92, 0.62),
+                            SELECT,
                         );
                     }
                 }
             }
         }
     }
-    let gold = Color::srgb(1.0, 0.84, 0.42);
+    // The chosen square and the road it takes are white; what a blow would land on is red.
+    let mark = SELECT;
+    let strike = Color::srgb(0.93, 0.31, 0.27);
     let pos = match session.selection {
         Selection::Unit(id) => game.units.get(&id).map(|u| u.position),
         Selection::City(id) => game.cities.get(&id).map(|c| c.position),
@@ -2075,8 +2177,10 @@ pub(super) fn draw_overlays(
         Selection::None => None,
     };
     if let Some(pos) = pos {
-        let (x, y) = pos.screen();
-        gizmos.linestrip_2d(diamond(Vec2::new(x, y)), gold);
+        for p in view.copies(&game.map, pos) {
+            let (x, y) = p.screen();
+            gizmos.linestrip_2d(diamond(Vec2::new(x, y)), mark);
+        }
     }
     // A selected unit shows where it is heading and what it could strike from here.
     if let Selection::Unit(id) = session.selection
@@ -2084,13 +2188,23 @@ pub(super) fn draw_overlays(
     {
         // Where it is heading: the exact squares it will walk (see `route`).
         if let Some(goal) = unit.goto {
-            crate::route::draw(&mut route_gizmos, unit.position, goal, &unit.route, gold);
+            crate::route::draw(
+                &mut route_gizmos,
+                &game.map,
+                view,
+                unit.position,
+                goal,
+                &unit.route,
+                mark,
+            );
         }
         for (target, bombard) in strike_targets(game, &session.rules, unit) {
-            let (x, y) = target.screen();
-            let colour = if bombard { gold } else { RED };
-            gizmos.linestrip_2d(diamond(Vec2::new(x, y)), colour);
-            gizmos.circle_2d(Vec2::new(x, y), 16.0, colour);
+            for p in view.copies(&game.map, target) {
+                let (x, y) = p.screen();
+                let colour = if bombard { AMBER } else { strike };
+                gizmos.linestrip_2d(diamond(Vec2::new(x, y)), colour);
+                gizmos.circle_2d(Vec2::new(x, y), 16.0, colour);
+            }
         }
     }
 }
@@ -2102,6 +2216,33 @@ mod tests {
         fourx_runtime::Host::base_scenario("dawn-straits", 42)
             .expect("the starter scenario starts")
             .game
+    }
+
+    #[test]
+    fn fog_matches_on_both_images_of_the_seam() {
+        let mut game = dawn();
+        let lattice = game.map.lattice.unwrap();
+        let city = game
+            .cities
+            .values_mut()
+            .find(|c| c.owner == game.commander)
+            .unwrap();
+        city.position = lattice.cell(0, 4);
+        let west = city.position;
+        let east = game.map.normalize(west.offset(-1, 1)).unwrap();
+        let sight = Sight::over(
+            &game,
+            game.commander,
+            (
+                -lattice.columns,
+                -lattice.columns,
+                2 * game.map.width,
+                2 * game.map.height,
+            ),
+        );
+        assert_eq!(sight.state(east), IN_SIGHT);
+        assert_eq!(sight.state(west.offset(-1, 1)), IN_SIGHT);
+        assert_eq!(sight.fog_cell(east), sight.fog_cell(west.offset(-1, 1)));
     }
 
     #[test]

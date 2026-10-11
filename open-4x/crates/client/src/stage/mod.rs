@@ -27,9 +27,7 @@ use script::{Event as Moment, LEAD_IN, Script, Setting, Showing};
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 
-const PAPER: Color = Color::srgb(0.88, 0.83, 0.69);
-const INK: Color = Color::srgb(0.09, 0.15, 0.16);
-const RED: Color = Color::srgb(0.75, 0.24, 0.20);
+use crate::theme::{AMBER, BAD, GOOD, ON_ACCENT, PLATE, Shapes, Tone, lift_small, rounded};
 /// Sprites on stage stand above the map's own units (drawn at about 30).
 const STAGE_Z: f32 = 40.0;
 const FX_Z: f32 = 60.0;
@@ -220,6 +218,7 @@ pub(super) fn drive(
     buttons: Query<Entity, With<SkipButton>>,
     mut puppetry: Puppetry,
     walks: Res<Walks>,
+    shapes: Res<Shapes>,
 ) {
     stage.step = 0.0;
     if session.game.is_none() {
@@ -262,6 +261,7 @@ pub(super) fn drive(
             &mut session,
             &assets,
             &mut puppetry,
+            &shapes,
             &windows,
             &cameras,
         );
@@ -306,6 +306,7 @@ pub(super) fn drive(
                 &mut session,
                 &assets,
                 &mut puppetry,
+                &shapes,
                 &windows,
                 &cameras,
             );
@@ -351,6 +352,7 @@ fn start_next(
     session: &mut Session,
     assets: &AssetServer,
     puppetry: &mut Puppetry,
+    shapes: &Shapes,
     windows: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Transform, &Projection), With<Camera2d>>,
 ) {
@@ -359,14 +361,56 @@ fn start_next(
     };
     let view = camera_rect(camera, projection, window);
     while let Some(battle) = stage.queue.pop_front() {
-        if !in_view(&battle, view) {
+        let game = session.game.as_ref().unwrap();
+        let reference = Coord::from_screen(camera.translation.x, camera.translation.y);
+        let mut image = battle.clone();
+        let near = |p: &mut Coord| *p = game.map.nearest(reference, *p);
+        match &mut image {
+            Battle::Duel {
+                attacker,
+                defender,
+                support,
+                retreat_to,
+                ..
+            } => {
+                near(&mut attacker.position);
+                // Keep the whole fight next to the attacker, even at the seam.
+                let at = attacker.position;
+                defender.position = game.map.nearest(at, defender.position);
+                if let Some(s) = support {
+                    s.shooter.position = game.map.nearest(at, s.shooter.position);
+                }
+                if let Some(p) = retreat_to {
+                    *p = game.map.nearest(defender.position, *p);
+                }
+            }
+            Battle::Capture {
+                attacker,
+                target,
+                taken,
+                destroyed,
+                ..
+            } => {
+                near(&mut attacker.position);
+                *target = game.map.nearest(attacker.position, *target);
+                for f in taken.iter_mut().chain(destroyed) {
+                    f.position = game.map.nearest(*target, f.position);
+                }
+            }
+            Battle::Bombard {
+                shooter, target, ..
+            } => {
+                near(&mut shooter.position);
+                target.position = game.map.nearest(shooter.position, target.position);
+            }
+        }
+        if !in_view(&image, view) {
             continue;
         }
-        let game = session.game.as_ref().unwrap();
         let city = |at: Coord| game.city_at(at).is_some();
         let animated = |kind: &str| session.pack.visuals.units.contains_key(kind);
         let script = Script::build(
-            &battle,
+            &image,
             &Setting {
                 rules: &session.rules,
                 combat: &session.pack.visuals.combat,
@@ -374,7 +418,8 @@ fn start_next(
                 animated: &animated,
             },
         );
-        let (parts, looks, arts) = spawn_actors(commands, session, assets, puppetry, &script);
+        let (parts, looks, arts) =
+            spawn_actors(commands, session, assets, puppetry, &script, shapes);
         // Whoever survives keeps looking the way the fight left it.
         for (i, actor) in script.actors.iter().enumerate() {
             let heading = script.heading_at(i, script.length);
@@ -410,21 +455,21 @@ fn spawn_skip_button(commands: &mut Commands) {
     commands
         .spawn((
             Button,
+            Tone::Primary,
             Node {
                 position_type: PositionType::Absolute,
-                top: px(84),
+                top: px(crate::theme::TOP_BAR + 18.0),
                 left: percent(50),
-                margin: UiRect::left(px(-110)),
-                width: px(220),
-                height: px(32),
-                border: UiRect::all(px(1)),
-                border_radius: BorderRadius::all(px(6)),
+                margin: UiRect::left(px(-90)),
+                width: px(180),
+                height: px(36),
+                border_radius: rounded(999.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(crate::presentation::NAVY),
-            BorderColor::all(crate::presentation::GOLD_LINE),
+            BackgroundColor(Tone::Primary.fill(Interaction::None)),
+            lift_small(),
             SkipButton,
             StageVisual,
         ))
@@ -432,10 +477,11 @@ fn spawn_skip_button(commands: &mut Commands) {
             p.spawn((
                 Text::new("Skip fight  (Space)"),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: 13.0,
+                    weight: bevy::text::FontWeight::SEMIBOLD,
                     ..default()
                 },
-                TextColor(PAPER),
+                TextColor(ON_ACCENT),
                 TextLayout::new_with_no_wrap(),
             ));
         });
@@ -461,6 +507,7 @@ fn spawn_actors(
     assets: &AssetServer,
     puppetry: &mut Puppetry,
     script: &Script,
+    shapes: &Shapes,
 ) -> (Vec<Parts>, Vec<Look>, Vec<Option<ClipSet>>) {
     let game = session.game.as_ref().unwrap();
     let mut parts = Vec::new();
@@ -531,7 +578,7 @@ fn spawn_actors(
         let sprite = commands.spawn((sprite, place(0.0), Part, StageVisual)).id();
         let frame = commands
             .spawn((
-                Sprite::from_color(INK.with_alpha(0.0), Vec2::new(BAR_WIDTH + 4.0, 9.0)),
+                shapes.bar(Vec2::new(BAR_WIDTH + 4.0, 10.0), PLATE.with_alpha(0.0)),
                 place(0.1),
                 Part,
                 StageVisual,
@@ -539,7 +586,7 @@ fn spawn_actors(
             .id();
         let fill = commands
             .spawn((
-                Sprite::from_color(Color::NONE, Vec2::new(BAR_WIDTH, 5.0)),
+                shapes.bar(Vec2::new(BAR_WIDTH, 6.0), Color::NONE),
                 place(0.2),
                 Part,
                 StageVisual,
@@ -576,11 +623,11 @@ fn shade(look: &Look, pose: &Pose, fade: f32) -> Color {
 
 fn bar_color(fraction: f32) -> Color {
     if fraction > 0.66 {
-        Color::srgb(0.30, 0.72, 0.32)
+        GOOD
     } else if fraction > 0.33 {
-        Color::srgb(0.88, 0.70, 0.22)
+        AMBER
     } else {
-        RED
+        BAD
     }
 }
 
@@ -611,13 +658,13 @@ fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
         let base = Vec2::new(actor.anchor.x, actor.anchor.y - 22.0) + pose.travel;
         if let Ok((mut transform, mut sprite)) = sprites.get_mut(parts.frame) {
             transform.translation = base.extend(z + 0.1);
-            sprite.color = INK.with_alpha(visible);
+            sprite.color = PLATE.with_alpha(PLATE.alpha() * visible);
         }
         if let Ok((mut transform, mut sprite)) = sprites.get_mut(parts.fill) {
             // The fill shrinks toward its left edge.
-            let width = BAR_WIDTH * fraction;
+            let width = (BAR_WIDTH * fraction).max(6.0);
             transform.translation = Vec3::new(base.x - (BAR_WIDTH - width) * 0.5, base.y, z + 0.2);
-            sprite.custom_size = Some(Vec2::new(width.max(0.01), 5.0));
+            sprite.custom_size = Some(Vec2::new(width, 6.0));
             sprite.color = bar_color(fraction).with_alpha(visible);
         }
     }

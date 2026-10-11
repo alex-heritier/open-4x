@@ -25,9 +25,13 @@
 //!   Scenarios omit it; the simulation derives it from the cities' border levels.
 //! * `improvements`: the same encoding for the worker improvements on each tile
 //!   (see [`Tile::ROAD`]). Scenarios may pre-build roads, railroads, mines and farms.
+//! * `resource_types` and `resources`: the kinds of natural resource the map uses (see
+//!   [`crate::resources`]) and the run-length layer that lays them on tiles, `0` for none and *n*
+//!   for the *n*th kind.
 //!
 //! Rows also accept the old combined glyphs `. , f F m M n N` (grass or sand, with forest or
 //! mountains already on it) so hand-written maps keep working; they are written back in layers.
+use crate::resources::{self, ResourceKind};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_DIMENSION: i32 = 1024;
@@ -223,6 +227,8 @@ pub struct Tile {
     pub claim: u32,
     pub region: u16,
     pub improvements: u8,
+    /// The natural resource on the square: 1-based into [`Map::resources`], `0` for none.
+    pub resource: u8,
 }
 impl Tile {
     pub const ROAD: u8 = 1;
@@ -248,6 +254,7 @@ impl Tile {
             claim: 0,
             region: 0,
             improvements: 0,
+            resource: 0,
         }
     }
     pub fn is_land(&self) -> bool {
@@ -342,8 +349,8 @@ impl Tile {
 /// A Civ3-style map: a rectangle of tiles that stands upright on screen, north up and east right,
 /// with every other row shifted half a tile. The simulation's square grid is that rectangle
 /// turned 45°, so the rectangle is embedded in a square of `side() * side()` cells and the cells
-/// outside it are void: they hold nothing, and [`Map::get`] answers `None` for them as it does
-/// for anything off the map.
+/// outside it are void storage. Lookups wrap native columns horizontally, while native rows
+/// beyond the north and south edges have no tile.
 ///
 /// Native column `cx` runs `0..2 * columns` and row `cy` runs `0..rows`; a tile exists where
 /// `cx + cy` is even. Tile `(x, y)` of the square sits at `cx = x - y + columns` and
@@ -396,6 +403,8 @@ pub struct Map {
     pub tiles: Vec<Tile>,
     /// Set when the world is a screen-upright rectangle embedded in the square grid.
     pub lattice: Option<Lattice>,
+    /// The kinds of resource this map declares; a tile's `resource` indexes them from 1.
+    pub resources: Vec<ResourceKind>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -420,6 +429,10 @@ struct MapRepr {
     claims: Vec<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     improvements: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resource_types: Vec<ResourceKind>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resources: Vec<u32>,
 }
 
 /// Run-length encode as flat `[value, count, value, count, ...]`. An all-zero layer is empty.
@@ -472,6 +485,8 @@ impl From<Map> for MapRepr {
             owners: encode_runs(map.tiles.iter().map(|t| t.owner)),
             claims: encode_runs(map.tiles.iter().map(|t| t.claim)),
             improvements: encode_runs(map.tiles.iter().map(|t| u32::from(t.improvements))),
+            resources: encode_runs(map.tiles.iter().map(|t| u32::from(t.resource))),
+            resource_types: map.resources,
         }
     }
 }
@@ -516,6 +531,20 @@ impl TryFrom<MapRepr> for Map {
         let owners = decode_runs(&repr.owners, len)?;
         let claims = decode_runs(&repr.claims, len)?;
         let improvements = decode_runs(&repr.improvements, len)?;
+        let resources = decode_runs(&repr.resources, len)?;
+        if repr.resource_types.len() > resources::MAX_KINDS {
+            return Err(format!(
+                "a map declares at most {} resource kinds",
+                resources::MAX_KINDS
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for kind in &repr.resource_types {
+            kind.check()?;
+            if !seen.insert(kind.id.as_str()) {
+                return Err(format!("resource id {:?} is declared twice", kind.id));
+            }
+        }
         let lattice = map.lattice;
         for (i, tile) in map.tiles.iter_mut().enumerate() {
             tile.river = u8::try_from(rivers[i])
@@ -525,6 +554,10 @@ impl TryFrom<MapRepr> for Map {
             tile.region = u16::try_from(regions[i]).map_err(|_| "region index exceeds 65535")?;
             tile.owner = owners[i];
             tile.claim = claims[i];
+            tile.resource = u8::try_from(resources[i])
+                .ok()
+                .filter(|&kind| usize::from(kind) <= repr.resource_types.len())
+                .ok_or("a resource must be 0 (none) or the number of a declared kind")?;
             tile.improvements = u8::try_from(improvements[i])
                 .ok()
                 .filter(|bits| bits & !Tile::IMPROVEMENT_MASK == 0)
@@ -550,6 +583,7 @@ impl TryFrom<MapRepr> for Map {
                 return Err(format!("tile {x},{y} has both a mine and a farm"));
             }
         }
+        map.resources = repr.resource_types;
         for tile in &map.tiles {
             for (bit, dx, dy) in [(Tile::RIVER_E, 1, 0), (Tile::RIVER_S, 0, 1)] {
                 let other = map.get(tile.position.offset(dx, dy));
@@ -576,6 +610,7 @@ impl Map {
             height,
             tiles,
             lattice: None,
+            resources: Vec::new(),
         }
     }
     /// An all-`terrain` upright rectangle of tiles inside its square, the rest void.
@@ -624,6 +659,7 @@ impl Map {
             height: height as i32,
             tiles,
             lattice: None,
+            resources: Vec::new(),
         })
     }
     pub fn rows(&self) -> Vec<String> {
@@ -685,6 +721,40 @@ impl Map {
             && self.lattice.is_none_or(|lattice| lattice.contains(p)))
         .then(|| (p.y * self.width + p.x) as usize)
     }
+    /// Canonical tile across the horizontal seam of an upright world. North and south
+    /// remain bounded; plain diamond maps retain their finite edges.
+    pub fn normalize(&self, p: Coord) -> Option<Coord> {
+        let p = if let Some(lattice) = self.lattice {
+            let (cx, cy) = lattice.native(p);
+            if !(0..lattice.rows).contains(&cy) {
+                return None;
+            }
+            lattice.cell(cx.rem_euclid(2 * lattice.columns), cy)
+        } else {
+            p
+        };
+        self.index(p).map(|_| p)
+    }
+    /// The image of `p` nearest `reference`, in logical coordinates.
+    pub fn nearest(&self, reference: Coord, p: Coord) -> Coord {
+        let Some(lattice) = self.lattice else {
+            return p;
+        };
+        let period = 2 * lattice.columns;
+        let delta = (p.x - p.y) - (reference.x - reference.y);
+        let turns = (delta + lattice.columns).div_euclid(period);
+        p.offset(-turns * lattice.columns, turns * lattice.columns)
+    }
+    pub fn distance(&self, a: Coord, b: Coord) -> i32 {
+        a.distance(self.nearest(a, b))
+    }
+    pub fn distance_squared(&self, a: Coord, b: Coord) -> i32 {
+        a.distance_squared(self.nearest(a, b))
+    }
+    /// Horizontal screen-space period, when the world wraps.
+    pub fn screen_period(&self) -> Option<f32> {
+        self.lattice.map(|l| l.columns as f32 * 128.0)
+    }
     /// Whether a tile exists at `p`.
     pub fn contains(&self, p: Coord) -> bool {
         self.index(p).is_some()
@@ -721,20 +791,35 @@ impl Map {
         }
     }
     pub fn get(&self, p: Coord) -> Option<&Tile> {
-        self.index(p).and_then(|i| self.tiles.get(i))
+        self.normalize(p)
+            .and_then(|p| self.index(p))
+            .and_then(|i| self.tiles.get(i))
     }
     pub fn get_mut(&mut self, p: Coord) -> Option<&mut Tile> {
-        self.index(p).and_then(|i| self.tiles.get_mut(i))
+        self.normalize(p)
+            .and_then(|p| self.index(p))
+            .and_then(|i| self.tiles.get_mut(i))
     }
-    /// The in-bounds Chebyshev neighbours, clockwise from north.
+    /// The resource lying on `tile`, if any.
+    pub fn resource(&self, tile: &Tile) -> Option<&ResourceKind> {
+        usize::from(tile.resource)
+            .checked_sub(1)
+            .and_then(|i| self.resources.get(i))
+    }
+    /// Canonical Chebyshev neighbours, clockwise from north, including the horizontal seam.
     pub fn neighbors(&self, p: Coord) -> Vec<Coord> {
-        Coord::NEIGHBORS
-            .into_iter()
-            .map(|(x, y)| p.offset(x, y))
-            .filter(|p| self.index(*p).is_some())
-            .collect()
+        let mut neighbors = Vec::with_capacity(8);
+        for (dx, dy) in Coord::NEIGHBORS {
+            if let Some(next) = self.normalize(p.offset(dx, dy))
+                && next != p
+                && !neighbors.contains(&next)
+            {
+                neighbors.push(next);
+            }
+        }
+        neighbors
     }
-    /// Base terrain at `(x, y)`; everything off the map is open ocean.
+    /// Base terrain at `(x, y)`, wrapping horizontally; past bounded edges is open ocean.
     fn terrain_at(&self, x: i32, y: i32) -> Terrain {
         self.get(Coord::new(x, y))
             .map_or(Terrain::Ocean, |t| t.terrain)
@@ -794,6 +879,26 @@ impl Map {
     pub fn water_cell(&self, corner: Coord) -> Option<usize> {
         let [n, e, s, w] = Self::cell_vertices(corner).map(|(x, y)| self.water_under(x, y));
         (n | e | s | w != 0).then_some((4 * s + e) * 16 + 4 * w + n)
+    }
+    /// Pieces of a sprite that must stop at the shore, for the four dual cells around tile `p`:
+    /// entry `role` is the cell that has `p` as its north (0), east (1), south (2) or west (3)
+    /// vertex, at corner `p`, `p - (1, 0)`, `p - (1, 1)` and `p - (0, 1)`. Each is `role * 8 +
+    /// mask`, where bit `i` of `mask` says that the `i`-th other vertex of the cell (in north,
+    /// east, south, west order) is water. All masks are zero for a tile with no water near it.
+    pub fn shore_pieces(&self, p: Coord) -> [usize; 4] {
+        let corners = [(0, 0), (-1, 0), (-1, -1), (0, -1)];
+        std::array::from_fn(|role| {
+            let corner = p.offset(corners[role].0, corners[role].1);
+            let mut mask = 0;
+            let mut bit = 0;
+            for (vertex, (x, y)) in Self::cell_vertices(corner).into_iter().enumerate() {
+                if vertex != role {
+                    mask |= usize::from(self.water_under(x, y) != 0) << bit;
+                    bit += 1;
+                }
+            }
+            role * 8 + mask
+        })
     }
     /// River branches in the dual cell at `corner`, as a mask for the river sheet:
     /// bit 0 north-east (the edge between the N and E tiles), bit 1 south-east, bit 2 south-west,
@@ -961,6 +1066,34 @@ impl TryFrom<ExploredRepr> for Explored {
 mod tests {
     use super::*;
     #[test]
+    fn upright_worlds_repeat_horizontally_but_stop_at_the_poles() {
+        let lattice = Lattice {
+            columns: 4,
+            rows: 6,
+        };
+        let mut map = Map::embedded(lattice, Terrain::Grass);
+        let west = lattice.cell(0, 2);
+        let east = lattice.cell(6, 2);
+        map.get_mut(east).unwrap().set_terrain(Terrain::Sea);
+        for turns in -3..=3 {
+            let image = east.offset(turns * lattice.columns, -turns * lattice.columns);
+            assert_eq!(map.normalize(image), Some(east));
+            assert_eq!(map.get(image), map.get(east));
+            assert_eq!(map.ground_cell(image), map.ground_cell(east));
+            assert_eq!(map.water_cell(image), map.water_cell(east));
+        }
+        assert!(map.neighbors(west).contains(&east));
+        assert_eq!(map.distance(west, east), 1);
+        assert_eq!(map.distance_squared(west, east), 2);
+        assert_eq!(map.normalize(lattice.cell(-1, -1)), None);
+        assert_eq!(map.normalize(lattice.cell(0, 6)), None);
+        assert_eq!(
+            Map::filled(4, 4, Terrain::Grass).normalize(Coord::new(-1, 2)),
+            None
+        );
+    }
+
+    #[test]
     fn neighbours_are_the_eight_chebyshev_directions() {
         let map = Map::filled(3, 3, Terrain::Grass);
         assert_eq!(map.neighbors(Coord::new(1, 1)).len(), 8);
@@ -1026,6 +1159,22 @@ mod tests {
             cell_map([Terrain::Sea; 4]).ground_cell(Coord::new(1, 1)),
             None
         );
+    }
+    #[test]
+    fn shore_pieces_name_the_water_around_a_tile() {
+        use Terrain::*;
+        // Land in the middle of a row of three, water everywhere else.
+        let mut map = Map::filled(5, 5, Sea);
+        map.get_mut(Coord::new(2, 2)).unwrap().terrain = Grass;
+        let p = Coord::new(2, 2);
+        assert_eq!(map.shore_pieces(p), [7, 15, 23, 31], "water on every side");
+        for t in &mut map.tiles {
+            t.terrain = Grass;
+        }
+        assert_eq!(map.shore_pieces(p), [0, 8, 16, 24], "inland");
+        // One water tile to the east: only the two cells that contain it change.
+        map.get_mut(Coord::new(3, 2)).unwrap().terrain = Sea;
+        assert_eq!(map.shore_pieces(p), [1, 8, 16, 24 + 4]);
     }
     #[test]
     fn water_beside_land_is_always_coast_and_open_water_keeps_its_depth() {
@@ -1332,7 +1481,7 @@ mod tests {
         assert!(
             map.neighbors(corner)
                 .iter()
-                .all(|&n| lattice.contains(n) && corner.distance(n) == 1)
+                .all(|&n| lattice.contains(n) && map.distance(corner, n) == 1)
         );
         let void = Coord::new(0, 0);
         assert!(!map.contains(void) && map.get(void).is_none());
@@ -1385,6 +1534,39 @@ mod tests {
         assert!(
             serde_json::from_str::<Map>(&json.replace("\"columns\":3", "\"columns\":4")).is_err()
         );
+    }
+    #[test]
+    fn resources_roundtrip_and_must_name_declared_kinds() {
+        use crate::resources::{ResourceClass, ResourceKind};
+        let kind = |id: &str, class| ResourceKind {
+            id: id.into(),
+            name: id.into(),
+            class,
+            food: 1,
+            shields: 0,
+            gold: 0,
+        };
+        let mut map = Map::from_rows(&["~~gg".into(), "gdpt".into(), "~gg~".into()]).unwrap();
+        map.resources = vec![
+            kind("fish", ResourceClass::Bonus),
+            kind("gold", ResourceClass::Luxury),
+        ];
+        map.tiles[0].resource = 1;
+        map.tiles[5].resource = 2;
+        assert_eq!(map.resource(&map.tiles[5]).unwrap().id, "gold");
+        assert!(map.resource(&map.tiles[4]).is_none());
+        let json = serde_json::to_string(&map).unwrap();
+        assert_eq!(serde_json::from_str::<Map>(&json).unwrap(), map);
+        // A tile naming a kind the map never declared, or a kind declared twice, is refused.
+        let mut stray = map.clone();
+        stray.tiles[6].resource = 3;
+        assert!(serde_json::from_str::<Map>(&serde_json::to_string(&stray).unwrap()).is_err());
+        let mut twice = map.clone();
+        twice.resources.push(kind("fish", ResourceClass::Bonus));
+        assert!(serde_json::from_str::<Map>(&serde_json::to_string(&twice).unwrap()).is_err());
+        // Maps without resources write neither layer.
+        let plain = serde_json::to_string(&Map::filled(3, 2, Terrain::Ocean)).unwrap();
+        assert!(!plain.contains("resource"), "{plain}");
     }
     #[test]
     fn filling_the_chart_marks_exactly_the_map() {

@@ -4,8 +4,10 @@ mod connection;
 mod march;
 mod presentation;
 mod puppet;
+mod roads;
 mod route;
 mod stage;
+mod theme;
 
 use bevy::{
     input::mouse::MouseWheel, prelude::*, ui::RelativeCursorPosition, window::PrimaryWindow,
@@ -74,6 +76,19 @@ impl WorldRect {
             max: self.max + Vec2::splat(by),
         }
     }
+    /// Images of a canonical tile within this horizontal view.
+    fn copies(&self, map: &Map, p: Coord) -> Vec<Coord> {
+        let Some(lattice) = map.lattice else {
+            return vec![p];
+        };
+        let (x, _) = p.screen();
+        let period = lattice.columns as f32 * 128.0;
+        let first = ((self.min.x - x) / period).ceil() as i32;
+        let last = ((self.max.x - x) / period).floor() as i32;
+        (first..=last)
+            .map(|k| p.offset(k * lattice.columns, -k * lattice.columns))
+            .collect()
+    }
     /// Bounding box in tile space as `(x0, y0, x1, y1)`, fractional and not clamped. The
     /// rectangle is a rotated square there.
     fn tile_box(&self) -> (Vec2, Vec2) {
@@ -94,6 +109,14 @@ impl WorldRect {
     /// Inclusive tile ranges clamped to the map: `(x0, y0, x1, y1)`.
     fn tile_bounds(&self, game: &Game) -> (i32, i32, i32, i32) {
         let (lo, hi) = self.tile_box();
+        if game.map.lattice.is_some() {
+            return (
+                lo.x.floor() as i32,
+                lo.y.floor() as i32,
+                hi.x.ceil() as i32,
+                hi.y.ceil() as i32,
+            );
+        }
         (
             (lo.x.floor() as i32).max(0),
             (lo.y.floor() as i32).max(0),
@@ -133,6 +156,19 @@ fn home(game: &Game, player: Id) -> Option<Coord> {
         .find(|c| c.capital)
         .or_else(|| game.cities.values().find(own))
         .map(|c| c.position)
+}
+
+/// Keep consecutive route squares adjacent on screen across a world seam.
+fn continuous_path(map: &Map, path: &[Coord]) -> Vec<Coord> {
+    let mut result = Vec::with_capacity(path.len());
+    for &p in path {
+        result.push(
+            result
+                .last()
+                .map_or(p, |&previous| map.nearest(previous, p)),
+        );
+    }
+    result
 }
 
 /// Move the camera onto a tile.
@@ -187,7 +223,11 @@ impl Chart {
     /// The tile a pixel stands for.
     fn tile(&self, px: i32, py: i32) -> Coord {
         let (px, py) = (
-            px.clamp(0, self.width as i32 - 1),
+            if self.lattice.is_some() {
+                px.rem_euclid(self.width as i32)
+            } else {
+                px.clamp(0, self.width as i32 - 1)
+            },
             py.clamp(0, self.height as i32 - 1),
         );
         match self.lattice {
@@ -201,6 +241,33 @@ impl Chart {
             (unit.x * self.width as f32).floor() as i32,
             (unit.y * self.height as f32).floor() as i32,
         )
+    }
+    /// A seam-crossing viewport occupies two rectangles on the overview.
+    fn view_parts(&self, rect: WorldRect) -> Vec<(Vec2, Vec2)> {
+        let Some(lattice) = self.lattice else {
+            return vec![self.view(rect)];
+        };
+        let period = lattice.columns as f32 * 128.0;
+        let left = -(lattice.columns as f32) * 64.0 - 32.0;
+        let width = rect.max.x - rect.min.x;
+        let start = (rect.min.x - left).rem_euclid(period) + left;
+        let rect = WorldRect {
+            min: Vec2::new(start, rect.min.y),
+            max: Vec2::new(start + width.min(period), rect.max.y),
+        };
+        let mut parts = vec![self.view(rect)];
+        if rect.max.x > left + period {
+            parts.push(self.view(WorldRect {
+                min: rect.min - Vec2::X * period,
+                max: rect.max - Vec2::X * period,
+            }));
+        }
+        if width >= period {
+            parts[0].0.x = 0.0;
+            parts[0].1.x = 1.0;
+            parts.truncate(1);
+        }
+        parts
     }
     /// The part of the image a camera rectangle covers: its corners, `0..1` across and down,
     /// clamped to the image.
@@ -232,7 +299,7 @@ impl Chart {
 #[derive(Component)]
 struct MinimapSurface;
 #[derive(Component)]
-struct MinimapView;
+struct MinimapView(usize);
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 enum Selection {
     #[default]
@@ -332,6 +399,14 @@ struct Art {
     borders: Handle<TextureAtlasLayout>,
     /// Each surface-border sheet can have its own resolution.
     relief_borders: std::collections::HashMap<String, (UVec2, Handle<TextureAtlasLayout>)>,
+    /// Layout of the shore-cut farm sheet: 8 x 4 terrain-sized pieces.
+    farm_shore: Handle<TextureAtlasLayout>,
+    farm_shore_sheet: UVec2,
+    /// The sheet's image, held from the first frame so that it loads.
+    farm_shore_image: Option<Handle<Image>>,
+    /// Road and railroad sheets: one cell per set of joined neighbours, see [`roads`].
+    roads: roads::Sheet,
+    rails: roads::Sheet,
     /// Image sizes the layouts were last cut for.
     ground_sheet: UVec2,
     river_sheet: UVec2,
@@ -528,8 +603,8 @@ pub fn run() {
             (
                 receive,
                 buttons,
+                theme::paint,
                 bar::update,
-                city::update,
                 city::scroll,
                 scroll_inspector,
                 minimap_click,
@@ -552,6 +627,7 @@ pub fn run() {
                 .chain(),
         );
     app.insert_gizmo_config(route::RouteGizmos, route::gizmo_config());
+    theme::install_font(&mut app);
     app.run();
 }
 
@@ -589,6 +665,7 @@ fn setup(
             ..OrthographicProjection::default_2d()
         }),
     ));
+    commands.insert_resource(theme::Shapes::new(&mut images));
     commands.insert_resource(Minimap {
         image: images.add(Image::new_fill(
             bevy::render::render_resource::Extent3d::default(),
@@ -617,6 +694,15 @@ fn setup(
         )),
         fog_sheet: UVec2::ZERO,
         border_sheet: UVec2::ZERO,
+        farm_shore: layouts.add(TextureAtlasLayout::from_grid(
+            UVec2::new(256, 128),
+            presentation::FARM_SHORE_COLUMNS,
+            4,
+            None,
+            None,
+        )),
+        farm_shore_sheet: UVec2::ZERO,
+        farm_shore_image: None,
         cells: layouts.add(TextureAtlasLayout::from_grid(
             UVec2::new(192, 96),
             presentation::SHEET_COLUMNS,
@@ -631,6 +717,8 @@ fn setup(
             None,
             None,
         )),
+        roads: roads::Sheet::new(&mut layouts),
+        rails: roads::Sheet::new(&mut layouts),
         ground_sheet: UVec2::ZERO,
         river_sheet: UVec2::ZERO,
         variants: 0,
@@ -769,7 +857,7 @@ fn order_for(session: &Session, unit: Id, target: Coord) -> Option<Command> {
     let game = session.game.as_ref()?;
     let u = game.units.get(&unit)?;
     let def = session.rules.def(u);
-    let distance = u.position.distance(target);
+    let distance = game.map.distance(u.position, target);
     let hostile = game.hostile_holder(target, session.player).is_some();
     Some(if hostile && def.can_bombard() && distance <= def.range {
         Command::Bombard { unit, target }
@@ -879,12 +967,11 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
     }
 }
 
-/// A button: what it does, its flat colour (the action bar's wear pictures instead), and
-/// whether it is one of the bar's.
+/// A button: what it does, and whether it is one of the bar's, which may be dormant. Its fill
+/// follows the pointer (see `theme::paint`).
 type Pressable = (
     &'static Interaction,
     &'static Action,
-    Option<&'static mut BackgroundColor>,
     Option<&'static bar::BarButton>,
 );
 
@@ -897,25 +984,7 @@ fn buttons(
     mut touch_action: Local<Option<Action>>,
 ) {
     let mut activated = Vec::new();
-    for (interaction, action, color, bar_button) in &mut buttons {
-        // The day button wears the brass; everything else stays navy and warms as the
-        // pointer crosses it. See `presentation` for the materials. The action bar's buttons
-        // are pictures and wear their own (see `bar`).
-        use crate::presentation::{BRASS, BRASS_HOVER, BRASS_PRESSED};
-        use crate::presentation::{NAVY, NAVY_HOVER, NAVY_PRESSED};
-        let primary = matches!(action, Action::EndTurn);
-        let (rest, hover, pressed) = if primary {
-            (BRASS, BRASS_HOVER, BRASS_PRESSED)
-        } else {
-            (NAVY, NAVY_HOVER, NAVY_PRESSED)
-        };
-        if let Some(mut color) = color {
-            color.0 = match interaction {
-                Interaction::Hovered => hover,
-                Interaction::Pressed => pressed,
-                _ => rest,
-            };
-        }
+    for (interaction, action, bar_button) in &mut buttons {
         // A button that cannot do anything now still shows what it is, and does nothing.
         if bar_button.is_some_and(|b| b.dormant) {
             continue;
@@ -1084,7 +1153,11 @@ fn controls(
     };
     // Keep the camera over the map: the world is large and empty space is disorienting.
     let (left, bottom, right, top) = game.map.screen_bounds();
-    transform.translation.x = transform.translation.x.clamp(left - 200.0, right + 200.0);
+    transform.translation.x = if let Some(period) = game.map.screen_period() {
+        (transform.translation.x - left).rem_euclid(period) + left
+    } else {
+        transform.translation.x.clamp(left - 200.0, right + 200.0)
+    };
     transform.translation.y = transform.translation.y.clamp(bottom - 100.0, top + 100.0);
     if keys.just_pressed(KeyCode::Home) || keys.just_pressed(KeyCode::KeyH) {
         if let Some(position) = home(game, session.player) {
@@ -1225,17 +1298,19 @@ fn controls(
         return;
     };
     // Panels also block map clicks in their empty space.
-    if cursor.y < 50.0 || cursor.y > window.height() - 34.0 || inspector_contains(window, cursor) {
+    if cursor.y < theme::TOP_BAR
+        || cursor.y > window.height() - 38.0
+        || inspector_contains(window, cursor)
+    {
         return;
     }
     let Ok(world) = camera.viewport_to_world_2d(global, cursor) else {
         return;
     };
-    let position = Coord::from_screen(world.x, world.y);
     let game = session.game.as_ref().unwrap();
-    if game.map.get(position).is_none() {
+    let Some(position) = game.map.normalize(Coord::from_screen(world.x, world.y)) else {
         return;
-    }
+    };
     let own: Vec<_> = game
         .unit_ids_at(position)
         .into_iter()
@@ -1314,6 +1389,56 @@ fn smoke(mut session: ResMut<Session>, mut _commands: Commands, mut exit: Messag
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_minimap_splits_the_view_at_the_horizontal_seam() {
+        let map = Map::embedded(
+            Lattice {
+                columns: 4,
+                rows: 6,
+            },
+            fourx_sim::terrain::Terrain::Grass,
+        );
+        let chart = Chart::of(&map);
+        let rect = WorldRect {
+            min: Vec2::new(-320.0, -220.0),
+            max: Vec2::new(-192.0, -160.0),
+        };
+        let parts = chart.view_parts(rect);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].1.x, 1.0);
+        assert_eq!(parts[1].0.x, 0.0);
+        assert!(
+            ((parts[0].1.x - parts[0].0.x) + (parts[1].1.x - parts[1].0.x) - 0.25).abs() < 1e-6
+        );
+        let whole = chart.view_parts(WorldRect {
+            max: Vec2::new(300.0, -160.0),
+            ..rect
+        });
+        assert_eq!(whole.len(), 1);
+        assert_eq!((whole[0].0.x, whole[0].1.x), (0.0, 1.0));
+    }
+
+    #[test]
+    fn seam_paths_are_short_and_visible_images_resolve_to_the_same_tile() {
+        let lattice = Lattice {
+            columns: 4,
+            rows: 6,
+        };
+        let map = Map::embedded(lattice, fourx_sim::terrain::Terrain::Grass);
+        let west = lattice.cell(0, 2);
+        let east = lattice.cell(6, 2);
+        let path = continuous_path(&map, &[west, east, west]);
+        assert_eq!(path, vec![west, west.offset(-1, 1), west]);
+        let (x, y) = west.screen();
+        let view = WorldRect {
+            min: Vec2::new(x - 140.0, y - 100.0),
+            max: Vec2::new(x + 140.0, y + 100.0),
+        };
+        let copies = view.copies(&map, east);
+        assert_eq!(copies, vec![west.offset(-1, 1)]);
+        assert_eq!(map.normalize(copies[0]), Some(east));
+    }
 
     #[test]
     fn a_second_click_on_the_same_square_soon_after_is_a_double_click() {

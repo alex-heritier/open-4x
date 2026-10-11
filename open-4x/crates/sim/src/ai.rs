@@ -149,7 +149,7 @@ impl Game {
             let Some(target) = self.nearest_enemy(&unit, def, enemies, rules) else {
                 return;
             };
-            if target.distance(unit.position) > AI_RANGE {
+            if self.map.distance(target, unit.position) > AI_RANGE {
                 return;
             }
             if let Some(count) = garrison.get_mut(&unit.position) {
@@ -175,8 +175,10 @@ impl Game {
         let mut best: Option<(f32, Coord, bool)> = None;
         for dy in -range..=range {
             for dx in -range..=range {
-                let target = unit.position.offset(dx, dy);
-                let adjacent = unit.position.distance(target) == 1;
+                let Some(target) = self.map.normalize(unit.position.offset(dx, dy)) else {
+                    continue;
+                };
+                let adjacent = self.map.distance(unit.position, target) == 1;
                 if (dx, dy) == (0, 0) || self.map.get(target).is_none() {
                     continue;
                 }
@@ -237,13 +239,13 @@ impl Game {
                         && rules.def(u).is_naval()
                         && self.map.get(u.position).is_some_and(|t| !t.is_land())
                 })
-                .min_by_key(|u| u.position.distance(unit.position))
+                .min_by_key(|u| self.map.distance(u.position, unit.position))
                 .map(|u| u.position)
         } else {
             self.cities
                 .values()
                 .filter(|c| enemies.contains(&c.owner))
-                .min_by_key(|c| c.position.distance(unit.position))
+                .min_by_key(|c| self.map.distance(c.position, unit.position))
                 .map(|c| c.position)
         }
     }
@@ -294,14 +296,12 @@ impl Game {
     /// Nearest land tile within reach that keeps three tiles from every city.
     fn settlement_site(&self, owner: Id, from: Coord) -> Option<Coord> {
         let mut best: Option<(i32, Coord)> = None;
-        for y in (from.y - AI_SETTLE_RADIUS).max(0)
-            ..=(from.y + AI_SETTLE_RADIUS).min(self.map.height - 1)
-        {
-            for x in (from.x - AI_SETTLE_RADIUS).max(0)
-                ..=(from.x + AI_SETTLE_RADIUS).min(self.map.width - 1)
-            {
-                let p = Coord::new(x, y);
-                let distance = p.distance(from);
+        for y in from.y - AI_SETTLE_RADIUS..=from.y + AI_SETTLE_RADIUS {
+            for x in from.x - AI_SETTLE_RADIUS..=from.x + AI_SETTLE_RADIUS {
+                let Some(p) = self.map.normalize(Coord::new(x, y)) else {
+                    continue;
+                };
+                let distance = self.map.distance(p, from);
                 if best.is_some_and(|(d, _)| d <= distance) {
                     continue;
                 }
@@ -309,7 +309,10 @@ impl Game {
                     .map
                     .get(p)
                     .is_some_and(|t| t.is_land() && (t.owner == 0 || t.owner == owner))
-                    && self.cities.values().all(|c| c.position.distance(p) >= 3);
+                    && self
+                        .cities
+                        .values()
+                        .all(|c| self.map.distance(c.position, p) >= 3);
                 if free {
                     best = Some((distance, p));
                 }
