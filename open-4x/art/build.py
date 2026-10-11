@@ -24,6 +24,17 @@ from forge.util import PACK, downsample, indexed, save_png, write_svg
 # (shown 70x70), ships 256x192 (shown 112x84).  Terrain cells are 192x96 (shown 128x64).
 
 
+def render_jobs(jobs, fn, chunksize, workers=None):
+    """Map `fn` over `jobs` on every core, falling back to this process when a pool cannot start
+    (a sandbox that forbids the pool's pipes or sockets renders serially instead of crashing)."""
+    try:
+        with ProcessPoolExecutor(workers or os.cpu_count() or 4) as pool:
+            return list(pool.map(fn, jobs, chunksize=chunksize))
+    except (OSError, PermissionError) as exc:
+        print(f"  (no process pool: {exc}; rendering {len(jobs)} frames serially)", flush=True)
+        return [fn(job) for job in jobs]
+
+
 def sprite(name, svg, size, rel, **kw):
     write_svg(name, svg.render())
     im = render_sprite(svg.render(), *size, **kw)
@@ -65,13 +76,28 @@ def build_relief():
                 print(f"  {name}", flush=True)
 
 
+def city_scene(flavor, build):
+    """A city skin with the nation's banner raised over it: white cloth, tinted to the owner."""
+    svg = build()
+    cities.banner(svg, cities.Iso(cities.CX, cities.CY - 64, cities.K), flavor)
+    return svg
+
+
 def build_sprites():
     sprite("forest", nature.build_forest_svg(), (256, 224), "sprites/forest.png", ss=4, seed=4, radius=1)
-    for flavor, build in cities.BUILDERS.items():
-        sprite(f"city_{flavor}", build(), (256, 224), f"sprites/city_{flavor}.png", ss=4, seed=3, radius=1)
+    build_cities()
     # Tile overlays: the same 2:1 diamond as a terrain cell, 256x128 shown at 128x64.
     sprite("farm", improvements.build_farm(), (256, 128), "sprites/farm.png", ss=4, seed=6, radius=1)
     sprite("mine", improvements.build_mine(), (256, 128), "sprites/mine.png", ss=4, seed=7, radius=1, rim=0.5)
+
+
+def build_cities():
+    """The eleven city skins, plus the matching transparent banner each raises over its town."""
+    for flavor, build in cities.BUILDERS.items():
+        sprite(f"city_{flavor}", city_scene(flavor, build), (256, 224), f"sprites/city_{flavor}.png", ss=4, seed=3, radius=1)
+        banner = cities.Svg(256, 224)
+        cities.banner(banner, cities.Iso(cities.CX, cities.CY - 64, cities.K), flavor)
+        sprite(f"city_{flavor}_banner", banner, (256, 224), f"sprites/city_{flavor}_banner.png", ss=4, seed=3, radius=1)
 
 
 # ---- unit animation sheets ---------------------------------------------------------------------
@@ -88,6 +114,16 @@ def unit_spec(name):
     return (160, 160), troops.CLIPS
 
 
+# ---- culture variants ---------------------------------------------------------------------------
+# Some cultures field a design of their own (a Zulu warrior, a Qing banner-man, a Cossack) whose
+# kit and horse differ from the Western base.  Each is written under `<design>_<flavor>` (as
+# pack.json's `flavor_sprites`/`flavor_animations` name them) and shares its base design's frame,
+# clips and layout, so the client draws it exactly like the base and only the paint differs.
+FLAVOR_UNITS = {
+    name: split for name in troops.BUILDERS if (split := troops.split_flavor(name)) is not None
+}
+
+
 def _unit_frame(job):
     name, clip, k, i = job
     (w, h), clips = unit_spec(name)
@@ -100,13 +136,15 @@ def _unit_frame(job):
 
 def build_units(names=None):
     names = names or list(UNIT_BUILDERS)
+    unknown = [name for name in names if name not in UNIT_BUILDERS]
+    if unknown:
+        sys.exit(f"unknown unit design {unknown[0]!r}; choose from {', '.join(UNIT_BUILDERS)}")
     jobs = []
     for name in names:
         _, clips = unit_spec(name)
         for clip, (frames, _, _) in clips.items():
             jobs += [(name, clip, k, i) for k in range(8) for i in range(frames)]
-    with ProcessPoolExecutor(os.cpu_count() or 4) as pool:
-        images = dict(zip(jobs, pool.map(_unit_frame, jobs, chunksize=4)))
+    images = dict(zip(jobs, render_jobs(jobs, _unit_frame, 4)))
     for name in names:
         (w, h), clips = unit_spec(name)
         for clip, (frames, _, _) in clips.items():
@@ -118,6 +156,11 @@ def build_units(names=None):
             save_png(indexed(sheet), f"units/{name}/{clip}.png")
         save_png(images[(name, "idle", 0, 0)], f"sprites/{name}.png")
         print(f"  {name}", flush=True)
+
+
+def build_flavor_units():
+    """Every culture's own infantry and cavalry, written as `<design>_<flavor>` like any design."""
+    build_units(list(FLAVOR_UNITS))
 
 
 def flat(svg, w, h, **kw):
@@ -153,13 +196,19 @@ GROUPS = {
     "overlays": build_overlays,
     "relief": build_relief,
     "sprites": build_sprites,
+    "cities": build_cities,
     "units": build_units,
+    "flavor": build_flavor_units,
     "ui": build_ui,
     "icons": build_icons,
 }
 
 
 def main(argv):
+    # `units NAME...` builds only the named designs (`infantry`, `cavalry_steppe`, ...).
+    if argv[:1] == ["units"] and len(argv) > 1:
+        build_units(argv[1:])
+        return
     wanted = argv or list(GROUPS)
     for name in wanted:
         if name not in GROUPS:

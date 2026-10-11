@@ -11,7 +11,7 @@ use fourx_content::{
     Visuals,
     animation::{Clip, FACINGS},
 };
-use fourx_sim::Id;
+use fourx_sim::{Flavor, Id};
 use std::collections::HashMap;
 
 /// One clip of one design, ready to draw.
@@ -104,7 +104,9 @@ pub(super) struct UnitArt {
 }
 
 impl UnitArt {
-    /// One clip of a design, or `None` when the pack draws the design from a single sprite.
+    /// One clip of a design, or `None` when the pack draws the design from a single sprite. The
+    /// flavor picks a culture's own art when the pack offers one, and the returned id names the
+    /// design that was actually drawn (so callers can fall back to its sprite).
     pub fn clip(
         &mut self,
         prefix: &str,
@@ -113,15 +115,18 @@ impl UnitArt {
         assets: &AssetServer,
         layouts: &mut Assets<TextureAtlasLayout>,
         kind: &str,
+        flavor: Flavor,
         clip: Clip,
-    ) -> Option<ClipArt> {
+    ) -> Option<(String, ClipArt)> {
         let key = format!("{prefix}|{pack_id}");
         if self.key != key {
             *self = UnitArt { key, ..default() };
         }
-        let unit = visuals.units.get(kind)?;
+        let visual = visuals.unit(kind, flavor)?;
+        let design = visuals.unit_design(kind, flavor).to_string();
+        let unit = visual.clips?;
         let sheet = unit.clips.get(&clip)?;
-        let id = (kind.to_string(), clip);
+        let id = (design.clone(), clip);
         let layout = self
             .layouts
             .entry(id.clone())
@@ -146,12 +151,15 @@ impl UnitArt {
             // sheet is let go.
             assets.load(path)
         };
-        Some(ClipArt {
-            image,
-            layout,
-            frames: sheet.frames,
-            ms: sheet.ms as f32,
-        })
+        Some((
+            design,
+            ClipArt {
+                image,
+                layout,
+                frames: sheet.frames,
+                ms: sheet.ms as f32,
+            },
+        ))
     }
 
     /// Every clip of a design, or `None` when it has none.
@@ -161,18 +169,23 @@ impl UnitArt {
         assets: &AssetServer,
         layouts: &mut Assets<TextureAtlasLayout>,
         kind: &str,
+        flavor: Flavor,
     ) -> Option<ClipSet> {
         let mut clips = Vec::with_capacity(5);
         for clip in Clip::ALL {
-            clips.push(self.clip(
-                &session.asset_prefix,
-                &session.pack.id,
-                &session.pack.visuals,
-                assets,
-                layouts,
-                kind,
-                clip,
-            )?);
+            clips.push(
+                self.clip(
+                    &session.asset_prefix,
+                    &session.pack.id,
+                    &session.pack.visuals,
+                    assets,
+                    layouts,
+                    kind,
+                    flavor,
+                    clip,
+                )?
+                .1,
+            );
         }
         Some(ClipSet {
             clips: clips.try_into().ok()?,

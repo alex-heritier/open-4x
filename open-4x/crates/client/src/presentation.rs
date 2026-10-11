@@ -206,10 +206,16 @@ pub(crate) fn nation_color(game: &Game, owner: Id, alpha: f32) -> Color {
     )
 }
 /// A sprite tint that leans toward a nation's colour without hiding the art.
-pub(super) fn tinted(game: &Game, owner: Id) -> Color {
+pub(super) fn tint(game: &Game, owner: Id) -> Color {
     let [r, g, b] = nation_rgb(game, owner);
-    let lean = |c: u8| 1.0 - 0.5 * (1.0 - f32::from(c) / 255.0);
-    Color::srgb(lean(r), lean(g), lean(b))
+    Color::srgb(lean_channel(r), lean_channel(g), lean_channel(b))
+}
+/// One channel of [`tint`]: a nation colour washed most of the way to white, so multiplying a
+/// sprite by it keeps the paint's shading but turns its hue to the nation's.
+fn lean_channel(c: u8) -> f32 {
+    let base = f32::from(c) / 255.0;
+    // A muted colour (a grey, a uniform) still ends up clearly the nation's hue.
+    1.0 - 0.62 * (1.0 - base)
 }
 /// How bright a city looks when it is remembered rather than in sight.
 const REMEMBERED_LIGHT: f32 = 0.6;
@@ -953,25 +959,52 @@ pub(super) fn refresh(
         let path = city_sprite(visuals, game, city.owner);
         let sprite = city_images
             .entry(path)
-            .or_insert_with(|| assets.load(format!("{prefix}{path}")));
-        let tint = if city.owner == session.player {
+            .or_insert_with(|| assets.load(format!("{prefix}{path}")))
+            .clone();
+        // The town keeps its own paint; the nation's colour rides the banner over it, as in Civ3,
+        // where one accent ramp colours the flag rather than washing the whole sprite.
+        let banner = visuals
+            .city_banners
+            .get(
+                game.factions
+                    .get(&city.owner)
+                    .map_or(Flavor::Western, |faction| faction.flavor)
+                    .key(),
+            )
+            .or_else(|| visuals.city_banners.get(Flavor::Western.key()));
+        let banner_handle = banner.map(|path| {
+            city_images
+                .entry(path)
+                .or_insert_with(|| assets.load(format!("{prefix}{path}")))
+                .clone()
+        });
+        let lit = sight.state(city.position) == IN_SIGHT;
+        let body = if lit {
             Color::WHITE
         } else {
-            tinted(game, city.owner)
+            dimmed(Color::WHITE, REMEMBERED_LIGHT)
         };
-        // A city seen once and since out of sight is shown as it was, dimmed.
-        let tint = if sight.state(city.position) == IN_SIGHT {
-            tint
+        let flag = if lit {
+            nation_color(game, city.owner, 1.0)
         } else {
-            dimmed(tint, REMEMBERED_LIGHT)
+            dimmed(nation_color(game, city.owner, 1.0), REMEMBERED_LIGHT)
         };
         image_sprite(
             &mut commands,
-            sprite,
+            &sprite,
             Vec3::new(x, y + 24.0, z),
             Vec2::new(128.0, 112.0),
-            tint,
+            body,
         );
+        if let Some(banner) = banner_handle {
+            image_sprite(
+                &mut commands,
+                &banner,
+                Vec3::new(x, y + 24.0, z + 0.05),
+                Vec2::new(128.0, 112.0),
+                flag,
+            );
+        }
         commands.spawn((
             Sprite::from_color(INK.with_alpha(0.88), Vec2::new(134.0, 23.0)),
             Transform::from_xyz(x, y - 24.0, z + 0.1),
@@ -1029,6 +1062,10 @@ pub(super) fn refresh(
         let Some(def) = session.rules.units.get(&unit.kind) else {
             continue;
         };
+        let flavor = game
+            .factions
+            .get(&unit.owner)
+            .map_or(Flavor::Western, |faction| faction.flavor);
         let (mut x, mut y) = unit.position.screen();
         if city_tiles.contains(&unit.position) {
             x += 62.0;
@@ -1036,12 +1073,12 @@ pub(super) fn refresh(
         }
         let z = Z_UNIT + depth(y);
         let spent = unit.owner == session.player && unit.moves_left(def) == 0;
-        let color = if unit.owner != session.player {
-            tinted(game, unit.owner)
-        } else if spent {
+        // Every nation's coat, cap and horse blanket lean their colour, as in Civ3; a unit with
+        // its movement spent is greyed so the player can still spot it.
+        let color = if spent {
             Color::srgb(0.66, 0.66, 0.70)
         } else {
-            Color::WHITE
+            tint(game, unit.owner)
         };
         let at = Vec3::new(x, y + 12.0, z);
         let mut clip = |kind: &str, which: Clip| {
@@ -1052,11 +1089,12 @@ pub(super) fn refresh(
                 &assets,
                 &mut puppetry.layouts,
                 kind,
+                flavor,
                 which,
             )
         };
         match clip(&unit.kind, Clip::Idle) {
-            Some(idle) => {
+            Some((_, idle)) => {
                 // Fetch the walk now, so the unit's first steps are not blank.
                 clip(&unit.kind, Clip::Run);
                 let facing = puppetry.facings.of(unit.id);
@@ -1069,9 +1107,13 @@ pub(super) fn refresh(
                 ));
             }
             None => {
-                let sprite = unit_images
-                    .entry(def.sprite.clone())
-                    .or_insert_with(|| assets.load(format!("{prefix}{}", def.sprite)));
+                let design = visuals.unit_design(&unit.kind, flavor).to_string();
+                let sprite = unit_images.entry(design.clone()).or_insert_with(|| {
+                    let path = visuals
+                        .unit(&unit.kind, flavor)
+                        .map_or_else(|| def.sprite.clone(), |visual| visual.sprite);
+                    assets.load(format!("{prefix}{path}"))
+                });
                 image_sprite(&mut commands, sprite, at, unit_size(def), color);
             }
         }

@@ -194,12 +194,7 @@ impl Game {
 
     /// Before a duel, artillery with the defender may shoot the attacker once. Returns the shot
     /// for the record, or `None` when nobody fired.
-    fn defensive_bombard(
-        &mut self,
-        attacker: Id,
-        defender: Id,
-        rules: &Rules,
-    ) -> Option<Support> {
+    fn defensive_bombard(&mut self, attacker: Id, defender: Id, rules: &Rules) -> Option<Support> {
         let victim = &self.units[&attacker];
         let victim_def = rules.def(victim);
         if victim_def.defense <= 0 || victim.hp(victim_def) <= 1 {
@@ -463,8 +458,8 @@ impl Game {
         };
         self.note(text);
         if let (Some(attacker_f), Some(defender_f)) = (a_before, d_before) {
-            let retreat_to = (outcome == Outcome::DefenderRetreated)
-                .then(|| self.units[&defender].position);
+            let retreat_to =
+                (outcome == Outcome::DefenderRetreated).then(|| self.units[&defender].position);
             self.record(Battle::Duel {
                 attacker: attacker_f,
                 defender: defender_f,
@@ -562,7 +557,8 @@ impl Game {
         let v_def = rules.def(v);
         let lethal = rules.def(&self.units[&id]).lethal_against(v_def.domain);
         let odds = self.bombard_odds(strength, v, v_def);
-        let (shooter_before, target_before) = (self.fighter(id, rules), self.fighter(victim, rules));
+        let (shooter_before, target_before) =
+            (self.fighter(id, rules), self.fighter(victim, rules));
         let (mut hits, mut killed) = (0, false);
         let mut volleys = Vec::new();
         for _ in 0..shots {

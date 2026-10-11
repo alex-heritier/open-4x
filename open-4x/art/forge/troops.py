@@ -45,16 +45,23 @@ STRIKE_AT = 0.50
 
 # ---- a person -----------------------------------------------------------------------------------
 class Kit:
-    """What a figure wears and carries."""
+    """What a figure wears and carries.
 
-    def __init__(self, coat=NAVY, trousers=SLATE, cap=NAVY, band=RED, hat=None, pack="knapsack", tool="rifle", plume=None):
+    `style` picks the headgear and the small cultural flourishes (`kepi`, `brim`, `turban`,
+    `conical`, `fez`, `shako`, `headband`, `bare`, `wrap`).  `band` is the accent colour the
+    kit wears at its collar, headband and cap: the client still tints the whole figure with the
+    nation's colour, so the accent is a hint, not the identity.
+    """
+
+    def __init__(self, coat=NAVY, trousers=SLATE, cap=NAVY, band=RED, hat=None, pack="knapsack", tool="rifle", plume=None, style="kepi", labour=False):
         self.coat, self.trousers, self.cap, self.band, self.hat = coat, trousers, cap, band, hat
         self.pack, self.tool, self.plume = pack, tool, plume
+        self.style, self.labour = style, labour
 
 
 SOLDIER = Kit()
-PIONEER = Kit(coat="#8a6a43", trousers="#55483a", hat="#5d4a32", pack="rucksack", tool="pick")
-WORKER = Kit(coat="#4f6a82", trousers="#4a4036", hat="#7a6a4a", pack="rucksack", tool="shovel")
+PIONEER = Kit(coat="#8a6a43", trousers="#55483a", hat="#5d4a32", pack="rucksack", tool="pick", labour=True)
+WORKER = Kit(coat="#4f6a82", trousers="#4a4036", hat="#7a6a4a", pack="rucksack", tool="shovel", labour=True)
 GUNNER = Kit(trousers="#4f5b6d", pack=None, tool=None)
 TROOPER = Kit(trousers="#d8d2c0", pack=None, tool="sabre", plume="#e9e2cf")
 
@@ -121,7 +128,7 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
     front = mul(fwd, 6.6)
     back = mul(fwd, -6.8)
     facing_viewer = W.vec(fwd)[1] < 0.2  # chest toward the camera
-    if kit is not WORKER and kit is not PIONEER:
+    if not kit.labour:
         # white cross belts on the chest and the back
         for sgn in (1, -1):
             a = add(add(neck, mul(left, 9.0 * sgn)), mul(up, -4.0))
@@ -185,25 +192,7 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
             sc.draw(c, lambda svg, x, y, op=op: svg.ellipse(x, y, 0.8 * SCALE, 1.0 * SCALE, "#3a2418", op=op), layer=layer, bias=-0.7)
         m = W(add(add(hc, mul(hf, 5.8)), mul(hu, -2.6)))
         sc.draw(m, lambda svg, x, y, op=op: svg.rect(x - 2.6 * SCALE, y - 0.7, 5.2 * SCALE, 1.4, "#3b2a1d", rx=0.5, op=op * 0.85), layer=layer, bias=-0.7)
-    if kit.hat:
-        # brimmed hat
-        brim_c = add(hc, mul(hu, 5.2))
-        sc.disk(W(brim_c), W.vec(hu), 11.5, shade(kit.hat, 0.9), sides=18, layer=layer, bias=-0.3)
-        sc.tube(W(brim_c), W(add(brim_c, mul(hu, 8.0))), 5.6, 4.9, kit.hat, sides=12, layer=layer, bias=-0.4)
-    else:
-        # kepi: a drum tilted forward, a band, a visor and a brass badge
-        k0 = add(hc, add(mul(hu, 3.0), mul(hf, -0.3)))
-        k1 = add(hc, add(mul(hu, 11.5), mul(hf, 1.6)))
-        sc.tube(W(k0), W(k1), 6.6, 5.8, kit.cap, side=W.vec(hl), sides=14, layer=layer, bias=-0.3)
-        sc.tube(W(k0), W(add(k0, mul(hu, 2.6))), 6.7, 6.6, kit.band, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.4)
-        v = [add(k0, add(mul(hf, 5.0), mul(hl, 4.5))), add(k0, add(mul(hf, 5.0), mul(hl, -4.5))), add(k0, add(mul(hf, 9.5), add(mul(hl, -3.5), mul(hu, -1.2)))), add(k0, add(mul(hf, 9.5), add(mul(hl, 3.5), mul(hu, -1.2))))]
-        sc.poly([W(q) for q in v], "#1a1511", two=True, layer=layer, bias=-0.5)
-        if seen > 0.1:
-            sc.draw(W(add(k0, add(mul(hf, 6.7), mul(hu, 2.0)))), lambda svg, x, y: svg.circle(x, y, 1.2, BRASS), layer=layer, bias=-0.9)
-        if kit.plume:
-            a = W(add(k1, mul(hf, 0.5)))
-            b = W(add(add(k1, mul(hu, 8.0)), mul(hf, -4.0)))
-            sc.limb(a, b, 1.6, 2.4, kit.plume, layer=layer, bias=-0.6)
+    headgear(sc, W, kit, hc, hu, hf, hl, seen, layer)
     # the tool: a rifle, a pick, a shovel or a sabre
     tool = p.tool
     if kit.tool and tool is not None:
@@ -216,6 +205,93 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
     if p.smoke:
         at, r, op = p.smoke
         sc.draw(W(at), lambda svg, x, y: smoke(svg, x, y, r * SCALE, op), layer=layer + 1)
+
+
+def headgear(sc, W, kit, hc, hu, hf, hl, seen, layer):
+    """The hat a figure wears: the Western kepi by default, or the headgear of its culture."""
+    style = kit.style
+    if style == "turban":
+        # a length of cloth wrapped in three turns about the crown, a knot at the brow
+        base = add(hc, mul(hu, 2.0))
+        turns = [(0.0, 4.2, 7.4, 7.2, 0.0), (3.6, 3.4, 7.3, 7.1, 4.0), (7.0, 2.4, 6.7, 6.5, -3.0), (10.0, 1.6, 5.7, 5.4, 1.5)]
+        for h0, h1, r0, r1, tw in turns:
+            a = add(base, mul(hu, h0))
+            b = add(base, mul(hu, h1 + h0))
+            side = unit(add(mul(hl, math.cos(math.radians(tw))), mul(hf, math.sin(math.radians(tw)))))
+            sc.tube(W(a), W(b), r0, r1, kit.hat, side=W.vec(side), sides=16, layer=layer, bias=-0.35, caps=False)
+        knot = add(add(base, mul(hu, 1.0)), mul(hf, 6.2))
+        sc.ball(W(knot), 2.4, shade(kit.hat, 0.86), squash=0.7, layer=layer, bias=-0.5)
+    elif style == "conical":
+        # a woven straw hat: a broad brim and a low cone, a cord under the chin
+        brim = add(hc, mul(hu, 4.0))
+        sc.disk(W(brim), W.vec(hu), 13.5, kit.hat, sides=22, layer=layer, bias=-0.3)
+        tip = add(brim, add(mul(hu, 10.0), mul(hf, 0.6)))
+        sc.tube(W(add(brim, mul(hu, 0.5))), W(tip), 7.4, 1.0, shade(kit.hat, 1.03), side=W.vec(hl), sides=16, layer=layer, bias=-0.4, caps=False)
+        sc.tube(W(add(brim, mul(hu, 0.2))), W(add(brim, mul(hu, 2.0))), 7.6, 7.5, kit.band, side=W.vec(hl), sides=16, layer=layer, bias=-0.45, caps=False)
+    elif style == "fez":
+        k0 = add(hc, mul(hu, 3.2))
+        k1 = add(k0, mul(hu, 6.0))
+        sc.tube(W(k0), W(k1), 6.2, 6.0, kit.hat, side=W.vec(hl), sides=14, layer=layer, bias=-0.3)
+        tassel = add(add(k1, mul(hu, 0.4)), mul(hl, 1.0))
+        sc.limb(W(tassel), W(add(add(tassel, mul(hu, 3.0)), mul(hl, 3.2))), 0.7, 0.4, "#2a1d14", layer=layer, bias=-0.6)
+    elif style == "shako":
+        # a tall stiff cap with a visor, a band and a brass plate
+        k0 = add(hc, add(mul(hu, 2.6), mul(hf, -0.3)))
+        k1 = add(hc, add(mul(hu, 15.5), mul(hf, 2.2)))
+        sc.tube(W(k0), W(k1), 7.0, 6.4, kit.cap, side=W.vec(hl), sides=16, layer=layer, bias=-0.3)
+        sc.tube(W(k0), W(add(k0, mul(hu, 3.4))), 7.2, 7.1, kit.band, side=W.vec(hl), sides=16, caps=False, layer=layer, bias=-0.4)
+        v = [add(k0, add(mul(hf, 5.2), mul(hl, 4.8))), add(k0, add(mul(hf, 5.2), mul(hl, -4.8))), add(k0, add(mul(hf, 10.0), add(mul(hl, -3.6), mul(hu, -1.0)))), add(k0, add(mul(hf, 10.0), add(mul(hl, 3.6), mul(hu, -1.0))))]
+        sc.poly([W(q) for q in v], "#1a1511", two=True, layer=layer, bias=-0.5)
+        if seen > 0.1:
+            sc.draw(W(add(add(k0, mul(hu, 9.0)), mul(hf, 7.2))), lambda svg, x, y: svg.circle(x, y, 1.5, BRASS), layer=layer, bias=-0.9)
+        if kit.plume:
+            a = W(add(k1, mul(hf, 0.5)))
+            b = W(add(add(k1, mul(hu, 8.0)), mul(hf, -4.0)))
+            sc.limb(a, b, 1.6, 2.4, kit.plume, layer=layer, bias=-0.6)
+    elif style in ("wrap", "bare"):
+        # a plain cloth cap snug to the crown
+        if style == "wrap":
+            k0 = add(hc, mul(hu, 2.6))
+            k1 = add(hc, add(mul(hu, 8.0), mul(hf, -0.4)))
+            sc.tube(W(k0), W(k1), 6.5, 5.6, kit.hat, side=W.vec(hl), sides=14, layer=layer, bias=-0.3)
+        band_c = add(hc, mul(hu, 2.4))
+        lo = add(hc, mul(hu, 0.6))
+        sc.tube(W(lo), W(band_c), 6.55, 6.5, kit.band, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.4)
+    elif style in ("headband", "steppe"):
+        # a headband (and long hair for the steppe); nothing else covers the head
+        if style == "steppe":
+            for e in (1, -1):
+                a = W(add(hc, add(mul(hu, 1.0), mul(hl, 4.6 * e))))
+                b = W(add(hc, add(mul(hu, -4.5), add(mul(hl, 5.2 * e), mul(hf, -1.6)))))
+                sc.limb(a, b, 1.2, 2.2, "#2a1d14", layer=layer, bias=-0.5)
+        band_c = add(hc, mul(hu, 2.2))
+        lo = add(hc, mul(hu, 0.4))
+        sc.tube(W(lo), W(band_c), 6.55, 6.5, kit.band, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.45)
+        if kit.plume:
+            # a single feather standing from the back of the band
+            a = add(add(hc, mul(hu, 1.6)), mul(hf, -5.6))
+            sc.limb(W(a), W(add(add(a, mul(hu, 10.0)), mul(hf, -2.0))), 1.4, 0.5, kit.plume, layer=layer, bias=-0.6)
+    if style != "kepi":
+        return
+    if kit.hat:
+        # brimmed hat
+        brim_c = add(hc, mul(hu, 5.2))
+        sc.disk(W(brim_c), W.vec(hu), 11.5, shade(kit.hat, 0.9), sides=18, layer=layer, bias=-0.3)
+        sc.tube(W(brim_c), W(add(brim_c, mul(hu, 8.0))), 5.6, 4.9, kit.hat, sides=12, layer=layer, bias=-0.4)
+        return
+    # kepi: a drum tilted forward, a band, a visor and a brass badge
+    k0 = add(hc, add(mul(hu, 3.0), mul(hf, -0.3)))
+    k1 = add(hc, add(mul(hu, 11.5), mul(hf, 1.6)))
+    sc.tube(W(k0), W(k1), 6.6, 5.8, kit.cap, side=W.vec(hl), sides=14, layer=layer, bias=-0.3)
+    sc.tube(W(k0), W(add(k0, mul(hu, 2.6))), 6.7, 6.6, kit.band, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.4)
+    v = [add(k0, add(mul(hf, 5.0), mul(hl, 4.5))), add(k0, add(mul(hf, 5.0), mul(hl, -4.5))), add(k0, add(mul(hf, 9.5), add(mul(hl, -3.5), mul(hu, -1.2)))), add(k0, add(mul(hf, 9.5), add(mul(hl, 3.5), mul(hu, -1.2))))]
+    sc.poly([W(q) for q in v], "#1a1511", two=True, layer=layer, bias=-0.5)
+    if seen > 0.1:
+        sc.draw(W(add(k0, add(mul(hf, 6.7), mul(hu, 2.0)))), lambda svg, x, y: svg.circle(x, y, 1.2, BRASS), layer=layer, bias=-0.9)
+    if kit.plume:
+        a = W(add(k1, mul(hf, 0.5)))
+        b = W(add(add(k1, mul(hu, 8.0)), mul(hf, -4.0)))
+        sc.limb(a, b, 1.6, 2.4, kit.plume, layer=layer, bias=-0.6)
 
 
 def draw_tool(sc, W, kind, grip, d, layer, bias=0.0):
@@ -412,7 +488,7 @@ def figure(sc, xf, kit, clip, t, phase=0.0, layer=0):
         draw_tool(sc, xf, kit.tool, dropped[0], dropped[1], layer)
 
 
-def infantry(k, clip, t):
+def infantry(k, clip, t, kit=SOLDIER):
     # two riflemen: one ahead on the right, one behind on the left
     lag = 0.04 if clip in ("attack", "death", "victory") else 0.0
     sc = Scene(U, U, ORIGIN, SCALE)
@@ -422,7 +498,7 @@ def infantry(k, clip, t):
         ground_shadow(sc, xf((sx, sy, 0.0)), 16, 5.0)
     for (sx, sy), phase, delay in slots:
         tt = t if CLIPS[clip][2] else max(0.0, t - delay)
-        figure(sc, xf.at((sx, sy, 0.0)), SOLDIER, clip, tt, phase)
+        figure(sc, xf.at((sx, sy, 0.0)), kit, clip, tt, phase)
     return sc.render()
 
 
@@ -454,7 +530,8 @@ HOOF = "#1a140f"
 
 
 class Steed:
-    def __init__(self):
+    def __init__(self, coat=COAT):
+        self.coat = coat
         self.pitch = 0.0  # positive tips the nose down
         self.pivot = (0.0, 0.0, 0.0)  # what the pitch turns about
         self.roll = 0.0  # positive falls onto its right side
@@ -479,7 +556,8 @@ def steed_xf(xf, h: Steed):
 
 def horse(sc, xf, h: Steed, layer=0):
     W = steed_xf(xf, h)
-    dark = shade(COAT, 0.62)
+    coat = h.coat
+    dark = shade(coat, 0.62)
     # legs: far side first is handled by depth sorting
     for name, (x, y, front) in LEGS.items():
         swing, fold = h.legs.get(name, (0.0, 0.0))
@@ -488,15 +566,15 @@ def horse(sc, xf, h: Steed, layer=0):
         knee = add(top, (math.sin(a) * 22.0, 0.0, -math.cos(a) * 22.0))
         b = math.radians(swing - fold if front else swing + fold)
         hoof = add(knee, (math.sin(b) * 21.0, 0.0, -math.cos(b) * 21.0))
-        col = COAT
+        col = coat
         sc.limb(W(top), W(knee), 5.6, 3.6, col, layer=layer)
         sc.limb(W(knee), W(hoof), 3.4, 2.8, col, layer=layer)
         sc.limb(W(add(hoof, (0.0, 0.0, 2.6))), W(hoof), 3.4, 3.6, HOOF, layer=layer, bias=-0.1)
         sc.ball(W(add(hoof, (0.0, 0.0, 4.6))), 2.6, "#e6ddc6", sw=0.4, squash=0.7, layer=layer, bias=-0.15)
     # body: barrel, chest, haunch
-    sc.tube(W((-30.0, 0.0, 56.0)), W((30.0, 0.0, 57.0)), 11.0, 11.5, COAT, side=W.vec((0, 1, 0)), squash=1.4, sides=16, caps=False, layer=layer)
-    sc.ball(W((-31.0, 0.0, 58.0)), 14.5, COAT, squash=1.05, layer=layer, bias=0.2)
-    sc.ball(W((29.0, 0.0, 58.0)), 14.0, COAT, squash=1.1, layer=layer, bias=0.2)
+    sc.tube(W((-30.0, 0.0, 56.0)), W((30.0, 0.0, 57.0)), 11.0, 11.5, coat, side=W.vec((0, 1, 0)), squash=1.4, sides=16, caps=False, layer=layer)
+    sc.ball(W((-31.0, 0.0, 58.0)), 14.5, coat, squash=1.05, layer=layer, bias=0.2)
+    sc.ball(W((29.0, 0.0, 58.0)), 14.0, coat, squash=1.1, layer=layer, bias=0.2)
     # tail
     sw_ = h.tail
     t0 = W((-43.0, 0.0, 64.0))
@@ -509,14 +587,14 @@ def horse(sc, xf, h: Steed, layer=0):
     base = (33.0, 0.0, 64.0)
     top = add(base, (math.cos(math.radians(58) + ra) * 26.0, 0.0, math.sin(math.radians(58) + ra) * 26.0))
     nose = add(top, (math.cos(math.radians(-38) + ra) * 17.0, 0.0, math.sin(math.radians(-38) + ra) * 17.0))
-    sc.tube(W(base), W(top), 8.5, 5.4, COAT, side=W.vec((0, 1, 0)), squash=1.25, sides=12, layer=layer, bias=-0.1)
-    sc.tube(W(top), W(nose), 5.6, 3.8, COAT, side=W.vec((0, 1, 0)), squash=1.15, sides=12, layer=layer, bias=-0.2)
-    sc.ball(W(nose), 3.9, shade(COAT, 0.75), layer=layer, bias=-0.25)
+    sc.tube(W(base), W(top), 8.5, 5.4, coat, side=W.vec((0, 1, 0)), squash=1.25, sides=12, layer=layer, bias=-0.1)
+    sc.tube(W(top), W(nose), 5.6, 3.8, coat, side=W.vec((0, 1, 0)), squash=1.15, sides=12, layer=layer, bias=-0.2)
+    sc.ball(W(nose), 3.9, shade(coat, 0.75), layer=layer, bias=-0.25)
     mane_a = add(base, (-3.0, 0.0, 9.0))
     sc.limb(W(mane_a), W(add(top, (-2.0, 0.0, 4.0))), 2.6, 2.0, MANE, layer=layer, bias=-0.15)
     for e in (1, -1):
         ear = add(top, (0.0, 2.4 * e, 5.0))
-        sc.limb(W(ear), W(add(ear, (-1.0, 0.6 * e, 4.5))), 1.4, 0.6, shade(COAT, 0.8), layer=layer, bias=-0.3)
+        sc.limb(W(ear), W(add(ear, (-1.0, 0.6 * e, 4.5))), 1.4, 0.6, shade(coat, 0.8), layer=layer, bias=-0.3)
         eye = add(add(top, mul(unit(sub(nose, top)), 4.0)), (0.0, 4.6 * e, 1.4))
         sc.draw(W(eye), lambda svg, x, y: svg.circle(x, y, 1.0, "#0f0b08"), layer=layer, bias=-0.35)
     # blaze
@@ -530,8 +608,8 @@ def horse(sc, xf, h: Steed, layer=0):
     return W
 
 
-def steed_pose(clip, t):
-    h = Steed()
+def steed_pose(clip, t, coat=COAT):
+    h = Steed(coat)
     if clip == "idle":
         a = math.tau * t
         h.neck = 4.0 * math.sin(a) - 2.0
@@ -633,15 +711,15 @@ def rider_pose(clip, t, steed: Steed):
     return p
 
 
-def cavalry(k, clip, t):
-    sc = Scene(U, U, ORIGIN, SCALE * 0.84)
+def cavalry(k, clip, t, kit=TROOPER, coat=COAT, scale=0.84):
+    sc = Scene(U, U, ORIGIN, SCALE * scale)
     xf = facing_frame(k).at((-2.0, 0.0, 0.0))
-    h = steed_pose(clip, t)
+    h = steed_pose(clip, t, coat)
     shadow_op = 0.5 * (1.0 - 0.5 * span(t, 0.5, 1.0)) if clip == "death" else 0.5
     oval_shadow(sc, xf, 46, 14, op=shadow_op)
     W = horse(sc, xf, h)
     rp = rider_pose(clip, t, h)
-    person(sc, W, rp, TROOPER)
+    person(sc, W, rp, kit)
     return sc.render()
 
 
@@ -747,3 +825,81 @@ BUILDERS = {
     "cavalry": cavalry,
     "artillery": artillery,
 }
+
+
+# ---- a culture's kit --------------------------------------------------------------------------
+# The Western soldier is the base design; each other culture fields its own kit and headgear so a
+# Zulu, an Ottoman and a Qing banner-man do not march in the same red coat.  Uniforms stay in the
+# muted, hand-painted range, because the client tints the whole figure with the nation's colour and
+# a busy coat would fight it.  The accent (`band`) is the collar and headband of the kit.
+def _kit(coat, trousers, band, style, head=None, cap=None, plume=None):
+    return Kit(
+        coat=coat,
+        trousers=trousers,
+        cap=cap or shade(coat, 0.92),
+        band=band,
+        hat=None if style == "kepi" else head or coat,
+        style=style,
+        pack=None,
+        plume=plume,
+    )
+
+
+FLAVOR_KITS = {
+    "latin": _kit("#e4ddc8", "#3a4a6a", "#b0302a", "kepi", cap="#2f3f5f"),
+    "orthodox": _kit("#274a3a", "#3f4a40", "#9c2f24", "shako"),
+    "arab": _kit("#e6dcc2", "#7a6a52", "#2f6a6a", "turban", head="#efe7cf"),
+    "east_asian": _kit("#5a7ba6", "#2f3a4a", "#c0392b", "conical", head="#d9c98a"),
+    "south_asian": _kit("#b2622a", "#5a4a34", "#e0a83a", "wrap", head="#b2622a"),
+    "southeast_asian": _kit("#3f6a4f", "#4a4034", "#c98a3a", "conical", head="#d9b877"),
+    "african": _kit("#a8783a", "#3a2a1e", "#b8302a", "headband"),
+    "steppe": _kit("#4a5a7a", "#c9a357", "#a8322a", "steppe"),
+    "native": _kit("#b8925e", "#6a4a2e", "#2f8a86", "headband", plume="#efe7cf"),
+    "oceanic": _kit("#8a3a28", "#e0d6bc", "#e0b040", "bare"),
+}
+
+# The horse's coat per culture, so a steppe pony and a European charger read apart.
+FLAVOR_STEEDS = {
+    "latin": ("#8a5a3a", 0.82),
+    "steppe": ("#5f4a34", 0.78),
+    "arab": ("#b08a5c", 0.83),
+    "east_asian": ("#6a5138", 0.8),
+    "south_asian": ("#8a6a44", 0.8),
+    "southeast_asian": ("#6a5138", 0.78),
+    "african": ("#7a6248", 0.78),
+    "native": ("#6a4f38", 0.8),
+    "oceanic": ("#6a5138", 0.79),
+    "orthodox": ("#5a4630", 0.84),
+}
+
+
+def _infantry_builder(kit):
+    def build(k, clip, t, kit=kit):
+        return infantry(k, clip, t, kit)
+
+    return build
+
+
+def _cavalry_builder(kit, coat, scale):
+    def build(k, clip, t, kit=kit, coat=coat, scale=scale):
+        return cavalry(k, clip, t, kit, coat, scale)
+
+    return build
+
+
+for _flavor, _flavor_kit in FLAVOR_KITS.items():
+    BUILDERS[f"infantry_{_flavor}"] = _infantry_builder(_flavor_kit)
+    _horse, _scale = FLAVOR_STEEDS[_flavor]
+    BUILDERS[f"cavalry_{_flavor}"] = _cavalry_builder(_flavor_kit, _horse, _scale)
+
+
+def split_flavor(name):
+    """`"infantry_african"` -> `("infantry", "african")`, and `None` for a base design.
+
+    A flavor's own name holds an underscore (`east_asian`), so it is matched against the known
+    cultures longest first rather than split on the last underscore.
+    """
+    for flavor in sorted(FLAVOR_KITS, key=len, reverse=True):
+        if name.endswith(f"_{flavor}"):
+            return name[: -len(flavor) - 1], flavor
+    return None
