@@ -2,7 +2,7 @@
 """Render every picture in the base pack: SVG scenes -> rsvg-convert -> painterly finishing -> PNG.
 
     python build.py                 # everything
-    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | units | ships | icons | chrome | resources)
+    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | farms | units | ships | icons | chrome | resources)
 
 Writes PNGs into ../assets/packs/base and the vector sources into ./svg.
 Needs: python3 + numpy + pillow (see requirements.txt) and `rsvg-convert` (librsvg) on PATH.
@@ -93,11 +93,29 @@ def city_scene(flavor, build):
 def build_sprites():
     sprite("forest", nature.build_forest_svg(), (256, 224), "sprites/forest.png", ss=4, seed=4, radius=1)
     build_cities()
-    # Tile overlays: the same 2:1 diamond as a terrain cell, 256x128 shown at 128x64.
-    farm = sprite("farm", improvements.build_farm(), (256, 128), "sprites/farm.png", ss=4, seed=6, radius=1)
-    water = Image.open(PACK / "terrain/water.png").convert("RGBA")  # build `terrain` first
-    save_png(improvements.farm_shore_sheet(farm, water), "sprites/farm_shore.png")
+    build_farms()
+    # Tile overlay: the same 2:1 diamond as a terrain cell, 256x128 shown at 128x64.
     sprite("mine", improvements.build_mine(), (256, 128), "sprites/mine.png", ss=4, seed=7, radius=1, rim=0.5)
+
+
+# Farm styles: the mixed-crop field (every culture without a crop of its own), then rice, corn and wheat.
+# Each is a whole-tile sprite plus the same field cut along the shore; the bank drawn on the cut is the
+# style's own boundary (hedge, earthen bund, fence).
+FARMS = {
+    "farm": (improvements.build_farm, 6, improvements.HEDGE),
+    "farm_rice": (improvements.build_rice, 7, (0x8D / 255, 0x7B / 255, 0x4A / 255)),
+    "farm_corn": (improvements.build_corn, 8, (0x6A / 255, 0x4A / 255, 0x2A / 255)),
+    "farm_wheat": (improvements.build_wheat, 9, improvements.HEDGE),
+}
+
+
+def build_farms():
+    """Every farm style and its shore-cut sheet (needs the water sheet, so build `terrain` first)."""
+    water = Image.open(PACK / "terrain/water.png").convert("RGBA")
+    for name, (build, seed, bank) in FARMS.items():
+        farm = sprite(name, build(), (256, 128), f"sprites/{name}.png", ss=4, seed=seed, radius=1)
+        save_png(improvements.farm_shore_sheet(farm, water, bank), f"sprites/{name}_shore.png")
+        print(f"  {name}", flush=True)
 
 
 def build_cities():
@@ -226,6 +244,7 @@ GROUPS = {
     "overlays": build_overlays,
     "relief": build_relief,
     "sprites": build_sprites,
+    "farms": build_farms,
     "cities": build_cities,
     "units": build_units,
     "flavor": build_flavor_units,

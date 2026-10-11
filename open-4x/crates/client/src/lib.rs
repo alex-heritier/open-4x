@@ -469,11 +469,8 @@ struct Art {
     borders: Handle<TextureAtlasLayout>,
     /// Each surface-border sheet can have its own resolution.
     relief_borders: std::collections::HashMap<String, (UVec2, Handle<TextureAtlasLayout>)>,
-    /// Layout of the shore-cut farm sheet: 8 x 4 terrain-sized pieces.
-    farm_shore: Handle<TextureAtlasLayout>,
-    farm_shore_sheet: UVec2,
-    /// The sheet's image, held from the first frame so that it loads.
-    farm_shore_image: Option<Handle<Image>>,
+    /// The shore-cut farm sheets, by pack path: the plain farm's and one for each crop.
+    farm_shores: std::collections::HashMap<String, presentation::FarmShore>,
     /// Road and railroad sheets: one cell per set of joined neighbours, see [`roads`].
     roads: roads::Sheet,
     rails: roads::Sheet,
@@ -772,15 +769,7 @@ fn setup(
         )),
         fog_sheet: UVec2::ZERO,
         border_sheet: UVec2::ZERO,
-        farm_shore: layouts.add(TextureAtlasLayout::from_grid(
-            UVec2::new(256, 128),
-            presentation::FARM_SHORE_COLUMNS,
-            4,
-            None,
-            None,
-        )),
-        farm_shore_sheet: UVec2::ZERO,
-        farm_shore_image: None,
+        farm_shores: Default::default(),
         cells: layouts.add(TextureAtlasLayout::from_grid(
             UVec2::new(192, 96),
             presentation::SHEET_COLUMNS,

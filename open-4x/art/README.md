@@ -34,8 +34,8 @@ Art is authored at **2x** the size the game draws, so it stays crisp on high-DPI
 | city (one per flavor), forest, pine, jungle, marsh, hills, mountain (and the dry and cold variants) | 256x224 | 128x112 | ground-diamond centre at (128, 160) |
 | fog sheet cell, flat border sheet cell | 256x128 | 128x64 | one diamond, drawn over the tile |
 | infantry, pioneer, worker, cavalry, artillery (and each cell of their animation sheets) | 160x160 | 70x70 | tile centre about (80, 108) |
-| farm, mine overlays | 256x128 | 128x64 | one diamond, drawn over the tile |
-| `farm_shore.png` | 8 x 4 pieces of 256x128 | 128x64 each | the farm cut by the shoreline of the water sheet, one piece per dual cell round a tile (see `forge/improvements.py`); a farm beside water is drawn from four of these instead of the whole diamond |
+| farm (plain, rice, corn, wheat), mine overlays | 256x128 | 128x64 | one diamond, drawn over the tile |
+| `farm_shore.png`, `farm_rice_shore.png`, `farm_corn_shore.png`, `farm_wheat_shore.png` | 8 x 4 pieces of 256x128 | 128x64 each | the farm cut by the shoreline of the water sheet, one piece per dual cell round a tile (see `forge/improvements.py`); a farm beside water is drawn from four of these instead of the whole diamond; `visuals.farms` picks the crop by the owner's flavor. Keep plants inside the diamond: the cut clips a piece to its cell |
 | ironclad, transport, battleship, protected cruiser, torpedo boat (and each cell of their sheets) | 256x192 | 144x108 | tile centre about (128, 123) |
 
 All light comes from the upper left, in every module.

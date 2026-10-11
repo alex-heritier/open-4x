@@ -161,6 +161,35 @@ const VARIANTS: usize = 6;
 /// `Map::shore_pieces`).
 pub(super) const FARM_SHORE_COLUMNS: u32 = 8;
 
+/// A shore-cut farm sheet: 8 x 4 terrain-sized pieces, one sheet per crop.
+pub(super) struct FarmShore {
+    /// The sheet, held from the first frame so that it loads.
+    image: Handle<Image>,
+    layout: Handle<TextureAtlasLayout>,
+    /// Size of the image the layout was last cut for; zero until it has loaded.
+    sheet: UVec2,
+}
+impl FarmShore {
+    fn new(
+        assets: &AssetServer,
+        layouts: &mut Assets<TextureAtlasLayout>,
+        prefix: &str,
+        path: &str,
+    ) -> Self {
+        Self {
+            image: assets.load(format!("{prefix}{path}")),
+            layout: layouts.add(TextureAtlasLayout::from_grid(
+                UVec2::new(256, 128),
+                FARM_SHORE_COLUMNS,
+                4,
+                None,
+                None,
+            )),
+            sheet: UVec2::ZERO,
+        }
+    }
+}
+
 /// Columns and rows of the fog sheet.
 pub(super) const FOG_COLUMNS: u32 = 9;
 
@@ -390,26 +419,25 @@ pub(super) fn fit_terrain_atlas(
             changed = true;
         }
     }
-    if !session.pack.visuals.farm_shore.is_empty() {
-        // Kept in `Art`: nothing draws with the sheet until it has loaded, and a handle that
+    let visuals = &session.pack.visuals;
+    let shores = std::iter::once(visuals.farm_shore.as_str())
+        .chain(visuals.farms.values().map(|farm| farm.farm_shore.as_str()))
+        .filter(|path| !path.is_empty());
+    for path in shores {
+        // Kept in `Art`: nothing draws with a sheet until it has loaded, and a handle that
         // is dropped before then would cancel the load.
-        let image = art
-            .farm_shore_image
-            .get_or_insert_with(|| {
-                assets.load(format!(
-                    "{}{}",
-                    session.asset_prefix, session.pack.visuals.farm_shore
-                ))
-            })
-            .clone();
-        if let Some(sheet) = images.get(&image).map(Image::size) {
+        let shore = art
+            .farm_shores
+            .entry(path.to_string())
+            .or_insert_with(|| FarmShore::new(&assets, &mut layouts, &session.asset_prefix, path));
+        if let Some(sheet) = images.get(&shore.image).map(Image::size) {
             let cell = UVec2::new(sheet.x / FARM_SHORE_COLUMNS, sheet.y / 4);
-            if sheet != art.farm_shore_sheet && cell.min_element() > 0 {
-                if let Some(layout) = layouts.get_mut(&art.farm_shore) {
+            if sheet != shore.sheet && cell.min_element() > 0 {
+                if let Some(layout) = layouts.get_mut(&shore.layout) {
                     *layout =
                         TextureAtlasLayout::from_grid(cell, FARM_SHORE_COLUMNS, 4, None, None);
                 }
-                art.farm_shore_sheet = sheet;
+                shore.sheet = sheet;
                 changed = true;
             }
         }
@@ -780,8 +808,8 @@ pub(super) fn refresh(
     for city in game.cities.values() {
         city_tiles.insert(city.position);
     }
-    let farm: Handle<Image> = assets.load(format!("{prefix}{}", session.pack.visuals.farm));
-    let farm_shore: Option<Handle<Image>> = art.farm_shore_image.clone();
+    // Each crop's whole-tile overlay, loaded once per redraw however many farms use it.
+    let mut farm_images: HashMap<&str, Handle<Image>> = HashMap::new();
     let mine: Handle<Image> = assets.load(format!("{prefix}{}", session.pack.visuals.mine));
     // Resource icons, in the order of the map's kinds; a kind the pack has no art for is not drawn.
     let resource_icons: Vec<Option<Handle<Image>>> = game
@@ -807,19 +835,29 @@ pub(super) fn refresh(
             }
             if tile.improvements & Tile::FARM != 0 {
                 let pieces = game.map.shore_pieces(tile.position);
-                match &farm_shore {
+                // The crop follows the culture of whoever owns the land.
+                let flavor = game
+                    .factions
+                    .get(&tile.owner)
+                    .filter(|_| tile.owner != 0)
+                    .map(|faction| faction.flavor);
+                let (farm_path, shore_path) = visuals.farm(flavor);
+                let farm = farm_images
+                    .entry(farm_path)
+                    .or_insert_with(|| assets.load(format!("{prefix}{farm_path}")));
+                match art.farm_shores.get(shore_path) {
                     // Beside water the farm is drawn as four terrain-cell pieces that stop at
                     // the shore; the sheet is only usable once its layout has been cut.
-                    Some(sheet)
-                        if art.farm_shore_sheet != UVec2::ZERO
+                    Some(shore)
+                        if shore.sheet != UVec2::ZERO
                             && pieces.iter().any(|piece| piece % 8 != 0) =>
                     {
                         for (piece, (dx, dy)) in pieces.into_iter().zip(FARM_CELLS) {
                             let (cx, cy) = p.offset(dx, dy).screen();
                             let mut sprite = Sprite::from_atlas_image(
-                                sheet.clone(),
+                                shore.image.clone(),
                                 TextureAtlas {
-                                    layout: art.farm_shore.clone(),
+                                    layout: shore.layout.clone(),
                                     index: piece,
                                 },
                             );
@@ -833,7 +871,7 @@ pub(super) fn refresh(
                     }
                     _ => image_sprite(
                         &mut commands,
-                        &farm,
+                        farm,
                         Vec3::new(sx, sy, 2.0),
                         Vec2::new(128.0, 64.0),
                         Color::WHITE,

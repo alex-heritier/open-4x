@@ -2,22 +2,61 @@
 
 Both are authored on a 256 x 128 canvas, shown at 128 x 64: the same 2:1 diamond as one terrain
 cell, so they sit exactly on a tile. Lit from the upper left like everything else.
+
+The farm comes in four styles. `build_farm` is the mixed-crop field every culture without a
+crop of its own gets; `build_rice`, `build_corn` and `build_wheat` are the paddies, maize and
+wheat of the nations the pack names them for (`visuals.farms`). All of them fill the same
+diamond, so any can stand on any tile, and all keep their tall plants inside it: the shore cut
+clips a piece to its cell, and a stalk poking out of the diamond would be sliced off there.
 """
+
+import math
+import random
 
 from .svgkit import Iso, Svg, lerp, mixc, shade
 
 W, H = 256, 128
 INK = "#17130f"
+N = 6  # the field is N x N iso units
+K = 112 / N  # it fills 90% of the diamond so a margin of terrain shows round it
+
+
+def _iso() -> Iso:
+    iso = Iso(128, 0, K)
+    iso.oy = 64 - N * K / 2
+    return iso
+
+
+def _corners(iso: Iso):
+    return [iso.p(0, 0), iso.p(N, 0), iso.p(N, N), iso.p(0, N)]
+
+
+def _hedge(svg: Svg, corners, sides=(0, 1, 2, 3)):
+    """A dark line round the field with leafy blobs along it. `sides` picks which of its four
+    edges to draw, in order back right, front right, front left, back left, so a field can put
+    its far hedge behind the crop and its near one in front."""
+    ring = corners + [corners[0]]
+    for p, q in (pair for i, pair in enumerate(zip(ring, ring[1:])) if i in sides):
+        svg.line(p, q, "#243a1c", 5.0)
+        for t in range(9):
+            c = lerp(p, q, (t + 0.5) / 9)
+            svg.circle(c[0], c[1] - 1.5, 4.2, "#35592a", stroke=None)
+            svg.circle(c[0] - 1, c[1] - 2.6, 2.4, "#5a8a3c", op=0.9)
+
+
+def _paint_in_depth(items):
+    """Run the drawing calls of `items` [(x + y, call)] from the back of the field to the front."""
+    for _, draw in sorted(items, key=lambda item: item[0]):
+        draw()
 
 
 def build_farm() -> Svg:
     """Ploughed strips in three crops inside a hedge, with a pair of haystacks."""
     svg = Svg(W, H)
-    n = 6
-    k = 112 / n  # the field fills 90% of the diamond so a margin of terrain shows round it
-    iso = Iso(128, 64 - 56 * 0.5 * 1.0, k)
-    iso.oy = 64 - n * k / 2
-    corners = [iso.p(0, 0), iso.p(n, 0), iso.p(n, n), iso.p(0, n)]
+    n = N
+    iso = _iso()
+    k = K
+    corners = _corners(iso)
     soil = "#6e4f2f"
     svg.poly(corners, soil)
     crops = ["#7fae45", "#d2b552", "#5e9a3c", "#e0c867", "#8bb84a", "#a77f45"]
@@ -32,14 +71,7 @@ def build_farm() -> Svg:
         svg.line(iso.p(a, 0), iso.p(a, n), shade(soil, 0.7), 1.6, 0.8)
         # light catches the upper-left edge of each strip
         svg.line(iso.p(a + 0.04, 0.1), iso.p(a + 0.04, n - 0.1), shade(crops[i], 1.35), 1.0, 0.6)
-    # hedge round the field: a dark line with leafy blobs
-    ring = corners + [corners[0]]
-    for p, q in zip(ring, ring[1:]):
-        svg.line(p, q, "#243a1c", 5.0)
-        for t in range(9):
-            c = lerp(p, q, (t + 0.5) / 9)
-            svg.circle(c[0], c[1] - 1.5, 4.2, "#35592a", stroke=None)
-            svg.circle(c[0] - 1, c[1] - 2.6, 2.4, "#5a8a3c", op=0.9)
+    _hedge(svg, corners)
     # a pair of haystacks in the lower corner
     for gx, gy in ((n - 1.3, n - 1.4), (n - 0.7, n - 0.8)):
         x, y = iso.p(gx, gy)
@@ -47,6 +79,193 @@ def build_farm() -> Svg:
         svg.poly([(x - 10, y), (x + 10, y), (x + 5, y - 14), (x - 5, y - 14)], svg.lin([(0, "#e4c870"), (1, "#a9863a")], 0, 0, 1, 0.4), INK, 0.7)
         svg.ellipse(x, y - 14, 5, 2.4, "#efd98c", INK, 0.6)
     return svg
+
+
+def build_rice() -> Svg:
+    """Flooded paddies in a grid of earthen bunds, planted at every stage from seedlings in
+    bright water to golden heads ready for the sickle."""
+    svg = Svg(W, H)
+    iso = _iso()
+    rng = random.Random(11)
+    svg.poly(_corners(iso), "#8d7b4a")
+    plots, m = 3, 0.16  # a 3 x 3 grid; m is half the width of a bund
+    span = N / plots
+    # how far along each paddy's crop is: 0 just transplanted, 1 ready to harvest
+    ripeness = [[0.10, 0.50, 0.90], [0.60, 0.25, 0.75], [0.95, 0.40, 0.05]]
+    water = svg.lin([(0, "#b4dad0"), (1, "#5a9795")], 0, 0, 1, 1)
+    plants = []
+    for i in range(plots):
+        for j in range(plots):
+            x0, y0, x1, y1 = i * span + m, j * span + m, (i + 1) * span - m, (j + 1) * span - m
+            paddy = [iso.p(x0, y0), iso.p(x1, y0), iso.p(x1, y1), iso.p(x0, y1)]
+            # a bund: a lit top, then the paddy sunk below it with a shadow under the near bank
+            svg.poly([iso.p(x0 - m, y0 - m), iso.p(x1 + m, y0 - m), iso.p(x1 + m, y1 + m), iso.p(x0 - m, y1 + m)], "#a8975c", "#6a5a34", 0.8)
+            svg.poly(paddy, water, "#3f7670", 1.0)
+            svg.line(iso.p(x0, y0), iso.p(x1, y0), "#2f625e", 2.2, 0.55)
+            svg.line(iso.p(x0, y0), iso.p(x0, y1), "#2f625e", 2.2, 0.55)
+            for s in range(2):  # sky glinting off the water
+                gy = y0 + (y1 - y0) * (0.3 + 0.4 * s)
+                svg.line(iso.p(x0 + 0.3 + 0.3 * s, gy), iso.p(x0 + 0.9 + 0.3 * s, gy), "#f2fbf4", 1.3, 0.55)
+            ripe = ripeness[i][j]
+            rows, per_row = 5, 5
+            for r in range(rows):
+                for c in range(per_row):
+                    px = x0 + 0.3 + (x1 - x0 - 0.6) * (r + 0.5) / rows + rng.uniform(-0.04, 0.04)
+                    py = y0 + 0.3 + (y1 - y0 - 0.6) * (c + 0.5) / per_row + rng.uniform(-0.05, 0.05)
+                    plants.append((px + py, lambda px=px, py=py, ripe=ripe: _rice_clump(svg, iso, rng, px, py, ripe)))
+    _paint_in_depth(plants)
+    return svg
+
+
+def _rice_clump(svg, iso, rng, x, y, ripe):
+    """A tuft of rice: a fan of blades, greener when young and heavy with gold heads when ripe."""
+    px, py = iso.p(x, y)
+    height = 5.5 + 5.0 * ripe
+    young, grown, golden = "#8fd24e", "#58a83a", "#d2bd48"
+    base = mixc(young, grown, min(1.0, ripe * 2.0)) if ripe < 0.5 else mixc(grown, golden, (ripe - 0.5) * 2.0)
+    svg.ellipse(px, py + 0.8, 3.2, 1.2, "#2f625e", op=0.45)  # reflection under the tuft
+    for blade in range(5):
+        lean = (blade - 2) * (1.5 + 1.5 * ripe) + rng.uniform(-0.6, 0.6)
+        top = (px + lean, py - height * (0.85 + 0.15 * (blade % 2)))
+        svg.path(
+            f"M{px + (blade - 2) * 0.5:.1f},{py:.1f} Q{px + lean * 0.4:.1f},{py - height * 0.6:.1f} {top[0]:.1f},{top[1]:.1f}",
+            stroke=shade(base, 0.85 + 0.12 * (blade % 3)),
+            sw=1.5,
+        )
+    if ripe > 0.6:  # drooping heads
+        svg.ellipse(px + 3.0, py - height * 0.8, 2.6, 1.2, "#e9d56a", INK, 0.4, rot=-25)
+        svg.ellipse(px - 2.6, py - height * 0.7, 2.4, 1.1, "#dcc558", INK, 0.4, rot=20)
+
+
+def build_corn() -> Svg:
+    """Rows of maize standing tall in dark soil behind a split-rail fence."""
+    svg = Svg(W, H)
+    iso = _iso()
+    rng = random.Random(21)
+    corners = _corners(iso)
+    svg.poly(corners, "#68482a")
+    for r in range(7):  # furrows between the rows, running to the right
+        y = 0.7 + 0.8 * r
+        svg.line(iso.p(0.2, y), iso.p(N - 0.2, y), "#3f2a15", 2.0, 0.55)
+        svg.line(iso.p(0.2, y + 0.12), iso.p(N - 0.2, y + 0.12), "#8c6a41", 1.0, 0.45)
+    top, left, bottom, right = corners[0], corners[3], corners[2], corners[1]
+    _fence(svg, top, right)  # the two edges behind the crop
+    _fence(svg, top, left)
+    stalks = []
+    for r in range(6):
+        y = 1.1 + 0.8 * r
+        for c in range(10):
+            x = 1.0 + 0.5 * c + 0.2 * (r % 2) * 0.5
+            ripe = rng.random() < 0.3
+            stalks.append((x + y, lambda x=x, y=y, ripe=ripe, h=rng.uniform(14.0, 17.0): _stalk(svg, iso, rng, x, y, h, ripe)))
+    _paint_in_depth(stalks)
+    _fence(svg, left, bottom)  # the near edges stand in front of it
+    _fence(svg, right, bottom)
+    return svg
+
+
+def _stalk(svg, iso, rng, x, y, h, ripe):
+    """One maize plant: a stem, drooping blade-like leaves, a tassel on top and a cob in a husk."""
+    px, py = iso.p(x, y)
+    svg.ellipse(px + 1.5, py + 1.0, 4.5, 1.7, "#1e1208", op=0.4)
+    svg.line((px, py), (px, py - h), "#4a7a2a", 2.0)
+    leaf = "#5e9a34" if not ripe else "#8aa83a"
+    for t, side in ((0.30, -1), (0.45, 1), (0.62, -1), (0.78, 1)):
+        ly = py - h * t
+        reach = 8.0 + 3.0 * (1 - t)
+        d = f"M{px:.1f},{ly:.1f} Q{px + side * reach * 0.7:.1f},{ly - 5.0:.1f} {px + side * reach:.1f},{ly + 3.0:.1f}"
+        svg.path(d, stroke=shade(leaf, 0.7), sw=2.6)
+        svg.path(d, stroke=shade(leaf, 1.12), sw=1.3)
+    side = 1 if rng.random() < 0.5 else -1
+    cx, cy = px + side * 2.8, py - h * 0.52
+    husk, silk = ("#a9c453", "#c9a24a") if not ripe else ("#e2b93e", "#a8742a")
+    svg.ellipse(cx, cy, 2.3, 4.6, husk, INK, 0.5, rot=side * 14)
+    svg.ellipse(cx + side * 0.6, cy - 3.9, 1.0, 2.0, silk, rot=side * 14)
+    for d in (-2, 0, 2):  # the tassel
+        svg.line((px, py - h), (px + d * 1.3, py - h - 4.5), "#e3d27a" if not ripe else "#c9a24a", 0.9)
+
+
+def _fence(svg, a, b, posts=6):
+    """A split-rail fence between two points: posts with two rails."""
+    wood, dark = "#a47a48", "#3c2a16"
+    pts = [lerp(a, b, i / (posts - 1)) for i in range(posts)]
+    for rail, height in ((1, 3.2), (2, 6.4)):
+        for p, q in zip(pts, pts[1:]):
+            svg.line((p[0], p[1] - height), (q[0], q[1] - height), dark, 2.6)
+            svg.line((p[0], p[1] - height), (q[0], q[1] - height), wood, 1.5)
+    for p in pts:
+        svg.line((p[0], p[1] + 0.5), (p[0], p[1] - 8.5), dark, 3.2)
+        svg.line((p[0] - 0.4, p[1]), (p[0] - 0.4, p[1] - 8.3), shade(wood, 1.1), 1.6)
+
+
+def build_wheat() -> Svg:
+    """Strips of ripe wheat swaying in the wind, a green one still coming and a cut one with its
+    sheaves stooked, inside a hedge."""
+    svg = Svg(W, H)
+    iso = _iso()
+    rng = random.Random(31)
+    corners = _corners(iso)
+    soil = "#7a5a34"
+    svg.poly(corners, soil)
+    # per strip: ground colour, ear colour, and whether it still stands
+    strips = [
+        ("#c9a647", "#e8c95c", True),
+        ("#d6b455", "#f0d36a", True),
+        ("#a9b04a", "#b9c352", True),  # not ripe yet
+        ("#cfae4e", "#ebcb5e", True),
+        ("#d2b052", "#efd068", True),
+        ("#b99a58", "#d8bd7c", False),  # cut: stubble and stooks, in front where they show
+    ]
+    for i, (ground, _, _) in enumerate(strips):
+        svg.poly([iso.p(i, 0), iso.p(i + 1, 0), iso.p(i + 1, N), iso.p(i, N)], ground, op=0.97)
+        svg.line(iso.p(i, 0), iso.p(i, N), shade(soil, 0.7), 1.4, 0.7)
+    _hedge(svg, corners, (0, 3))
+    items = []
+    for i, (ground, ear, standing) in enumerate(strips):
+        for f in range(5):  # five drills of grain in a strip
+            x = i + 0.1 + 0.2 * f + 0.1
+            for c in range(17):
+                y = 0.55 + c * 0.29 + rng.uniform(-0.04, 0.04)
+                if y > N - 0.35:
+                    continue
+                if standing and min(x, y) < 0.75:
+                    continue  # leave the back edges bare: an ear that tall would poke out of the diamond
+                if standing:
+                    sway = math.sin((i * 5 + f) * 0.9 + c * 0.5) * 1.6
+                    items.append((x + y, lambda x=x, y=y, ear=ear, sway=sway: _wheat_ear(svg, iso, x, y, ear, sway)))
+                else:
+                    px, py = iso.p(x, y)
+                    items.append((x + y, lambda px=px, py=py: svg.line((px, py), (px + 0.8, py - 2.6), "#a58a47", 1.0, 0.8)))
+    for sx, sy in ((5.45, 1.5), (5.45, 2.9), (5.45, 4.3), (5.15, 2.2)):  # the sheaves
+        items.append((sx + sy + 0.2, lambda sx=sx, sy=sy: _stook(svg, iso, sx, sy)))
+    _paint_in_depth(items)
+    _hedge(svg, corners, (1, 2))
+    return svg
+
+
+def _wheat_ear(svg, iso, x, y, ear, sway):
+    """A stalk of wheat: a thin stem, a plump ear and the awns on top, leaning with the wind."""
+    px, py = iso.p(x, y)
+    top = (px + sway, py - 8.5)
+    stem = shade(ear, 0.78)
+    svg.path(f"M{px:.1f},{py:.1f} Q{px + sway * 0.3:.1f},{py - 5.0:.1f} {top[0]:.1f},{top[1]:.1f}", stroke=stem, sw=1.0)
+    svg.ellipse(top[0] + sway * 0.1, top[1] - 2.2, 1.5, 3.4, ear, shade(ear, 0.6), 0.4, rot=sway * 4)
+    svg.ellipse(top[0] + sway * 0.1 - 0.4, top[1] - 2.6, 0.5, 2.4, shade(ear, 1.25), op=0.8, rot=sway * 4)
+    for d in (-1.0, 1.0):  # awns
+        svg.line((top[0], top[1] - 4.0), (top[0] + d * 1.0 + sway * 0.4, top[1] - 7.5), shade(ear, 1.1), 0.6, 0.9)
+
+
+def _stook(svg, iso, x, y):
+    """A stook: sheaves of cut wheat stood against each other and tied."""
+    px, py = iso.p(x, y)
+    svg.ellipse(px + 2, py + 2, 8, 3.2, "#1a1308", op=0.4)
+    body = svg.lin([(0, "#f0d878"), (1, "#a9863a")], 0, 0, 1, 0.4)
+    svg.poly([(px - 7.5, py), (px + 7.5, py), (px + 3.4, py - 13), (px, py - 16), (px - 3.4, py - 13)], body, INK, 0.7)
+    for d in (-4.5, -1.5, 1.5, 4.5):  # straw, running up the sheaves
+        svg.line((px + d, py - 1), (px + d * 0.45, py - 13), "#8c6a2c", 0.8, 0.7)
+    svg.line((px - 5.2, py - 6), (px + 5.2, py - 6), "#7a5a2a", 1.8)  # the band
+    for d in (-2.6, 0, 2.6):  # ears at the top
+        svg.ellipse(px + d, py - 15.5 - (d == 0) * 1.5, 1.5, 3.0, "#f2db7c", INK, 0.4, rot=d * 6)
 
 
 def build_mine() -> Svg:
@@ -135,8 +354,9 @@ def _cell_mask():
     return np.clip((CELL_MARGIN - d) * 24.0, 0.0, 1.0)
 
 
-def farm_shore_sheet(farm, water):
+def farm_shore_sheet(farm, water, bank=HEDGE):
     """Sheet of farm pieces; `farm` is the 256 x 128 sprite and `water` the water terrain sheet.
+    `bank` is the colour (0..1 RGB) of the bank drawn along the cut: the style's own boundary.
 
     Piece `role * 8 + mask`: the part of the farm inside the dual cell that has the tile as its
     north (role 0), east (1), south (2) or west (3) vertex, cut where the water layer begins.
@@ -177,7 +397,7 @@ def farm_shore_sheet(farm, water):
             # a hedge along the new edge, as along the old ones
             edge = np.clip(1.0 - np.abs(land - 0.5) * 2.0, 0.0, 1.0) * (land > 0.02)
             out = framed.copy()
-            out[..., :3] = out[..., :3] * (1 - edge[..., None] * 0.85) + np.array(HEDGE, dtype=np.float32) * edge[..., None] * 0.85
+            out[..., :3] = out[..., :3] * (1 - edge[..., None] * 0.85) + np.array(bank, dtype=np.float32) * edge[..., None] * 0.85
             out[..., 3] = out[..., 3] * land * cell
             sheet.paste(to_image(out), (mask * CELL_W, role * CELL_H))
     return sheet

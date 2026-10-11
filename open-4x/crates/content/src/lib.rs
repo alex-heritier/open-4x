@@ -89,6 +89,12 @@ pub struct Visuals {
     /// layout of `fourx_sim::terrain::Map::shore_pieces`). Without it the whole farm is drawn.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub farm_shore: String,
+    /// Optional: the farm of a culture's own crop (rice paddies, maize, wheat), by
+    /// [`fourx_sim::Flavor`] key. A farm on land owned by a nation of that flavor is drawn from
+    /// this art instead of `farm` and `farm_shore`; every other flavor, and land nobody owns,
+    /// keeps the plain farm.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub farms: BTreeMap<String, FarmArt>,
     /// Optional: roads. A 16-column sheet of tile-sized cells, one per set of neighbours the
     /// road joins (bit `i` of the cell number is `Coord::NEIGHBORS[i]`: NE, E, SE, S, SW, W, NW,
     /// N), then further variants of the cells with at most two links; see `docs/roads.md`.
@@ -121,7 +127,35 @@ pub struct Visuals {
     pub units: BTreeMap<String, animation::UnitVisual>,
 }
 
+/// The farm of one culture: its crop, whole and (optionally) cut along the shore.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FarmArt {
+    /// Overlay drawn on a tile with a farm, like [`Visuals::farm`].
+    pub farm: String,
+    /// Optional shore-cut sheet of this crop, like [`Visuals::farm_shore`]. Without it the whole
+    /// farm is drawn beside water.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub farm_shore: String,
+}
+
+impl FarmArt {
+    fn farm_shore(&self) -> Option<&String> {
+        (!self.farm_shore.is_empty()).then_some(&self.farm_shore)
+    }
+}
+
 impl Visuals {
+    /// The farm art for land held by a nation of `flavor` (none for land nobody owns): the
+    /// pack's crop for that culture if it has one, else the plain farm. Returns the whole-tile
+    /// overlay and the shore-cut sheet, which is empty when there is none.
+    pub fn farm(&self, flavor: Option<fourx_sim::Flavor>) -> (&str, &str) {
+        match flavor.and_then(|flavor| self.farms.get(flavor.key())) {
+            Some(art) => (&art.farm, &art.farm_shore),
+            None => (&self.farm, &self.farm_shore),
+        }
+    }
+
     /// Every asset path the visuals name.
     pub fn paths(&self) -> impl Iterator<Item = &String> {
         [
@@ -138,6 +172,11 @@ impl Visuals {
         ]
         .into_iter()
         .chain((!self.farm_shore.is_empty()).then_some(&self.farm_shore))
+        .chain(
+            self.farms
+                .values()
+                .flat_map(|art| std::iter::once(&art.farm).chain(art.farm_shore())),
+        )
         .chain((!self.diplomacy_music.is_empty()).then_some(&self.diplomacy_music))
         .chain(&self.music)
         .chain((!self.roads.is_empty()).then_some(&self.roads))
@@ -310,6 +349,13 @@ impl Pack {
             if !flavors.contains(flavor.as_str()) {
                 return Err(invalid(&format!(
                     "visuals.city_banners names unknown flavor {flavor:?}"
+                )));
+            }
+        }
+        for flavor in self.visuals.farms.keys() {
+            if !flavors.contains(flavor.as_str()) {
+                return Err(invalid(&format!(
+                    "visuals.farms names unknown flavor {flavor:?}"
                 )));
             }
         }
@@ -842,6 +888,43 @@ mod tests {
             .cities
             .insert("martian".into(), "x.png".into());
         assert!(unknown.validate().is_err());
+    }
+    #[test]
+    fn farms_grow_the_crop_of_the_culture_that_owns_the_land() {
+        use fourx_sim::Flavor::*;
+        let visuals = Pack::base().visuals;
+        let crop = |flavor| visuals.farm(flavor).0;
+        for rice in [EastAsian, SouthAsian, SoutheastAsian] {
+            assert!(crop(Some(rice)).contains("rice"), "{rice:?}");
+        }
+        assert!(crop(Some(Native)).contains("corn"));
+        for wheat in [Western, Latin, Orthodox] {
+            assert!(crop(Some(wheat)).contains("wheat"), "{wheat:?}");
+        }
+        // Every crop has its own shore-cut sheet (that the files exist is checked with the
+        // rest of the bundled assets).
+        for flavor in [EastAsian, Native, Western] {
+            let (farm, shore) = visuals.farm(Some(flavor));
+            assert!(!shore.is_empty() && shore != visuals.farm_shore);
+            assert_ne!(farm, visuals.farm);
+        }
+        // A culture without a crop, and land nobody owns, keep the plain farm.
+        for plain in [None, Some(African), Some(Arab), Some(Steppe), Some(Oceanic)] {
+            assert_eq!(visuals.farm(plain), (&*visuals.farm, &*visuals.farm_shore));
+        }
+        // A crop for a culture that does not exist, or outside the pack, is rejected.
+        let mut unknown = Pack::base();
+        unknown.visuals.farms.insert(
+            "martian".into(),
+            FarmArt {
+                farm: "sprites/farm_rice.png".into(),
+                farm_shore: String::new(),
+            },
+        );
+        assert!(unknown.validate().is_err());
+        let mut outside = Pack::base();
+        outside.visuals.farms.get_mut("native").unwrap().farm = "../farm.png".into();
+        assert!(outside.validate().is_err());
     }
     #[test]
     fn the_default_scenario_is_the_age_of_imperialism_map() {

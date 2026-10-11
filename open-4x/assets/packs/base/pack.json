@@ -131,6 +131,15 @@
     "mine": "sprites/mine.png",
     "farm": "sprites/farm.png",
     "farm_shore": "sprites/farm_shore.png",
+    "farms": {
+      "east_asian": { "farm": "sprites/farm_rice.png", "farm_shore": "sprites/farm_rice_shore.png" },
+      "south_asian": { "farm": "sprites/farm_rice.png", "farm_shore": "sprites/farm_rice_shore.png" },
+      "southeast_asian": { "farm": "sprites/farm_rice.png", "farm_shore": "sprites/farm_rice_shore.png" },
+      "native": { "farm": "sprites/farm_corn.png", "farm_shore": "sprites/farm_corn_shore.png" },
+      "western": { "farm": "sprites/farm_wheat.png", "farm_shore": "sprites/farm_wheat_shore.png" },
+      "latin": { "farm": "sprites/farm_wheat.png", "farm_shore": "sprites/farm_wheat_shore.png" },
+      "orthodox": { "farm": "sprites/farm_wheat.png", "farm_shore": "sprites/farm_wheat_shore.png" }
+    },
     "roads": "terrain/roads.png",
     "railroads": "terrain/railroads.png",
     "turn_sound": "audio/bell.wav",
