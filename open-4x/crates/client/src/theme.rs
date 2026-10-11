@@ -67,6 +67,13 @@ pub(crate) const FORGE: Color = Color::srgb(0.847, 0.384, 0.196);
 /// An income, and a loss, read on the dark panel of the nation.
 pub(crate) const GAIN: Color = Color::srgb(0.490, 0.827, 0.545);
 pub(crate) const LOSS: Color = Color::srgb(0.929, 0.463, 0.416);
+/// A spent health pip on a dark track: near-black, so it reads as missing.
+pub(crate) const SPENT: Color = Color::srgba(0.012, 0.020, 0.032, 0.92);
+/// The gap between two neighbouring health pips, in px.
+pub(crate) const PIP_GAP: f32 = 2.0;
+/// The most hit points still drawn as separate pips. Past that the pips would be slivers,
+/// so callers fall back to a continuous bar.
+pub(crate) const MAX_PIPS: i32 = 24;
 /// The white of a selection on the map, and of the route that leads out of it.
 pub(crate) const SELECT: Color = Color::srgb(0.965, 0.957, 0.925);
 
@@ -213,6 +220,52 @@ pub(crate) fn row(
         });
 }
 
+/// The colour of lit health pips at `fraction` of full strength: green while healthy,
+/// amber while hurt, red when nearly dead. One helper so the map, the inspector and the
+/// combat stage agree.
+pub(crate) fn hp_color(fraction: f32) -> Color {
+    if fraction > 0.66 {
+        GOOD
+    } else if fraction > 0.33 {
+        AMBER
+    } else {
+        BAD
+    }
+}
+
+/// One health pip: its centre's offset from the bar's centre, its width, and whether it is
+/// still lit (one pip per hit point, like the reference).
+pub(crate) struct Pip {
+    pub centre: f32,
+    pub width: f32,
+    pub lit: bool,
+}
+
+/// Lay `max` pips out across `width`, the first `hp` of them lit. The pips tile the width
+/// with [`PIP_GAP`] between neighbours. Returns an empty vector when there is nothing to
+/// draw (`max <= 0`) or the pips would be unreadably thin (`max > MAX_PIPS`); the caller
+/// then falls back to a continuous bar.
+pub(crate) fn pip_layout(hp: i32, max: i32, width: f32) -> Vec<Pip> {
+    if max <= 0 || max > MAX_PIPS {
+        return Vec::new();
+    }
+    let lit = hp.clamp(0, max);
+    let pip_width = (width - PIP_GAP * (max - 1) as f32) / max as f32;
+    if pip_width < 2.0 {
+        return Vec::new();
+    }
+    (0..max)
+        .map(|i| {
+            let left = -width / 2.0 + i as f32 * (pip_width + PIP_GAP);
+            Pip {
+                centre: left + pip_width / 2.0,
+                width: pip_width,
+                lit: i < lit,
+            }
+        })
+        .collect()
+}
+
 /// A bar of `fraction`, flat, with rounded ends.
 pub(crate) fn meter(parent: &mut ChildSpawnerCommands, fraction: f32, color: Color, height: f32) {
     parent
@@ -237,6 +290,42 @@ pub(crate) fn meter(parent: &mut ChildSpawnerCommands, fraction: f32, color: Col
                 },
                 BackgroundColor(color),
             ));
+        });
+}
+
+/// Hit points as separate pips, one per hit point: the lit ones take the health colour,
+/// the spent ones sit dark, like the reference's segmented bar. Falls back to [`meter`]
+/// when there are too many hit points to segment.
+pub(crate) fn hp_pips(parent: &mut ChildSpawnerCommands, hp: i32, max: i32, height: f32) {
+    let lit = hp.clamp(0, max.max(1));
+    let max = max.max(1);
+    if max > MAX_PIPS {
+        let fraction = lit as f32 / max as f32;
+        meter(parent, fraction, hp_color(fraction), height);
+        return;
+    }
+    let color = hp_color(lit as f32 / max as f32);
+    parent
+        .spawn(Node {
+            width: percent(100),
+            height: px(height),
+            flex_direction: FlexDirection::Row,
+            column_gap: px(PIP_GAP),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|p| {
+            for i in 0..max {
+                p.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        height: percent(100),
+                        border_radius: rounded(2.0),
+                        ..default()
+                    },
+                    BackgroundColor(if i < lit { color } else { INK.with_alpha(0.14) }),
+                ));
+            }
         });
 }
 
@@ -612,4 +701,67 @@ pub(crate) fn map_text(
 /// How wide a label of `chars` characters is at `size`, near enough to size a pill around it.
 pub(crate) fn text_width(chars: usize, size: f32) -> f32 {
     chars as f32 * size * 0.56
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pips_are_one_per_hit_point_with_the_wounds_unlit() {
+        let pips = pip_layout(2, 4, 42.0);
+        assert_eq!(pips.len(), 4, "one pip per hit point");
+        assert_eq!(
+            pips.iter().filter(|p| p.lit).count(),
+            2,
+            "the wounds stay dark"
+        );
+    }
+
+    #[test]
+    fn pips_tile_their_width_with_gaps_and_stay_in_order() {
+        let pips = pip_layout(3, 3, 42.0);
+        assert_eq!(pips.len(), 3);
+        assert!(pips.iter().all(|p| p.lit), "full health lights every pip");
+        for pair in pips.windows(2) {
+            let left_end = pair[0].centre + pair[0].width / 2.0;
+            let right_start = pair[1].centre - pair[1].width / 2.0;
+            assert!((right_start - left_end - PIP_GAP).abs() < 1e-3);
+        }
+        let first_start = pips[0].centre - pips[0].width / 2.0;
+        let last_end = pips[2].centre + pips[2].width / 2.0;
+        assert!((first_start + 21.0).abs() < 1e-3);
+        assert!((last_end - 21.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn pips_handle_one_hit_point_full_and_dead() {
+        let one = pip_layout(1, 1, 42.0);
+        assert_eq!(one.len(), 1);
+        assert!(one[0].lit, "a lone hit point still shows");
+        let dead = pip_layout(0, 4, 42.0);
+        assert_eq!(dead.len(), 4);
+        assert!(dead.iter().all(|p| !p.lit), "the dead show an empty track");
+        let over = pip_layout(9, 4, 42.0);
+        assert!(
+            over.iter().all(|p| p.lit),
+            "overheal clamps to full, never a fifth pip"
+        );
+    }
+
+    #[test]
+    fn pips_give_up_when_there_is_nothing_sane_to_draw() {
+        assert!(pip_layout(3, 0, 42.0).is_empty());
+        assert!(pip_layout(3, MAX_PIPS + 1, 42.0).is_empty());
+    }
+
+    #[test]
+    fn the_health_colour_runs_green_amber_red() {
+        assert_eq!(hp_color(1.0), GOOD);
+        assert_eq!(hp_color(0.67), GOOD);
+        assert_eq!(hp_color(0.66), AMBER);
+        assert_eq!(hp_color(0.5), AMBER);
+        assert_eq!(hp_color(0.33), BAD);
+        assert_eq!(hp_color(0.0), BAD);
+    }
 }

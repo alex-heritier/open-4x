@@ -194,7 +194,8 @@ fn a_fight_out_of_view_is_dropped_and_one_in_view_is_played() {
         "the visible one plays after the dropped one"
     );
     assert!(stage(&app).hides(here));
-    // Two fighters with a sprite, a frame and a fill each, and the skip button with its text.
+    // Two fighters with a sprite, a frame and a pip per hit point each, and the skip
+    // button with its text.
     assert!(count::<Part>(&mut app) >= 6);
     assert_eq!(count::<SkipButton>(&mut app), 1);
 }
@@ -287,7 +288,7 @@ fn a_real_attack_reaches_the_stage_and_holds_orders_back_until_it_is_over() {
     assert!(stage(&app).hides(from) && stage(&app).hides(target));
     assert!(
         count::<Part>(&mut app) >= 6,
-        "a sprite, a frame and a fill each"
+        "a sprite, a frame and health pips each"
     );
 
     // Orders wait while it plays, and nothing reaches the host.
