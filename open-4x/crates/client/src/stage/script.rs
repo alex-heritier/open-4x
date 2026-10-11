@@ -20,8 +20,6 @@ pub const SHELL_SPEED: f32 = 600.0;
 pub const SHELL_FLIGHT: (f32, f32) = (0.25, 0.90);
 /// Gap between the shots of a broadside.
 pub const SALVO_GAP: f32 = 0.05;
-/// Where a unit's sprite stands relative to its square's anchor, as in the map's own drawing.
-const CITY_SHIFT: Vec2 = Vec2::new(62.0, 24.0);
 /// Where a defender's supporting gun stands beside it.
 const SUPPORT_SHIFT: Vec2 = Vec2::new(30.0, 8.0);
 
@@ -29,8 +27,6 @@ const SUPPORT_SHIFT: Vec2 = Vec2::new(30.0, 8.0);
 pub struct Setting<'a> {
     pub rules: &'a Rules,
     pub combat: &'a CombatVisuals,
-    /// Whether a square holds a city. A unit in a city stands beside it, not on it.
-    pub city: &'a dyn Fn(Coord) -> bool,
     /// Whether a unit design has its own clips (see [`Script::showing`]).
     pub animated: &'a dyn Fn(&str) -> bool,
 }
@@ -315,13 +311,7 @@ impl<'a> Builder<'a> {
 
     /// Where a unit stands on a square.
     fn anchor(&self, tile: Coord) -> Vec2 {
-        let (x, y) = tile.screen();
-        let at = Vec2::new(x, y);
-        if (self.setting.city)(tile) {
-            at + CITY_SHIFT
-        } else {
-            at
-        }
+        Vec2::from(tile.screen())
     }
 
     fn actor(&mut self, fighter: &Fighter, role: Role, shift: Vec2) -> usize {
@@ -716,17 +706,16 @@ mod tests {
     }
 
     fn build(battle: &Battle) -> Script {
-        build_with(battle, &CombatVisuals::default(), &|_| false)
+        build_with(battle, &CombatVisuals::default())
     }
 
-    fn build_with(battle: &Battle, combat: &CombatVisuals, city: &dyn Fn(Coord) -> bool) -> Script {
+    fn build_with(battle: &Battle, combat: &CombatVisuals) -> Script {
         let pack = Pack::base();
         Script::build(
             battle,
             &Setting {
                 rules: &pack.rules,
                 combat,
-                city,
                 animated: &|_| false,
             },
         )
@@ -739,7 +728,6 @@ mod tests {
             &Setting {
                 rules: &pack.rules,
                 combat: &CombatVisuals::default(),
-                city: &|_| false,
                 animated: &|_| true,
             },
         )
@@ -1001,7 +989,6 @@ mod tests {
         let script = build_with(
             &duel(("cavalry", "infantry"), &[true, true], Outcome::AttackerWon),
             &combat,
-            &|_| false,
         );
         let charges: Vec<_> = script.actors[0]
             .motions
@@ -1340,22 +1327,13 @@ mod tests {
     }
 
     #[test]
-    fn units_in_a_city_stand_beside_it() {
-        let in_city = |c: Coord| c == Coord::new(5, 5);
-        let script = build_with(
-            &duel(("infantry", "infantry"), &[true], Outcome::AttackerWon),
-            &CombatVisuals::default(),
-            &in_city,
-        );
-        let (x, y) = Coord::new(5, 5).screen();
-        assert!(
-            script.actors[1]
-                .anchor
-                .distance(Vec2::new(x + 62.0, y + 24.0))
-                < 1e-3
-        );
-        let (x, y) = Coord::new(4, 4).screen();
-        assert!(script.actors[0].anchor.distance(Vec2::new(x, y)) < 1e-3);
+    fn land_and_naval_units_stand_on_their_tile_centers() {
+        for kind in ["infantry", "ironclad"] {
+            let script = build(&duel((kind, kind), &[true], Outcome::AttackerWon));
+            for actor in &script.actors {
+                assert_eq!(actor.anchor, Vec2::from(actor.fighter.position.screen()));
+            }
+        }
     }
 
     fn capture(taken: usize, destroyed: usize, advanced: bool) -> Battle {
@@ -1554,7 +1532,6 @@ mod tests {
         let script = build_with(
             &duel(("infantry", "militia"), &[true], Outcome::AttackerWon),
             &combat,
-            &|_| false,
         );
         assert!(script.actors[0].motions.iter().any(|s| matches!(
             s.motion,

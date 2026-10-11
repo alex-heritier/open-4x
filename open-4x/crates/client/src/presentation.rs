@@ -1072,11 +1072,7 @@ pub(super) fn refresh(
         let Some(def) = session.rules.units.get(&unit.kind) else {
             continue;
         };
-        let (mut x, mut y) = Coord::new(px, py).screen();
-        if city_tiles.contains(&unit.position) {
-            x += 62.0;
-            y += 24.0;
-        }
+        let (x, y) = Coord::new(px, py).screen();
         let z = Z_UNIT + depth(y);
         let spent = unit.owner == session.player && unit.moves_left(def) == 0;
         let color = if unit.owner != session.player {

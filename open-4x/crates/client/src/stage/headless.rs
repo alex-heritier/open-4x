@@ -342,6 +342,10 @@ fn a_real_march_is_walked_square_by_square() {
             .expect("the commander has infantry");
         (u.id, u.position)
     };
+    assert!(
+        host.game.city_at(from).is_some(),
+        "the march starts in a city"
+    );
     let to = (host.game.map.neighbors(from).into_iter())
         .find(|c| {
             host.game.city_at(*c).is_none()
@@ -387,6 +391,13 @@ fn a_real_march_is_walked_square_by_square() {
         "the walk began"
     );
     assert_eq!(count::<WalkerSprite>(&mut app), 1);
+    let translation = app
+        .world_mut()
+        .query_filtered::<&Transform, With<WalkerSprite>>()
+        .single(app.world())
+        .unwrap()
+        .translation;
+    assert_eq!(translation.truncate(), Vec2::new(x, y + 12.0));
     assert!(!session_of(&app).staging, "a walk never holds back orders");
     let mut frames = 0;
     while walks_of(&app).busy() {

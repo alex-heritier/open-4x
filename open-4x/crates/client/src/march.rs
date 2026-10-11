@@ -17,8 +17,6 @@ use std::collections::HashSet;
 pub const STEP_SECS: f32 = 0.4;
 /// The longest a walk may take: a long railway journey speeds up to fit.
 pub const LONGEST_WALK: f32 = 2.4;
-/// Where a unit stands in a city square, as the map draws it.
-const CITY_SHIFT: Vec2 = Vec2::new(62.0, 24.0);
 /// How far a unit's sprite is drawn above its square.
 const LIFT: f32 = 12.0;
 /// A walk is shown when it passes within this much of the camera's view (about a tile).
@@ -34,9 +32,9 @@ pub(super) struct Walks {
 
 struct Walker {
     unit: Id,
-    /// Where the sprite stands on each square (beside the city on a city square).
+    /// Where the sprite stands on each square.
     path: Vec<Vec2>,
-    /// The facing of each step, from the squares themselves: the city shift must not turn it.
+    /// The facing of each step.
     faces: Vec<u32>,
     step: f32,
     art: Option<ClipArt>,
@@ -175,16 +173,7 @@ fn start(
     if march.path.len() < 2 {
         return None;
     }
-    let spot = |p: Coord| {
-        let (x, y) = p.screen();
-        let at = Vec2::new(x, y);
-        if game.city_at(p).is_some() {
-            at + CITY_SHIFT
-        } else {
-            at
-        }
-    };
-    let path: Vec<Vec2> = march.path.iter().map(|p| spot(*p)).collect();
+    let path: Vec<Vec2> = march.path.iter().map(|p| Vec2::from(p.screen())).collect();
     let faces = steps_facing(&march.path);
     if !path.iter().any(|p| view.has(*p)) {
         return None;

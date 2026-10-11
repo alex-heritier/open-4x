@@ -407,14 +407,12 @@ fn start_next(
         if !in_view(&image, view) {
             continue;
         }
-        let city = |at: Coord| game.city_at(at).is_some();
         let animated = |kind: &str| session.pack.visuals.units.contains_key(kind);
         let script = Script::build(
             &image,
             &Setting {
                 rules: &session.rules,
                 combat: &session.pack.visuals.combat,
-                city: &city,
                 animated: &animated,
             },
         );
