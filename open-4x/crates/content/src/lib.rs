@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
-pub const PACK_FORMAT: u32 = 4;
+pub const PACK_FORMAT: u32 = 5;
 pub const BASE_JSON: &str = include_str!("../../../assets/packs/base/pack.json");
 pub const BASE_SCRIPT: &str = include_str!("../../../assets/packs/base/scripts/campaign.lua");
 /// Scenario files embedded in the binary, keyed by their pack-relative path.
@@ -58,6 +58,10 @@ pub struct Visuals {
     /// City sprites by [`fourx_sim::Flavor`] key (`western`, `east_asian`, ...): every flavor
     /// needs one, so a nation's cities always have an architecture to be drawn in.
     pub cities: BTreeMap<String, String>,
+    /// The nation's banner, by flavor key: a second sprite drawn over the city and tinted with
+    /// the owner's colour. A flavor left out simply has no flag.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub city_banners: BTreeMap<String, String>,
     /// Fog of war: a 9 x 9 sheet of tile diamonds, black with the fog's opacity in the alpha
     /// channel. Cell `(3*W + N, 3*S + E)` holds a tile whose north, east, south and west
     /// vertices are each 0 never seen, 1 remembered, or 2 in sight.
@@ -98,10 +102,12 @@ pub struct Visuals {
     /// How fights look and sound; every part is optional.
     #[serde(default)]
     pub combat: combat::CombatVisuals,
-    /// Frame-by-frame clips by unit design id (idle, run, attack, victory, death, each in
-    /// eight facings). A design left out is drawn from its single sprite.
+    /// Art by unit design id: a sprite, optional frame-by-frame clips (idle, run, attack,
+    /// victory, death, each in eight facings), and optional per-flavor overrides so a culture
+    /// may field a design of its own. A design with neither clips nor a flavor's clips is drawn
+    /// from its single sprite.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub units: BTreeMap<String, animation::UnitAnimation>,
+    pub units: BTreeMap<String, animation::UnitVisual>,
 }
 
 impl Visuals {
@@ -127,8 +133,34 @@ impl Visuals {
         .chain(self.relief_borders.values())
         .chain(self.resources.values())
         .chain(self.cities.values())
+        .chain(self.city_banners.values())
         .chain(self.combat.paths())
-        .chain(animation::paths(&self.units))
+        .chain(animation::visual_paths(&self.units))
+    }
+
+    /// The art of one unit design, with the given flavor's overrides folded in: a culture that
+    /// fields its own infantry sees its own kit, everyone else the design's base art.
+    pub fn unit(&self, kind: &str, flavor: fourx_sim::Flavor) -> Option<animation::UnitVisual> {
+        let base = self.units.get(kind)?;
+        let mut visual = base.clone();
+        let key = flavor.key();
+        if let Some(sprite) = base.flavor_sprites.get(key) {
+            visual.sprite = sprite.clone();
+        }
+        if let Some(clips) = base.flavor_animations.get(key) {
+            visual.clips = Some(clips.clone());
+        }
+        Some(visual)
+    }
+
+    /// A key for the art a flavor's `<kind>` is drawn from: the culture's own sprite path when
+    /// the pack names one, else the kind itself. Two flavors share a key exactly when they share
+    /// art, so it suits caching the loaded sprite and sheets.
+    pub fn unit_design<'a>(&'a self, kind: &'a str, flavor: fourx_sim::Flavor) -> &'a str {
+        self.units
+            .get(kind)
+            .and_then(|visual| visual.flavor_sprites.get(flavor.key()))
+            .map_or(kind, String::as_str)
     }
 }
 
@@ -260,9 +292,37 @@ impl Pack {
                 "visuals.cities needs exactly one city sprite for each flavor",
             ));
         }
+        for flavor in self.visuals.city_banners.keys() {
+            if !flavors.contains(flavor.as_str()) {
+                return Err(invalid(&format!(
+                    "visuals.city_banners names unknown flavor {flavor:?}"
+                )));
+            }
+        }
         for path in std::iter::once(&self.script).chain(self.visuals.paths()) {
             if !safe_path(path) {
                 return Err(invalid("Asset paths must stay inside the pack"));
+            }
+        }
+        // Flavor overrides must name a real culture.
+        for (kind, visual) in &self.visuals.units {
+            for flavor in visual
+                .flavor_sprites
+                .keys()
+                .chain(visual.flavor_animations.keys())
+            {
+                if !flavors.contains(flavor.as_str()) {
+                    return Err(invalid(&format!(
+                        "visuals.units.{kind} names unknown flavor {flavor:?}"
+                    )));
+                }
+            }
+            for sprite in visual.flavor_sprites.values() {
+                if !safe_path(sprite) {
+                    return Err(invalid(&format!(
+                        "visuals.units.{kind} has a flavor sprite outside the pack"
+                    )));
+                }
             }
         }
         self.visuals.combat.validate(&self.rules)?;
@@ -456,6 +516,27 @@ mod tests {
         let mut p = Pack::base();
         p.rules.victory_industry = 0;
         assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn a_flavor_override_names_a_culture_the_pack_knows() {
+        // The base pack's per-culture designs are fine, and a culture's own clips are laid out
+        // like the design's own so the client can draw the variant exactly like its base.
+        let base = Pack::base();
+        base.validate().unwrap();
+        let infantry = &base.visuals.units["infantry"];
+        assert!(!infantry.flavor_sprites.is_empty());
+        assert_eq!(
+            infantry.flavor_animations["african"].frame,
+            infantry.clips.as_ref().unwrap().frame
+        );
+        // An unknown culture is not.
+        let mut pack = Pack::base();
+        let visual = pack.visuals.units.get_mut("infantry").unwrap();
+        visual
+            .flavor_sprites
+            .insert("martian".into(), "sprites/infantry_martian.png".into());
+        assert!(pack.validate().is_err());
     }
     #[test]
     fn unit_designs_are_checked() {
@@ -724,6 +805,13 @@ mod tests {
     #[test]
     fn every_flavor_has_its_own_city_sprite() {
         use fourx_sim::Flavor;
+        let pack = Pack::base();
+        // Every flavor names a flag sprite, and it is a distinct file per culture.
+        let banners: std::collections::BTreeSet<_> = Flavor::ALL
+            .iter()
+            .map(|flavor| &pack.visuals.city_banners[flavor.key()])
+            .collect();
+        assert_eq!(banners.len(), Flavor::ALL.len(), "one flag per flavor");
         let pack = Pack::base();
         let paths: std::collections::BTreeSet<_> = Flavor::ALL
             .iter()

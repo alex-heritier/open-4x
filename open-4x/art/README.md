@@ -11,7 +11,7 @@ cd art
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # numpy, pillow
 brew install librsvg                                                   # provides rsvg-convert
 .venv/bin/python build.py              # all groups
-.venv/bin/python build.py terrain      # or: terrain | roads | overlays | relief | sprites | units | icons | resources
+.venv/bin/python build.py terrain      # or: terrain | roads | overlays | relief | sprites | cities | units | flavor | icons | resources
 ```
 
 Output goes to `assets/packs/base/`; the vector sources of the sprites are written to `art/svg/` (git-ignored, reproducible). Builds are deterministic (fixed seeds).
@@ -81,11 +81,11 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 | `nature.py`, `relief.py` | paint-dab forest, pine, jungle and marsh; heightfield hills and snow mountains in green, dry and cold styles (ridged noise, Lambert lighting, front-to-back projection) |
 | `buildings.py` | isometric kit for the city: gable/hip/flat roofs, windows, brick chimneys, pagoda, flag |
 | `kit.py` | round and organic primitives in the same light: drums, cones, domes, onion domes, minarets, palms, palisades, stilts, tents, canoes |
-| `cities.py` | the eleven city skins, one per flavor: `western`, `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, `oceanic` (`sprites/city_<flavor>.png`). They share one camera, ground disc and light, and carry no flag: the client tints the nation's plate over them |
+| `cities.py` | the eleven city skins, one per flavor: `western`, `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, `oceanic` (`sprites/city_<flavor>.png`). They share one camera, ground disc and light. Each raises a white banner, also written alone as `sprites/city_<flavor>_banner.png`, which the client draws over the town tinted with the nation's colour |
 | `roads.py` | the road and railroad sheets: routes paired through each cell, junction branches, sleepers and rails, seamless exits |
 | `overlay.py` | the fog-of-war and culture-border sheets |
 | `rig.py` | a small 3D puppet renderer that writes SVG: the game's 2:1 camera, painter-sorted polygons, tubes, tapered limbs and balls, Lambert light from the upper left, two-bone IK, the eight facings |
-| `troops.py` | the land units as puppets: riflemen, pioneers and workers, horse and dragoon, field gun and gunner, and their five clips |
+| `troops.py` | the land units as puppets: riflemen, pioneers and workers, horse and dragoon, field gun and gunner, and their five clips. It also holds the per-culture **kits** (`FLAVOR_KITS`: coat, trousers, accent and headgear) and **steeds** (`FLAVOR_STEEDS`), from which `BUILDERS` gains an `infantry_<flavor>` and a `cavalry_<flavor>` for each culture that fields its own |
 | `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, deck) with boxes, funnels, turrets, masts, ensign, wake and smoke, and their five clips |
 | `icons.py` | flat white glyph icons (`icon_*`, `hud_*`) |
 | `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (ore heaps, crops, animals, a derrick, flags for the colonial markers; no frame or outline, only a contact shadow), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
@@ -111,6 +111,25 @@ built from tapered limbs (its knees and elbows by two-bone IK toward its feet an
 and barrels, boxes for packs and deckhouses. Sheets are palette PNGs, one palette per sheet, which at the drawn size
 cannot be told from full colour and is about five times smaller. `preview_anim.py <design> <clip>` draws a quick
 contact sheet of one clip into `preview/`.
+
+### Culture variants (`python build.py flavor`)
+
+The base designs are cut as the Western kit. The ten other cultures each field an infantry and a
+cavalry of their own, which `python build.py flavor` renders as `units/<design>_<flavor>/<clip>.png` and
+`sprites/<design>_<flavor>.png` — the same frame, clips and layout as the base design, only painted
+as that culture's people. `pack.json`'s `visuals.units.<design>.flavor_sprites` and
+`flavor_animations` name them, so the client draws a Zulu warrior, an Ottoman asker or a Qing
+banner-man from its own art while every other design stays shared. `python build.py units
+cavalry_steppe infantry` re-renders just the named designs.
+
+Each kit stays in the muted, hand-painted range, because the client tints a figure with its nation's
+colour and a busy coat would fight it. The accent is the collar, cap band or headband, and the
+headgear carries the strongest read at the drawn size: a white tunic under a dark kepi for Latin
+America, a shako for the Orthodox world, a turban for the Islamic one, a straw hat for East and
+South-East Asia, a cloth cap for the subcontinent, a red headband over an ochre tunic for Africa,
+long hair under a band for the steppe, buckskin and a feather for the indigenous Americas, and a
+bare head over a red-brown tunic and pale wrap for the Pacific. The horse's coat follows the culture
+too, so a steppe pony, an Arab and a European charger read apart.
 
 ## UI glyphs (`ui/icons/`)
 

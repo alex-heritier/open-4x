@@ -602,6 +602,60 @@ def oceanic(seed=43):
     return sc.render()
 
 
+# ---- the nation's banner -----------------------------------------------------------------------
+# Every skin raises one flag over the town.  The cloth is painted a near-white buff carrying only
+# its own shading and a faint charge (a cross, a crescent, a six-pointed lozenge); the client
+# multiplies the nation's colour over the whole city, so the flag takes that colour and reads as
+# the owner's, the way Civ3 paints a civilization's flag and unit trim from one accent ramp.
+DEVICES = {
+    "cross": "cross",
+    "crescent": "crescent",
+    "lozenge": "lozenge",
+}
+# flavor -> (banner charge, grid x, grid y, pole height in px).  The pole stands on a corner of
+# the ground diamond, front-left or front-right of the houses, so the flag is never hidden.
+BANNERS = {
+    "western": ("cross", 0.9, 5.0, 48),
+    "latin": ("cross", 0.9, 5.0, 48),
+    "orthodox": ("cross", 0.9, 5.0, 48),
+    "arab": ("crescent", 0.9, 5.0, 48),
+    "east_asian": ("lozenge", 0.9, 5.0, 48),
+    "south_asian": ("lozenge", 0.9, 5.0, 48),
+    "southeast_asian": ("lozenge", 0.9, 5.0, 48),
+    "african": ("lozenge", 0.9, 5.0, 48),
+    "steppe": ("lozenge", 0.9, 5.0, 48),
+    "native": ("lozenge", 0.9, 5.0, 48),
+    "oceanic": ("lozenge", 0.9, 5.0, 48),
+}
+
+
+def banner(svg, iso, flavor):
+    """Draw one flag over the town: the nation's accent, on the white cloth the client will tint.
+
+    Drawn as raw SVG after the town's own items, so it is always the last thing on the canvas.
+    """
+    charge, x, y, pole = BANNERS[flavor]
+    top = iso.p(x, y, -pole)
+    base = iso.p(x, y, 0)
+    svg.rect(base[0] - 1.9, top[1], 3.8, base[1] - top[1], svg.lin([(0, "#8a7350"), (1, "#5a4630")], 0, 0, 0, 1), rx=1.4)
+    svg.circle(base[0], top[1] - 2.0, 2.8, "#c9a85c")
+    cloth_x, cloth_y, w, hgt = top[0] + 1.6, top[1] + 3.0, 18.0, 25.0
+    svg.rect(cloth_x, cloth_y, w, hgt, svg.lin([(0, "#f3ecda"), (1, "#cdbf9e")], 0, 0, 1, 0.3))
+    svg.poly([(cloth_x + w, cloth_y), (cloth_x + w + 6.5, cloth_y), (cloth_x + w, cloth_y + 6.0)], "#f3ecda")
+    svg.rect(cloth_x + w - 4.0, cloth_y, 4.0, hgt, "#c4b592", op=0.55)
+    ink = "#8f815f"
+    cx, cy = cloth_x + w * 0.5 - 1.2, cloth_y + hgt * 0.5
+    if charge == "cross":
+        svg.line((cx, cy - 8.4), (cx, cy + 8.4), ink, 2.1, op=0.78)
+        svg.line((cx - 5.2, cy - 2.0), (cx + 5.2, cy - 2.0), ink, 2.1, op=0.78)
+    elif charge == "crescent":
+        svg.circle(cx, cy, 7.2, ink, op=0.72)
+        svg.circle(cx + 3.4, cy - 1.2, 6.0, "#f3ecda")
+    else:
+        svg.poly([(cx, cy - 7.8), (cx + 5.6, cy), (cx, cy + 7.8), (cx - 5.6, cy)], ink, op=0.66)
+
+
+
 # `Flavor` key -> builder, in the order of `fourx_sim::Flavor::ALL`.
 BUILDERS = {
     "western": western,

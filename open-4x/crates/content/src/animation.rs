@@ -72,6 +72,38 @@ impl UnitAnimation {
     }
 }
 
+/// One design's art: a single sprite and, optional, its five frame-by-frame clips. A culture may
+/// name a design of its own for any flavor whose people should not march in another's kit, so
+/// `flavor_sprites` and `flavor_animations` override `sprite` and `clips` for that flavor only.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnitVisual {
+    /// Pack-relative PNG drawn when the design has no clips (or none for this flavor).
+    pub sprite: String,
+    /// Frame-by-frame clips, when the design is animated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clips: Option<UnitAnimation>,
+    /// Per-flavor sprite overrides, keyed by [`fourx_sim::Flavor::key`]: the design each culture
+    /// fields. A flavor left out falls back to `sprite`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flavor_sprites: BTreeMap<String, String>,
+    /// Per-flavor animation overrides, keyed the same way, for a culture's own clips.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flavor_animations: BTreeMap<String, UnitAnimation>,
+}
+
+impl UnitVisual {
+    /// A design with neither clips nor flavor overrides: one sprite, as a pack may still hold.
+    pub fn sprite(sprite: impl Into<String>) -> Self {
+        Self {
+            sprite: sprite.into(),
+            clips: None,
+            flavor_sprites: BTreeMap::new(),
+            flavor_animations: BTreeMap::new(),
+        }
+    }
+}
+
 /// Every sheet the animations name.
 pub fn paths(units: &BTreeMap<String, UnitAnimation>) -> impl Iterator<Item = &String> {
     units
@@ -79,36 +111,78 @@ pub fn paths(units: &BTreeMap<String, UnitAnimation>) -> impl Iterator<Item = &S
         .flat_map(|unit| unit.clips.values().map(|clip| &clip.sheet))
 }
 
-pub fn validate(
-    units: &BTreeMap<String, UnitAnimation>,
-    rules: &Rules,
-) -> Result<(), ContentError> {
+/// Every sprite, flavor sprite and animation sheet the unit visuals name.
+pub fn visual_paths(units: &BTreeMap<String, UnitVisual>) -> impl Iterator<Item = &String> {
+    units.values().flat_map(|visual| {
+        std::iter::once(&visual.sprite)
+            .chain(visual.flavor_sprites.values())
+            .chain(visual.clips.as_ref().into_iter().flat_map(paths_one))
+            .chain(visual.flavor_animations.values().flat_map(paths_one))
+    })
+}
+
+fn paths_one(unit: &UnitAnimation) -> impl Iterator<Item = &String> {
+    unit.clips.values().map(|clip| &clip.sheet)
+}
+
+pub fn validate(units: &BTreeMap<String, UnitVisual>, rules: &Rules) -> Result<(), ContentError> {
     let invalid = |message: String| Err(ContentError::Invalid(message));
-    for (id, unit) in units {
+    for (id, visual) in units {
         if !rules.units.contains_key(id) {
             return invalid(format!("visuals.units names unknown unit design {id:?}"));
         }
-        let [w, h] = unit.frame;
-        if !(16..=1024).contains(&w) || !(16..=1024).contains(&h) || h * FACINGS > MAX_SHEET_SIDE {
+        if !safe_path(&visual.sprite) {
             return invalid(format!(
-                "visuals.units.{id}.frame must be 16-1024 pixels, and eight rows of it at most {MAX_SHEET_SIDE}"
+                "visuals.units.{id}.sprite must stay inside the pack"
             ));
         }
-        for clip in Clip::ALL {
-            let Some(sheet) = unit.clips.get(&clip) else {
+        for (flavor, sprite) in &visual.flavor_sprites {
+            if !safe_path(sprite) {
                 return invalid(format!(
-                    "visuals.units.{id} needs all five clips (idle, run, attack, victory, death)"
-                ));
-            };
-            if !(1..=32).contains(&sheet.frames)
-                || w * sheet.frames > MAX_SHEET_SIDE
-                || !(20..=2000).contains(&sheet.ms)
-                || !safe_path(&sheet.sheet)
-            {
-                return invalid(format!(
-                    "visuals.units.{id}: the {clip:?} sheet needs 1-32 frames no wider than {MAX_SHEET_SIDE} pixels in all, 20-2000 ms a frame, and a path inside the pack"
+                    "visuals.units.{id}.flavor_sprites.{flavor} must stay inside the pack"
                 ));
             }
+        }
+        // A design is drawn from clips when it has them; a design with neither clips nor any
+        // flavor's clips is drawn from its single sprite.
+        let animated = visual.clips.is_some() || !visual.flavor_animations.is_empty();
+        if animated && visual.clips.is_none() {
+            return invalid(format!(
+                "visuals.units.{id} has per-flavor clips but no clips of its own to fall back on"
+            ));
+        }
+        if let Some(clips) = &visual.clips {
+            check_clips(id, clips)?;
+        }
+        for (flavor, clips) in &visual.flavor_animations {
+            check_clips(&format!("{id}.flavor_animations.{flavor}"), clips)?;
+        }
+    }
+    Ok(())
+}
+
+/// One design's clips: every clip present, each a sheet that fits the grid and names a safe path.
+fn check_clips(id: &str, unit: &UnitAnimation) -> Result<(), ContentError> {
+    let [w, h] = unit.frame;
+    if !(16..=1024).contains(&w) || !(16..=1024).contains(&h) || h * FACINGS > MAX_SHEET_SIDE {
+        return Err(ContentError::Invalid(format!(
+            "visuals.units.{id}.frame must be 16-1024 pixels, and eight rows of it at most {MAX_SHEET_SIDE}"
+        )));
+    }
+    for clip in Clip::ALL {
+        let Some(sheet) = unit.clips.get(&clip) else {
+            return Err(ContentError::Invalid(format!(
+                "visuals.units.{id} needs all five clips (idle, run, attack, victory, death)"
+            )));
+        };
+        if !(1..=32).contains(&sheet.frames)
+            || w * sheet.frames > MAX_SHEET_SIDE
+            || !(20..=2000).contains(&sheet.ms)
+            || !safe_path(&sheet.sheet)
+        {
+            return Err(ContentError::Invalid(format!(
+                "visuals.units.{id}: the {clip:?} sheet needs 1-32 frames no wider than {MAX_SHEET_SIDE} pixels in all, 20-2000 ms a frame, and a path inside the pack"
+            )));
         }
     }
     Ok(())
@@ -144,6 +218,15 @@ mod tests {
         UnitAnimation {
             frame: [160, 160],
             clips: Clip::ALL.into_iter().map(|c| (c, sheet(8))).collect(),
+        }
+    }
+
+    fn visual() -> UnitVisual {
+        UnitVisual {
+            sprite: "units/x.png".into(),
+            clips: Some(animation()),
+            flavor_sprites: BTreeMap::new(),
+            flavor_animations: BTreeMap::new(),
         }
     }
 
@@ -191,14 +274,39 @@ mod tests {
     }
 
     #[test]
+    fn a_culture_fields_its_own_kit_and_everyone_else_keeps_the_base_design() {
+        use fourx_sim::Flavor;
+        let pack = Pack::base();
+        let african = pack.visuals.unit("infantry", Flavor::African).unwrap();
+        assert_eq!(african.sprite, "sprites/infantry_african.png");
+        let western = pack.visuals.unit("infantry", Flavor::Western).unwrap();
+        assert_eq!(western.sprite, "sprites/infantry.png");
+        assert_eq!(
+            pack.visuals.unit_design("infantry", Flavor::Western),
+            "infantry"
+        );
+        // A design with no flavor art is the same for every culture.
+        assert_eq!(
+            pack.visuals.unit("ironclad", Flavor::Arab).unwrap().sprite,
+            "sprites/ironclad.png"
+        );
+    }
+
+    #[test]
     fn animations_are_checked_against_the_pack() {
         let rules = Pack::base().rules;
-        let ok = BTreeMap::from([("infantry".to_string(), animation())]);
+        let ok = BTreeMap::from([("infantry".to_string(), visual())]);
         validate(&ok, &rules).unwrap();
         let breaks = |change: &dyn Fn(&mut UnitAnimation)| {
             let mut unit = animation();
             change(&mut unit);
-            let units = BTreeMap::from([("infantry".to_string(), unit)]);
+            let units = BTreeMap::from([(
+                "infantry".to_string(),
+                UnitVisual {
+                    clips: Some(unit),
+                    ..visual()
+                },
+            )]);
             assert!(validate(&units, &rules).is_err());
         };
         breaks(&|u| {
@@ -209,8 +317,78 @@ mod tests {
         breaks(&|u| u.clips.get_mut(&Clip::Idle).unwrap().ms = 5);
         breaks(&|u| u.clips.get_mut(&Clip::Idle).unwrap().sheet = "../x.png".into());
         breaks(&|u| u.frame = [160, 300]);
-        let unknown = BTreeMap::from([("dragon".to_string(), animation())]);
+        let unknown = BTreeMap::from([("dragon".to_string(), visual())]);
         assert!(validate(&unknown, &rules).is_err());
+    }
+
+    #[test]
+    fn a_flavor_override_stays_in_the_pack() {
+        let rules = Pack::base().rules;
+        let with = |edit: &dyn Fn(&mut UnitVisual)| {
+            let mut unit = visual();
+            edit(&mut unit);
+            BTreeMap::from([("infantry".to_string(), unit)])
+        };
+        // A real culture, with its own sprite and its own clips, is fine.
+        let good = with(&|u| {
+            u.flavor_sprites
+                .insert("african".into(), "sprites/infantry_african.png".into());
+            u.flavor_animations.insert("african".into(), animation());
+        });
+        validate(&good, &rules).unwrap();
+        // A sprite that leaves the pack is not.
+        let outside = with(&|u| {
+            u.flavor_sprites
+                .insert("african".into(), "../infantry.png".into());
+        });
+        assert!(validate(&outside, &rules).is_err());
+        // A culture's clips carry the same checks as the design's own.
+        let mut broken = animation();
+        broken.clips.get_mut(&Clip::Run).unwrap().sheet = "../x.png".into();
+        let bad_clips = with(&|u| {
+            u.flavor_animations.insert("african".into(), broken.clone());
+        });
+        assert!(validate(&bad_clips, &rules).is_err());
+    }
+
+    #[test]
+    fn a_flavor_may_field_a_design_of_its_own() {
+        // A culture with its own art and another without it draw different things.
+        let visuals = Pack::base().visuals;
+        let african = visuals
+            .unit("infantry", fourx_sim::Flavor::African)
+            .unwrap();
+        let western = visuals
+            .unit("infantry", fourx_sim::Flavor::Western)
+            .unwrap();
+        assert_eq!(african.sprite, "sprites/infantry_african.png");
+        assert_eq!(western.sprite, "sprites/infantry.png");
+        assert_eq!(
+            visuals.unit_design("infantry", fourx_sim::Flavor::African),
+            "sprites/infantry_african.png"
+        );
+        assert_eq!(
+            visuals.unit_design("infantry", fourx_sim::Flavor::Western),
+            "infantry"
+        );
+        // A design a culture does not override keeps the base art and the base clips.
+        assert_eq!(
+            visuals
+                .unit("worker", fourx_sim::Flavor::African)
+                .unwrap()
+                .sprite,
+            "sprites/worker.png"
+        );
+        // A culture's clips are laid out exactly like the design's own, so the art has to
+        // match the base frame and sheet shape.
+        let base = western.clips.unwrap();
+        let own = african.clips.unwrap();
+        assert_eq!(own.frame, base.frame);
+        assert_eq!(
+            own.clips.len(),
+            base.clips.len(),
+            "a culture lists the same five clips"
+        );
     }
 
     /// A PNG's size, from its header.
@@ -225,11 +403,15 @@ mod tests {
         let pack = Pack::base();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/packs/base");
         for id in pack.rules.units.keys() {
-            let unit = pack
+            let visual = pack
                 .visuals
                 .units
                 .get(id)
                 .unwrap_or_else(|| panic!("{id} has no animation"));
+            let unit = visual
+                .clips
+                .as_ref()
+                .unwrap_or_else(|| panic!("{id} is not animated"));
             for (clip, sheet) in &unit.clips {
                 let bytes = std::fs::read(root.join(&sheet.sheet)).unwrap();
                 let (w, h) = png_size(&bytes);

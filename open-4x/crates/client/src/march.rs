@@ -5,7 +5,7 @@
 //! its run clip, turned toward each step, then hands back to the real unit facing the way it
 //! last walked. The walks of one snapshot play together, and fights wait for them. They never
 //! hold back orders: a newer snapshot cuts them short and starts its own.
-use super::presentation::{Z_UNIT, depth, tinted, unit_size};
+use super::presentation::{Z_UNIT, depth, tint, unit_size};
 use super::puppet::{ClipArt, Puppetry};
 use super::{Session, camera_rect};
 use bevy::{prelude::*, window::PrimaryWindow};
@@ -170,6 +170,10 @@ fn start(
 ) -> Option<Walker> {
     let game = session.game.as_ref()?;
     let def = session.rules.units.get(&march.kind)?;
+    let flavor = game
+        .factions
+        .get(&march.owner)
+        .map_or(fourx_sim::Flavor::Western, |faction| faction.flavor);
     if march.path.len() < 2 {
         return None;
     }
@@ -185,20 +189,26 @@ fn start(
         assets,
         &mut puppetry.layouts,
         &march.kind,
+        flavor,
         Clip::Run,
     );
     let color = if march.owner == session.player {
         Color::WHITE
     } else {
-        tinted(game, march.owner)
+        tint(game, march.owner)
     };
     let size = unit_size(def);
     let first = path[0];
     let sprite = match &art {
-        Some(clip) => clip.sprite(faces[0], 0, size, color),
+        Some((_, clip)) => clip.sprite(faces[0], 0, size, color),
         None => {
+            let path = session
+                .pack
+                .visuals
+                .unit(&march.kind, flavor)
+                .map_or_else(|| def.sprite.clone(), |visual| visual.sprite);
             let mut sprite =
-                Sprite::from_image(assets.load(format!("{}{}", session.asset_prefix, def.sprite)));
+                Sprite::from_image(assets.load(format!("{}{}", session.asset_prefix, path)));
             sprite.custom_size = Some(size);
             sprite.color = color;
             sprite
@@ -216,7 +226,7 @@ fn start(
         step: step_secs(path.len() - 1),
         path,
         faces,
-        art,
+        art: art.map(|(_, clip)| clip),
         entity,
     })
 }

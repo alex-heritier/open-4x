@@ -11,7 +11,7 @@ mod motion;
 mod script;
 
 use super::march::Walks;
-use super::presentation::{tinted, unit_size};
+use super::presentation::{tint, unit_size};
 use super::puppet::{ClipSet, Puppetry};
 use super::{Session, WorldRect, camera_rect, option};
 use bevy::{
@@ -490,12 +490,12 @@ fn unit_color(session: &Session, owner: Id, spent: bool) -> Color {
     let Some(game) = &session.game else {
         return Color::WHITE;
     };
-    if owner != session.player {
-        tinted(game, owner)
-    } else if spent {
+    // A nation's colour sits on its own units and its rivals' alike; only the spent grey is a
+    // player-only signal.
+    if spent {
         Color::srgb(0.66, 0.66, 0.70)
     } else {
-        Color::WHITE
+        tint(game, owner)
     }
 }
 
@@ -540,12 +540,20 @@ fn spawn_actors(
             .map(|id| now.unwrap_or_else(|| unit_color(session, id, false)))
             .unwrap_or(start);
         looks.push(Look { start, captor });
+        let flavor = game
+            .factions
+            .get(&fighter.owner)
+            .map_or(fourx_sim::Flavor::Western, |faction| faction.flavor);
         let art = actor
             .animated
             .then(|| {
-                puppetry
-                    .art
-                    .set(session, assets, &mut puppetry.layouts, &fighter.kind)
+                puppetry.art.set(
+                    session,
+                    assets,
+                    &mut puppetry.layouts,
+                    &fighter.kind,
+                    flavor,
+                )
             })
             .flatten();
         let mut sprite = match &art {

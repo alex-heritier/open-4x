@@ -164,8 +164,8 @@ screen: on an upright map the grid's `x + 1` neighbour is the tile to the lower 
 | --- | --- |
 | `id`, `name` | Required. |
 | `adjective` | Names raised units and founded cities (`Canadian`). Defaults to the name. |
-| `color` | Required. Used for borders, the minimap, and flags. |
-| `flavor` | Cultural look of the nation's cities: `western` (default), `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, or `oceanic`. The pack's `visuals.cities` must hold a sprite for each. Cosmetic: the simulation never reads it, but it travels in snapshots so every client draws the same skin. |
+| `color` | Required. The nation's colour, multiplied over its units, cities (its flag), and culture borders, and drawn flat on the minimap. Should be one distinctive hue per nation. |
+| `flavor` | Cultural look of the nation's cities and, where the pack gives that culture its own art, its units ([`units.md`](units.md)): `western` (default), `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, or `oceanic`. The pack's `visuals.cities` must hold a sprite for each. Cosmetic: the simulation never reads it, but it travels in snapshots so every client draws the same skin. |
 | `status` | `sovereign` (default), `dependent`, or `unrecognized`. |
 | `suzerain` | Required exactly when `status` is `dependent`, forbidden otherwise. Chains must terminate: a nation cannot be its own overlord. |
 | `government`, `leader` | Display text, up to 96 characters. |

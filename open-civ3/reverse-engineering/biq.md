@@ -377,3 +377,17 @@ Canton, Nanking, Tsingtao, Xinjian, Chengdu, Hangchow. The rule for choosing
 unique over default is not traced; `civ3-clone` uses Japan's default color
 at ramp index 4, `(25,148,24)`, for label badges and border beads
 (`cities::CIV_COLOR`).
+
+The colors are *accent ramps*, not flat fills: each `ntpNN.pcx` is one
+16-entry row running light (index 0) to dark (index 15), and a unit or city
+sprite is drawn with one of those indices as its "team" colour. The same
+`warrior` sheet or monolith therefore comes out red for Rome, cyan for
+America and green for Japan because the engine swaps the ramp the accent
+index resolves to, leaving the rest of the palette (flesh, cloth, shadow)
+alone. That is the mechanism behind "the same unit asset has different
+accent coloring depending on which civ it belongs to". `open-4x` does not
+carry the `.pcx` ramps (it does not bundle Civ3 art); instead the client
+re-derives one ramp from the scenario's nation colour and multiplies it over
+the sprite, which reaches the same "one accent, every civ" result in true
+colour rather than an indexed palette. See `docs/units.md` §"National colour"
+in `open-4x`.
