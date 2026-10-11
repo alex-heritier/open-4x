@@ -20,7 +20,7 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
     window::PrimaryWindow,
 };
-use fourx_content::animation::facing;
+use fourx_content::combat::Style;
 use fourx_sim::{Battle, Id, terrain::Coord};
 use motion::Pose;
 use script::{Event as Moment, LEAD_IN, Script, Setting, Showing};
@@ -47,6 +47,12 @@ const DUST: Srgba = Srgba::new(0.76, 0.66, 0.48, 1.0);
 const SPLASH: Srgba = Srgba::new(0.86, 0.95, 1.0, 1.0);
 const SHELL: Srgba = Srgba::new(0.10, 0.09, 0.08, 1.0);
 const GLINT: Srgba = Srgba::new(1.0, 0.85, 0.35, 1.0);
+/// A broadside's blast, from the white-hot flash through the orange fireball to the brown and black
+/// smoke it leaves, and the pale ring it throws across the water.
+const FIREBALL: Srgba = Srgba::new(1.0, 0.52, 0.14, 1.0);
+const BROWN: Srgba = Srgba::new(0.50, 0.40, 0.31, 1.0);
+const SOOT: Srgba = Srgba::new(0.17, 0.16, 0.16, 1.0);
+const FOAM: Srgba = Srgba::new(0.96, 0.98, 0.97, 1.0);
 
 /// Marks everything the stage has put on screen, so it can all be taken down at once.
 #[derive(Component)]
@@ -157,6 +163,8 @@ impl Stage {
 pub(super) struct FxArt {
     soft: Handle<Image>,
     star: Handle<Image>,
+    /// A thin bright ring, for a blast's shock across the water.
+    ring: Handle<Image>,
 }
 
 pub(super) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
@@ -169,6 +177,11 @@ pub(super) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         // A four-pointed star.
         star: images.add(shape(48, |x, y| {
             (1.0 - (x.abs().sqrt() + y.abs().sqrt())).max(0.0).powf(0.8)
+        })),
+        ring: images.add(shape(96, |x, y| {
+            let off = ((x * x + y * y).sqrt() - 0.78).abs() / 0.22;
+            let edge = (1.0 - off).clamp(0.0, 1.0);
+            edge * edge * (3.0 - 2.0 * edge) * 0.9
         })),
     });
 }
@@ -420,10 +433,9 @@ fn start_next(
             spawn_actors(commands, session, assets, puppetry, &script, shapes);
         // Whoever survives keeps looking the way the fight left it.
         for (i, actor) in script.actors.iter().enumerate() {
-            let heading = script.heading_at(i, script.length);
             puppetry
                 .facings
-                .turn(actor.fighter.id, facing(heading.x, heading.y));
+                .turn(actor.fighter.id, script.facing_at(i, script.length));
         }
         if !stage.button {
             spawn_skip_button(commands);
@@ -515,7 +527,7 @@ fn spawn_actors(
         let fighter = &actor.fighter;
         let size = match session.rules.units.get(&fighter.kind) {
             Some(def) => unit_size(def),
-            None if actor.sea => Vec2::new(112.0, 84.0),
+            None if actor.sea => Vec2::new(144.0, 108.0),
             None => Vec2::splat(70.0),
         };
         // A unit that is still there looks as the map will draw it when the fight is over, so
@@ -557,15 +569,12 @@ fn spawn_actors(
             })
             .flatten();
         let mut sprite = match &art {
-            Some(art) => {
-                let toward = actor.toward;
-                art.get(fourx_content::animation::Clip::Idle).sprite(
-                    facing(toward.x, toward.y),
-                    0,
-                    size,
-                    start.with_alpha(0.0),
-                )
-            }
+            Some(art) => art.get(fourx_content::animation::Clip::Idle).sprite(
+                script.facing_at(i, 0.0),
+                0,
+                size,
+                start.with_alpha(0.0),
+            ),
             None => Sprite {
                 custom_size: Some(size),
                 color: start.with_alpha(0.0),
@@ -686,8 +695,7 @@ fn show_clip(
     sprite: &mut Sprite,
     images: &Assets<Image>,
 ) {
-    let heading = script.heading_at(actor, t);
-    let face = facing(heading.x, heading.y);
+    let face = script.facing_at(actor, t);
     let (clip, frame) = match script.showing(actor, t) {
         Showing::Once { clip, progress } => (art.get(clip), art.get(clip).once(progress)),
         Showing::Looping { clip, seconds } => (art.get(clip), art.get(clip).looping(seconds)),
@@ -724,10 +732,13 @@ enum FxKind {
     Shell { to: Vec2, landing: Landing },
     /// A star that drifts upward and spins away.
     Star { rise: Vec2 },
+    /// A ring that spreads across the water, drawn squashed to the map's slant.
+    Ring { from: f32, to: f32, peak: f32 },
 }
 
 #[derive(Component)]
 pub(super) struct Fx {
+    /// Seconds into its life; below zero it is still waiting to appear.
     age: f32,
     life: f32,
     from: Vec3,
@@ -743,7 +754,21 @@ fn spawn_fx(
     life: f32,
     kind: FxKind,
 ) {
+    spawn_fx_after(commands, art, from, color, life, kind, 0.0);
+}
+
+/// An effect that begins `delay` seconds from now.
+fn spawn_fx_after(
+    commands: &mut Commands,
+    art: &FxArt,
+    from: Vec3,
+    color: Srgba,
+    life: f32,
+    kind: FxKind,
+    delay: f32,
+) {
     let (image, size) = match kind {
+        FxKind::Ring { from: size, .. } => (art.ring.clone(), Vec2::new(size, size * 0.5)),
         FxKind::Puff { from: size, .. } => (art.soft.clone(), Vec2::splat(size)),
         FxKind::Star { .. } => (art.star.clone(), Vec2::splat(18.0)),
         FxKind::Shell { .. } => (art.soft.clone(), Vec2::splat(9.0)),
@@ -757,7 +782,7 @@ fn spawn_fx(
         },
         Transform::from_translation(from),
         Fx {
-            age: 0.0,
+            age: -delay,
             life: life.max(0.01),
             from,
             color,
@@ -765,6 +790,109 @@ fn spawn_fx(
         },
         StageVisual,
     ));
+}
+
+/// Where a broadside ship's guns are on screen, with the weight of each, when its design says: the
+/// cell pixels of the table, put where the sprite is drawn.
+fn muzzles(session: &Session, script: &Script, actor: usize, t: f32) -> Option<Vec<(Vec2, f32)>> {
+    let a = &script.actors[actor];
+    if a.style != Style::Broadside || !a.animated {
+        return None;
+    }
+    let flavor = session
+        .game
+        .as_ref()?
+        .factions
+        .get(&a.fighter.owner)?
+        .flavor;
+    let visual = session.pack.visuals.unit(&a.fighter.kind, flavor)?;
+    let unit = visual.clips?;
+    let row = unit.muzzles.get(script.facing_at(actor, t) as usize)?;
+    let size = unit_size(session.rules.units.get(&a.fighter.kind)?);
+    let frame = Vec2::new(unit.frame[0] as f32, unit.frame[1] as f32);
+    let centre = a.anchor + script.pose_at(actor, t).offset + Vec2::Y * LIFT;
+    Some(
+        row.iter()
+            .map(|&[x, y, weight]| {
+                let corner = Vec2::new((x / frame.x - 0.5) * size.x, (0.5 - y / frame.y) * size.y);
+                (centre + corner, weight)
+            })
+            .collect(),
+    )
+}
+
+/// The blast of a broadside: at every gun on the beam a white-hot flash, an orange fireball that
+/// rolls up into brown and then black smoke, and a pale ring of shock across the water. The
+/// guns do not quite fire together.
+fn broadside(commands: &mut Commands, art: &FxArt, guns: &[(Vec2, f32)], out: Vec2) {
+    for (n, &(at, weight)) in guns.iter().enumerate() {
+        let delay = (n * 5 % 4) as f32 * 0.012;
+        let size = 0.55 + 0.45 * weight.min(1.6);
+        let drift = out * 14.0;
+        let muzzle = at.extend(FX_Z);
+        let flash = FxKind::Puff {
+            from: 16.0 * size,
+            to: 56.0 * size,
+            rise: Vec2::ZERO,
+            peak: 1.0,
+        };
+        spawn_fx_after(commands, art, muzzle, FLASH, 0.13, flash, delay);
+        let fireball = FxKind::Puff {
+            from: 10.0 * size,
+            to: 42.0 * size,
+            rise: drift * 0.4 + Vec2::Y * 8.0,
+            peak: 0.95,
+        };
+        spawn_fx_after(
+            commands,
+            art,
+            muzzle - Vec3::Z * 0.05,
+            FIREBALL,
+            0.34,
+            fireball,
+            delay,
+        );
+        // The shock rings only for every other gun, or a long ship's would stack like coins.
+        if n % 2 == 0 {
+            let ring = FxKind::Ring {
+                from: 12.0 * size,
+                to: 66.0 * size,
+                peak: 0.55,
+            };
+            let on_water = (at + Vec2::new(0.0, -8.0)).extend(FX_Z - 0.3);
+            spawn_fx_after(commands, art, on_water, FOAM, 0.55, ring, delay);
+        }
+        let brown = FxKind::Puff {
+            from: 16.0 * size,
+            to: 52.0 * size,
+            rise: drift + Vec2::Y * 16.0,
+            peak: 0.65,
+        };
+        spawn_fx_after(
+            commands,
+            art,
+            muzzle - Vec3::Z * 0.1,
+            BROWN,
+            0.95,
+            brown,
+            delay + 0.04,
+        );
+        let soot = FxKind::Puff {
+            from: 14.0 * size,
+            to: 60.0 * size,
+            rise: drift * 1.5 + Vec2::Y * 34.0,
+            peak: 0.6,
+        };
+        spawn_fx_after(
+            commands,
+            art,
+            muzzle - Vec3::Z * 0.15,
+            SOOT,
+            1.4,
+            soot,
+            delay + 0.12,
+        );
+    }
 }
 
 /// Does what an event of the script calls for at the moment `at`.
@@ -791,6 +919,10 @@ fn fire(
             }
         }
         Moment::Flash { actor, big } => {
+            if let Some(guns) = muzzles(session, script, actor, at) {
+                broadside(commands, art, &guns, script.actors[actor].toward);
+                return;
+            }
             let at_muzzle = muzzle(actor, if big { 38.0 } else { 26.0 }).extend(FX_Z);
             let (to, life) = if big { (64.0, 0.14) } else { (38.0, 0.10) };
             let flash = FxKind::Puff {
@@ -818,8 +950,13 @@ fn fire(
             to,
             flight,
             hits,
+            index,
         } => {
-            let start = muzzle(from, 30.0);
+            // A broadside's shells each leave a different gun on the beam.
+            let start = muzzles(session, script, from, at)
+                .filter(|guns| !guns.is_empty())
+                .map(|guns| guns[(2 * usize::from(index) + 1) * guns.len() / 6].0)
+                .unwrap_or_else(|| muzzle(from, 30.0));
             let aim = centre(to, at + flight);
             let (end, landing) = if hits {
                 (aim, Landing::Hit)
@@ -908,6 +1045,10 @@ pub(super) fn fx(
 ) {
     for (entity, mut fx, mut transform, mut sprite) in &mut effects {
         fx.age += stage.step;
+        if fx.age < 0.0 {
+            sprite.color = Color::from(fx.color).with_alpha(0.0);
+            continue;
+        }
         let u = (fx.age / fx.life).clamp(0.0, 1.0);
         match fx.kind {
             FxKind::Puff {
@@ -944,6 +1085,11 @@ pub(super) fn fx(
                     let at = to.extend(FX_Z);
                     spawn_fx(&mut commands, &art, at, color, life, cloud);
                 }
+            }
+            FxKind::Ring { from, to, peak } => {
+                let width = mix(from, to, 1.0 - (1.0 - u) * (1.0 - u));
+                sprite.custom_size = Some(Vec2::new(width, width * 0.5));
+                sprite.color = Color::from(fx.color).with_alpha(peak * (1.0 - u).powf(1.2));
             }
             FxKind::Star { rise } => {
                 transform.translation = fx.from + rise.extend(0.0) * u;

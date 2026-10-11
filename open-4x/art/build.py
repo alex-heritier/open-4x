@@ -2,13 +2,15 @@
 """Render every picture in the base pack: SVG scenes -> rsvg-convert -> painterly finishing -> PNG.
 
     python build.py                 # everything
-    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | units | icons | resources)
+    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | units | ships | icons | resources)
 
 Writes PNGs into ../assets/packs/base and the vector sources into ./svg.
 Needs: python3 + numpy + pillow (see requirements.txt) and `rsvg-convert` (librsvg) on PATH.
 """
 
+import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -20,7 +22,7 @@ from forge.paint import paint, render_sprite
 from forge.util import PACK, downsample, indexed, save_png, write_svg
 
 # Authoring is at 2x the sizes the game draws: sprites 256x224 (shown 128x112), land units 160x160
-# (shown 70x70), ships 256x192 (shown 112x84).  Terrain cells are 192x96 (shown 128x64).
+# (shown 70x70), ships 256x192 (shown 144x108).  Terrain cells are 192x96 (shown 128x64).
 
 
 def render_jobs(jobs, fn, chunksize, workers=None):
@@ -181,6 +183,29 @@ def build_resources():
         sprite(f"resource_{name}", resources.build(name), (resources.SIZE, resources.SIZE), f"sprites/resources/{name}.png", ss=4, seed=2, radius=1, rim=0.5)
 
 
+def build_ships():
+    """Only the ships: their sheets, and the muzzle tables the client fires a broadside from."""
+    build_units(list(fleet.BUILDERS))
+    write_muzzles()
+
+
+def write_muzzles():
+    """Put each ship's per-facing muzzle table into pack.json, replacing the one there, line by line so the
+    hand-formatted file stays readable."""
+    path = PACK / "pack.json"
+    text = path.read_text()
+    for name in fleet.BUILDERS:
+        rows = fleet.muzzle_table(name)
+        body = ",\n".join("            " + json.dumps(row, separators=(",", ":")) for row in rows)
+        block = f'          "muzzles": [\n{body}\n          ],\n'
+        head = re.compile(rf'(      "{re.escape(name)}": {{\n        "sprite": "[^"\n]+",\n        "clips": {{\n          "frame": \[\d+, \d+\],\n)(          "muzzles": \[\n(?:            .*\n)+?          \],\n)?')
+        text, n = head.subn(lambda m: m.group(1) + block, text, count=1)
+        if n != 1:
+            sys.exit(f"pack.json has no visuals.units.{name} block to put muzzles in")
+    path.write_text(text)
+    print("  muzzles")
+
+
 GROUPS = {
     "terrain": build_terrain,
     "roads": build_roads,
@@ -190,6 +215,7 @@ GROUPS = {
     "cities": build_cities,
     "units": build_units,
     "flavor": build_flavor_units,
+    "ships": build_ships,
     "icons": build_icons,
     "resources": build_resources,
 }

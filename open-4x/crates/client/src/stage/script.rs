@@ -6,7 +6,7 @@
 //! `docs/combat-animation.md`; keep its constants table in step with the ones below.
 use super::motion::{FIRE_AT, Motion, Pose, STEP_SECS, STRIKE_AT};
 use bevy::math::Vec2;
-use fourx_content::animation::Clip;
+use fourx_content::animation::{Clip, facing};
 use fourx_content::combat::{CombatVisuals, Style};
 use fourx_sim::{Battle, Fighter, Id, Outcome, Rules, Support, terrain::Coord};
 
@@ -20,6 +20,9 @@ pub const SHELL_SPEED: f32 = 600.0;
 pub const SHELL_FLIGHT: (f32, f32) = (0.25, 0.90);
 /// Gap between the shots of a broadside.
 pub const SALVO_GAP: f32 = 0.05;
+/// Facings a broadside ship is turned past looking at its foe, to show it its starboard side: a
+/// quarter turn clockwise on the ground, which is two eighths.
+pub const BEAM_ON: u32 = 2;
 /// Where a defender's supporting gun stands beside it.
 const SUPPORT_SHIFT: Vec2 = Vec2::new(30.0, 8.0);
 
@@ -100,6 +103,8 @@ pub enum Event {
         to: usize,
         flight: f32,
         hits: bool,
+        /// Which of its volley's shells this is (a broadside fires several, each from its own gun).
+        index: u8,
     },
     /// A cloud kicked up where a charge meets its mark.
     Dust {
@@ -281,6 +286,20 @@ impl Script {
             .unwrap_or(a.toward)
     }
 
+    /// Which sheet row an actor is drawn in `t` seconds in: the way it looks, except that a
+    /// ship that fights broadside-on shows its starboard side to the foe, two facings round from
+    /// looking at it. (A ship under way on a step sails bow first.)
+    pub fn facing_at(&self, actor: usize, t: f32) -> u32 {
+        let a = &self.actors[actor];
+        let heading = self.heading_at(actor, t);
+        let face = facing(heading.x, heading.y);
+        if a.animated && a.style == Style::Broadside && heading == a.toward {
+            (face + BEAM_ON) % 8
+        } else {
+            face
+        }
+    }
+
     /// An actor's hit points `t` seconds in: each blow so far costs one.
     pub fn hp_at(&self, actor: usize, t: f32) -> i32 {
         let blows = self
@@ -411,13 +430,13 @@ impl<'a> Builder<'a> {
 
     /// The shells of one shot: one, or three for a broadside.
     fn volley(&mut self, from: usize, to: usize, fire: f32, flight: f32, hits: bool) {
-        let shells = if self.actors[from].style == Style::Broadside {
+        let shells: u8 = if self.actors[from].style == Style::Broadside {
             3
         } else {
             1
         };
         for k in 0..shells {
-            let launch = fire + k as f32 * SALVO_GAP;
+            let launch = fire + f32::from(k) * SALVO_GAP;
             self.at(
                 launch,
                 Event::Shell {
@@ -425,6 +444,7 @@ impl<'a> Builder<'a> {
                     to,
                     flight,
                     hits,
+                    index: k,
                 },
             );
         }
@@ -1523,6 +1543,29 @@ mod tests {
             .fold(0.0, f32::max);
         let beat = script.beats[0];
         assert!(last <= beat.start + beat.length + 1e-4);
+    }
+
+    #[test]
+    fn a_broadside_ship_shows_its_starboard_side_to_the_foe() {
+        let battle = bombard(&[true], false, "protected-cruiser", (5, 5));
+        let (plain, animated) = (build(&battle), build_animated(&battle));
+        for (script, turned) in [(&plain, false), (&animated, true)] {
+            let (ship, foe) = (0, 1);
+            let looking = |i: usize| {
+                let toward = script.actors[i].toward;
+                facing(toward.x, toward.y)
+            };
+            // Only a ship drawn from clips can be turned to show a side.
+            let expected = if turned {
+                (looking(ship) + BEAM_ON) % 8
+            } else {
+                looking(ship)
+            };
+            assert_eq!(script.facing_at(ship, 0.0), expected);
+            assert_eq!(script.facing_at(ship, script.length), expected);
+            // Whatever it shoots at keeps looking at it.
+            assert_eq!(script.facing_at(foe, 0.0), looking(foe));
+        }
     }
 
     #[test]

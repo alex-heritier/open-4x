@@ -181,17 +181,31 @@ standing. When a fight starts, every unit in it is turned to face the way the fi
 the survivors keep looking at the foe on the map. A design without clips is drawn from its single
 image, flipped to face its foe, and moves by its pose alone.
 
+**Broadside.** A ship in a fight is turned *beam-on*: it is drawn in the facing two eighths
+(`BEAM_ON`, a quarter turn) past the one that looks at the foe, so that its starboard side, where
+its guns are trained, shows to the foe. (A ship stepping to retreat still sails bow first, and a
+design drawn from a single image is not turned.) The attack clip carries what belongs to the hull:
+turrets training round to the beam, the recoil, the heel, a glare at each muzzle and the haze that
+hangs about the guns afterwards. The rest of the blast is the client's, put at the guns' own
+positions: a design lists in `visuals.units.<design>.clips`' `muzzles` the `[x, y, weight]` of every
+gun that fires on the starboard beam at `FIRE_AT`, for each of the eight facings (cell pixels from
+the top left; the weight sizes the blast). At each muzzle the stage fires a white-hot flash, an
+orange fireball that rolls up into brown and then black smoke, and on every other gun a pale ring
+of shock across the water; the guns go off within about 0.04 s of one another rather than on the
+same frame. The three shells each leave a different gun. A ship whose design lists no muzzles is
+not turned and fires the older single flash.
+
 | Style | Default for | Attack motion (length) | Cues |
 | --- | --- | --- | --- |
 | `volley` | land units that attack | recoil at `FIRE_AT` (0.80 s) | muzzle flash, smoke, small shell, `volley` |
 | `charge` | explicit only (cavalry) | wind-up, thrust, contact at `STRIKE_AT`, recover (0.80 s) | dust, `charge` |
 | `gun` | land units with a bombard | heavy recoil (0.90 s) | large flash and smoke, shell, `gun` |
-| `broadside` | all sea units | roll and recoil (1.00 s) | three staggered flashes, shells, `broadside` |
+| `broadside` | all sea units | beam-on roll and recoil (1.00 s) | a blast at every gun on the beam, three shells, `broadside` |
 
 | Other motion | Length | Notes |
 | --- | --- | --- |
 | Fall | 0.90 s | Topples and fades. Sound `fall`. |
-| Sink | 1.80 s | Lists, drops, fades; splash and smoke. Sound `sink`. |
+| Sink | 1.80 s | Lists, drops, fades; the sheet shows a magazine explosion and a ring of foam where she goes under. Sound `sink`. |
 | Cheer | 0.70 s | Two small hops (a gentle bob at sea). |
 | Yield | 0.90 s | Settles and turns toward the captor's colour. Sound `yield`. |
 | Withdraw | 0.60 s | Slides away from the foe and back. |

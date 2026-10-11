@@ -1196,7 +1196,7 @@ pub(super) fn refresh(
 /// How big a design's sprite is drawn: ships are wider than they are tall.
 pub(super) fn unit_size(def: &UnitDef) -> Vec2 {
     if def.is_naval() {
-        Vec2::new(112.0, 84.0)
+        Vec2::new(144.0, 108.0)
     } else {
         Vec2::splat(70.0)
     }

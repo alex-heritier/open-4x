@@ -64,7 +64,17 @@ pub struct UnitAnimation {
     /// and anchored like its sprite.
     pub frame: [u32; 2],
     pub clips: BTreeMap<Clip, Sheet>,
+    /// Where a ship's guns fire a broadside from, for each facing (empty for everything else).
+    /// The ship is drawn with its starboard side turned to the foe, so each row lists the muzzles
+    /// on the starboard beam at the moment of firing, in cell pixels from the top left, with a
+    /// weight for how big a blast the gun throws. The client puts the flashes, fireballs and
+    /// smoke there; the sheet carries only the hull, the trained turrets and the haze.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub muzzles: Vec<Vec<Muzzle>>,
 }
+
+/// One gun's muzzle: `[x, y, weight]`.
+pub type Muzzle = [f32; 3];
 
 impl UnitAnimation {
     pub fn clip(&self, clip: Clip) -> &Sheet {
@@ -185,7 +195,31 @@ fn check_clips(id: &str, unit: &UnitAnimation) -> Result<(), ContentError> {
             )));
         }
     }
-    Ok(())
+    validate_muzzles(id, unit)
+}
+
+fn validate_muzzles(id: &str, unit: &UnitAnimation) -> Result<(), ContentError> {
+    if unit.muzzles.is_empty() {
+        return Ok(());
+    }
+    let [w, h] = unit.frame;
+    let ok = unit.muzzles.len() == FACINGS as usize
+        && unit.muzzles.iter().all(|row| {
+            !row.is_empty()
+                && row.len() <= 32
+                && row.iter().all(|&[x, y, weight]| {
+                    (0.0..w as f32).contains(&x)
+                        && (0.0..h as f32).contains(&y)
+                        && (0.1..=4.0).contains(&weight)
+                })
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err(ContentError::Invalid(format!(
+            "visuals.units.{id}.muzzles needs one row per facing ({FACINGS}), each listing 1-32 [x, y, weight] guns inside the frame with a weight of 0.1-4"
+        )))
+    }
 }
 
 /// The facing (sheet row) that looks along a screen direction, `+y` up. The map is drawn at
@@ -218,6 +252,7 @@ mod tests {
         UnitAnimation {
             frame: [160, 160],
             clips: Clip::ALL.into_iter().map(|c| (c, sheet(8))).collect(),
+            muzzles: Vec::new(),
         }
     }
 
@@ -317,6 +352,22 @@ mod tests {
         breaks(&|u| u.clips.get_mut(&Clip::Idle).unwrap().ms = 5);
         breaks(&|u| u.clips.get_mut(&Clip::Idle).unwrap().sheet = "../x.png".into());
         breaks(&|u| u.frame = [160, 300]);
+        breaks(&|u| u.muzzles = vec![vec![[10.0, 10.0, 1.0]]; 7]);
+        breaks(&|u| u.muzzles = vec![vec![[10.0, 200.0, 1.0]]; 8]);
+        breaks(&|u| u.muzzles = vec![Vec::new(); 8]);
+        let mut armed = animation();
+        armed.muzzles = vec![vec![[10.0, 10.0, 1.0], [20.0, 12.0, 0.5]]; 8];
+        validate(
+            &BTreeMap::from([(
+                "infantry".to_string(),
+                UnitVisual {
+                    clips: Some(armed),
+                    ..visual()
+                },
+            )]),
+            &rules,
+        )
+        .unwrap();
         let unknown = BTreeMap::from([("dragon".to_string(), visual())]);
         assert!(validate(&unknown, &rules).is_err());
     }
@@ -421,6 +472,19 @@ mod tests {
                     "{id} {clip:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn every_base_ship_says_where_its_broadside_fires_from() {
+        let pack = Pack::base();
+        for (id, def) in &pack.rules.units {
+            let unit = pack.visuals.units[id].clips.as_ref().unwrap();
+            assert_eq!(
+                !unit.muzzles.is_empty(),
+                def.is_naval(),
+                "{id}: only ships have muzzles, and every ship has them"
+            );
         }
     }
 }

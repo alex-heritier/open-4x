@@ -11,8 +11,10 @@ cd art
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # numpy, pillow
 brew install librsvg                                                   # provides rsvg-convert
 .venv/bin/python build.py              # all groups
-.venv/bin/python build.py terrain      # or: terrain | roads | overlays | relief | sprites | cities | units | flavor | icons | resources
+.venv/bin/python build.py terrain      # or: terrain | roads | overlays | relief | sprites | cities | units | flavor | ships | icons | resources
 ```
+
+`build.py ships` redraws only the five ships and rewrites each one's `muzzles` table (where its guns fire from, per facing) in `pack.json`; the client needs that table to fire a broadside.
 
 Output goes to `assets/packs/base/`; the vector sources of the sprites are written to `art/svg/` (git-ignored, reproducible). Builds are deterministic (fixed seeds).
 `preview_*.py` are scratch scripts that render contact sheets into `art/preview/` (git-ignored).
@@ -34,7 +36,7 @@ Art is authored at **2x** the size the game draws, so it stays crisp on high-DPI
 | infantry, pioneer, worker, cavalry, artillery (and each cell of their animation sheets) | 160x160 | 70x70 | tile centre about (80, 108) |
 | farm, mine overlays | 256x128 | 128x64 | one diamond, drawn over the tile |
 | `farm_shore.png` | 8 x 4 pieces of 256x128 | 128x64 each | the farm cut by the shoreline of the water sheet, one piece per dual cell round a tile (see `forge/improvements.py`); a farm beside water is drawn from four of these instead of the whole diamond |
-| ironclad, transport, battleship, protected cruiser, torpedo boat (and each cell of their sheets) | 256x192 | 112x84 | tile centre about (128, 123) |
+| ironclad, transport, battleship, protected cruiser, torpedo boat (and each cell of their sheets) | 256x192 | 144x108 | tile centre about (128, 123) |
 
 All light comes from the upper left, in every module.
 
@@ -86,7 +88,7 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 | `overlay.py` | the fog-of-war and culture-border sheets |
 | `rig.py` | a small 3D puppet renderer that writes SVG: the game's 2:1 camera, painter-sorted polygons, tubes, tapered limbs and balls, Lambert light from the upper left, two-bone IK, the eight facings |
 | `troops.py` | the land units as puppets: riflemen, pioneers and workers, horse and dragoon, field gun and gunner, and their five clips. It also holds the per-culture **kits** (`FLAVOR_KITS`: coat, trousers, accent and headgear) and **steeds** (`FLAVOR_STEEDS`), from which `BUILDERS` gains an `infantry_<flavor>` and a `cavalry_<flavor>` for each culture that fields its own |
-| `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, deck) with boxes, funnels, turrets, masts, ensign, wake and smoke, and their five clips |
+| `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, planked deck) with casemates, oval funnels and their trailing plumes, turrets that train round to the starboard beam, sponsons, tripod masts, ensign, bow and stern foam, and their five clips; `muzzle_table(design)` reports where the guns are when a broadside fires, for `pack.json`'s `muzzles` |
 | `icons.py` | flat white glyph icons (`icon_*`, `hud_*`) |
 | `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (ore heaps, crops, animals, a derrick, flags for the colonial markers; no frame or outline, only a contact shadow), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
 
@@ -103,7 +105,7 @@ north-east, north, north-west, west. Facing `k` looks along the ground at `225 +
 | `run` | 8 x 60 (loops) | 8 x 90 (loops) | one stride, gallop or wheel turn in place; a ship's bow wave and wake |
 | `attack` | 10 x 80 | 8 x 120 | the shot 30% of the way in (a charge connects at 50%), then back to rest |
 | `victory` | 8 x 90 | 8 x 110 | rifles, sabre or cap raised, a horse rearing; a ship's whistle |
-| `death` | 10 x 90 | 8 x 220 | struck, crumpling and falling; a ship burning, listing and going down |
+| `death` | 10 x 90 | 8 x 220 | struck, crumpling and falling; a ship's magazine going up in two columns of fire and smoke, then listing and going down in a ring of foam |
 
 These numbers are also in `pack.json` (`visuals.units`), and a content test checks every sheet against them. Each
 figure is posed in its own frame and drawn through the camera, so all eight facings come from one model: a puppet is
