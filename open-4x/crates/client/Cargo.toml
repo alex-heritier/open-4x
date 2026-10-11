@@ -21,7 +21,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
   "std", "async_executor", "bevy_asset", "bevy_log", "bevy_window", "bevy_winit",
   "bevy_color", "bevy_camera", "bevy_image", "bevy_mesh", "bevy_shader",
   "bevy_text", "bevy_render", "bevy_core_pipeline", "bevy_sprite", "bevy_sprite_render",
-  "bevy_ui", "bevy_ui_render", "bevy_gizmos", "bevy_gizmos_render", "default_font", "png", "webgl2", "http", "https", "audio", "wav"
+  "bevy_ui", "bevy_ui_render", "bevy_gizmos", "bevy_gizmos_render", "default_font", "png", "webgl2", "http", "https", "audio", "wav", "mp3"
 ] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

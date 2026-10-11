@@ -99,6 +99,14 @@ pub struct Visuals {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub railroads: String,
     pub turn_sound: String,
+    /// Optional: music under the diplomacy window, played in a loop while it is open.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub diplomacy_music: String,
+    /// Optional: a picture of each nation, by its scenario tag: its flag, which is also the
+    /// art of its leader (200 x 240, portrait). A nation without one is drawn as a flag made
+    /// of its colour.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub nations: BTreeMap<String, String>,
     /// How fights look and sound; every part is optional.
     #[serde(default)]
     pub combat: combat::CombatVisuals,
@@ -127,11 +135,13 @@ impl Visuals {
         ]
         .into_iter()
         .chain((!self.farm_shore.is_empty()).then_some(&self.farm_shore))
+        .chain((!self.diplomacy_music.is_empty()).then_some(&self.diplomacy_music))
         .chain((!self.roads.is_empty()).then_some(&self.roads))
         .chain((!self.railroads.is_empty()).then_some(&self.railroads))
         .chain(self.overlays.values())
         .chain(self.relief_borders.values())
         .chain(self.resources.values())
+        .chain(self.nations.values())
         .chain(self.cities.values())
         .chain(self.city_banners.values())
         .chain(self.combat.paths())

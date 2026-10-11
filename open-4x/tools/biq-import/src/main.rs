@@ -120,10 +120,11 @@ fn slug(name: &str) -> String {
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
-    let (mut input, mut out) = (None, None);
+    let (mut input, mut out, mut art) = (None, None, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => out = args.next(),
+            "--art" => art = true,
             _ => input = Some(arg),
         }
     }
@@ -137,6 +138,15 @@ fn main() -> ExitCode {
             env!("CARGO_MANIFEST_DIR")
         )
     });
+    if art {
+        return match print_art(&input) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("{input}: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match run(&input, &out) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -144,6 +154,32 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `--art`: print, as JSON on stdout, which Civ3 art each player's civilization names: its
+/// Civilopedia key (the key of `PediaIcons.txt`, which names the flag picture) and its era
+/// animations (the leader's flics). Used by `tools/aoi-art/import.py`.
+fn print_art(input: &str) -> Result<(), String> {
+    let biq = Biq::read_file(input).map_err(|e| e.to_string())?;
+    let mut nations = serde_json::Map::new();
+    for lead in &biq.scenario.players {
+        let civ = biq
+            .rules
+            .civilizations
+            .get(lead.civilization as usize)
+            .ok_or("a player has no civilization")?;
+        let flics: Vec<_> = civ.era_art.iter().map(|s| s.to_string()).collect();
+        nations.insert(
+            slug(&civ.civilization_name.to_string()),
+            serde_json::json!({
+                "race": civ.civilopedia_entry.to_string(),
+                "leader": lead.leader_name.to_string(),
+                "flics": flics,
+            }),
+        );
+    }
+    println!("{}", serde_json::to_string_pretty(&nations).map_err(|e| e.to_string())?);
+    Ok(())
 }
 
 fn run(input: &str, out: &str) -> Result<(), String> {

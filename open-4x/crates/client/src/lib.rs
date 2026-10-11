@@ -1,6 +1,7 @@
 mod bar;
 mod city;
 mod connection;
+mod diplomacy;
 mod march;
 mod presentation;
 mod puppet;
@@ -23,6 +24,10 @@ use fourx_sim::{
 /// Zoom limits. The whole world never fits one screen; the minimap covers overview.
 const MIN_ZOOM: f32 = 0.4;
 const MAX_ZOOM: f32 = 4.0;
+/// How much faster the camera pans while Shift is held.
+const PAN_BOOST: f32 = 3.0;
+/// The camera's scale when no `--zoom` is given.
+const DEFAULT_ZOOM: f32 = 0.84;
 /// What shows behind a map that has no void of its own: deep water.
 const BACKDROP: Color = Color::srgb(0.055, 0.13, 0.15);
 
@@ -50,6 +55,8 @@ struct Session {
     previous_pinch: Option<f32>,
     /// A recorded fight is playing or waiting: orders are held back until it is over.
     staging: bool,
+    /// The nation whose leader the diplomacy window shows, if it is open.
+    diplomacy: Option<Id>,
 }
 
 /// A rectangle of the world in screen units (what the camera shows). Only tiles, cities and
@@ -319,6 +326,12 @@ struct Inspector;
 /// carries an `Interaction` so that a click on it is not a click on the map under it.
 #[derive(Component)]
 struct InfoPane;
+/// Either card of the top bar. Like `InfoPane` it carries an `Interaction`, so that a click on it
+/// is not a click on the map under it.
+#[derive(Component)]
+struct TopCard;
+/// The cards that block clicks to the map under them.
+type Panels = (With<InfoPane>, With<TopCard>);
 #[derive(Component, Clone)]
 enum Action {
     EndTurn,
@@ -336,6 +349,11 @@ enum Action {
     SelectCity(Id),
     /// Close the city's detail view.
     CloseCity,
+    /// Open the diplomacy window with a nation's leader.
+    Talk(Id),
+    CloseTalk,
+    /// A control that is drawn but does nothing yet.
+    Idle,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -573,6 +591,7 @@ pub fn run() {
             smoke: flag("--smoke"),
             previous_pinch: None,
             staging: false,
+            diplomacy: option("--talk").and_then(|id| id.parse().ok()),
         })
         .insert_resource(stage::Stage::new())
         .init_resource::<march::Walks>()
@@ -606,6 +625,7 @@ pub fn run() {
                 theme::paint,
                 bar::update,
                 city::scroll,
+                diplomacy::music,
                 scroll_inspector,
                 minimap_click,
                 controls,
@@ -654,7 +674,7 @@ fn setup(
 ) {
     let zoom = option("--zoom")
         .and_then(|z| z.parse::<f32>().ok())
-        .unwrap_or(1.25)
+        .unwrap_or(DEFAULT_ZOOM)
         .clamp(MIN_ZOOM, MAX_ZOOM);
     // The camera is moved onto the player's capital when the first snapshot arrives.
     commands.spawn((
@@ -923,6 +943,18 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             session.dirty = true;
             None
         }
+        Action::Talk(nation) => {
+            session.diplomacy = Some(*nation);
+            session.selection = Selection::None;
+            session.dirty = true;
+            None
+        }
+        Action::CloseTalk => {
+            session.diplomacy = None;
+            session.dirty = true;
+            None
+        }
+        Action::Idle => None,
         Action::CloseCity => {
             if matches!(session.selection, Selection::City(_)) {
                 session.selection = Selection::None;
@@ -1097,7 +1129,7 @@ fn controls(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut camera: Query<(&Camera, &GlobalTransform, &mut Transform, &mut Projection), With<Camera2d>>,
     ui: Query<&Interaction, With<Button>>,
-    info: Query<&Interaction, With<InfoPane>>,
+    info: Query<&Interaction, Or<Panels>>,
     mut session: ResMut<Session>,
     mut connection: NonSendMut<Connection>,
     mut last_click: Local<Option<(Coord, f64)>>,
@@ -1111,7 +1143,13 @@ fn controls(
     let Projection::Orthographic(ref mut ortho) = *projection else {
         return;
     };
-    let step = time.delta_secs() * 650.0 * ortho.scale;
+    // Holding either Shift key pans faster.
+    let boost = if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        PAN_BOOST
+    } else {
+        1.0
+    };
+    let step = time.delta_secs() * 650.0 * boost * ortho.scale;
     if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
         transform.translation.x -= step;
     }
@@ -1129,7 +1167,8 @@ fn controls(
         .is_some_and(|p| inspector_contains(window, p))
         || info.iter().any(|i| *i != Interaction::None)
         // The city view is a window over the map; the wheel scrolls it (see `city::scroll`).
-        || matches!(session.selection, Selection::City(_));
+        || matches!(session.selection, Selection::City(_))
+        || session.diplomacy.is_some();
     for scroll in wheel.read() {
         if !over_inspector {
             ortho.scale = (ortho.scale * (1.0 - scroll.y * 0.08)).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -1147,6 +1186,14 @@ fn controls(
         transform.translation.y += delta.y;
     } else {
         session.previous_pinch = None;
+    }
+    // The diplomacy window is a modal: Escape leaves it, and nothing behind it takes keys.
+    if session.diplomacy.is_some() {
+        if keys.just_pressed(KeyCode::Escape) {
+            session.diplomacy = None;
+            session.dirty = true;
+        }
+        return;
     }
     let Some(game) = &session.game else {
         return;
@@ -1298,10 +1345,7 @@ fn controls(
         return;
     };
     // Panels also block map clicks in their empty space.
-    if cursor.y < theme::TOP_BAR
-        || cursor.y > window.height() - 38.0
-        || inspector_contains(window, cursor)
-    {
+    if cursor.y > window.height() - 38.0 || inspector_contains(window, cursor) {
         return;
     }
     let Ok(world) = camera.viewport_to_world_2d(global, cursor) else {

@@ -36,6 +36,7 @@ fn session() -> Session {
         smoke: false,
         previous_pinch: None,
         staging: false,
+        diplomacy: None,
     }
 }
 

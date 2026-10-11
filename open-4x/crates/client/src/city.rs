@@ -274,7 +274,26 @@ pub(super) fn spawn(
                             INK_SOFT,
                         );
                     });
-                    button(p, "Close", Action::CloseCity, Tone::Quiet);
+                    p.spawn(Node {
+                        column_gap: px(8),
+                        ..default()
+                    })
+                    .with_children(|p| {
+                        if !mine && let Some(faction) = game.factions.get(&c.owner) {
+                            let leader = faction.leader.trim();
+                            button(
+                                p,
+                                if leader.is_empty() {
+                                    "Talk".to_string()
+                                } else {
+                                    format!("Talk to {leader}")
+                                },
+                                Action::Talk(c.owner),
+                                Tone::Quiet,
+                            );
+                        }
+                        button(p, "Close", Action::CloseCity, Tone::Quiet);
+                    });
                 });
             });
         });

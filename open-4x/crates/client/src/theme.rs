@@ -14,8 +14,11 @@ use bevy::asset::AssetId;
 use bevy::sprite::{BorderRect, SliceScaleMode, SpriteImageMode, TextureSlicer};
 use bevy::text::{Font, FontWeight};
 
-/// Height of the bar along the top edge; map clicks under it belong to the bar.
-pub(crate) const TOP_BAR: f32 = 50.0;
+/// Room the two cards along the top edge take: their height plus the margin around them. The
+/// pane under them is kept clear of it.
+pub(crate) const TOP_BAR: f32 = 62.0;
+/// Distance of the top cards from the edges of the window.
+pub(crate) const TOP_MARGIN: f32 = 10.0;
 
 /// The face every `Text` uses (see [`install_font`]). Inter, SIL OFL 1.1: `fonts/Inter-OFL.txt`.
 const INTER: &[u8] = include_bytes!("../fonts/Inter-Variable.ttf");
@@ -57,6 +60,13 @@ pub(crate) const ON_PLATE: Color = Color::srgb(0.965, 0.957, 0.925);
 pub(crate) const GOOD: Color = Color::srgb(0.239, 0.576, 0.361);
 pub(crate) const BAD: Color = Color::srgb(0.765, 0.235, 0.216);
 pub(crate) const AMBER: Color = Color::srgb(0.835, 0.600, 0.157);
+/// The badges of the top bar's readouts: a gold coin, a violet flask, a forge's glow.
+pub(crate) const COIN: Color = Color::srgb(0.878, 0.639, 0.110);
+pub(crate) const LORE: Color = Color::srgb(0.451, 0.384, 0.769);
+pub(crate) const FORGE: Color = Color::srgb(0.847, 0.384, 0.196);
+/// An income, and a loss, read on the dark panel of the nation.
+pub(crate) const GAIN: Color = Color::srgb(0.490, 0.827, 0.545);
+pub(crate) const LOSS: Color = Color::srgb(0.929, 0.463, 0.416);
 /// The white of a selection on the map, and of the route that leads out of it.
 pub(crate) const SELECT: Color = Color::srgb(0.965, 0.957, 0.925);
 
@@ -251,6 +261,127 @@ pub(crate) fn nation_flag(parent: &mut ChildSpawnerCommands, color: Color, width
             px(3),
         ),
     ));
+}
+
+/// Gold of the trim around a flag.
+pub(crate) const TRIM: Color = Color::srgb(0.800, 0.647, 0.290);
+
+/// A nation's flag in a gilt frame: the pack's picture of it when there is one, else its colour
+/// set in one of five layouts, picked from the nation's tag so the same nation always flies the
+/// same flag.
+pub(crate) fn framed_flag(
+    parent: &mut ChildSpawnerCommands,
+    color: Color,
+    tag: &str,
+    art: Option<Handle<Image>>,
+    width: f32,
+    height: f32,
+) {
+    let light = Color::srgb(0.965, 0.957, 0.925);
+    let deep = {
+        let c = color.to_srgba();
+        Color::srgb(c.red * 0.55, c.green * 0.55, c.blue * 0.55)
+    };
+    let layout = tag
+        .bytes()
+        .fold(7u32, |h, b| h.wrapping_mul(31) + u32::from(b))
+        % 5;
+    let fill = |color: Color, left: f32, top: f32, width: f32, height: f32| {
+        (
+            Node {
+                position_type: PositionType::Absolute,
+                left: percent(left),
+                top: percent(top),
+                width: percent(width),
+                height: percent(height),
+                ..default()
+            },
+            BackgroundColor(color),
+        )
+    };
+    parent
+        .spawn((
+            Node {
+                width: px(width),
+                height: px(height),
+                flex_shrink: 0.0,
+                padding: UiRect::all(px(3)),
+                border: UiRect::all(px(2)),
+                border_radius: rounded((width * 0.2).min(14.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.20, 0.16, 0.11)),
+            BorderColor::all(TRIM),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.35),
+                px(0),
+                px(2),
+                px(0),
+                px(5),
+            ),
+        ))
+        .with_children(|p| {
+            p.spawn((
+                Node {
+                    width: percent(100),
+                    height: percent(100),
+                    border_radius: rounded((width * 0.12).min(9.0)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(color),
+            ))
+            .with_children(|c| match (art, layout) {
+                (Some(image), _) => {
+                    c.spawn((
+                        ImageNode::new(image),
+                        Node {
+                            width: percent(100),
+                            height: percent(100),
+                            ..default()
+                        },
+                    ));
+                }
+                // A disc on a light field.
+                (_, 0) => {
+                    c.spawn(fill(light, 0.0, 0.0, 100.0, 100.0));
+                    let disc = 0.46 * width;
+                    c.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: percent(50),
+                            top: percent(50),
+                            width: px(disc),
+                            height: px(disc),
+                            margin: UiRect::all(px(-disc / 2.0)),
+                            border_radius: rounded(999.0),
+                            ..default()
+                        },
+                        BackgroundColor(color),
+                    ));
+                }
+                // Three bands, the middle one light.
+                (_, 1) => {
+                    c.spawn(fill(light, 0.0, 33.0, 100.0, 34.0));
+                    c.spawn(fill(deep, 0.0, 67.0, 100.0, 33.0));
+                }
+                // Three columns, the middle one light.
+                (_, 2) => {
+                    c.spawn(fill(light, 33.0, 0.0, 34.0, 100.0));
+                    c.spawn(fill(deep, 67.0, 0.0, 33.0, 100.0));
+                }
+                // A light cross on the colour.
+                (_, 3) => {
+                    c.spawn(fill(light, 28.0, 0.0, 20.0, 100.0));
+                    c.spawn(fill(light, 0.0, 40.0, 100.0, 20.0));
+                }
+                // Two halves with a light canton.
+                (_, _) => {
+                    c.spawn(fill(deep, 0.0, 50.0, 100.0, 50.0));
+                    c.spawn(fill(light, 0.0, 0.0, 40.0, 50.0));
+                }
+            });
+        });
 }
 
 // --- glyphs --------------------------------------------------------------------------------------

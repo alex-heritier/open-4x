@@ -23,45 +23,77 @@ const MAP_FOG: [u8; 3] = [20, 33, 38];
 const MAP_OWN_CITY: [u8; 3] = [244, 238, 220];
 const MAP_OWN_CITY_CORE: [u8; 3] = [24, 28, 30];
 
-/// One readout of the top bar: a glyph and its figure, in a soft pill.
+/// Which corner of the window a card of the top bar sits in.
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum Side {
+    Left,
+    Right,
+}
+
+/// One readout of the top bar, a row of the nation's panel: a coloured badge carrying the glyph,
+/// the figure, and a darker cell at the end for the second figure (a rate, a target) if there is
+/// one.
 fn stat(
     parent: &mut ChildSpawnerCommands,
     assets: &AssetServer,
     prefix: &str,
     icon: &str,
+    tint: Color,
     value: impl Into<String>,
+    second: Option<(String, Color)>,
 ) {
     parent
         .spawn((
             Node {
+                width: percent(100),
+                height: px(24),
                 align_items: AlignItems::Center,
                 column_gap: px(8),
-                padding: UiRect::axes(px(12), px(6)),
-                border_radius: rounded(999.0),
+                padding: UiRect::left(px(3)),
+                border_radius: rounded(7.0),
+                overflow: Overflow::clip(),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(WELL),
+            BackgroundColor(Color::WHITE.with_alpha(0.10)),
         ))
         .with_children(|p| {
-            glyph(p, assets, prefix, icon, 18.0, INK.with_alpha(0.72));
-            bold(p, value, 13.5, INK);
+            p.spawn((
+                Node {
+                    width: px(19),
+                    height: px(19),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border_radius: rounded(999.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(tint),
+                BoxShadow::new(tint.with_alpha(0.5), px(0), px(0), px(0), px(3)),
+            ))
+            .with_children(|b| glyph(b, assets, prefix, icon, 12.0, Color::WHITE));
+            p.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            })
+            .with_children(|v| bold(v, value, 13.0, ON_PLATE));
+            if let Some((second, ink)) = second {
+                p.spawn((
+                    Node {
+                        min_width: px(46),
+                        height: percent(100),
+                        padding: UiRect::horizontal(px(8)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::BLACK.with_alpha(0.30)),
+                ))
+                .with_children(|c| bold(c, second, 12.5, ink));
+            }
         });
 }
 
-/// The first `chars` characters of `s`, cut at a word, with an ellipsis when cut. A
-/// panel that shows prose shows a readable excerpt of it, not a wall.
-fn clipped(s: &str, chars: usize) -> String {
-    if s.chars().count() <= chars {
-        return s.to_string();
-    }
-    let mut cut: String = s.chars().take(chars).collect();
-    if let Some(space) = cut.rfind(char::is_whitespace) {
-        cut.truncate(space);
-    }
-    cut.push_str("...");
-    cut
-}
 fn image_sprite(
     commands: &mut Commands,
     image: &Handle<Image>,
@@ -92,6 +124,16 @@ fn long_date(date: Date) -> String {
         date.month_name(),
         date.year()
     )
+}
+
+/// The pack's picture of a nation (its flag and leader art), if it has one.
+pub(crate) fn nation_art(
+    session: &Session,
+    assets: &AssetServer,
+    tag: &str,
+) -> Option<Handle<Image>> {
+    let path = session.pack.visuals.nations.get(tag)?;
+    Some(assets.load(format!("{}{path}", session.asset_prefix)))
 }
 
 fn nation_rgb(game: &Game, owner: Id) -> [u8; 3] {
@@ -404,7 +446,9 @@ pub(super) fn fit_terrain_atlas(
         }
     }
     let (prefix, visuals) = (&session.asset_prefix, &session.pack.visuals);
-    changed |= art.roads.fit(prefix, &visuals.roads, &assets, &images, &mut layouts)
+    changed |= art
+        .roads
+        .fit(prefix, &visuals.roads, &assets, &images, &mut layouts)
         | art
             .rails
             .fit(prefix, &visuals.railroads, &assets, &images, &mut layouts);
@@ -1557,29 +1601,23 @@ fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
     row(p, "Gold", gathered.gold.to_string(), INK);
 }
 
-/// The pane that describes the selection: the unit, the square, or, with nothing chosen, the
-/// latest dispatches.
+/// Whether anything is selected that the pane has something to say about.
+fn has_info(game: &Game, session: &Session) -> bool {
+    match session.selection {
+        Selection::Unit(id) => game.units.contains_key(&id),
+        Selection::Tile(pos) => game.map.get(pos).is_some(),
+        _ => false,
+    }
+}
+
+/// The pane that describes the selection: the unit or the square.
 fn info(p: &mut ChildSpawnerCommands, game: &Game, session: &Session) {
     match session.selection {
         Selection::Unit(id) if game.units.contains_key(&id) => {
             unit_panel(p, game, session, &game.units[&id]);
         }
         Selection::Tile(pos) if game.map.get(pos).is_some() => tile_panel(p, game, pos),
-        _ => {
-            bold(p, "Dispatches", 17.0, INK);
-            // The newest line is the darkest; the rest fade back.
-            for (age, line) in game.log.iter().rev().take(3).enumerate() {
-                if age > 0 {
-                    rule(p);
-                }
-                text(
-                    p,
-                    clipped(line, 170),
-                    12.5,
-                    INK.with_alpha(0.95 - 0.22 * age as f32),
-                );
-            }
-        }
+        _ => {}
     }
 }
 
@@ -1605,133 +1643,142 @@ fn build_ui(
     };
     let faction = &game.factions[&me];
     let date = game.date();
-    let top = Node {
+    let margin = if narrow { 8.0 } else { TOP_MARGIN + 6.0 };
+    let section = |side: Side| Node {
         position_type: PositionType::Absolute,
-        top: px(0),
-        width: percent(100),
-        height: px(TOP_BAR),
-        padding: UiRect::axes(px(if narrow { 12 } else { 20 }), px(0)),
-        border: UiRect::bottom(px(1)),
-        justify_content: JustifyContent::SpaceBetween,
+        top: px(TOP_MARGIN),
+        left: if side == Side::Left {
+            px(margin)
+        } else {
+            Val::Auto
+        },
+        right: if side == Side::Right {
+            px(margin)
+        } else {
+            Val::Auto
+        },
+        padding: UiRect::all(px(if side == Side::Left { 8 } else { 6 })),
+        border: UiRect::all(px(1)),
+        border_radius: rounded(14.0),
         align_items: AlignItems::Center,
-        column_gap: px(16),
+        column_gap: px(if narrow { 8 } else { 12 }),
         ..default()
     };
-    commands
-        .spawn((
-            top,
-            BackgroundColor(BAR),
-            BorderColor::all(EDGE),
-            lift_small(),
+    let face = |fill: Color, edge: Color| {
+        (
+            BackgroundColor(fill),
+            BorderColor::all(edge),
+            lift(),
             GlobalZIndex(5),
             UiRoot,
+            TopCard,
+            Interaction::default(),
+        )
+    };
+    // Top left: the nation's flag with the number of its cities, and beside it what it holds,
+    // one row each: treasury and income, research and its goal, industry.
+    let cities = game.cities.values().filter(|c| c.owner == me).count();
+    let (flag_width, flag_height) = if narrow { (44.0, 51.0) } else { (62.0, 72.0) };
+    commands
+        .spawn((
+            section(Side::Left),
+            face(
+                Color::srgba(0.118, 0.157, 0.220, 0.96),
+                TRIM.with_alpha(0.55),
+            ),
         ))
         .with_children(|p| {
-            // Whose empire this is.
             p.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: px(12),
-                flex_basis: px(0),
-                flex_grow: 1.0,
+                flex_shrink: 0.0,
+                margin: UiRect::right(px(2)),
+                ..default()
+            })
+            .with_children(|f| {
+                framed_flag(
+                    f,
+                    nation_color(game, me, 1.0),
+                    &faction.tag,
+                    nation_art(session, assets, &faction.tag),
+                    flag_width,
+                    flag_height,
+                );
+                // A round badge on the flag's lower corner.
+                f.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: px(-9),
+                        bottom: px(-7),
+                        width: px(24),
+                        height: px(24),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(px(2)),
+                        border_radius: rounded(999.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.086, 0.114, 0.160)),
+                    BorderColor::all(TRIM),
+                ))
+                .with_children(|b| bold(b, cities.to_string(), 12.0, ON_PLATE));
+            });
+            p.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(3),
+                width: px(if narrow { 118 } else { 158 }),
                 ..default()
             })
             .with_children(|p| {
-                nation_flag(p, nation_color(game, me, 1.0), 30.0);
-                p.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                })
-                .with_children(|p| {
-                    bold(
-                        p,
-                        clipped(&faction.name, if narrow { 18 } else { 34 }),
-                        16.0,
-                        INK,
-                    );
-                    if !narrow {
-                        text(p, game.scenario_name.clone(), 11.5, INK_SOFT);
-                    }
-                });
-            });
-            // What it holds: treasury, research, industry.
-            if narrow {
+                let income = game.income(me);
                 stat(
                     p,
                     assets,
                     prefix,
                     "hud_gold",
-                    format!("{} (+{})", faction.gold, game.income(me)),
+                    COIN,
+                    faction.gold.to_string(),
+                    Some((format!("{income:+}"), if income >= 0 { GAIN } else { LOSS })),
                 );
-            } else {
-                p.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: px(10),
-                    ..default()
-                })
-                .with_children(|p| {
-                    stat(
-                        p,
-                        assets,
-                        prefix,
-                        "hud_gold",
-                        format!("{} (+{})", faction.gold, game.income(me)),
-                    );
+                if !narrow {
                     stat(
                         p,
                         assets,
                         prefix,
                         "hud_research",
-                        format!(
-                            "{} / {}",
-                            faction.research,
-                            session.rules.research_cost * (faction.technology as i32 + 1)
-                        ),
+                        LORE,
+                        faction.research.to_string(),
+                        Some((
+                            (session.rules.research_cost * (faction.technology as i32 + 1))
+                                .to_string(),
+                            ON_PLATE.with_alpha(0.75),
+                        )),
                     );
                     stat(
                         p,
                         assets,
                         prefix,
                         "hud_industry",
+                        FORGE,
                         faction.industry.to_string(),
+                        None,
                     );
-                });
-            }
-            // The calendar and the one button that moves it on.
-            p.spawn(Node {
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::FlexEnd,
-                column_gap: px(12),
-                flex_basis: px(0),
-                flex_grow: 1.0,
-                ..default()
-            })
-            .with_children(|p| {
-                if !narrow {
-                    p.spawn((
-                        Node {
-                            width: px(1),
-                            height: px(24),
-                            ..default()
-                        },
-                        BackgroundColor(RULE),
-                    ));
                 }
-                bold(p, short_date(date), 13.5, INK);
-                if !narrow {
-                    button(p, "Save", Action::Save, Tone::Quiet);
-                }
-                button(
-                    p,
-                    if session.pending {
-                        "Waiting...".to_string()
-                    } else {
-                        "End Day".to_string()
-                    },
-                    Action::EndTurn,
-                    Tone::Primary,
-                );
             });
+        });
+    // Top right: the calendar and the one button that moves it on.
+    commands
+        .spawn((section(Side::Right), face(BAR, EDGE)))
+        .with_children(|p| {
+            bold(p, short_date(date), 13.5, INK);
+            button(
+                p,
+                if session.pending {
+                    "Waiting...".to_string()
+                } else {
+                    "End Day".to_string()
+                },
+                Action::EndTurn,
+                Tone::Primary,
+            );
         });
     if narrow {
         // The inspector sits under the map: what the selection is, then quick ways to pick
@@ -1794,9 +1841,11 @@ fn build_ui(
         pane.width = px(INFO_WIDTH);
         pane.max_height = px((size.y - TOP_BAR - 12.0 - CHART_BOTTOM).max(120.0));
         pane.overflow = Overflow::clip();
-        commands
-            .spawn((pane, floating(), UiRoot, InfoPane, Interaction::default()))
-            .with_children(|p| info(p, game, session));
+        if has_info(game, session) {
+            commands
+                .spawn((pane, floating(), UiRoot, InfoPane, Interaction::default()))
+                .with_children(|p| info(p, game, session));
+        }
     }
     if !narrow {
         // The minimap is the map's own shape, set in a card with a rounded frame.
@@ -1848,7 +1897,7 @@ fn build_ui(
             });
     }
     // The selected unit's orders float over the foot of the map, in the space the minimap and
-    // the dispatches leave between them (the inspector is above the bar on a narrow screen).
+    // the selection's pane leave between them (the inspector is above the bar on a narrow screen).
     if let Selection::Unit(id) = session.selection
         && let Some(unit) = game.units.get(&id)
     {
@@ -1918,6 +1967,9 @@ fn build_ui(
         && game.cities.contains_key(&id)
     {
         crate::city::spawn(commands, assets, session, game, id, narrow);
+    }
+    if let Some(nation) = session.diplomacy {
+        crate::diplomacy::spawn(commands, assets, session, game, nation, narrow);
     }
     if let Some(winner) = game.winner {
         commands
