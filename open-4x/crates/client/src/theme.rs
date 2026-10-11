@@ -75,6 +75,8 @@ pub(crate) const LOSS: Color = Color::srgb(0.929, 0.455, 0.384);
 pub(crate) const SPENT: Color = Color::srgba(0.012, 0.020, 0.032, 0.92);
 /// The gap between two neighbouring health pips, in px.
 pub(crate) const PIP_GAP: f32 = 2.0;
+/// The vivid green of a healthy unit's pips on the map, bright enough to read over terrain.
+pub(crate) const MAP_HEALTHY: Color = Color::srgb(0.38, 0.88, 0.24);
 /// The most hit points still drawn as separate pips. Past that the pips would be slivers,
 /// so callers fall back to a continuous bar.
 pub(crate) const MAX_PIPS: i32 = 24;
@@ -282,17 +284,22 @@ pub(crate) struct Pip {
 /// draw (`max <= 0`) or the pips would be unreadably thin (`max > MAX_PIPS`); the caller
 /// then falls back to a continuous bar.
 pub(crate) fn pip_layout(hp: i32, max: i32, width: f32) -> Vec<Pip> {
+    pip_layout_gapped(hp, max, width, PIP_GAP)
+}
+
+/// [`pip_layout`] with `gap` px between neighbouring pips instead of [`PIP_GAP`].
+pub(crate) fn pip_layout_gapped(hp: i32, max: i32, width: f32, gap: f32) -> Vec<Pip> {
     if max <= 0 || max > MAX_PIPS {
         return Vec::new();
     }
     let lit = hp.clamp(0, max);
-    let pip_width = (width - PIP_GAP * (max - 1) as f32) / max as f32;
+    let pip_width = (width - gap * (max - 1) as f32) / max as f32;
     if pip_width < 2.0 {
         return Vec::new();
     }
     (0..max)
         .map(|i| {
-            let left = -width / 2.0 + i as f32 * (pip_width + PIP_GAP);
+            let left = -width / 2.0 + i as f32 * (pip_width + gap);
             Pip {
                 centre: left + pip_width / 2.0,
                 width: pip_width,

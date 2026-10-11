@@ -135,6 +135,22 @@
     "railroads": "terrain/railroads.png",
     "turn_sound": "audio/bell.wav",
     "diplomacy_music": "audio/diplomacy.mp3",
+    "music": [
+      "audio/music/blue-danube.mp3",
+      "audio/music/a-hot-time-in-the-old-town.mp3",
+      "audio/music/ride-of-the-valkyrie.mp3",
+      "audio/music/please-say-you-will.mp3",
+      "audio/music/prelude-in-c-sharp.mp3",
+      "audio/music/maple-leaf-rag.mp3",
+      "audio/music/la-mer.mp3",
+      "audio/music/boogie-woogie-blues.mp3",
+      "audio/music/symphony-no-2.mp3",
+      "audio/music/stars-and-stripes-forever.mp3",
+      "audio/music/clair-de-lune.mp3",
+      "audio/music/rhapsody-in-blue.mp3",
+      "audio/music/arabesque.mp3",
+      "audio/music/boogie-woogie-piano.mp3"
+    ],
     "nations": {
       "abyssinia": "nations/abyssinia.png",
       "argentina": "nations/argentina.png",

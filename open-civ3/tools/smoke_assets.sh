@@ -14,7 +14,7 @@ out=${2:-/tmp/open-4x-smoke}
 mkdir -p "$out"
 cargo build --release --quiet >/dev/null 2>&1 || cargo build --release   # warnings only on failure
 status=0
-for fixture in "civ3_utils/biq/tests/data/TEST.SAV" "civ3_utils/biq/tests/data/Intro3 New Alliances.biq"; do
+for fixture in "civ3_utils/biq/tests/data/LANTERN.SAV" "civ3_utils/biq/tests/data/Lantern Isles.biq"; do
   name=$(basename "$fixture" | tr ' ' '_')
   rm -f "$out/$name"-*.png
   CIV3_DIR=/nonexistent CIV3_GOG=/nonexistent CIV3_NO_SPLASH=1 CIV3_REVEAL=1 MAP_ZOOM=1.2 \

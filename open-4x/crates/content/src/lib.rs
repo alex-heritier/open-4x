@@ -102,6 +102,9 @@ pub struct Visuals {
     /// Optional: music under the diplomacy window, played in a loop while it is open.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub diplomacy_music: String,
+    /// Optional: the soundtrack, played one track after another in a loop through the game.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub music: Vec<String>,
     /// Optional: a picture of each nation, by its scenario tag: its flag, which is also the
     /// art of its leader (200 x 240, portrait). A nation without one is drawn as a flag made
     /// of its colour.
@@ -136,6 +139,7 @@ impl Visuals {
         .into_iter()
         .chain((!self.farm_shore.is_empty()).then_some(&self.farm_shore))
         .chain((!self.diplomacy_music.is_empty()).then_some(&self.diplomacy_music))
+        .chain(&self.music)
         .chain((!self.roads.is_empty()).then_some(&self.roads))
         .chain((!self.railroads.is_empty()).then_some(&self.railroads))
         .chain(self.overlays.values())

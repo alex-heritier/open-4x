@@ -466,20 +466,21 @@ UNIT_RULES = [
     ("air", ("fighter", "bomber", "jet", "stealth", "helicopter", "zeppelin")),
     ("ship", ("galley", "caravel", "galleon", "frigate", "privateer", "ironclad",
               "transport", "destroyer", "battleship", "cruiser", "submarine", "carrier",
-              "dromon", "man-o-war", "canoe", "raft")),
-    ("siege", ("catapult", "trebuchet", "cannon", "artillery", "howitzer", "ballista")),
+              "dromon", "man-o-war", "canoe", "raft", "skiff")),
+    ("siege", ("catapult", "trebuchet", "cannon", "artillery", "howitzer", "ballista",
+               "stone thrower")),
     ("mech", ("mech infantry", "mech", "walker")),
-    ("vehicle", ("tank", "armor", "panzer", "vehicle", "wagon")),
+    ("vehicle", ("tank", "armor", "panzer", "vehicle", "wagon", "crawler")),
     ("mounted", ("horseman", "knight", "cavalry", "chariot", "camel", "conquistador",
                  "rider", "hussar", "elephant", "war elephant", "lancer", "dragoon")),
-    ("leader", ("leader", "army")),
-    ("civilian", ("settler", "worker", "engineer", "civil")),
+    ("leader", ("leader", "army", "war host")),
+    ("civilian", ("settler", "worker", "engineer", "civil", "homesteader", "delver")),
 ]
 WEAPON_RULES = [
     ("bow", ("archer", "longbow", "bowman", "slinger")),
     ("gun", ("musket", "rifle", "infantry", "marine", "paratrooper", "guerrilla",
              "partisan", "police", "officer", "explorer", "scout", "sniper", "conquistador",
-             "dragoon")),
+             "dragoon", "fusilier")),
     ("spear", ("spear", "hoplite", "pike", "phalanx", "halberd", "javelin", "horseman",
                "chariot", "elephant", "lancer")),
     ("sword", ("sword", "legion", "immortal", "crusader", "samurai", "blade", "knight",
@@ -1095,8 +1096,9 @@ def audio(tree):
 
 def load_refs(manifest, biqs):
     """The art references; each BIQ given adds its units, leaders, advances and
-    buildings to the committed manifest (the first one also fixes `buildings`,
-    the BLDG row order the improvement icon sheet follows)."""
+    buildings to the committed manifest. `buildings`, the BLDG row order the
+    improvement icon sheet follows, comes from the first BIQ only when the
+    manifest has none yet, so merging a scenario keeps the stock order."""
     old = json.loads(manifest.read_text()) if manifest.exists() else {}
     for n, biq in enumerate(biqs):
         result = subprocess.check_output(
@@ -1107,7 +1109,7 @@ def load_refs(manifest, biqs):
         for line in result.splitlines():
             kind, *values = line.split("\t")
             refs[kind].append(values if kind == "unit" else values[0])
-        if n == 0:
+        if n == 0 and "buildings" not in old:
             old["buildings"] = refs["wonder"]
         for kind, found in refs.items():
             have = old.get(kind, [])

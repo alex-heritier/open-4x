@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn saves_keep_the_original_scenario_location_when_saved_again() {
         let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("civ3_utils/biq/tests/data/Intro3 New Alliances.biq");
+            .join("civ3_utils/biq/tests/data/Lantern Isles.biq");
         let mut w = world();
         w.insert_resource(Boot {
             options: Default::default(),

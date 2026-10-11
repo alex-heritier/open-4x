@@ -38,6 +38,7 @@ fn session() -> Session {
         menu: None,
         staging: false,
         diplomacy: None,
+        production: None,
     }
 }
 

@@ -9,7 +9,7 @@ and prep pipeline also run against art that real modders made: other palettes,
 other FLC sizes and frame counts, other INI timing and sound references.
 
     python3 tools/fetch_community_assets.py            # test-assets-community/
-    cargo run --release -- "civ3_utils/biq/tests/data/TEST.SAV" --assets test-assets-community
+    cargo run --release -- "civ3_utils/biq/tests/data/LANTERN.SAV" --assets test-assets-community
 
 The output is git-ignored and never committed: the archive is fan content that
 may carry Firaxis-derived pixels, so only the *script* lives in the repo.

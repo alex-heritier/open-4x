@@ -4,7 +4,9 @@ mod city;
 mod connection;
 mod diplomacy;
 mod march;
+mod music;
 mod presentation;
+mod production;
 mod puppet;
 mod roads;
 mod route;
@@ -58,6 +60,8 @@ struct Session {
     staging: bool,
     /// The nation whose leader the diplomacy window shows, if it is open.
     diplomacy: Option<Id>,
+    /// The city whose production window is open, if any.
+    production: Option<Id>,
     /// The right-click menu over the map, if one is open.
     menu: Option<ContextMenu>,
 }
@@ -384,6 +388,9 @@ enum Action {
         city: Id,
         unit: String,
     },
+    /// Open the window for choosing what a city builds.
+    OpenProduction(Id),
+    CloseProduction,
     /// Dismiss the right-click menu.
     CloseMenu,
     /// Close the city's detail view.
@@ -638,6 +645,7 @@ pub fn run() {
             menu: None,
             staging: false,
             diplomacy: option("--talk").and_then(|id| id.parse().ok()),
+            production: None,
         })
         .insert_resource(stage::Stage::new())
         .init_resource::<march::Walks>()
@@ -663,6 +671,7 @@ pub fn run() {
                 }),
         )
         .add_systems(Startup, (setup, stage::setup))
+        .add_systems(Update, (production::scroll, music::soundtrack))
         .add_systems(
             Update,
             (
@@ -1052,7 +1061,20 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             session.dirty = true;
             None
         }
+        Action::OpenProduction(city) => {
+            session.production = Some(*city);
+            session.dirty = true;
+            None
+        }
+        Action::CloseProduction => {
+            session.production = None;
+            session.dirty = true;
+            None
+        }
         Action::ProduceAt { city, unit } => {
+            // The choice is made; the window has done its work.
+            session.production = None;
+            session.dirty = true;
             let own = session
                 .game
                 .as_ref()
@@ -1321,7 +1343,8 @@ fn controls(
         || info.iter().any(|i| *i != Interaction::None)
         // The city view is a window over the map; the wheel scrolls it (see `city::scroll`).
         || matches!(session.selection, Selection::City(_))
-        || session.diplomacy.is_some();
+        || session.diplomacy.is_some()
+        || session.production.is_some();
     for scroll in wheel.read() {
         if !over_inspector {
             ortho.scale = (ortho.scale * (1.0 - scroll.y * 0.08)).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -1339,6 +1362,14 @@ fn controls(
         transform.translation.y += delta.y;
     } else {
         session.previous_pinch = None;
+    }
+    // The production window is a modal too, and sits over the others.
+    if session.production.is_some() {
+        if keys.just_pressed(KeyCode::Escape) {
+            session.production = None;
+            session.dirty = true;
+        }
+        return;
     }
     // The diplomacy window is a modal: Escape leaves it, and nothing behind it takes keys.
     if session.diplomacy.is_some() {

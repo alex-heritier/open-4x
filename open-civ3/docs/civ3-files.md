@@ -276,17 +276,19 @@ Run a scenario or a save with it, with no install present:
 
 ```sh
 CIV3_DIR=/nonexistent CIV3_GOG=/nonexistent CIV3_NO_SPLASH=1 CIV3_REVEAL=1 \
-  cargo run --release -- "civ3_utils/biq/tests/data/TEST.SAV" --assets test-assets
+  cargo run --release -- "civ3_utils/biq/tests/data/LANTERN.SAV" --assets test-assets
 ```
 
-`civ3_utils/biq/tests/data/` holds two fixtures (`TEST.SAV`, `Intro3 New
-Alliances.biq`); both load and render with it.
+`civ3_utils/biq/tests/data/` holds two fixtures (`Lantern Isles.biq`,
+`LANTERN.SAV`); both load and render with it. They are original, written by
+`cargo run --release --example make_fixtures` in `civ3_utils/biq/`, so they
+carry nothing from a Civ3 install.
 
 Regenerate and verify (Pillow only; conversion later needs ffmpeg as with real art):
 
 ```sh
 python3 tools/make_stub_assets.py --clean \
-  --biq "civ3_utils/biq/tests/data/Intro3 New Alliances.biq"
+  --biq "civ3_utils/biq/tests/data/Lantern Isles.biq"
 python3 tools/check_stub_assets.py test-assets --civ3 ../civ3/civ3-gog/app
 ```
 

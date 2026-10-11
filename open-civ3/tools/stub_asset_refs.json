@@ -555,6 +555,62 @@
     [
       "PRTO_TOW_Infantry",
       "TOW Infantry"
+    ],
+    [
+      "PRTO_Homesteader",
+      "Homesteader"
+    ],
+    [
+      "PRTO_Delver",
+      "Delver"
+    ],
+    [
+      "PRTO_Wayfinder",
+      "Wayfinder"
+    ],
+    [
+      "PRTO_Cudgeler",
+      "Cudgeler"
+    ],
+    [
+      "PRTO_Slinger",
+      "Slinger"
+    ],
+    [
+      "PRTO_Pikeguard",
+      "Pikeguard"
+    ],
+    [
+      "PRTO_Bladehand",
+      "Bladehand"
+    ],
+    [
+      "PRTO_Ox_Rider",
+      "Ox Rider"
+    ],
+    [
+      "PRTO_Stone_Thrower",
+      "Stone Thrower"
+    ],
+    [
+      "PRTO_Reed_Skiff",
+      "Reed Skiff"
+    ],
+    [
+      "PRTO_Fusilier",
+      "Fusilier"
+    ],
+    [
+      "PRTO_Steam_Crawler",
+      "Steam Crawler"
+    ],
+    [
+      "PRTO_Warleader",
+      "Warleader"
+    ],
+    [
+      "PRTO_War_Host",
+      "War Host"
     ]
   ],
   "leader": [
@@ -845,7 +901,39 @@
     "Art\\Flics\\X2_Smoke-Jaguar_ancient_bwrd.flc",
     "Art\\Flics\\X2_Smoke-Jaguar_mid_bwrd.flc",
     "Art\\Flics\\X2_Smoke-Jaguar_indust_bwrd.flc",
-    "Art\\Flics\\X2_Smoke-Jaguar_mod_bwrd.flc"
+    "Art\\Flics\\X2_Smoke-Jaguar_mod_bwrd.flc",
+    "Art/Flics/Zv_A01.flc",
+    "Art/Flics/Zv_B01.flc",
+    "Art/Flics/Zv_C01.flc",
+    "Art/Flics/Zv_D01.flc",
+    "Art/Flics/Zv_A02.flc",
+    "Art/Flics/Zv_B02.flc",
+    "Art/Flics/Zv_C02.flc",
+    "Art/Flics/Zv_D02.flc",
+    "Art/Flics/Zw_A01.flc",
+    "Art/Flics/Zw_B01.flc",
+    "Art/Flics/Zw_C01.flc",
+    "Art/Flics/Zw_D01.flc",
+    "Art/Flics/Zw_A02.flc",
+    "Art/Flics/Zw_B02.flc",
+    "Art/Flics/Zw_C02.flc",
+    "Art/Flics/Zw_D02.flc",
+    "Art/Flics/Zx_A01.flc",
+    "Art/Flics/Zx_B01.flc",
+    "Art/Flics/Zx_C01.flc",
+    "Art/Flics/Zx_D01.flc",
+    "Art/Flics/Zx_A02.flc",
+    "Art/Flics/Zx_B02.flc",
+    "Art/Flics/Zx_C02.flc",
+    "Art/Flics/Zx_D02.flc",
+    "Art/Flics/Zy_A01.flc",
+    "Art/Flics/Zy_B01.flc",
+    "Art/Flics/Zy_C01.flc",
+    "Art/Flics/Zy_D01.flc",
+    "Art/Flics/Zy_A02.flc",
+    "Art/Flics/Zy_B02.flc",
+    "Art/Flics/Zy_C02.flc",
+    "Art/Flics/Zy_D02.flc"
   ],
   "tech": [
     "TECH_Bronze_Working",
@@ -936,7 +1024,23 @@
     "TECH_Genetics",
     "TECH_Smart_Weapons",
     "TECH_Ironclads",
-    "TECH_Fascism"
+    "TECH_Fascism",
+    "TECH_Fire_Keeping",
+    "TECH_Stone_Shaping",
+    "TECH_Rope_Weaving",
+    "TECH_Ox_Taming",
+    "TECH_Clay_Tablets",
+    "TECH_Star_Reading",
+    "TECH_Tin_Smelting",
+    "TECH_Reed_Boats",
+    "TECH_Tally_Sticks",
+    "TECH_Chant_Halls",
+    "TECH_Terrace_Farming",
+    "TECH_Gear_Trains",
+    "TECH_Lens_Grinding",
+    "TECH_Black_Salts",
+    "TECH_Steam_Kettles",
+    "TECH_Spark_Coils"
   ],
   "wonder": [
     "BLDG_Palace",
@@ -1048,7 +1152,18 @@
     "BLDG_Artemis",
     "BLDG_Zeus",
     "BLDG_Mausoleum",
-    "BLDG_Secret_Police_HQ"
+    "BLDG_Secret_Police_HQ",
+    "BLDG_Lantern_Hall",
+    "BLDG_Drill_Yard",
+    "BLDG_Grain_Vault",
+    "BLDG_Lamp_Shrine",
+    "BLDG_Bazaar",
+    "BLDG_Scroll_House",
+    "BLDG_Palisade",
+    "BLDG_Wharf",
+    "BLDG_The_Tide_Bell",
+    "BLDG_Beacon_of_Asra",
+    "BLDG_Star_Loom"
   ],
   "sheets": {
     "pcx": {

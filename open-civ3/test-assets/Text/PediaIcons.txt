@@ -276,6 +276,34 @@ Carrack
 Chasqui Scout
 #ANIMNAME_PRTO_TOW_Infantry
 TOW Infantry
+#ANIMNAME_PRTO_Homesteader
+Homesteader
+#ANIMNAME_PRTO_Delver
+Delver
+#ANIMNAME_PRTO_Wayfinder
+Wayfinder
+#ANIMNAME_PRTO_Cudgeler
+Cudgeler
+#ANIMNAME_PRTO_Slinger
+Slinger
+#ANIMNAME_PRTO_Pikeguard
+Pikeguard
+#ANIMNAME_PRTO_Bladehand
+Bladehand
+#ANIMNAME_PRTO_Ox_Rider
+Ox Rider
+#ANIMNAME_PRTO_Stone_Thrower
+Stone Thrower
+#ANIMNAME_PRTO_Reed_Skiff
+Reed Skiff
+#ANIMNAME_PRTO_Fusilier
+Fusilier
+#ANIMNAME_PRTO_Steam_Crawler
+Steam Crawler
+#ANIMNAME_PRTO_Warleader
+Warleader
+#ANIMNAME_PRTO_War_Host
+War Host
 #TECH_Bronze_Working
 Art/Stub/Techs/TECH_Bronze_Working.pcx
 #TECH_Alphabet
@@ -454,6 +482,38 @@ Art/Stub/Techs/TECH_Smart_Weapons.pcx
 Art/Stub/Techs/TECH_Ironclads.pcx
 #TECH_Fascism
 Art/Stub/Techs/TECH_Fascism.pcx
+#TECH_Fire_Keeping
+Art/Stub/Techs/TECH_Fire_Keeping.pcx
+#TECH_Stone_Shaping
+Art/Stub/Techs/TECH_Stone_Shaping.pcx
+#TECH_Rope_Weaving
+Art/Stub/Techs/TECH_Rope_Weaving.pcx
+#TECH_Ox_Taming
+Art/Stub/Techs/TECH_Ox_Taming.pcx
+#TECH_Clay_Tablets
+Art/Stub/Techs/TECH_Clay_Tablets.pcx
+#TECH_Star_Reading
+Art/Stub/Techs/TECH_Star_Reading.pcx
+#TECH_Tin_Smelting
+Art/Stub/Techs/TECH_Tin_Smelting.pcx
+#TECH_Reed_Boats
+Art/Stub/Techs/TECH_Reed_Boats.pcx
+#TECH_Tally_Sticks
+Art/Stub/Techs/TECH_Tally_Sticks.pcx
+#TECH_Chant_Halls
+Art/Stub/Techs/TECH_Chant_Halls.pcx
+#TECH_Terrace_Farming
+Art/Stub/Techs/TECH_Terrace_Farming.pcx
+#TECH_Gear_Trains
+Art/Stub/Techs/TECH_Gear_Trains.pcx
+#TECH_Lens_Grinding
+Art/Stub/Techs/TECH_Lens_Grinding.pcx
+#TECH_Black_Salts
+Art/Stub/Techs/TECH_Black_Salts.pcx
+#TECH_Steam_Kettles
+Art/Stub/Techs/TECH_Steam_Kettles.pcx
+#TECH_Spark_Coils
+Art/Stub/Techs/TECH_Spark_Coils.pcx
 #WON_SPLASH_BLDG_Palace
 Art/Stub/Wonders/BLDG_Palace.pcx
 #WON_SPLASH_BLDG_Barracks
@@ -674,3 +734,25 @@ Art/Stub/Wonders/BLDG_Zeus.pcx
 Art/Stub/Wonders/BLDG_Mausoleum.pcx
 #WON_SPLASH_BLDG_Secret_Police_HQ
 Art/Stub/Wonders/BLDG_Secret_Police_HQ.pcx
+#WON_SPLASH_BLDG_Lantern_Hall
+Art/Stub/Wonders/BLDG_Lantern_Hall.pcx
+#WON_SPLASH_BLDG_Drill_Yard
+Art/Stub/Wonders/BLDG_Drill_Yard.pcx
+#WON_SPLASH_BLDG_Grain_Vault
+Art/Stub/Wonders/BLDG_Grain_Vault.pcx
+#WON_SPLASH_BLDG_Lamp_Shrine
+Art/Stub/Wonders/BLDG_Lamp_Shrine.pcx
+#WON_SPLASH_BLDG_Bazaar
+Art/Stub/Wonders/BLDG_Bazaar.pcx
+#WON_SPLASH_BLDG_Scroll_House
+Art/Stub/Wonders/BLDG_Scroll_House.pcx
+#WON_SPLASH_BLDG_Palisade
+Art/Stub/Wonders/BLDG_Palisade.pcx
+#WON_SPLASH_BLDG_Wharf
+Art/Stub/Wonders/BLDG_Wharf.pcx
+#WON_SPLASH_BLDG_The_Tide_Bell
+Art/Stub/Wonders/BLDG_The_Tide_Bell.pcx
+#WON_SPLASH_BLDG_Beacon_of_Asra
+Art/Stub/Wonders/BLDG_Beacon_of_Asra.pcx
+#WON_SPLASH_BLDG_Star_Loom
+Art/Stub/Wonders/BLDG_Star_Loom.pcx

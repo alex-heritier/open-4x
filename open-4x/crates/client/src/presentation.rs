@@ -1093,8 +1093,7 @@ pub(super) fn refresh(
             map_text(
                 &mut commands,
                 builds_in(
-                    city
-                        .production
+                    city.production
                         .as_ref()
                         .and_then(|id| session.rules.units.get(id))
                         .map(|def| def.cost),
@@ -1266,28 +1265,37 @@ fn draw_unit_badges(
     // A dark track with one pip per hit point in it, standing left of the piece
     // like the reference's vertical segmented bar. The first pips sit at the
     // bottom, so wounds empty from the top.
-    let (length, inner) = (50.0, 42.0);
-    let bar = Vec3::new(x - size.x / 2.0 - 9.0, y + 12.0, z + 0.1);
-    pill(commands, shapes, bar, Vec2::new(10.0, length), PLATE);
-    let lit = hp_color(fraction);
-    let pips = pip_layout(hp, max, inner);
+    // Centred on the sprite, which stands 12 above the tile's centre.
+    let (length, inner) = (28.0, 26.0);
+    let bar = Vec3::new(x - size.x / 2.0 + 4.0, y + 12.0, z + 0.1);
+    pill(commands, shapes, bar, Vec2::new(6.0, length), PLATE);
+    let lit = if fraction > 0.66 {
+        MAP_HEALTHY
+    } else {
+        hp_color(fraction)
+    };
+    let pips = pip_layout_gapped(hp, max, inner, 1.0);
+    // Square-cornered pips, so the segments read as blocks rather than beads.
+    let mut pip = |at: Vec3, size: Vec2, color: Color| {
+        commands.spawn((
+            Sprite::from_color(color, size),
+            Transform::from_translation(at),
+            WorldVisual,
+        ));
+    };
     if pips.is_empty() {
-        let fill = (inner * fraction).max(6.0);
-        pill(
-            commands,
-            shapes,
+        let fill = (inner * fraction).max(4.0);
+        pip(
             Vec3::new(bar.x, bar.y - inner / 2.0 + fill / 2.0, z + 0.2),
-            Vec2::new(6.0, fill),
+            Vec2::new(4.0, fill),
             lit,
         );
     } else {
-        for pip in &pips {
-            pill(
-                commands,
-                shapes,
-                Vec3::new(bar.x, bar.y + pip.centre, z + 0.2),
-                Vec2::new(6.0, pip.width),
-                if pip.lit { lit } else { SPENT },
+        for p in &pips {
+            pip(
+                Vec3::new(bar.x, bar.y + p.centre, z + 0.2),
+                Vec2::new(4.0, p.width),
+                if p.lit { lit } else { SPENT },
             );
         }
     }
@@ -2241,6 +2249,9 @@ fn build_ui(
         crate::diplomacy::spawn(commands, assets, session, game, nation, narrow);
     }
     context_menu(commands, session, size);
+    if let Some(city) = session.production {
+        crate::production::spawn(commands, assets, session, game, city, narrow);
+    }
     if let Some(winner) = game.winner {
         commands
             .spawn((
@@ -2412,27 +2423,12 @@ fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
                     Tone::Quiet,
                 );
                 if c.owner == session.player {
-                    heading(p, "production");
-                    let coastal = game.coastal(c.position);
-                    for def in session.rules.units.values() {
-                        if def.is_naval() && !coastal {
-                            continue;
-                        }
-                        let chosen = c.production.as_deref() == Some(def.id.as_str());
-                        menu_button(
-                            p,
-                            if chosen {
-                                format!("{} ({}) · building", def.name, def.cost)
-                            } else {
-                                format!("{} ({})", def.name, def.cost)
-                            },
-                            Action::ProduceAt {
-                                city: c.id,
-                                unit: def.id.clone(),
-                            },
-                            if chosen { Tone::Primary } else { Tone::Quiet },
-                        );
-                    }
+                    menu_button(
+                        p,
+                        "Change production".to_string(),
+                        Action::OpenProduction(c.id),
+                        Tone::Quiet,
+                    );
                 }
             }
             if !units.is_empty() {
@@ -3099,10 +3095,7 @@ mod tests {
     fn pieces_stand_half_again_as_tall_as_before() {
         let host = fourx_runtime::Host::base_scenario("dawn-straits", 42)
             .expect("the starter scenario starts");
-        assert_eq!(
-            unit_size(&host.rules.units["infantry"]),
-            Vec2::splat(105.0)
-        );
+        assert_eq!(unit_size(&host.rules.units["infantry"]), Vec2::splat(105.0));
         assert_eq!(
             unit_size(&host.rules.units["ironclad"]),
             Vec2::new(216.0, 162.0)
