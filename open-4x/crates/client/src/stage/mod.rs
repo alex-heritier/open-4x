@@ -27,7 +27,9 @@ use script::{Event as Moment, LEAD_IN, Script, Setting, Showing};
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 
-use crate::theme::{AMBER, BAD, GOOD, ON_ACCENT, PLATE, Shapes, Tone, lift_small, rounded};
+use crate::theme::{
+    ON_ACCENT, PLATE, SPENT, Shapes, Tone, hp_color, lift_small, pip_layout, rounded,
+};
 /// Sprites on stage stand above the map's own units (drawn at about 30).
 const STAGE_Z: f32 = 40.0;
 const FX_Z: f32 = 60.0;
@@ -98,7 +100,8 @@ struct Playing {
 struct Parts {
     sprite: Entity,
     frame: Entity,
-    fill: Entity,
+    /// One bar pip per hit point, like the reference's segmented bar.
+    pips: Vec<Entity>,
 }
 
 /// What colour an actor is at the start, and what it turns to if it yields.
@@ -599,18 +602,32 @@ fn spawn_actors(
                 StageVisual,
             ))
             .id();
-        let fill = commands
-            .spawn((
-                shapes.bar(Vec2::new(BAR_WIDTH, 6.0), Color::NONE),
-                place(0.2),
-                Part,
-                StageVisual,
-            ))
-            .id();
+        // One pip per hit point; the layout is fixed for the fight, the paint poses them.
+        // When there are too many hit points to segment, a single continuous fill stands in.
+        let max_hp = fighter.max_hp.max(1);
+        let layout = pip_layout(max_hp, max_hp, BAR_WIDTH);
+        let widths: Vec<f32> = if layout.is_empty() {
+            vec![BAR_WIDTH]
+        } else {
+            layout.iter().map(|pip| pip.width).collect()
+        };
+        let mut pips = Vec::with_capacity(widths.len());
+        for width in widths {
+            pips.push(
+                commands
+                    .spawn((
+                        shapes.bar(Vec2::new(width, 6.0), Color::NONE),
+                        place(0.2),
+                        Part,
+                        StageVisual,
+                    ))
+                    .id(),
+            );
+        }
         parts.push(Parts {
             sprite,
             frame,
-            fill,
+            pips,
         });
     }
     (parts, looks, arts)
@@ -636,16 +653,6 @@ fn shade(look: &Look, pose: &Pose, fade: f32) -> Color {
     )
 }
 
-fn bar_color(fraction: f32) -> Color {
-    if fraction > 0.66 {
-        GOOD
-    } else if fraction > 0.33 {
-        AMBER
-    } else {
-        BAD
-    }
-}
-
 /// Poses every actor, and its hit-point bar, for the clock's moment.
 fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
     let (script, t) = (&playing.script, playing.clock);
@@ -667,20 +674,41 @@ fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
             sprite.color = shade(&playing.looks[i], &pose, fade);
         }
         let visible = pose.alpha * fade;
-        let hp = script.hp_at(i, t);
-        let fraction = (hp as f32 / actor.fighter.max_hp.max(1) as f32).clamp(0.0, 1.0);
+        let max_hp = actor.fighter.max_hp.max(1);
+        let hp = script.hp_at(i, t).clamp(0, max_hp);
+        let fraction = (hp as f32 / max_hp as f32).clamp(0.0, 1.0);
         // A unit that crosses to another square takes its bar along; a lunge or a fall does not.
         let base = Vec2::new(actor.anchor.x, actor.anchor.y - 22.0) + pose.travel;
         if let Ok((mut transform, mut sprite)) = sprites.get_mut(parts.frame) {
             transform.translation = base.extend(z + 0.1);
             sprite.color = PLATE.with_alpha(PLATE.alpha() * visible);
         }
-        if let Ok((mut transform, mut sprite)) = sprites.get_mut(parts.fill) {
-            // The fill shrinks toward its left edge.
-            let width = (BAR_WIDTH * fraction).max(6.0);
-            transform.translation = Vec3::new(base.x - (BAR_WIDTH - width) * 0.5, base.y, z + 0.2);
-            sprite.custom_size = Some(Vec2::new(width, 6.0));
-            sprite.color = bar_color(fraction).with_alpha(visible);
+        let layout = pip_layout(hp, max_hp, BAR_WIDTH);
+        if layout.is_empty() {
+            // Too many hit points to segment: the lone pip is the old continuous fill,
+            // shrinking toward its left edge.
+            if let Some(&fill) = parts.pips.first()
+                && let Ok((mut transform, mut sprite)) = sprites.get_mut(fill)
+            {
+                let width = (BAR_WIDTH * fraction).max(6.0);
+                transform.translation =
+                    Vec3::new(base.x - (BAR_WIDTH - width) * 0.5, base.y, z + 0.2);
+                sprite.custom_size = Some(Vec2::new(width, 6.0));
+                sprite.color = hp_color(fraction).with_alpha(visible);
+            }
+        } else {
+            let lit = hp_color(fraction);
+            for (pip, entity) in layout.iter().zip(parts.pips.iter()) {
+                let Ok((mut transform, mut sprite)) = sprites.get_mut(*entity) else {
+                    continue;
+                };
+                transform.translation = Vec3::new(base.x + pip.centre, base.y, z + 0.2);
+                sprite.color = if pip.lit {
+                    lit.with_alpha(visible)
+                } else {
+                    SPENT.with_alpha(SPENT.alpha() * visible)
+                };
+            }
         }
     }
 }
@@ -717,6 +745,16 @@ enum Landing {
     Short {
         sea: bool,
     },
+}
+
+/// The cloud a shot kicks up where it falls short: a splash on water, dust on land.
+/// Returns the colour, the swell from and to, the drift, and the life.
+fn short_fall(sea: bool) -> (Srgba, f32, f32, Vec2, f32) {
+    if sea {
+        (SPLASH, 10.0, 36.0, Vec2::new(0.0, 26.0), 0.45)
+    } else {
+        (DUST, 14.0, 46.0, Vec2::new(0.0, 10.0), 0.5)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -950,13 +988,9 @@ fn fire(
             to,
             flight,
             hits,
-            index,
+            ..
         } => {
-            // A broadside's shells each leave a different gun on the beam.
-            let start = muzzles(session, script, from, at)
-                .filter(|guns| !guns.is_empty())
-                .map(|guns| guns[(2 * usize::from(index) + 1) * guns.len() / 6].0)
-                .unwrap_or_else(|| muzzle(from, 30.0));
+            let start = muzzle(from, 30.0);
             let aim = centre(to, at + flight);
             let (end, landing) = if hits {
                 (aim, Landing::Hit)
@@ -979,6 +1013,33 @@ fn fire(
                 flight,
                 shell,
             );
+        }
+        Moment::Splash {
+            from,
+            to,
+            flight,
+            hits,
+            index,
+        } => {
+            // No shell is drawn for a broadside: a hit shows as the blow, a miss as
+            // splashes where the shots fall short, at the same moments and places.
+            if !hits {
+                let start = muzzles(session, script, from, at)
+                    .filter(|guns| !guns.is_empty())
+                    .map(|guns| guns[(2 * usize::from(index) + 1) * guns.len() / 6].0)
+                    .unwrap_or_else(|| muzzle(from, 30.0));
+                let aim = centre(to, at + flight);
+                let side = ((at * 977.0).fract() - 0.5) * 24.0;
+                let end = start.lerp(aim, 0.55) + Vec2::new(0.0, side);
+                let (color, puff_from, puff_to, rise, life) = short_fall(script.actors[to].sea);
+                let cloud = FxKind::Puff {
+                    from: puff_from,
+                    to: puff_to,
+                    rise,
+                    peak: 0.8,
+                };
+                spawn_fx_after(commands, art, end.extend(FX_Z), color, life, cloud, flight);
+            }
         }
         Moment::Dust { actor } => {
             let feet = script.actors[actor].anchor + Vec2::Y * 4.0;
@@ -1071,11 +1132,7 @@ pub(super) fn fx(
                 if fx.age >= fx.life
                     && let Landing::Short { sea } = landing
                 {
-                    let (color, from, to_size, rise, life) = if sea {
-                        (SPLASH, 10.0, 36.0, Vec2::new(0.0, 26.0), 0.45)
-                    } else {
-                        (DUST, 14.0, 46.0, Vec2::new(0.0, 10.0), 0.5)
-                    };
+                    let (color, from, to_size, rise, life) = short_fall(sea);
                     let cloud = FxKind::Puff {
                         from,
                         to: to_size,

@@ -97,13 +97,24 @@ pub enum Event {
         actor: usize,
         big: bool,
     },
-    /// A shell leaves `from` for `to` and lands `flight` seconds later: on target, or short.
+    /// A land style's shell leaves `from` for `to` and lands `flight` seconds later: on
+    /// target, or short.
     Shell {
         from: usize,
         to: usize,
         flight: f32,
         hits: bool,
-        /// Which of its volley's shells this is (a broadside fires several, each from its own gun).
+        /// Which of its volley's shells this is (always the only one now).
+        index: u8,
+    },
+    /// A broadside's shot falls toward `to` and lands `flight` seconds later. No shell is
+    /// drawn in flight: a hit shows as the blow, a miss as a splash short of the mark.
+    Splash {
+        from: usize,
+        to: usize,
+        flight: f32,
+        hits: bool,
+        /// Which of its volley's shots this is (a broadside fires three, staggered).
         index: u8,
     },
     /// A cloud kicked up where a charge meets its mark.
@@ -394,8 +405,13 @@ impl<'a> Builder<'a> {
     }
 
     /// An actor's swing in a beat that begins at `start` and whose blow lands at `strike`. A
-    /// firing style shoots, shells flying from the shot to the blow; a charge reaches its foe
-    /// at the blow. `hits` says whether the swing connects.
+    /// firing style shoots: a land style flies a shell from the shot to the blow, a broadside
+    /// raises splashes where its shots fall; a charge reaches its foe at the blow. `hits`
+    /// says whether the swing connects.
+    ///
+    /// The swing itself never depends on `hits`: the attacker plays the same attack motion
+    /// whether the shot lands or falls short. Only the shot's landing, the blow's target,
+    /// and the sounds show the outcome.
     fn swing(
         &mut self,
         actor: usize,
@@ -428,26 +444,35 @@ impl<'a> Builder<'a> {
         self.volley(actor, foe, fire, strike - fire, hits);
     }
 
-    /// The shells of one shot: one, or three for a broadside.
+    /// The shots of one volley: a broadside raises three staggered splashes where its shots
+    /// fall, with no shell drawn in flight; every other firing style flies a single shell.
     fn volley(&mut self, from: usize, to: usize, fire: f32, flight: f32, hits: bool) {
-        let shells: u8 = if self.actors[from].style == Style::Broadside {
-            3
-        } else {
-            1
-        };
-        for k in 0..shells {
-            let launch = fire + f32::from(k) * SALVO_GAP;
-            self.at(
-                launch,
-                Event::Shell {
-                    from,
-                    to,
-                    flight,
-                    hits,
-                    index: k,
-                },
-            );
+        if self.actors[from].style == Style::Broadside {
+            for k in 0..3u8 {
+                let launch = fire + f32::from(k) * SALVO_GAP;
+                self.at(
+                    launch,
+                    Event::Splash {
+                        from,
+                        to,
+                        flight,
+                        hits,
+                        index: k,
+                    },
+                );
+            }
+            return;
         }
+        self.at(
+            fire,
+            Event::Shell {
+                from,
+                to,
+                flight,
+                hits,
+                index: 0,
+            },
+        );
     }
 
     /// The target of a blow loses a hit point and is knocked back; the impact is heard.
@@ -640,7 +665,7 @@ impl<'a> Builder<'a> {
                     (distance / SHELL_SPEED).clamp(SHELL_FLIGHT.0, SHELL_FLIGHT.1),
                 )
             };
-            // A broadside's last shell trails the first by two gaps.
+            // A broadside's last shot trails the first by two gaps.
             let salvo = if style == Style::Broadside {
                 2.0 * SALVO_GAP
             } else {
@@ -949,6 +974,37 @@ mod tests {
             Outcome::AttackerWon,
         ));
         assert!((script.beats[0].length - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_attacker_swings_the_same_whether_its_shot_hits_or_misses() {
+        // The swing is the shot; its result belongs to the target, not the attacker.
+        for kinds in [("infantry", "infantry"), ("ironclad", "ironclad")] {
+            let won = build(&duel(kinds, &[true], Outcome::AttackerWon));
+            let lost = build(&duel(kinds, &[false], Outcome::DefenderWon));
+            for actor in 0..2 {
+                let attacks = |script: &Script| {
+                    script.actors[actor]
+                        .motions
+                        .iter()
+                        .filter_map(|seg| match seg.motion {
+                            Motion::Attack { style, variant } => Some((seg.start, style, variant)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(attacks(&won), attacks(&lost), "actor {actor} of {kinds:?}");
+            }
+            // The outcome still shows where it belongs: the other fighter takes the blow at
+            // the same moment.
+            let (hit_blows, miss_blows) = (blows(&won), blows(&lost));
+            assert_eq!((hit_blows.len(), miss_blows.len()), (1, 1));
+            assert!(
+                (hit_blows[0].0 - miss_blows[0].0).abs() < 1e-4,
+                "the blow lands at the same moment"
+            );
+            assert_eq!((hit_blows[0].1, miss_blows[0].1), (1, 0));
+        }
     }
 
     #[test]
@@ -1523,26 +1579,92 @@ mod tests {
     }
 
     #[test]
-    fn a_broadside_fires_three_shells_but_costs_one_hit_point() {
+    fn a_broadside_raises_three_splashes_but_costs_one_hit_point() {
         let script = build(&bombard(&[true], false, "protected-cruiser", (5, 5)));
-        let shells = script
+        // No shell is drawn in flight for a naval volley.
+        assert!(
+            !script
+                .events
+                .iter()
+                .any(|e| matches!(e.event, Event::Shell { .. })),
+            "a broadside flies no shells"
+        );
+        let splashes = script
             .events
             .iter()
-            .filter(|e| matches!(e.event, Event::Shell { .. }))
+            .filter(|e| matches!(e.event, Event::Splash { .. }))
             .count();
-        assert_eq!(shells, 3);
+        assert_eq!(splashes, 3);
         assert_eq!(blows(&script).len(), 1);
-        // The beat is long enough for the last shell to land.
+        // But the timing is unchanged: the beat is long enough for the last shot to land.
         let last = script
             .events
             .iter()
             .filter_map(|e| match e.event {
-                Event::Shell { flight, .. } => Some(e.at + flight),
+                Event::Splash { flight, .. } => Some(e.at + flight),
                 _ => None,
             })
             .fold(0.0, f32::max);
         let beat = script.beats[0];
         assert!(last <= beat.start + beat.length + 1e-4);
+        // The muzzle blast and the sound are still there.
+        assert!(
+            script
+                .events
+                .iter()
+                .any(|e| matches!(e.event, Event::Flash { .. }))
+        );
+        assert!(
+            script
+                .events
+                .iter()
+                .any(|e| e.event == Event::Sound("broadside"))
+        );
+    }
+
+    #[test]
+    fn a_naval_duel_flies_no_shells_but_keeps_its_blast_and_blows() {
+        let script = build(&duel(
+            ("ironclad", "ironclad"),
+            &[true],
+            Outcome::AttackerWon,
+        ));
+        assert!(
+            !script
+                .events
+                .iter()
+                .any(|e| matches!(e.event, Event::Shell { .. })),
+            "no shell in flight"
+        );
+        // Each side fires three staggered shots: the winner's strike, the loser's fall short.
+        let splashes: Vec<_> = script
+            .events
+            .iter()
+            .filter_map(|e| match e.event {
+                Event::Splash { from, hits, .. } => Some((from, hits)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(splashes.len(), 6);
+        for (from, hits) in splashes {
+            assert_eq!(hits, from == 0, "actor {from}");
+        }
+        // Both blasts, the sound, and the round's single blow are unchanged.
+        assert_eq!(
+            script
+                .events
+                .iter()
+                .filter(|e| matches!(e.event, Event::Flash { .. }))
+                .count(),
+            2
+        );
+        assert!(
+            script
+                .events
+                .iter()
+                .any(|e| e.event == Event::Sound("broadside"))
+        );
+        assert_eq!(blows(&script).len(), 1);
     }
 
     #[test]

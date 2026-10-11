@@ -41,7 +41,7 @@ Command ──► sim: attack / bombard ──► Game.battles (records, in orde
                                           ▼
                               Response::Snapshot  (state is already final)
                                           │
-                client: receive ──► Stage.queue ──► drive ──► actors, shells, effects, sounds
+                client: receive ──► Stage.queue ──► drive ──► actors, effects, sounds
                                                        │
                                   refresh hides the tiles the stage is playing on
 ```
@@ -104,13 +104,17 @@ playback is deterministic) and then sampled by the clock.
 - The blow lands at `STRIKE_AT` of the beat: the round's loser loses exactly one hit point, its
   bar drops, it flinches, and a hit effect and sound play at it. Damage **must not** show earlier.
 - Motions cycle through two variants by round number, so consecutive rounds do not repeat.
-- A duel's firing styles (§7) launch a shell at `FIRE_AT` that lands exactly at `STRIKE_AT`: the
-  winner's shell hits, the loser's falls short.
-- A bombard volley is a beat with only the shooter acting. The shell leaves at `FIRE_AT` and its
-  flight depends on the distance (§8); the target takes the blow *when the shell arrives*, and a
-  missed shell lands short (splash on water, dust on land). The beat lasts until the shell has
-  landed, if that is later than the motion ends. A `charge` style on a bombard has no shell: its
-  blow is the contact. A `broadside` fires three shells, `SALVO_GAP` apart, for one hit point.
+- A duel's land firing styles (§7) launch a shell at `FIRE_AT` that lands exactly at
+  `STRIKE_AT`: the winner's shell hits, the loser's falls short. A `broadside` draws no shell
+  in flight: its three staggered shots strike (a hit effect at `STRIKE_AT`) or fall short
+  (splashes) where they land.
+- A bombard volley is a beat with only the shooter acting. A land style's shell leaves at
+  `FIRE_AT` and its flight depends on the distance (§8); the target takes the blow *when the
+  shell arrives*, and a missed shell lands short (splash on water, dust on land). The beat
+  lasts until the shell has landed, if that is later than the motion ends. A `charge` style on
+  a bombard has no shell: its blow is the contact. A `broadside` fires three shots,
+  `SALVO_GAP` apart, for one hit point, with no shells drawn: misses raise splashes where the
+  shots fall, and the beat lasts until the last shot has landed.
 - A support shot is a one-motion beat before round 1; if it hit, the attacker takes the blow at
   the strike point.
 
@@ -192,7 +196,8 @@ gun that fires on the starboard beam at `FIRE_AT`, for each of the eight facings
 the top left; the weight sizes the blast). At each muzzle the stage fires a white-hot flash, an
 orange fireball that rolls up into brown and then black smoke, and on every other gun a pale ring
 of shock across the water; the guns go off within about 0.04 s of one another rather than on the
-same frame. The three shells each leave a different gun. A ship whose design lists no muzzles is
+same frame. No shell is drawn in flight: where the three shots fall, hits show as the blow
+and misses raise splashes. A ship whose design lists no muzzles is
 not turned and fires the older single flash.
 
 | Style | Default for | Attack motion (length) | Cues |
@@ -200,7 +205,7 @@ not turned and fires the older single flash.
 | `volley` | land units that attack | recoil at `FIRE_AT` (0.80 s) | muzzle flash, smoke, small shell, `volley` |
 | `charge` | explicit only (cavalry) | wind-up, thrust, contact at `STRIKE_AT`, recover (0.80 s) | dust, `charge` |
 | `gun` | land units with a bombard | heavy recoil (0.90 s) | large flash and smoke, shell, `gun` |
-| `broadside` | all sea units | beam-on roll and recoil (1.00 s) | a blast at every gun on the beam, three shells, `broadside` |
+| `broadside` | all sea units | beam-on roll and recoil (1.00 s) | a blast at every gun on the beam, splashes where misses fall, `broadside` |
 
 | Other motion | Length | Notes |
 | --- | --- | --- |
@@ -227,7 +232,7 @@ Defaults, defined once in `crates/client/src/stage/script.rs` (`LEAD_IN`, `TAIL`
 | `SALVO_GAP` | 0.05 s | Spacing of a broadside's shells |
 | `MIN_FINALE` | 0.60 s | Shortest finale |
 | `STEP_SECS` | 0.40 s | A retreat or advance between tiles |
-| Shell flight (bombard) | `distance / 600 px/s`, clamped to 0.25–0.90 s | Time from fire to impact |
+| Shell flight (bombard) | `distance / 600 px/s`, clamped to 0.25–0.90 s | Time from fire to impact, for land shells and broadside shots alike |
 
 ## 9. Acceptance
 

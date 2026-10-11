@@ -1212,9 +1212,10 @@ fn draw_unit_badges(
     at: Vec3,
 ) {
     let (x, y, z) = (at.x, at.y, at.z);
-    let (hp, max) = (unit.hp(def).max(0), unit.max_hp(def));
+    let max = unit.max_hp(def).max(1);
+    let hp = unit.hp(def).clamp(0, max);
     let fraction = hp as f32 / max as f32;
-    // A dark track with a coloured pill in it.
+    // A dark track with one pip per hit point in it, like the reference's segmented bar.
     let (width, inner) = (50.0, 42.0);
     pill(
         commands,
@@ -1223,20 +1224,28 @@ fn draw_unit_badges(
         Vec2::new(width, 10.0),
         PLATE,
     );
-    let fill = (inner * fraction).max(6.0);
-    pill(
-        commands,
-        shapes,
-        Vec3::new(x - inner / 2.0 + fill / 2.0, y - 22.0, z + 0.2),
-        Vec2::new(fill, 6.0),
-        if fraction > 0.66 {
-            GOOD
-        } else if fraction > 0.33 {
-            AMBER
-        } else {
-            BAD
-        },
-    );
+    let lit = hp_color(fraction);
+    let pips = pip_layout(hp, max, inner);
+    if pips.is_empty() {
+        let fill = (inner * fraction).max(6.0);
+        pill(
+            commands,
+            shapes,
+            Vec3::new(x - inner / 2.0 + fill / 2.0, y - 22.0, z + 0.2),
+            Vec2::new(fill, 6.0),
+            lit,
+        );
+    } else {
+        for pip in &pips {
+            pill(
+                commands,
+                shapes,
+                Vec3::new(x + pip.centre, y - 22.0, z + 0.2),
+                Vec2::new(pip.width, 6.0),
+                if pip.lit { lit } else { SPENT },
+            );
+        }
+    }
     // Experience stars, then the order glyph: F fortified, f digging in, W working, > marching.
     let order = match unit.order {
         Order::Fortified => "F",
@@ -1376,22 +1385,11 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
             INK,
         );
     }
-    // Hit points are the reference's morale bar: a figure over a meter.
-    let (hp, max) = (u.hp(def).max(0), u.max_hp(def));
-    let fraction = hp as f32 / max.max(1) as f32;
+    // Hit points are the reference's morale bar: a figure over a meter of pips.
+    let max = u.max_hp(def).max(1);
+    let hp = u.hp(def).clamp(0, max);
     row(p, "Hit points", format!("{hp} / {max}"), INK);
-    meter(
-        p,
-        fraction,
-        if fraction > 0.66 {
-            GOOD
-        } else if fraction > 0.33 {
-            AMBER
-        } else {
-            BAD
-        },
-        8.0,
-    );
+    hp_pips(p, hp, max, 8.0);
     if mine {
         row(
             p,
