@@ -11,8 +11,9 @@
 //! Right-clicking the map is how a unit is sent somewhere or at an enemy (see `controls`);
 //! the strike buttons offer the same blows from the bar.
 use super::*;
+use crate::chrome::{Frame, Skin, dress};
 use crate::theme::{
-    BAD, CARD, EDGE, INK, INK_SOFT, ON_PLATE, PLATE, Tone, card, glyph, lift_small, rounded,
+    BAD, CARD, EDGE, INK, INK_SOFT, ON_PLATE, PLATE, TRIM, Tone, card, glyph, lift_small, rounded,
 };
 use fourx_sim::{Domain, Order, Unit};
 
@@ -250,11 +251,13 @@ pub(super) fn spawn(
             bar.spawn((
                 Node {
                     display: Display::None,
-                    padding: UiRect::axes(px(12), px(5)),
-                    border_radius: rounded(999.0),
+                    padding: UiRect::axes(px(14), px(5)),
+                    border: UiRect::all(px(1.5)),
+                    border_radius: rounded(4.0),
                     ..default()
                 },
                 BackgroundColor(PLATE),
+                BorderColor::all(TRIM.with_alpha(0.55)),
                 lift_small(),
                 BarHint,
                 Text::new(""),
@@ -266,32 +269,27 @@ pub(super) fn spawn(
             ));
             let mut tray = card();
             tray.position_type = PositionType::Relative;
-            tray.padding = UiRect::all(px(6));
+            tray.padding = UiRect::axes(px(16), px(14));
             tray.row_gap = px(4);
-            tray.border_radius = rounded(16.0);
-            bar.spawn((
-                tray,
-                BackgroundColor(CARD),
-                BorderColor::all(EDGE),
-                lift_small(),
-            ))
-            .with_children(|tray| {
-                for row in rows {
-                    tray.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        justify_content: JustifyContent::Center,
-                        column_gap: px(4),
-                        row_gap: px(4),
-                        ..default()
-                    })
-                    .with_children(|row_node| {
-                        for entry in row {
-                            button(row_node, assets, prefix, entry);
-                        }
-                    });
-                }
-            });
+            bar.spawn((tray, BackgroundColor(CARD), lift_small()))
+                .with_children(|tray| {
+                    dress(tray, assets, prefix, Skin::Paper, Frame::Small, false);
+                    for row in rows {
+                        tray.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            justify_content: JustifyContent::Center,
+                            column_gap: px(4),
+                            row_gap: px(4),
+                            ..default()
+                        })
+                        .with_children(|row_node| {
+                            for entry in row {
+                                button(row_node, assets, prefix, entry);
+                            }
+                        });
+                    }
+                });
         });
 }
 
@@ -320,9 +318,11 @@ fn button(row: &mut ChildSpawnerCommands, assets: &AssetServer, prefix: &str, en
             height: px(BUTTON),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border_radius: rounded(11.0),
+            border: UiRect::all(px(1.5)),
+            border_radius: rounded(4.0),
             ..default()
         },
+        BorderColor::all(if dormant { EDGE.with_alpha(0.2) } else { EDGE }),
     ))
     .with_children(|b| {
         glyph(b, assets, prefix, entry.icon, GLYPH, face);

@@ -9,6 +9,7 @@ use fourx_sim::{
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::chrome::{Frame, Skin, dress, texture, trim};
 use crate::theme::*;
 
 /// Minimap pixel colours.
@@ -30,15 +31,13 @@ enum Side {
     Right,
 }
 
-/// One readout of the top bar, a row of the nation's panel: a coloured badge carrying the glyph,
-/// the figure, and a darker cell at the end for the second figure (a rate, a target) if there is
-/// one.
+/// One readout of the nation's panel, a row of it: a painted emblem, the figure, and the second
+/// figure (a rate, a target) at the far end if there is one, over a gilt hairline.
 fn stat(
     parent: &mut ChildSpawnerCommands,
     assets: &AssetServer,
     prefix: &str,
-    icon: &str,
-    tint: Color,
+    emblem: &str,
     value: impl Into<String>,
     second: Option<(String, Color)>,
 ) {
@@ -46,50 +45,24 @@ fn stat(
         .spawn((
             Node {
                 width: percent(100),
-                height: px(24),
                 align_items: AlignItems::Center,
-                column_gap: px(8),
-                padding: UiRect::left(px(3)),
-                border_radius: rounded(7.0),
-                overflow: Overflow::clip(),
+                column_gap: px(12),
+                padding: UiRect::vertical(px(2)),
+                border: UiRect::bottom(px(1)),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(Color::WHITE.with_alpha(0.10)),
+            BorderColor::all(TRIM.with_alpha(0.28)),
         ))
         .with_children(|p| {
-            p.spawn((
-                Node {
-                    width: px(19),
-                    height: px(19),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    border_radius: rounded(999.0),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BackgroundColor(tint),
-                BoxShadow::new(tint.with_alpha(0.5), px(0), px(0), px(0), px(3)),
-            ))
-            .with_children(|b| glyph(b, assets, prefix, icon, 12.0, Color::WHITE));
+            crate::chrome::emblem(p, assets, prefix, emblem, 28.0);
             p.spawn(Node {
                 flex_grow: 1.0,
                 ..default()
             })
-            .with_children(|v| bold(v, value, 13.0, ON_PLATE));
+            .with_children(|v| bold(v, value, 17.0, ON_PLATE));
             if let Some((second, ink)) = second {
-                p.spawn((
-                    Node {
-                        min_width: px(46),
-                        height: percent(100),
-                        padding: UiRect::horizontal(px(8)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    },
-                    BackgroundColor(Color::BLACK.with_alpha(0.30)),
-                ))
-                .with_children(|c| bold(c, second, 12.5, ink));
+                bold(p, second, 15.0, ink);
             }
         });
 }
@@ -107,14 +80,9 @@ fn image_sprite(
     commands.spawn((sprite, Transform::from_translation(position), WorldVisual));
 }
 
-/// "Jan 1, 1876".
-fn short_date(date: Date) -> String {
-    format!(
-        "{} {}, {}",
-        &date.month_name()[..3],
-        date.day(),
-        date.year()
-    )
+/// "January 1, 1895".
+fn date_text(date: Date) -> String {
+    format!("{} {}, {}", date.month_name(), date.day(), date.year())
 }
 fn long_date(date: Date) -> String {
     format!(
@@ -1067,41 +1035,43 @@ pub(super) fn refresh(
                     flag,
                 );
             }
-            // The plate: the nation's flag at one end, the city's size at the other, its name between.
-            let width = text_width(city.name.chars().count(), 14.0) + 54.0;
+            // The banner: the nation's flag at one end, the city's size at the other, its name between.
+            let width = text_width(city.name.chars().count(), 15.0) + 60.0;
             let plate = Vec3::new(x, y - 26.0, z + 0.1);
-            pill(&mut commands, &shapes, plate, Vec2::new(width, 24.0), PLATE);
+            label_plate(&mut commands, &shapes, plate, Vec2::new(width, 24.0));
             let ours = city.owner == session.player;
             map_flag(
                 &mut commands,
-                &shapes,
-                plate + Vec3::new(5.0 - width / 2.0, 0.0, 0.1),
-                26.0,
+                plate + Vec3::new(8.0 - width / 2.0, 0.0, 0.1),
+                30.0,
                 nation_color(game, city.owner, 1.0),
+                game.factions
+                    .get(&city.owner)
+                    .and_then(|f| nation_art(&session, &assets, &f.tag)),
             );
             map_text(
                 &mut commands,
                 &city.name,
-                14.0,
-                ON_PLATE,
+                15.0,
+                BRONZE,
                 plate + Vec3::Z * 0.3,
             );
-            disc(
+            medallion(
                 &mut commands,
                 &shapes,
                 plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.1),
-                26.0,
+                28.0,
                 if ours {
-                    ACCENT
+                    Color::srgb(0.082, 0.157, 0.122)
                 } else {
-                    Color::srgb(0.20, 0.27, 0.37)
+                    Color::srgb(0.075, 0.082, 0.094)
                 },
             );
             map_text(
                 &mut commands,
                 city.population.to_string(),
-                13.0,
-                ON_ACCENT,
+                14.0,
+                ON_PLATE,
                 plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.3),
             );
         }
@@ -1506,42 +1476,126 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
     );
 }
 
-/// What the player knows of a square: its terrain, who holds it, what stands on it, and what
-/// it yields.
-fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
+/// A row of the terrain panel with the pane's hairline under it: `label` at the left, and
+/// whatever `value` adds at the right.
+fn tile_row(
+    p: &mut ChildSpawnerCommands,
+    label: &str,
+    value: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    p.spawn((
+        Node {
+            width: percent(100),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: px(10),
+            flex_shrink: 0.0,
+            padding: UiRect::vertical(px(3)),
+            border: UiRect::bottom(px(1)),
+            ..default()
+        },
+        BorderColor::all(RULE),
+    ))
+    .with_children(|p| {
+        text(p, label, 14.0, INK_SOFT);
+        p.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: px(8),
+            ..default()
+        })
+        .with_children(value);
+    });
+}
+
+/// What the player knows of a square: its terrain pictured and named, who holds it, what stands
+/// on it, and what it yields.
+fn tile_panel(
+    p: &mut ChildSpawnerCommands,
+    game: &Game,
+    session: &Session,
+    pos: Coord,
+    assets: &AssetServer,
+) {
+    let prefix = session.asset_prefix.as_str();
     let t = game.map.get(pos).unwrap();
     let region = game.region_of(pos).map(|r| r.name.clone());
-    let owner = game
-        .factions
-        .get(&t.owner)
-        .filter(|_| t.owner != 0)
-        .map(|f| f.name.clone());
+    let holder = game.factions.get(&t.owner).filter(|_| t.owner != 0);
     let border = game.cities.get(&t.claim).map(|c| c.name.clone());
+    // The head: the name over what kind of country it is, and the landscape fading in behind.
     p.spawn(Node {
-        justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Baseline,
+        width: percent(100),
+        height: px(74),
         flex_shrink: 0.0,
+        margin: UiRect::bottom(px(6)),
         ..default()
     })
-    .with_children(|p| {
-        bold(p, t.terrain.name(), 18.0, INK);
-        text(p, format!("({}, {})", pos.x, pos.y), 12.5, INK_SOFT);
+    .with_children(|h| {
+        h.spawn((
+            ImageNode::new(crate::chrome::picture(
+                assets,
+                prefix,
+                crate::chrome::scene_for(t),
+            )),
+            Node {
+                position_type: PositionType::Absolute,
+                right: px(-4),
+                top: px(-4),
+                width: px(168),
+                height: px(75),
+                ..default()
+            },
+        ));
+        h.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: px(0),
+            ..default()
+        })
+        .with_children(|c| {
+            bold(c, t.terrain.name(), 22.0, INK);
+            text(
+                c,
+                region.unwrap_or_else(|| "Open country".into()),
+                14.0,
+                INK_SOFT,
+            );
+        });
     });
-    text(
-        p,
-        region.unwrap_or_else(|| "Open country".into()),
-        12.5,
-        INK_SOFT,
-    );
-    rule(p);
-    row(
-        p,
-        "Held by",
-        owner.map_or_else(|| "Unclaimed".into(), |o| o),
-        INK,
-    );
+    tile_row(p, "Held by", |v| {
+        if let Some(faction) = holder {
+            let art = nation_art(session, assets, &faction.tag);
+            v.spawn((
+                Node {
+                    width: px(23),
+                    height: px(16),
+                    border: UiRect::all(px(1)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(nation_color(game, faction.id, 1.0)),
+                BorderColor::all(BRONZE),
+            ))
+            .with_children(|f| {
+                if let Some(art) = art {
+                    // The flag's picture is a portrait of a waving cloth: show its middle.
+                    let mut flag = ImageNode::new(art);
+                    flag.rect = Some(Rect::new(0.0, 48.0, 200.0, 48.0 + 200.0 * 16.0 / 23.0));
+                    f.spawn((
+                        flag,
+                        Node {
+                            width: percent(100),
+                            height: percent(100),
+                            ..default()
+                        },
+                    ));
+                }
+            });
+            bold(v, faction.name.clone(), 14.5, INK);
+        } else {
+            bold(v, "Unclaimed", 14.5, INK);
+        }
+    });
     if let Some(city) = border {
-        row(p, "Border of", city, INK);
+        tile_row(p, "Border of", |v| bold(v, city, 14.5, INK));
     }
     let mut features = Vec::new();
     match t.relief {
@@ -1569,34 +1623,72 @@ fn tile_panel(p: &mut ChildSpawnerCommands, game: &Game, pos: Coord) {
         }
     }
     if !features.is_empty() {
-        row(p, "Features", features.join(", "), INK);
+        tile_row(p, "Features", |v| bold(v, features.join(", "), 14.5, INK));
     }
     if let Some(resource) = game.map.resource(t) {
-        row(
-            p,
-            "Resource",
-            format!("{} ({})", resource.name, resource.class.name()),
-            INK,
-        );
+        tile_row(p, "Resource", |v| {
+            bold(
+                v,
+                format!("{} ({})", resource.name, resource.class.name()),
+                14.5,
+                INK,
+            )
+        });
     }
-    row(
-        p,
-        "Movement cost",
-        (if t.is_land() { t.move_cost() } else { 1 }).to_string(),
-        INK,
-    );
+    tile_row(p, "Movement cost", |v| {
+        bold(
+            v,
+            (if t.is_land() { t.move_cost() } else { 1 }).to_string(),
+            14.5,
+            INK,
+        )
+    });
     let defense = t.defense_percent();
-    row(
-        p,
-        "Defense bonus",
-        format!("+{defense}%"),
-        if defense > 0 { GOOD } else { INK },
-    );
+    tile_row(p, "Defense bonus", |v| {
+        bold(
+            v,
+            format!("+{defense}%"),
+            14.5,
+            if defense > 0 { GOOD } else { INK },
+        )
+    });
     let gathered = fourx_sim::economy::square_yield(&game.map, t, game.city_at(pos).is_some());
     heading(p, "Yields");
-    row(p, "Food", gathered.food.to_string(), INK);
-    row(p, "Shields", gathered.shields.to_string(), INK);
-    row(p, "Gold", gathered.gold.to_string(), INK);
+    for (icon, name, amount) in [
+        ("wheat", "Food", gathered.food),
+        ("shield", "Shields", gathered.shields),
+        ("coins", "Gold", gathered.gold),
+    ] {
+        p.spawn((
+            Node {
+                width: percent(100),
+                align_items: AlignItems::Center,
+                column_gap: px(14),
+                flex_shrink: 0.0,
+                padding: UiRect::new(px(10), px(0), px(1), px(1)),
+                border: UiRect::bottom(px(1)),
+                ..default()
+            },
+            BorderColor::all(RULE.with_alpha(0.14)),
+        ))
+        .with_children(|y| {
+            crate::chrome::emblem(y, assets, prefix, icon, 30.0);
+            y.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            })
+            .with_children(|n| bold(n, name, 15.0, INK));
+            bold(y, amount.to_string(), 15.0, INK);
+        });
+    }
+    p.spawn(Node {
+        width: percent(100),
+        justify_content: JustifyContent::FlexEnd,
+        flex_shrink: 0.0,
+        margin: UiRect::top(px(2)),
+        ..default()
+    })
+    .with_children(|c| text(c, format!("({}, {})", pos.x, pos.y), 13.0, INK_SOFT));
 }
 
 /// Whether anything is selected that the pane has something to say about.
@@ -1609,12 +1701,14 @@ fn has_info(game: &Game, session: &Session) -> bool {
 }
 
 /// The pane that describes the selection: the unit or the square.
-fn info(p: &mut ChildSpawnerCommands, game: &Game, session: &Session) {
+fn info(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, assets: &AssetServer) {
     match session.selection {
         Selection::Unit(id) if game.units.contains_key(&id) => {
             unit_panel(p, game, session, &game.units[&id]);
         }
-        Selection::Tile(pos) if game.map.get(pos).is_some() => tile_panel(p, game, pos),
+        Selection::Tile(pos) if game.map.get(pos).is_some() => {
+            tile_panel(p, game, session, pos, assets);
+        }
         _ => {}
     }
 }
@@ -1641,8 +1735,8 @@ fn build_ui(
     };
     let faction = &game.factions[&me];
     let date = game.date();
-    let margin = if narrow { 8.0 } else { TOP_MARGIN + 6.0 };
-    let section = |side: Side| Node {
+    let margin = if narrow { 6.0 } else { TOP_MARGIN + 4.0 };
+    let top_card = |side: Side| Node {
         position_type: PositionType::Absolute,
         top: px(TOP_MARGIN),
         left: if side == Side::Left {
@@ -1655,17 +1749,12 @@ fn build_ui(
         } else {
             Val::Auto
         },
-        padding: UiRect::all(px(if side == Side::Left { 8 } else { 6 })),
-        border: UiRect::all(px(1)),
-        border_radius: rounded(14.0),
         align_items: AlignItems::Center,
-        column_gap: px(if narrow { 8 } else { 12 }),
         ..default()
     };
-    let face = |fill: Color, edge: Color| {
+    let face = |fill: Color| {
         (
             BackgroundColor(fill),
-            BorderColor::all(edge),
             lift(),
             GlobalZIndex(5),
             UiRoot,
@@ -1673,168 +1762,254 @@ fn build_ui(
             Interaction::default(),
         )
     };
-    // Top left: the nation's flag with the number of its cities, and beside it what it holds,
-    // one row each: treasury and income, research and its goal, industry.
+    // Top left: the nation's banner with the number of its cities, and beside it its name over
+    // what it holds, one row each: treasury and income, research and its goal, industry.
     let cities = game.cities.values().filter(|c| c.owner == me).count();
-    let (flag_width, flag_height) = if narrow { (44.0, 51.0) } else { (62.0, 72.0) };
-    commands
-        .spawn((
-            section(Side::Left),
-            face(
-                Color::srgba(0.118, 0.157, 0.220, 0.96),
-                TRIM.with_alpha(0.55),
-            ),
-        ))
-        .with_children(|p| {
-            p.spawn(Node {
-                flex_shrink: 0.0,
-                margin: UiRect::right(px(2)),
-                ..default()
-            })
-            .with_children(|f| {
-                framed_flag(
-                    f,
-                    nation_color(game, me, 1.0),
-                    &faction.tag,
-                    nation_art(session, assets, &faction.tag),
-                    flag_width,
-                    flag_height,
-                );
-                // A round badge on the flag's lower corner.
-                f.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: px(-9),
-                        bottom: px(-7),
-                        width: px(24),
-                        height: px(24),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        border: UiRect::all(px(2)),
-                        border_radius: rounded(999.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.086, 0.114, 0.160)),
-                    BorderColor::all(TRIM),
-                ))
-                .with_children(|b| bold(b, cities.to_string(), 12.0, ON_PLATE));
+    let (banner_width, banner_height) = if narrow { (46.0, 66.0) } else { (66.0, 94.0) };
+    let mut nation = top_card(Side::Left);
+    nation.padding = UiRect::axes(px(if narrow { 18 } else { 24 }), px(18));
+    nation.column_gap = px(if narrow { 12 } else { 18 });
+    commands.spawn((nation, face(SLATE))).with_children(|p| {
+        dress(p, assets, prefix, Skin::Slate, Frame::Grand, !narrow);
+        p.spawn(Node {
+            flex_shrink: 0.0,
+            margin: UiRect::right(px(4)),
+            ..default()
+        })
+        .with_children(|f| {
+            // The flag hangs from a gilt rod.
+            f.spawn((
+                Node {
+                    width: px(banner_width),
+                    height: px(banner_height),
+                    border: UiRect::new(px(1), px(1), px(0), px(1)),
+                    flex_shrink: 0.0,
+                    margin: UiRect::top(px(5)),
+                    ..default()
+                },
+                BackgroundColor(nation_color(game, me, 1.0)),
+                BorderColor::all(BRONZE),
+            ))
+            .with_children(|b| {
+                if let Some(art) = nation_art(session, assets, &faction.tag) {
+                    b.spawn((
+                        ImageNode::new(art),
+                        Node {
+                            width: percent(100),
+                            height: percent(100),
+                            ..default()
+                        },
+                    ));
+                }
             });
-            p.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: px(3),
-                width: px(if narrow { 118 } else { 158 }),
+            f.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(-4),
+                    top: px(0),
+                    width: px(banner_width + 8.0),
+                    height: px(7),
+                    border: UiRect::all(px(1)),
+                    border_radius: rounded(3.0),
+                    ..default()
+                },
+                BackgroundColor(TRIM),
+                BorderColor::all(BRONZE),
+            ));
+            // A round badge on the banner's lower corner.
+            f.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(-17),
+                    bottom: px(-9),
+                    width: px(32),
+                    height: px(32),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(px(3)),
+                    border_radius: rounded(999.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.075, 0.082, 0.094)),
+                BorderColor::all(TRIM),
+                BoxShadow::new(Color::BLACK.with_alpha(0.5), px(0), px(2), px(0), px(4)),
+            ))
+            .with_children(|b| bold(b, cities.to_string(), 14.0, ON_PLATE));
+        });
+        // A gilt rule between the banner and the figures.
+        p.spawn((
+            Node {
+                width: px(1),
+                align_self: AlignSelf::Stretch,
+                margin: UiRect::vertical(px(2)),
+                flex_shrink: 0.0,
                 ..default()
-            })
-            .with_children(|p| {
-                let income = game.income(me);
+            },
+            BackgroundColor(TRIM.with_alpha(0.4)),
+        ));
+        p.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            width: px(if narrow { 128 } else { 176 }),
+            ..default()
+        })
+        .with_children(|p| {
+            if !narrow {
+                bold(p, faction.name.clone(), 19.0, ON_PLATE);
+            }
+            let income = game.income(me);
+            stat(
+                p,
+                assets,
+                prefix,
+                "coin",
+                faction.gold.to_string(),
+                Some((format!("{income:+}"), if income >= 0 { GAIN } else { LOSS })),
+            );
+            if !narrow {
                 stat(
                     p,
                     assets,
                     prefix,
-                    "hud_gold",
-                    COIN,
-                    faction.gold.to_string(),
-                    Some((format!("{income:+}"), if income >= 0 { GAIN } else { LOSS })),
+                    "flask",
+                    faction.research.to_string(),
+                    Some((
+                        (session.rules.research_cost * (faction.technology as i32 + 1)).to_string(),
+                        ON_PLATE.with_alpha(0.7),
+                    )),
                 );
-                if !narrow {
-                    stat(
-                        p,
-                        assets,
-                        prefix,
-                        "hud_research",
-                        LORE,
-                        faction.research.to_string(),
-                        Some((
-                            (session.rules.research_cost * (faction.technology as i32 + 1))
-                                .to_string(),
-                            ON_PLATE.with_alpha(0.75),
-                        )),
-                    );
-                    stat(
-                        p,
-                        assets,
-                        prefix,
-                        "hud_industry",
-                        FORGE,
-                        faction.industry.to_string(),
-                        None,
-                    );
-                }
-            });
+                stat(
+                    p,
+                    assets,
+                    prefix,
+                    "ingots",
+                    faction.industry.to_string(),
+                    None,
+                );
+            }
         });
-    // Top right: the calendar and the one button that moves it on.
+    });
+    // Top right: the calendar and the one button that moves it on, joined by a compass.
+    let mut right = top_card(Side::Right);
+    right.align_items = AlignItems::Center;
     commands
-        .spawn((section(Side::Right), face(BAR, EDGE)))
+        .spawn((right, face(Color::NONE)))
         .with_children(|p| {
-            bold(p, short_date(date), 13.5, INK);
-            button(
-                p,
-                if session.pending {
-                    "Waiting...".to_string()
-                } else {
-                    "End Day".to_string()
+            p.spawn(Node {
+                padding: UiRect::axes(px(26), px(12)),
+                min_height: px(48),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .insert((BackgroundColor(CARD), lift_small()))
+            .with_children(|d| {
+                dress(d, assets, prefix, Skin::Paper, Frame::Small, false);
+                bold(d, date_text(date), 18.0, INK);
+            });
+            p.spawn((
+                ImageNode::new(crate::chrome::picture(assets, prefix, "compass")),
+                Node {
+                    width: px(38),
+                    height: px(38),
+                    margin: UiRect::horizontal(px(-19)),
+                    flex_shrink: 0.0,
+                    ..default()
                 },
+                ZIndex(2),
+            ));
+            p.spawn((
+                Button,
                 Action::EndTurn,
                 Tone::Primary,
-            );
+                Node {
+                    min_width: px(132),
+                    min_height: px(48),
+                    padding: UiRect::axes(px(28), px(10)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(Tone::Primary.fill(Interaction::None)),
+                lift_small(),
+            ))
+            .with_children(|b| {
+                texture(b, assets, prefix, Skin::Felt, 0.4);
+                trim(b, assets, prefix, Frame::Small);
+                bold(
+                    b,
+                    if session.pending {
+                        "Waiting..."
+                    } else {
+                        "End Day"
+                    },
+                    19.0,
+                    ON_ACCENT,
+                );
+            });
         });
     if narrow {
         // The inspector sits under the map: what the selection is, then quick ways to pick
-        // another city or unit.
+        // another city or unit. Its dressing stays put while the contents scroll.
         let mut inspector = card();
         inspector.left = px(8);
         inspector.right = px(8);
         inspector.bottom = px(44);
         inspector.height = px(inspector_height(size.y));
-        inspector.padding = UiRect::all(px(12));
-        inspector.border_radius = rounded(14.0);
-        inspector.overflow = Overflow::scroll_y();
+        inspector.padding = UiRect::axes(px(18), px(14));
         commands
-            .spawn((
-                inspector,
-                floating(),
-                UiRoot,
-                Inspector,
-                ScrollPosition::default(),
-            ))
+            .spawn((inspector, floating(), UiRoot))
             .with_children(|p| {
-                info(p, game, session);
-                p.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(6),
-                    row_gap: px(6),
-                    flex_wrap: FlexWrap::Wrap,
-                    ..default()
-                })
+                dress(p, assets, prefix, Skin::Paper, Frame::Grand, false);
+                p.spawn((
+                    Node {
+                        width: percent(100),
+                        height: percent(100),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(4),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    Inspector,
+                    ScrollPosition::default(),
+                ))
                 .with_children(|p| {
-                    for c in game
-                        .cities
-                        .values()
-                        .filter(|c| c.owner == session.player)
-                        .take(8)
-                    {
-                        button(p, &c.name, Action::SelectCity(c.id), Tone::Quiet);
-                    }
-                    for u in game
-                        .units
-                        .values()
-                        .filter(|u| u.owner == session.player)
-                        .take(4)
-                    {
-                        button(
-                            p,
-                            session.rules.def(u).name.clone(),
-                            Action::SelectUnit(u.id),
-                            Tone::Quiet,
-                        );
-                    }
-                    button(p, "Save", Action::Save, Tone::Quiet);
+                    info(p, game, session, assets);
+                    p.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: px(6),
+                        row_gap: px(6),
+                        flex_wrap: FlexWrap::Wrap,
+                        ..default()
+                    })
+                    .with_children(|p| {
+                        for c in game
+                            .cities
+                            .values()
+                            .filter(|c| c.owner == session.player)
+                            .take(8)
+                        {
+                            button(p, &c.name, Action::SelectCity(c.id), Tone::Quiet);
+                        }
+                        for u in game
+                            .units
+                            .values()
+                            .filter(|u| u.owner == session.player)
+                            .take(4)
+                        {
+                            button(
+                                p,
+                                session.rules.def(u).name.clone(),
+                                Action::SelectUnit(u.id),
+                                Tone::Quiet,
+                            );
+                        }
+                        button(p, "Save", Action::Save, Tone::Quiet);
+                    });
                 });
             });
     } else {
         // The selection is described at the bottom right, over the map.
         let mut pane = card();
-        pane.right = px(16);
+        pane.right = px(14);
         pane.bottom = px(CHART_BOTTOM);
         pane.width = px(INFO_WIDTH);
         pane.max_height = px((size.y - TOP_BAR - 12.0 - CHART_BOTTOM).max(120.0));
@@ -1842,29 +2017,43 @@ fn build_ui(
         if has_info(game, session) {
             commands
                 .spawn((pane, floating(), UiRoot, InfoPane, Interaction::default()))
-                .with_children(|p| info(p, game, session));
+                .with_children(|p| {
+                    dress(p, assets, prefix, Skin::Paper, Frame::Grand, true);
+                    info(p, game, session, assets);
+                });
         }
     }
     if !narrow {
-        // The minimap is the map's own shape, set in a card with a rounded frame.
+        // The minimap is the map's own shape, set in a slate frame with a column of tools beside it.
         let image = chart_size(size.y, &game.map);
         let mut chart = card();
         chart.left = px(CHART_LEFT);
         chart.bottom = px(CHART_BOTTOM);
-        chart.width = px(image.x + 2.0 * CHART_FRAME);
+        chart.width = px(image.x + 2.0 * CHART_FRAME + TOOLS_WIDTH + TOOLS_GAP);
         chart.height = px(image.y + 2.0 * CHART_FRAME);
-        chart.padding = UiRect::all(px(CHART_FRAME - 1.0));
-        chart.border_radius = rounded(14.0);
+        chart.padding = UiRect::all(px(CHART_FRAME));
+        chart.flex_direction = FlexDirection::Row;
+        chart.column_gap = px(TOOLS_GAP);
         commands
-            .spawn((chart, floating(), UiRoot))
+            .spawn((
+                chart,
+                BackgroundColor(SLATE),
+                lift(),
+                UiRoot,
+                Interaction::default(),
+            ))
             .with_children(|p| {
-                p.spawn(Node {
-                    width: px(image.x),
-                    height: px(image.y),
-                    border_radius: rounded(9.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                })
+                dress(p, assets, prefix, Skin::Slate, Frame::Grand, false);
+                p.spawn((
+                    Node {
+                        width: px(image.x),
+                        height: px(image.y),
+                        overflow: Overflow::clip(),
+                        border: UiRect::all(px(1)),
+                        ..default()
+                    },
+                    BorderColor::all(Color::BLACK.with_alpha(0.7)),
+                ))
                 .with_children(|p| {
                     p.spawn((
                         Button,
@@ -1884,13 +2073,49 @@ fn build_ui(
                                 Node {
                                     position_type: PositionType::Absolute,
                                     border: UiRect::all(px(2)),
-                                    border_radius: rounded(3.0),
+                                    border_radius: rounded(1.0),
                                     ..default()
                                 },
                                 BorderColor::all(SELECT),
                             ));
                         }
                     });
+                });
+                // The tools: the capital, the next unit, the next city.
+                p.spawn((
+                    Node {
+                        width: px(TOOLS_WIDTH),
+                        height: px(image.y),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::all(px(3)),
+                        border: UiRect::all(px(2)),
+                        row_gap: px(2),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.067, 0.075, 0.086)),
+                    BorderColor::all(TRIM.with_alpha(0.8)),
+                ))
+                .with_children(|p| {
+                    for (emblem, action) in [
+                        ("globe", Action::Home),
+                        ("ship", Action::NextUnit),
+                        ("lens", Action::NextCity),
+                    ] {
+                        p.spawn((
+                            Button,
+                            action,
+                            crate::chrome::Tool,
+                            Node {
+                                flex_grow: 1.0,
+                                width: percent(100),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(crate::chrome::TOOL),
+                        ))
+                        .with_children(|b| crate::chrome::emblem(b, assets, prefix, emblem, 34.0));
+                    }
                 });
             });
     }
@@ -1908,7 +2133,7 @@ fn build_ui(
         } else {
             let chart = chart_size(size.y, &game.map);
             crate::bar::Placement {
-                left: CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
+                left: CHART_LEFT + chart.x + 2.0 * CHART_FRAME + TOOLS_WIDTH + TOOLS_GAP + 16.0,
                 right: 16.0 + INFO_WIDTH + 12.0,
                 bottom: CHART_BOTTOM + MESSAGE_HEIGHT + 10.0,
             }
@@ -1923,7 +2148,7 @@ fn build_ui(
     } else {
         let chart = chart_size(size.y, &game.map);
         (
-            CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
+            CHART_LEFT + chart.x + 2.0 * CHART_FRAME + TOOLS_WIDTH + TOOLS_GAP + 16.0,
             16.0 + INFO_WIDTH + 16.0,
             CHART_BOTTOM,
         )
@@ -1944,12 +2169,14 @@ fn build_ui(
             p.spawn((
                 Node {
                     min_height: px(MESSAGE_HEIGHT),
-                    padding: UiRect::axes(px(16), px(5)),
+                    padding: UiRect::axes(px(18), px(5)),
                     align_items: AlignItems::Center,
-                    border_radius: rounded(999.0),
+                    border: UiRect::all(px(1.5)),
+                    border_radius: rounded(4.0),
                     ..default()
                 },
                 BackgroundColor(PLATE),
+                BorderColor::all(TRIM.with_alpha(0.55)),
                 lift_small(),
             ))
             .with_children(|p| {
@@ -1989,10 +2216,10 @@ fn build_ui(
                 dialog.position_type = PositionType::Relative;
                 dialog.width = percent(70);
                 dialog.max_width = px(560);
-                dialog.padding = UiRect::all(px(32));
+                dialog.padding = UiRect::all(px(40));
                 dialog.row_gap = px(14);
-                dialog.border_radius = rounded(20.0);
                 p.spawn((dialog, floating())).with_children(|p| {
+                    dress(p, assets, prefix, Skin::Paper, Frame::Grand, true);
                     bold(
                         p,
                         if winner == session.player {
@@ -2028,11 +2255,14 @@ fn build_ui(
 /// Margin of the minimap card from the left edge and of both cards from the foot of the window.
 const CHART_LEFT: f32 = 12.0;
 const CHART_BOTTOM: f32 = 12.0;
-/// The card's rim and padding around the minimap picture.
-const CHART_FRAME: f32 = 6.0;
+/// The frame's rim and padding around the minimap picture.
+const CHART_FRAME: f32 = 14.0;
+/// The column of tools beside the minimap, and the gap between it and the picture.
+const TOOLS_WIDTH: f32 = 52.0;
+const TOOLS_GAP: f32 = 8.0;
 /// Width of the pane that describes the selection, and height of the pill that carries the
 /// game's message (map clicks under both are blocked, see `controls`).
-const INFO_WIDTH: f32 = 340.0;
+const INFO_WIDTH: f32 = 320.0;
 pub(super) const MESSAGE_HEIGHT: f32 = 26.0;
 
 /// Length of the minimap's longer side on screen for a window height.

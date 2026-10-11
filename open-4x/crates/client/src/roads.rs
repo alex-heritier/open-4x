@@ -113,12 +113,7 @@ impl Sheet {
 
 /// How much track a square carries: 0 none, 1 road, 2 railroad. A city counts as both, as it
 /// does for movement, so track that reaches a city is drawn into it.
-fn track(
-    game: &Game,
-    cities: &HashSet<Coord>,
-    known: &impl Fn(Coord) -> bool,
-    p: Coord,
-) -> u8 {
+fn track(game: &Game, cities: &HashSet<Coord>, known: &impl Fn(Coord) -> bool, p: Coord) -> u8 {
     if !known(p) {
         return 0;
     }
@@ -188,13 +183,13 @@ pub(super) fn draw(
                 .map
                 .get(here)
                 .is_some_and(|t| cities.contains(&t.position));
-            let around = Coord::NEIGHBORS.map(|(dx, dy)| {
-                track(game, cities, &known, here.offset(dx, dy))
-            });
+            let around =
+                Coord::NEIGHBORS.map(|(dx, dy)| track(game, cities, &known, here.offset(dx, dy)));
             let (road, rail) = cells(own, city, around);
             let pick = pick(here);
             for (mask, sheet, z) in [(road, roads, Z_ROAD), (rail, rails, Z_RAIL)] {
-                let (Some(mask), Some(image), true) = (mask, &sheet.image, sheet.size != UVec2::ZERO)
+                let (Some(mask), Some(image), true) =
+                    (mask, &sheet.image, sheet.size != UVec2::ZERO)
                 else {
                     continue;
                 };

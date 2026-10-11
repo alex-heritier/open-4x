@@ -1,20 +1,126 @@
 //! The city view: a window over the map that shows what a city gathers and what it builds.
 //!
-//! A light card over a dimmed map, in the interface's own language (see `theme`): readout tiles
-//! with flat glyphs for the economy (people, food, shields, gold, industry, land) in the left
-//! column, and production in the right, with a card for every design the pack offers. Foreign
-//! cities show the left column only.
+//! A sheet of aged parchment in a gilt frame over a dimmed map, set in two serif faces (Playfair
+//! Display for names and figures, EB Garamond for the rest) and engraved in sepia. A header holds
+//! the city's picture, its names and a harbour engraving; under it the economy (people, food,
+//! shields, gold, industry, land, and the granary over a field engraving) fills the left column,
+//! and production (what is being built, development, and a card for every design the pack
+//! offers) the right. Foreign cities show the left column and what they are building.
+//!
+//! The window keeps its own palette and controls rather than the rest of the interface's flat
+//! cards, so everything it needs lives here: the faces ([`install_fonts`]) and the hover colours
+//! of its controls ([`Paper`], [`paint`]).
 use super::*;
 use crate::presentation::{city_sprite, nation_color};
-use crate::theme::{
-    ACCENT, BAD, CARD, EDGE, GOOD, INK, INK_SOFT, Tone, WELL, bold, button, caption, glyph, lift,
-    meter, nation_flag, rounded, rule, text,
-};
+use crate::theme::{glyph, nation_flag, rounded};
+use bevy::asset::uuid_handle;
+use bevy::text::{Font, FontWeight};
 use bevy::ui::FocusPolicy;
 use fourx_sim::City;
 
 /// Cost of one step of industrial development, in gold (see `Command::Develop`).
 const DEVELOP_COST: i32 = 40;
+
+// --- faces -----------------------------------------------------------------------------------
+/// Playfair Display, SIL OFL 1.1: `fonts/PlayfairDisplay-OFL.txt`.
+const DISPLAY: Handle<Font> = uuid_handle!("7a1c0b9e-52d4-4f1b-9d6e-3b1f6a0c8d21");
+/// EB Garamond, SIL OFL 1.1: `fonts/EBGaramond-OFL.txt`.
+const SERIF: Handle<Font> = uuid_handle!("c4e2f7a8-1b36-4a5d-8e90-62d7b13f4a55");
+
+/// Make the two serif faces available to the city view.
+pub(super) fn install_fonts(app: &mut App) {
+    let mut fonts = app.world_mut().resource_mut::<Assets<Font>>();
+    for (handle, bytes) in [
+        (
+            DISPLAY,
+            &include_bytes!("../fonts/PlayfairDisplay-Variable.ttf")[..],
+        ),
+        (
+            SERIF,
+            &include_bytes!("../fonts/EBGaramond-Variable.ttf")[..],
+        ),
+    ] {
+        let font = Font::try_from_bytes(bytes.to_vec()).expect("the bundled font is a font");
+        fonts
+            .insert(handle.id(), font)
+            .expect("a font slot takes a font");
+    }
+}
+
+// --- palette ---------------------------------------------------------------------------------
+/// Dark brown ink, and the same pulled back for what is secondary.
+const INK: Color = Color::srgb(0.169, 0.125, 0.086);
+const INK_SOFT: Color = Color::srgba(0.235, 0.169, 0.102, 0.70);
+/// The red-brown of headings and the close button.
+const RED: Color = Color::srgb(0.545, 0.176, 0.133);
+/// Gilt: the frame, the rules and the trim of controls.
+const GILT: Color = Color::srgb(0.718, 0.545, 0.208);
+const GILT_SOFT: Color = Color::srgba(0.718, 0.545, 0.208, 0.55);
+/// The dark edge of the window, and the hairline round a tile.
+const FRAME: Color = Color::srgb(0.290, 0.188, 0.098);
+const HAIR: Color = Color::srgba(0.443, 0.310, 0.141, 0.42);
+/// Words on the navy button.
+const ON_NAVY: Color = Color::srgb(0.965, 0.945, 0.878);
+/// Good news and bad news on paper.
+const GROWTH: Color = Color::srgb(0.251, 0.541, 0.196);
+const FAMINE: Color = Color::srgb(0.690, 0.176, 0.133);
+
+/// How a control of the window is filled, and how that changes as the pointer crosses it.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Paper {
+    /// A lighter patch of paper: tiles and every ordinary control.
+    Tile,
+    /// The design that is already being built.
+    Chosen,
+    /// Cannot be used now.
+    Faint,
+    /// Deep blue: the one thing that spends gold.
+    Navy,
+    /// The red of the close button.
+    Red,
+}
+
+impl Paper {
+    fn fill(self, interaction: Interaction) -> Color {
+        let (rest, hover, pressed) = match self {
+            Paper::Tile => (
+                Color::srgb(0.957, 0.918, 0.812),
+                Color::srgb(0.984, 0.953, 0.859),
+                Color::srgb(0.914, 0.867, 0.741),
+            ),
+            Paper::Chosen => (
+                Color::srgb(0.929, 0.855, 0.643),
+                Color::srgb(0.949, 0.880, 0.682),
+                Color::srgb(0.894, 0.816, 0.604),
+            ),
+            Paper::Faint => return Color::srgba(0.957, 0.918, 0.812, 0.45),
+            Paper::Navy => (
+                Color::srgb(0.114, 0.239, 0.396),
+                Color::srgb(0.157, 0.306, 0.486),
+                Color::srgb(0.078, 0.176, 0.310),
+            ),
+            Paper::Red => (
+                Color::srgb(0.635, 0.141, 0.110),
+                Color::srgb(0.725, 0.188, 0.149),
+                Color::srgb(0.502, 0.102, 0.078),
+            ),
+        };
+        match interaction {
+            Interaction::Pressed => pressed,
+            Interaction::Hovered => hover,
+            Interaction::None => rest,
+        }
+    }
+}
+
+/// Repaint the window's controls as the pointer moves over them.
+pub(super) fn paint(
+    mut controls: Query<(&Interaction, &Paper, &mut BackgroundColor), Changed<Interaction>>,
+) {
+    for (interaction, paper, mut fill) in &mut controls {
+        fill.0 = paper.fill(*interaction);
+    }
+}
 
 /// Marks the window of the city view so that the wheel and a finger can scroll it when it is
 /// taller than the screen.
@@ -38,6 +144,52 @@ pub(super) fn scroll(
     }
 }
 
+// --- text ------------------------------------------------------------------------------------
+fn write(
+    p: &mut ChildSpawnerCommands,
+    value: impl Into<String>,
+    font: &Handle<Font>,
+    size: f32,
+    weight: i32,
+    color: Color,
+) {
+    p.spawn((
+        Node {
+            flex_shrink: 0.0,
+            ..default()
+        },
+        Text::new(value),
+        TextFont {
+            font: font.clone(),
+            font_size: size,
+            weight: FontWeight(weight as u16),
+            ..default()
+        },
+        TextColor(color),
+    ));
+}
+
+/// Names, figures and headings.
+fn display(
+    p: &mut ChildSpawnerCommands,
+    value: impl Into<String>,
+    size: f32,
+    weight: i32,
+    color: Color,
+) {
+    write(p, value, &DISPLAY, size, weight, color);
+}
+
+/// Running text.
+fn serif(p: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, color: Color) {
+    write(p, value, &SERIF, size, 500, color);
+}
+
+/// A small label in capitals over a figure.
+fn label(p: &mut ChildSpawnerCommands, value: &str) {
+    write(p, value.to_uppercase(), &SERIF, 12.0, 700, INK_SOFT);
+}
+
 /// What the view's widgets need to find the pack's pictures.
 struct Kit<'a> {
     assets: &'a AssetServer,
@@ -48,44 +200,101 @@ impl Kit<'_> {
     fn glyph(&self, p: &mut ChildSpawnerCommands, name: &str, side: f32, color: Color) {
         glyph(p, self.assets, self.prefix, name, side, color);
     }
+
+    fn image(&self, path: &str) -> Handle<Image> {
+        self.assets.load(format!("{}{path}", self.prefix))
+    }
 }
 
-/// A section label with its hairline.
-fn section(p: &mut ChildSpawnerCommands, label: &str) {
+// --- pieces ----------------------------------------------------------------------------------
+/// A hairline that takes the rest of its row.
+fn line(p: &mut ChildSpawnerCommands, color: Color) {
+    p.spawn((
+        Node {
+            flex_grow: 1.0,
+            height: px(1),
+            ..default()
+        },
+        BackgroundColor(color),
+    ));
+}
+
+/// A small diamond, the way the window sets its rules and corners.
+fn diamond(p: &mut ChildSpawnerCommands, side: f32) {
+    p.spawn((
+        Node {
+            width: px(side),
+            height: px(side),
+            flex_shrink: 0.0,
+            border: UiRect::all(px(1)),
+            ..default()
+        },
+        BackgroundColor(GILT),
+        BorderColor::all(FRAME),
+        UiTransform::from_rotation(Rot2::degrees(45.0)),
+    ));
+}
+
+/// The rule under the header: gilt, with a diamond at its middle.
+fn ornament(p: &mut ChildSpawnerCommands) {
     p.spawn(Node {
+        width: percent(100),
         align_items: AlignItems::Center,
         column_gap: px(10),
         flex_shrink: 0.0,
         ..default()
     })
     .with_children(|p| {
-        caption(p, label);
-        p.spawn((
-            Node {
-                flex_grow: 1.0,
-                height: px(1),
-                ..default()
-            },
-            BackgroundColor(crate::theme::RULE),
-        ));
+        line(p, GILT_SOFT);
+        diamond(p, 7.0);
+        line(p, GILT_SOFT);
     });
 }
 
+/// A section heading with its hairline.
+fn section(p: &mut ChildSpawnerCommands, title: &str) {
+    p.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: px(12),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|p| {
+        display(p, title, 19.0, 600, RED);
+        line(p, GILT_SOFT);
+    });
+}
+
+/// The look of a patch of paper set into the sheet.
+fn tile(radius: f32) -> Node {
+    Node {
+        border: UiRect::all(px(1)),
+        border_radius: rounded(radius),
+        ..default()
+    }
+}
+
 /// A small pill: a glyph and a few words.
-fn chip(p: &mut ChildSpawnerCommands, kit: &Kit, name: &str, words: impl Into<String>) {
+fn chip(
+    p: &mut ChildSpawnerCommands,
+    kit: &Kit,
+    name: &str,
+    colour: Color,
+    words: impl Into<String>,
+) {
     p.spawn((
         Node {
             align_items: AlignItems::Center,
-            column_gap: px(6),
-            padding: UiRect::axes(px(10), px(4)),
-            border_radius: rounded(999.0),
-            ..default()
+            column_gap: px(7),
+            padding: UiRect::axes(px(11), px(5)),
+            ..tile(5.0)
         },
-        BackgroundColor(WELL),
+        BackgroundColor(Paper::Tile.fill(Interaction::None)),
+        BorderColor::all(HAIR),
     ))
     .with_children(|p| {
-        kit.glyph(p, name, 15.0, INK_SOFT);
-        bold(p, words, 12.0, INK);
+        kit.glyph(p, name, 16.0, colour);
+        write(p, words, &SERIF, 15.0, 600, INK);
     });
 }
 
@@ -94,34 +303,32 @@ fn readout(
     p: &mut ChildSpawnerCommands,
     kit: &Kit,
     name: &str,
-    figure: String,
     colour: Color,
+    (figure, figure_colour): (String, Color),
     what: &str,
     detail: Option<String>,
 ) {
     p.spawn((
         Node {
-            flex_basis: percent(46.0),
-            flex_grow: 1.0,
             align_items: AlignItems::Center,
             column_gap: px(12),
-            padding: UiRect::axes(px(14), px(10)),
-            border_radius: rounded(14.0),
-            ..default()
+            padding: UiRect::axes(px(14), px(8)),
+            ..tile(6.0)
         },
-        BackgroundColor(WELL),
+        BackgroundColor(Paper::Tile.fill(Interaction::None)),
+        BorderColor::all(HAIR),
     ))
     .with_children(|p| {
-        kit.glyph(p, name, 28.0, ACCENT);
+        kit.glyph(p, name, 36.0, colour);
         p.spawn(Node {
             flex_direction: FlexDirection::Column,
             ..default()
         })
         .with_children(|p| {
-            bold(p, figure, 21.0, colour);
-            caption(p, what);
+            display(p, figure, 25.0, 700, figure_colour);
+            label(p, what);
             if let Some(detail) = detail {
-                text(p, detail, 11.5, INK_SOFT);
+                serif(p, detail, 13.0, INK_SOFT);
             }
         });
     });
@@ -139,19 +346,72 @@ fn in_days(n: i32) -> String {
     }
 }
 
-/// A figure on the left and what it counts on the right, over a meter.
-fn gauge(p: &mut ChildSpawnerCommands, label: &str, figure: String, fraction: f32, tint: Color) {
-    p.spawn(Node {
-        justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Center,
-        flex_shrink: 0.0,
-        ..default()
-    })
+/// A bar in a dark case, `fraction` full.
+fn bar(p: &mut ChildSpawnerCommands, fraction: f32, tint: Color) {
+    p.spawn((
+        Node {
+            flex_grow: 1.0,
+            height: px(16),
+            border: UiRect::all(px(2)),
+            border_radius: rounded(4.0),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.20, 0.17, 0.14)),
+        BorderColor::all(FRAME),
+    ))
     .with_children(|p| {
-        caption(p, label);
-        bold(p, figure, 12.5, INK);
+        p.spawn((
+            Node {
+                width: percent(fraction.clamp(0.0, 1.0) * 100.0),
+                height: percent(100),
+                ..default()
+            },
+            BackgroundColor(tint),
+        ));
     });
-    meter(p, fraction, tint, 10.0);
+}
+
+/// A button of the window: a label (and anything `inside` adds) on a patch of paper.
+fn control(
+    p: &mut ChildSpawnerCommands,
+    action: Option<Action>,
+    paper: Paper,
+    node: Node,
+    inside: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    let mut button = p.spawn((
+        Button,
+        paper,
+        Node {
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..node
+        },
+        BackgroundColor(paper.fill(Interaction::None)),
+        BorderColor::all(if paper == Paper::Faint { HAIR } else { GILT }),
+    ));
+    if let Some(action) = action {
+        button.insert(action);
+    }
+    button.with_children(inside);
+}
+
+/// A labelled, gilt-edged button.
+fn labelled(p: &mut ChildSpawnerCommands, title: impl Into<String>, action: Action) {
+    control(
+        p,
+        Some(action),
+        Paper::Tile,
+        Node {
+            min_width: px(116),
+            height: px(40),
+            flex_shrink: 0.0,
+            padding: UiRect::horizontal(px(20)),
+            ..tile(5.0)
+        },
+        |p| display(p, title, 15.0, 600, INK),
+    );
 }
 
 /// The window of the city view over the map. `narrow` is a phone-shaped screen, where the two
@@ -180,7 +440,7 @@ pub(super) fn spawn(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.03, 0.06, 0.10, 0.55)),
+            BackgroundColor(Color::srgba(0.03, 0.05, 0.08, 0.58)),
             FocusPolicy::Block,
             GlobalZIndex(50),
             UiRoot,
@@ -188,29 +448,40 @@ pub(super) fn spawn(
         .with_children(|p| {
             p.spawn((
                 Node {
-                    width: if narrow { percent(96) } else { px(900) },
+                    width: if narrow { percent(96) } else { px(960) },
                     max_width: percent(96),
-                    max_height: percent(92),
-                    padding: UiRect::axes(px(if narrow { 18 } else { 28 }), px(24)),
-                    border: UiRect::all(px(1)),
-                    border_radius: rounded(20.0),
+                    max_height: percent(94),
+                    padding: UiRect::axes(px(if narrow { 20 } else { 34 }), px(26)),
+                    border: UiRect::all(px(3)),
+                    border_radius: rounded(8.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: px(16),
+                    row_gap: px(12),
                     ..default()
                 },
-                BackgroundColor(CARD),
-                BorderColor::all(EDGE),
-                lift(),
+                ImageNode::new(kit.image("ui/paper.png")).with_mode(NodeImageMode::Tiled {
+                    tile_x: true,
+                    tile_y: true,
+                    stretch_value: 0.5,
+                }),
+                BorderColor::all(FRAME),
+                BoxShadow::new(
+                    Color::srgba(0.0, 0.0, 0.0, 0.5),
+                    px(0),
+                    px(10),
+                    px(0),
+                    px(30),
+                ),
                 FocusPolicy::Block,
             ))
             .with_children(|p| {
+                frame(p, &kit);
                 // Everything but the footer scrolls when the window is short.
                 p.spawn((
                     Node {
                         flex_shrink: 1.0,
                         min_height: px(0),
                         flex_direction: FlexDirection::Column,
-                        row_gap: px(16),
+                        row_gap: px(14),
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
@@ -219,23 +490,25 @@ pub(super) fn spawn(
                 ))
                 .with_children(|p| {
                     header(p, &kit, game, session, c, narrow);
-                    rule(p);
+                    ornament(p);
                     p.spawn(Node {
                         flex_direction: if narrow {
                             FlexDirection::Column
                         } else {
                             FlexDirection::Row
                         },
-                        column_gap: px(28),
+                        column_gap: px(34),
                         row_gap: px(18),
-                        align_items: AlignItems::FlexStart,
+                        align_items: AlignItems::Stretch,
                         flex_shrink: 0.0,
                         ..default()
                     })
                     .with_children(|body| {
                         body.spawn(Node {
-                            width: if narrow { percent(100) } else { px(372) },
-                            flex_shrink: 0.0,
+                            width: if narrow { percent(100) } else { auto() },
+                            flex_grow: 1.0,
+                            flex_basis: px(0),
+                            min_width: px(0),
                             flex_direction: FlexDirection::Column,
                             row_gap: px(10),
                             ..default()
@@ -243,7 +516,7 @@ pub(super) fn spawn(
                         .with_children(|p| economy(p, &kit, game, c));
                         body.spawn(Node {
                             width: if narrow { percent(100) } else { auto() },
-                            flex_grow: 1.0,
+                            flex_grow: 1.1,
                             flex_basis: px(0),
                             min_width: px(0),
                             flex_direction: FlexDirection::Column,
@@ -255,51 +528,99 @@ pub(super) fn spawn(
                 });
                 p.spawn(Node {
                     width: percent(100),
-                    justify_content: JustifyContent::SpaceBetween,
+                    justify_content: JustifyContent::FlexEnd,
                     align_items: AlignItems::Center,
-                    column_gap: px(16),
+                    column_gap: px(10),
                     flex_shrink: 0.0,
                     ..default()
                 })
                 .with_children(|p| {
-                    p.spawn(Node {
-                        flex_shrink: 1.0,
-                        ..default()
-                    })
-                    .with_children(|p| {
-                        text(
+                    if !mine && let Some(faction) = game.factions.get(&c.owner) {
+                        let leader = faction.leader.trim();
+                        labelled(
                             p,
-                            "Its border never changes: whoever holds the city holds the land.",
-                            11.5,
-                            INK_SOFT,
+                            if leader.is_empty() {
+                                "Talk".to_string()
+                            } else {
+                                format!("Talk to {leader}")
+                            },
+                            Action::Talk(c.owner),
                         );
-                    });
-                    p.spawn(Node {
-                        column_gap: px(8),
-                        ..default()
-                    })
-                    .with_children(|p| {
-                        if !mine && let Some(faction) = game.factions.get(&c.owner) {
-                            let leader = faction.leader.trim();
-                            button(
-                                p,
-                                if leader.is_empty() {
-                                    "Talk".to_string()
-                                } else {
-                                    format!("Talk to {leader}")
-                                },
-                                Action::Talk(c.owner),
-                                Tone::Quiet,
-                            );
-                        }
-                        button(p, "Close", Action::CloseCity, Tone::Quiet);
-                    });
+                    }
+                    labelled(p, "Close", Action::CloseCity);
                 });
+                close_button(p, &kit);
             });
         });
 }
 
-/// The portrait, the names, and the way out.
+/// The gilt line inside the edge of the window, and a bracket in each corner.
+fn frame(p: &mut ChildSpawnerCommands, kit: &Kit) {
+    p.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(7),
+            right: px(7),
+            top: px(7),
+            bottom: px(7),
+            border: UiRect::all(px(1.5)),
+            border_radius: rounded(4.0),
+            ..default()
+        },
+        BorderColor::all(GILT_SOFT),
+    ));
+    for (left, top, flip_x, flip_y) in [
+        (true, true, false, false),
+        (false, true, true, false),
+        (true, false, false, true),
+        (false, false, true, true),
+    ] {
+        let edge = |on: bool| if on { px(3) } else { auto() };
+        let mut image = ImageNode::new(kit.image("ui/flourish.png"));
+        image.flip_x = flip_x;
+        image.flip_y = flip_y;
+        p.spawn((
+            image,
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(48),
+                height: px(48),
+                left: edge(left),
+                right: edge(!left),
+                top: edge(top),
+                bottom: edge(!top),
+                ..default()
+            },
+        ));
+    }
+}
+
+/// The red button in the corner that closes the window.
+fn close_button(p: &mut ChildSpawnerCommands, kit: &Kit) {
+    p.spawn((
+        Button,
+        Action::CloseCity,
+        Paper::Red,
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(-16),
+            right: px(-16),
+            width: px(40),
+            height: px(40),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            border: UiRect::all(px(3)),
+            border_radius: rounded(999.0),
+            ..default()
+        },
+        BackgroundColor(Paper::Red.fill(Interaction::None)),
+        BorderColor::all(GILT),
+        BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.4), px(0), px(3), px(0), px(8)),
+    ))
+    .with_children(|p| kit.glyph(p, "cross", 16.0, ON_NAVY));
+}
+
+/// The portrait, the names, and an engraving of the harbour.
 fn header(
     p: &mut ChildSpawnerCommands,
     kit: &Kit,
@@ -312,13 +633,31 @@ fn header(
     p.spawn(Node {
         width: percent(100),
         align_items: AlignItems::Center,
-        column_gap: px(18),
+        column_gap: px(20),
         flex_shrink: 0.0,
         ..default()
     })
     .with_children(|h| {
-        // The city as the map draws it, in a little window of its own.
-        let (width, height) = if narrow { (84.0, 74.0) } else { (132.0, 116.0) };
+        // The engraving sits behind the words and fades out to the left.
+        if !narrow {
+            h.spawn((
+                ImageNode::new(kit.image("ui/city_panorama.png")),
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(0),
+                    top: px(0),
+                    width: px(540),
+                    height: px(112),
+                    ..default()
+                },
+            ));
+        }
+        // The city as the map draws it, in a gilt frame of its own.
+        let (width, height) = if narrow {
+            (104.0, 74.0)
+        } else {
+            (160.0, 108.0)
+        };
         h.spawn((
             Node {
                 width: px(width),
@@ -326,28 +665,44 @@ fn header(
                 flex_shrink: 0.0,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                border_radius: rounded(16.0),
+                border: UiRect::all(px(3)),
+                border_radius: rounded(4.0),
                 overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.22, 0.38, 0.42)),
+            BorderColor::all(GILT),
+            BoxShadow::new(
+                Color::srgba(0.1, 0.05, 0.0, 0.35),
+                px(0),
+                px(2),
+                px(0),
+                px(6),
+            ),
         ))
         .with_children(|p| {
+            p.spawn((
+                ImageNode::new(kit.image("ui/city_backdrop.png")).with_mode(NodeImageMode::Stretch),
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: percent(100),
+                    height: percent(100),
+                    ..default()
+                },
+            ));
             let sprite = city_sprite(&session.pack.visuals, game, c.owner);
             p.spawn((
-                ImageNode::new(kit.assets.load(format!("{}{sprite}", kit.prefix))),
+                ImageNode::new(kit.image(sprite)),
                 Node {
-                    height: percent(100),
+                    height: percent(110),
+                    margin: UiRect::top(px(8)),
                     ..default()
                 },
             ));
         });
         h.spawn(Node {
-            flex_grow: 1.0,
-            flex_basis: px(0),
-            min_width: px(0),
+            flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
-            row_gap: px(6),
+            row_gap: px(4),
             ..default()
         })
         .with_children(|p| {
@@ -357,41 +712,37 @@ fn header(
                 ..default()
             })
             .with_children(|p| {
-                nation_flag(p, nation_color(game, c.owner, 1.0), 20.0);
-                caption(p, nation.map_or("Unknown", |f| f.name.as_str()));
+                nation_flag(p, nation_color(game, c.owner, 1.0), 22.0);
+                label(p, nation.map_or("Unknown", |f| f.name.as_str()));
             });
-            bold(p, &c.name, if narrow { 26.0 } else { 32.0 }, INK);
+            display(p, &c.name, if narrow { 30.0 } else { 46.0 }, 700, INK);
             p.spawn(Node {
                 flex_wrap: FlexWrap::Wrap,
                 column_gap: px(8),
                 row_gap: px(6),
+                margin: UiRect::top(px(2)),
                 ..default()
             })
             .with_children(|p| {
                 if c.capital {
-                    chip(p, kit, "star", "Capital");
+                    chip(p, kit, "star", GILT, "Capital");
                 }
-                chip(p, kit, "hud_people", format!("Population {}", c.population));
-                chip(p, kit, "globe", format!("Border level {}", c.border));
+                chip(
+                    p,
+                    kit,
+                    "hud_people",
+                    INK_SOFT,
+                    format!("Population {}", c.population),
+                );
+                chip(
+                    p,
+                    kit,
+                    "globe",
+                    INK_SOFT,
+                    format!("Border level {}", c.border),
+                );
             });
         });
-        h.spawn((
-            Button,
-            Action::CloseCity,
-            Tone::Quiet,
-            Node {
-                width: px(38),
-                height: px(38),
-                flex_shrink: 0.0,
-                align_self: AlignSelf::FlexStart,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border_radius: rounded(999.0),
-                ..default()
-            },
-            BackgroundColor(Tone::Quiet.fill(Interaction::None)),
-        ))
-        .with_children(|p| kit.glyph(p, "cross", 16.0, INK));
     });
 }
 
@@ -400,18 +751,22 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
     section(p, "Economy");
     let surplus = c.food_surplus();
     p.spawn(Node {
-        flex_wrap: FlexWrap::Wrap,
-        column_gap: px(8),
-        row_gap: px(8),
+        display: Display::Grid,
+        grid_template_columns: vec![RepeatedGridTrack::flex(2, 1.0)],
+        column_gap: px(10),
+        row_gap: px(10),
         ..default()
     })
     .with_children(|p| {
+        let brown = Color::srgb(0.36, 0.24, 0.14);
+        let iron = Color::srgb(0.36, 0.34, 0.33);
+        let gold = Color::srgb(0.80, 0.57, 0.10);
         readout(
             p,
             kit,
             "hud_people",
-            c.population.to_string(),
-            INK,
+            brown,
+            (c.population.to_string(), INK),
             "Citizens",
             Some(format!("{} eat {} food", c.population, c.food_eaten())),
         );
@@ -419,8 +774,11 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             p,
             kit,
             "wheat",
-            format!("{surplus:+}"),
-            if surplus < 0 { BAD } else { INK },
+            gold,
+            (
+                format!("{surplus:+}"),
+                if surplus < 0 { FAMINE } else { INK },
+            ),
             "Food a day",
             Some(format!(
                 "{} grown, {} eaten",
@@ -432,8 +790,8 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             p,
             kit,
             "tools",
-            c.shields().to_string(),
-            INK,
+            iron,
+            (c.shields().to_string(), INK),
             "Shields a day",
             Some(format!(
                 "{} land + {} industry",
@@ -444,8 +802,8 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             p,
             kit,
             "hud_gold",
-            format!("{:+}", c.harvest.gold),
-            INK,
+            gold,
+            (format!("{:+}", c.harvest.gold), INK),
             "Gold a day",
             None,
         );
@@ -453,8 +811,8 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             p,
             kit,
             "hud_industry",
-            c.industry.to_string(),
-            INK,
+            iron,
+            (c.industry.to_string(), INK),
             "Industry",
             None,
         );
@@ -462,8 +820,8 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             p,
             kit,
             "globe",
-            game.territory_of(c.id).len().to_string(),
-            INK,
+            Color::srgb(0.27, 0.48, 0.22),
+            (game.territory_of(c.id).len().to_string(), INK),
             "Squares held",
             Some(format!("border level {}", c.border)),
         );
@@ -472,20 +830,24 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
     let size = c.granary_size();
     p.spawn(Node {
         margin: UiRect::top(px(6)),
-        flex_direction: FlexDirection::Column,
-        row_gap: px(6),
+        ..default()
+    })
+    .with_children(|p| section(p, "Granary"));
+    p.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: px(12),
+        flex_shrink: 0.0,
         ..default()
     })
     .with_children(|p| {
-        gauge(
+        bar(
             p,
-            "Granary",
-            format!("{} / {}", c.granary, size),
             c.granary as f32 / size.max(1) as f32,
-            if surplus < 0 { BAD } else { GOOD },
+            if surplus < 0 { FAMINE } else { GROWTH },
         );
+        display(p, format!("{} / {}", c.granary, size), 15.0, 600, INK);
     });
-    text(
+    serif(
         p,
         match surplus {
             s if s > 0 => format!(
@@ -498,9 +860,39 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             }
             _ => "The city is neither growing nor starving.".to_string(),
         },
-        11.5,
-        if surplus < 0 { BAD } else { INK_SOFT },
+        14.0,
+        if surplus < 0 { FAMINE } else { INK_SOFT },
     );
+    // An engraving of the fields, with the rule of borders written across its foot.
+    p.spawn(Node {
+        position_type: PositionType::Relative,
+        width: percent(100),
+        height: px(112),
+        flex_grow: 1.0,
+        min_height: px(100),
+        flex_shrink: 0.0,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::FlexEnd,
+        overflow: Overflow::clip(),
+        ..default()
+    })
+    .with_children(|p| {
+        p.spawn((
+            ImageNode::new(kit.image("ui/city_fields.png")).with_mode(NodeImageMode::Stretch),
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                ..default()
+            },
+        ));
+        serif(
+            p,
+            "Its border never changes: whoever holds the city holds the land.",
+            13.5,
+            INK,
+        );
+    });
 }
 
 /// The right column: what is being built, development, and the designs to choose from.
@@ -521,62 +913,70 @@ fn production(
     p.spawn((
         Node {
             width: percent(100),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(8),
-            padding: UiRect::axes(px(14), px(12)),
-            border_radius: rounded(14.0),
+            align_items: AlignItems::Center,
+            column_gap: px(14),
+            padding: UiRect::axes(px(14), px(11)),
             flex_shrink: 0.0,
-            ..default()
+            ..tile(6.0)
         },
-        BackgroundColor(WELL),
+        BackgroundColor(Paper::Tile.fill(Interaction::None)),
+        BorderColor::all(HAIR),
     ))
     .with_children(|p| match building {
         Some(def) => {
+            sprite(p, kit, &def.sprite, 46.0);
             p.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: px(12),
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
                 ..default()
             })
             .with_children(|p| {
-                sprite(p, kit, &def.sprite, 46.0);
+                display(p, def.name.clone(), 18.0, 700, INK);
+                let left = days(def.cost - c.progress, c.shields());
+                serif(
+                    p,
+                    match left {
+                        Some(n) => format!("Ready in {}", in_days(n.max(1))),
+                        None => "Nothing is gathered to build it".to_string(),
+                    },
+                    14.0,
+                    if left.is_some() { INK_SOFT } else { FAMINE },
+                );
                 p.spawn(Node {
-                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    column_gap: px(10),
                     ..default()
                 })
                 .with_children(|p| {
-                    bold(p, def.name.clone(), 16.0, INK);
-                    let left = days(def.cost - c.progress, c.shields());
-                    text(
+                    bar(
                         p,
-                        match left {
-                            Some(n) => format!("Ready in {}", in_days(n.max(1))),
-                            None => "Nothing is gathered to build it".to_string(),
-                        },
-                        11.5,
-                        if left.is_some() { INK_SOFT } else { BAD },
+                        c.progress as f32 / def.cost.max(1) as f32,
+                        Color::srgb(0.17, 0.35, 0.57),
                     );
+                    display(p, format!("{} / {}", c.progress, def.cost), 14.0, 600, INK);
                 });
             });
-            gauge(
-                p,
-                "Shields",
-                format!("{} / {}", c.progress, def.cost),
-                c.progress as f32 / def.cost.max(1) as f32,
-                ACCENT,
-            );
         }
         None => {
-            bold(p, "Idle", 16.0, INK);
-            text(
-                p,
-                if mine {
-                    "Nothing is being built. Choose a design below."
-                } else {
-                    "Nothing is being built."
-                },
-                11.5,
-                INK_SOFT,
-            );
+            kit.glyph(p, "gear", 32.0, Color::srgb(0.55, 0.40, 0.17));
+            p.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                ..default()
+            })
+            .with_children(|p| {
+                display(p, "Idle", 19.0, 700, INK);
+                serif(
+                    p,
+                    if mine {
+                        "Nothing is being built. Choose a project below."
+                    } else {
+                        "Nothing is being built."
+                    },
+                    14.0,
+                    INK_SOFT,
+                );
+            });
         }
     });
     if !mine {
@@ -587,46 +987,58 @@ fn production(
         .factions
         .get(&c.owner)
         .is_some_and(|f| f.gold >= DEVELOP_COST);
-    let tone = if rich { Tone::Primary } else { Tone::Dormant };
-    let mut develop = p.spawn((
-        Button,
-        tone,
+    let paper = if rich { Paper::Navy } else { Paper::Faint };
+    let ink = if rich { ON_NAVY } else { INK_SOFT };
+    control(
+        p,
+        rich.then_some(Action::Develop),
+        paper,
         Node {
             width: percent(100),
-            height: px(44),
+            height: px(48),
             flex_shrink: 0.0,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            column_gap: px(8),
+            column_gap: px(10),
             padding: UiRect::horizontal(px(14)),
-            border_radius: rounded(12.0),
-            ..default()
+            ..tile(5.0)
         },
-        BackgroundColor(tone.fill(Interaction::None)),
-    ));
-    if rich {
-        develop.insert(Action::Develop);
-    }
-    develop.with_children(|p| {
-        kit.glyph(p, "hud_industry", 20.0, tone.ink());
-        bold(p, "Develop industry  +2", 13.5, tone.ink());
-        kit.glyph(p, "hud_gold", 18.0, tone.ink());
-        bold(
-            p,
-            if rich {
-                DEVELOP_COST.to_string()
-            } else {
-                format!("{DEVELOP_COST}: not enough gold")
-            },
-            13.5,
-            tone.ink(),
-        );
-    });
+        |p| {
+            kit.glyph(p, "gear", 22.0, ink);
+            display(p, "Develop industry", 16.0, 600, ink);
+            display(p, "+2", 15.0, 700, ink);
+            kit.glyph(p, "tools", 18.0, ink);
+            p.spawn(Node {
+                width: px(8),
+                ..default()
+            });
+            display(
+                p,
+                if rich {
+                    DEVELOP_COST.to_string()
+                } else {
+                    format!("{DEVELOP_COST}: not enough gold")
+                },
+                15.0,
+                700,
+                ink,
+            );
+            kit.glyph(
+                p,
+                "hud_gold",
+                20.0,
+                if rich {
+                    Color::srgb(0.96, 0.78, 0.25)
+                } else {
+                    ink
+                },
+            );
+        },
+    );
     section(p, "Build");
     p.spawn(Node {
-        flex_wrap: FlexWrap::Wrap,
-        column_gap: px(8),
-        row_gap: px(8),
+        display: Display::Grid,
+        grid_template_columns: vec![RepeatedGridTrack::flex(2, 1.0)],
+        column_gap: px(10),
+        row_gap: px(10),
         ..default()
     })
     .with_children(|p| {
@@ -642,7 +1054,7 @@ fn production(
 /// A unit's picture at the given height; the width follows the picture.
 fn sprite(p: &mut ChildSpawnerCommands, kit: &Kit, path: &str, height: f32) {
     p.spawn(Node {
-        width: px(height * 1.3),
+        width: px(height * 1.25),
         height: px(height),
         flex_shrink: 0.0,
         align_items: AlignItems::Center,
@@ -652,13 +1064,22 @@ fn sprite(p: &mut ChildSpawnerCommands, kit: &Kit, path: &str, height: f32) {
     })
     .with_children(|p| {
         p.spawn((
-            ImageNode::new(kit.assets.load(format!("{}{path}", kit.prefix))),
+            ImageNode::new(kit.image(path)),
             Node {
                 height: px(height),
                 ..default()
             },
         ));
     });
+}
+
+/// The key that picks the design at `index`: 1 to 9, then 0.
+fn key_of(index: usize) -> Option<String> {
+    match index {
+        0..=8 => Some((index + 1).to_string()),
+        9 => Some("0".to_string()),
+        _ => None,
+    }
 }
 
 /// One design on offer: its picture, name and cost, and the key that picks it.
@@ -670,35 +1091,31 @@ fn card(
     chosen: bool,
     needs_coast: bool,
 ) {
-    let tone = if needs_coast {
-        Tone::Dormant
+    let paper = if needs_coast {
+        Paper::Faint
     } else if chosen {
-        Tone::Chosen
+        Paper::Chosen
     } else {
-        Tone::Quiet
+        Paper::Tile
     };
     let mut card = p.spawn((
         Button,
-        tone,
+        paper,
         Node {
-            flex_basis: percent(46.0),
-            flex_grow: 1.0,
-            height: px(70),
+            height: px(62),
             align_items: AlignItems::Center,
             column_gap: px(8),
-            padding: UiRect::axes(px(12), px(6)),
-            border: UiRect::all(px(if chosen { 2 } else { 0 })),
-            border_radius: rounded(14.0),
-            ..default()
+            padding: UiRect::axes(px(10), px(6)),
+            ..tile(6.0)
         },
-        BackgroundColor(tone.fill(Interaction::None)),
-        BorderColor::all(ACCENT),
+        BackgroundColor(paper.fill(Interaction::None)),
+        BorderColor::all(if chosen { GILT } else { HAIR }),
     ));
     if !needs_coast {
         card.insert(Action::Produce(def.id.clone()));
     }
     card.with_children(|p| {
-        sprite(p, kit, &def.sprite, 44.0);
+        sprite(p, kit, &def.sprite, 50.0);
         p.spawn(Node {
             flex_direction: FlexDirection::Column,
             row_gap: px(2),
@@ -706,10 +1123,11 @@ fn card(
             ..default()
         })
         .with_children(|p| {
-            bold(
+            display(
                 p,
                 def.name.clone(),
-                13.0,
+                14.0,
+                600,
                 if needs_coast { INK_SOFT } else { INK },
             );
             p.spawn(Node {
@@ -719,28 +1137,29 @@ fn card(
             })
             .with_children(|p| {
                 if needs_coast {
-                    text(p, "Needs a coast", 11.5, BAD);
+                    serif(p, "Needs a coast", 14.0, FAMINE);
                 } else {
-                    kit.glyph(p, "tools", 14.0, INK_SOFT);
-                    bold(p, def.cost.to_string(), 13.0, INK);
+                    kit.glyph(p, "tools", 15.0, Color::srgb(0.36, 0.34, 0.33));
+                    write(p, def.cost.to_string(), &SERIF, 16.0, 700, INK);
                     if chosen {
-                        bold(p, "BUILDING", 9.5, ACCENT);
+                        write(p, "BUILDING", &SERIF, 11.0, 800, RED);
                     }
                 }
             });
         });
-        if index < 6 && !needs_coast {
+        if let Some(key) = key_of(index).filter(|_| !needs_coast) {
             p.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    top: px(6),
-                    right: px(10),
+                    top: px(5),
+                    right: px(9),
                     ..default()
                 },
-                Text::new((index + 1).to_string()),
+                Text::new(key),
                 TextFont {
-                    font_size: 11.0,
-                    weight: bevy::text::FontWeight::SEMIBOLD,
+                    font: SERIF,
+                    font_size: 12.0,
+                    weight: FontWeight(600),
                     ..default()
                 },
                 TextColor(INK_SOFT),

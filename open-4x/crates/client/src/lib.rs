@@ -1,4 +1,5 @@
 mod bar;
+mod chrome;
 mod city;
 mod connection;
 mod diplomacy;
@@ -354,6 +355,12 @@ enum Action {
     CloseTalk,
     /// A control that is drawn but does nothing yet.
     Idle,
+    /// Bring the camera to the capital.
+    Home,
+    /// Select the next unit that waits for orders, and show it.
+    NextUnit,
+    /// Open the next of the player's cities.
+    NextCity,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -623,6 +630,7 @@ pub fn run() {
                 receive,
                 buttons,
                 theme::paint,
+                city::paint,
                 bar::update,
                 city::scroll,
                 diplomacy::music,
@@ -646,8 +654,10 @@ pub fn run() {
             )
                 .chain(),
         );
+    app.add_systems(Update, chrome::tools);
     app.insert_gizmo_config(route::RouteGizmos, route::gizmo_config());
     theme::install_font(&mut app);
+    city::install_fonts(&mut app);
     app.run();
 }
 
@@ -900,6 +910,54 @@ fn next_road_job(game: &Game, unit: &fourx_sim::Unit) -> Job {
     }
 }
 
+/// The unit Tab selects next: units still waiting for orders come first; with none idle, every
+/// unit of the player's is in turn.
+fn next_unit(session: &Session) -> Option<Id> {
+    let game = session.game.as_ref()?;
+    let mine: Vec<_> = game
+        .units
+        .values()
+        .filter(|u| u.owner == session.player)
+        .collect();
+    let idle: Vec<Id> = mine
+        .iter()
+        .filter(|u| u.moves_left(session.rules.def(u)) > 0 && u.order.is_none() && u.goto.is_none())
+        .map(|u| u.id)
+        .collect();
+    let ids: Vec<Id> = if idle.is_empty() {
+        mine.iter().map(|u| u.id).collect()
+    } else {
+        idle
+    };
+    let next = if let Selection::Unit(id) = session.selection {
+        ids.iter().position(|v| *v > id).unwrap_or(0)
+    } else {
+        0
+    };
+    ids.get(next).copied()
+}
+
+/// The city C opens next, after the selected one.
+fn next_city(session: &Session) -> Option<Id> {
+    let ids: Vec<Id> = session
+        .game
+        .as_ref()?
+        .cities
+        .values()
+        .filter(|c| c.owner == session.player)
+        .map(|c| c.id)
+        .collect();
+    if ids.is_empty() {
+        return None;
+    }
+    let next = if let Selection::City(id) = session.selection {
+        (ids.iter().position(|v| *v == id).unwrap_or(0) + 1) % ids.len()
+    } else {
+        0
+    };
+    ids.get(next).copied()
+}
+
 fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
     let unit = selected_unit(session).map(|u| u.id);
     let command = match action {
@@ -955,6 +1013,22 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             None
         }
         Action::Idle => None,
+        // The camera is the caller's to move (see `buttons`).
+        Action::Home => None,
+        Action::NextUnit => {
+            if let Some(id) = next_unit(session) {
+                session.selection = Selection::Unit(id);
+                session.dirty = true;
+            }
+            None
+        }
+        Action::NextCity => {
+            if let Some(id) = next_city(session) {
+                session.selection = Selection::City(id);
+                session.dirty = true;
+            }
+            None
+        }
         Action::CloseCity => {
             if matches!(session.selection, Selection::City(_)) {
                 session.selection = Selection::None;
@@ -1049,6 +1123,14 @@ fn buttons(
                 .as_ref()
                 .and_then(|g| g.cities.get(id))
                 .map(|c| c.position),
+            Action::Home => session.game.as_ref().and_then(|g| home(g, session.player)),
+            Action::NextUnit | Action::NextCity => {
+                session.game.as_ref().and_then(|g| match session.selection {
+                    Selection::Unit(id) => g.units.get(&id).map(|u| u.position),
+                    Selection::City(id) => g.cities.get(&id).map(|c| c.position),
+                    _ => None,
+                })
+            }
             _ => None,
         };
         if let Some(pos) = pos
@@ -1250,59 +1332,20 @@ fn controls(
         session.selection = Selection::None;
         session.dirty = true;
     }
-    if keys.just_pressed(KeyCode::Tab) {
-        // Units still waiting for orders come first; with none idle, cycle through them all.
-        let game = session.game.as_ref().unwrap();
-        let mine: Vec<_> = game
-            .units
-            .values()
-            .filter(|u| u.owner == session.player)
-            .collect();
-        let idle: Vec<Id> = mine
-            .iter()
-            .filter(|u| {
-                u.moves_left(session.rules.def(u)) > 0 && u.order.is_none() && u.goto.is_none()
-            })
-            .map(|u| u.id)
-            .collect();
-        let ids = if idle.is_empty() {
-            mine.iter().map(|u| u.id).collect()
-        } else {
-            idle
-        };
-        if !ids.is_empty() {
-            let next = if let Selection::Unit(id) = session.selection {
-                ids.iter().position(|v| *v > id).unwrap_or(0)
-            } else {
-                0
-            };
-            let id = ids[next];
-            session.selection = Selection::Unit(id);
-            if let Some(unit) = session.game.as_ref().and_then(|g| g.units.get(&id)) {
-                focus(&mut transform, unit.position);
-            }
-            session.dirty = true;
+    if keys.just_pressed(KeyCode::Tab)
+        && let Some(id) = next_unit(&session)
+    {
+        session.selection = Selection::Unit(id);
+        if let Some(unit) = session.game.as_ref().and_then(|g| g.units.get(&id)) {
+            focus(&mut transform, unit.position);
         }
+        session.dirty = true;
     }
-    if keys.just_pressed(KeyCode::KeyC) {
-        let ids: Vec<_> = session
-            .game
-            .as_ref()
-            .unwrap()
-            .cities
-            .values()
-            .filter(|c| c.owner == session.player)
-            .map(|c| c.id)
-            .collect();
-        if !ids.is_empty() {
-            let next = if let Selection::City(id) = session.selection {
-                (ids.iter().position(|v| *v == id).unwrap_or(0) + 1) % ids.len()
-            } else {
-                0
-            };
-            session.selection = Selection::City(ids[next]);
-            session.dirty = true;
-        }
+    if keys.just_pressed(KeyCode::KeyC)
+        && let Some(id) = next_city(&session)
+    {
+        session.selection = Selection::City(id);
+        session.dirty = true;
     }
     for (index, key) in [
         KeyCode::Digit1,
@@ -1311,6 +1354,10 @@ fn controls(
         KeyCode::Digit4,
         KeyCode::Digit5,
         KeyCode::Digit6,
+        KeyCode::Digit7,
+        KeyCode::Digit8,
+        KeyCode::Digit9,
+        KeyCode::Digit0,
     ]
     .into_iter()
     .enumerate()

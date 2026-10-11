@@ -8,15 +8,16 @@
 //! the others are drawn and dimmed, so the window already has the shape the treaties will fill.
 //! Music plays under it for as long as it is open (see [`music`]).
 use super::*;
+use crate::chrome::{Frame, Skin, dress};
 use crate::presentation::{nation_art, nation_color};
 use crate::theme::{
-    GAIN, LOSS, ON_PLATE, TRIM, Tone, bold, button, framed_flag, glyph, lift, rounded, text,
+    GAIN, LOSS, ON_PLATE, SLATE, TRIM, Tone, bold, button, framed_flag, glyph, lift, rounded, text,
 };
 use bevy::ui::FocusPolicy;
 
-/// The window's surface and the lighter wells set into it.
-const PANEL: Color = Color::srgb(0.071, 0.098, 0.145);
-const INSET: Color = Color::srgb(0.043, 0.063, 0.100);
+/// The window's surface (slate, under a gilt frame) and the darker wells set into it.
+const PANEL: Color = SLATE;
+const INSET: Color = Color::srgb(0.082, 0.090, 0.102);
 /// Words on the dark surface that are not the main line.
 const MUTED: Color = Color::srgba(0.965, 0.957, 0.925, 0.62);
 
@@ -120,9 +121,7 @@ pub(super) fn spawn(
                 Node {
                     width: if narrow { percent(96) } else { px(860) },
                     max_height: percent(94),
-                    padding: UiRect::all(px(if narrow { 14 } else { 22 })),
-                    border: UiRect::all(px(2)),
-                    border_radius: rounded(18.0),
+                    padding: UiRect::all(px(if narrow { 24 } else { 36 })),
                     flex_direction: if narrow {
                         FlexDirection::Column
                     } else {
@@ -134,11 +133,11 @@ pub(super) fn spawn(
                     ..default()
                 },
                 BackgroundColor(PANEL),
-                BorderColor::all(TRIM.with_alpha(0.75)),
                 lift(),
                 FocusPolicy::Block,
             ))
             .with_children(|p| {
+                dress(p, assets, prefix, Skin::Slate, Frame::Grand, !narrow);
                 // The leader.
                 p.spawn(Node {
                     flex_direction: FlexDirection::Column,
@@ -234,7 +233,7 @@ pub(super) fn spawn(
                         Node {
                             padding: UiRect::all(px(16)),
                             border: UiRect::all(px(1)),
-                            border_radius: rounded(12.0),
+                            border_radius: rounded(4.0),
                             ..default()
                         },
                         BackgroundColor(INSET),

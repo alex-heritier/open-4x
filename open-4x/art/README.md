@@ -2,7 +2,7 @@
 
 Every picture in `assets/packs/base/` is generated here: **procedural SVG scenes -> `rsvg-convert` -> painterly finishing (NumPy) -> PNG.**
 The target look is a hand-painted, saturated "Civ-style" strategy-game finish: olive land, tan beaches, deep teal sea with turquoise shallows,
-dark painted forests, snow-capped relief, gritty brick-and-slate industrial cities, a flat, light UI: cream cards, dark navy pill plates, white glyphs.
+dark painted forests, snow-capped relief, gritty brick-and-slate industrial cities, a UI of aged parchment and dark slate under gilt frames, with white glyphs for small controls.
 
 ## Regenerate
 
@@ -11,7 +11,7 @@ cd art
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # numpy, pillow
 brew install librsvg                                                   # provides rsvg-convert
 .venv/bin/python build.py              # all groups
-.venv/bin/python build.py terrain      # or: terrain | roads | overlays | relief | sprites | cities | units | flavor | ships | icons | resources
+.venv/bin/python build.py terrain      # or: terrain | roads | overlays | relief | sprites | cities | units | flavor | ships | icons | parchment | resources
 ```
 
 `build.py ships` redraws only the five ships and rewrites each one's `muzzles` table (where its guns fire from, per facing) in `pack.json`; the client needs that table to fire a broadside.
@@ -89,6 +89,7 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 | `rig.py` | a small 3D puppet renderer that writes SVG: the game's 2:1 camera, painter-sorted polygons, tubes, tapered limbs and balls, Lambert light from the upper left, two-bone IK, the eight facings |
 | `troops.py` | the land units as puppets: riflemen, pioneers and workers, horse and dragoon, field gun and gunner, and their five clips. It also holds the per-culture **kits** (`FLAVOR_KITS`: coat, trousers, accent and headgear) and **steeds** (`FLAVOR_STEEDS`), from which `BUILDERS` gains an `infantry_<flavor>` and a `cavalry_<flavor>` for each culture that fields its own |
 | `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, planked deck) with casemates, oval funnels and their trailing plumes, turrets that train round to the starboard beam, sponsons, tripod masts, ensign, bow and stern foam, and their five clips; `muzzle_table(design)` reports where the guns are when a broadside fires, for `pack.json`'s `muzzles` |
+| `chrome.py`, `emblems.py`, `scenes.py` | window chrome: parchment/slate/felt surfaces, gilt frames with boss and scroll corners, cartouches, compass; yield emblems; terrain vignettes (`build.py chrome`) |
 | `icons.py` | flat white glyph icons (`icon_*`, `hud_*`) |
 | `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (ore heaps, crops, animals, a derrick, flags for the colonial markers; no frame or outline, only a contact shadow), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
 
@@ -135,7 +136,11 @@ too, so a steppe pony, an Arab and a European charger read apart.
 
 ## UI glyphs (`ui/icons/`)
 
-Flat white glyphs at 64 px, drawn by `forge/icons.py`; detail is cut out as transparent holes. The client tints them with `ImageNode` colours. Panels, buttons, plates and bars are not textures: they are drawn in code in `crates/client/src/theme.rs`.
+Flat white glyphs at 64 px, drawn by `forge/icons.py`; detail is cut out as transparent holes. The client tints them with `ImageNode` colours. Buttons, plates and text are drawn in code in `crates/client/src/theme.rs`; panels are dressed with the pictures of `ui/chrome/` (see below) by `crates/client/src/chrome.rs`.
+
+## Window chrome (`ui/chrome/`)
+
+`forge/chrome.py` draws the seamless `parchment`, `slate` and `felt` tiles, the 9-slice gilt `frame` (160 px, drawn at half size) and `frame_small` (100 px) with boss corners at top right and bottom left and scroll corners at the others, the `stud`, the side `cartouche_h`/`cartouche_v`, and the `compass`. `forge/emblems.py` draws the `ico_*` yield emblems (96 px) and `forge/scenes.py` the `scene_*` terrain vignettes (340 x 150). Build with `python art/build.py chrome`.
 
 ## Relief surfaces and borders
 

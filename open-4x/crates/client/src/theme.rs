@@ -1,14 +1,17 @@
-//! The interface's design language: light cards over the map, one steel-blue action, and dark
-//! plates for the labels that sit on the map itself.
+//! The interface's design language: gilt-framed parchment and slate over the map, one dark-green
+//! action, and parchment plates for the labels that sit on the map itself.
 //!
-//! Everything is flat. Surfaces are warm off-white cards with large radii, a hairline edge and a
-//! soft drop shadow; text is a single dark slate in two weights of one sans face (Inter); icons
-//! are white glyphs tinted at the place of use; the one primary control (ending the day) is
-//! steel blue and nothing else is. On the map, names and counts sit on dark navy pills so they
-//! read over any terrain, and a nation is a colour disc, the stand-in for its flag.
+//! Panels are dressed by [`crate::chrome`]: a tile of aged paper (or dark slate) under a bronze
+//! and gold frame with a boss or a scroll in each corner and a cartouche in the middle of each
+//! side. Text is a single dark brown ink on paper and cream on slate, set in two weights of one
+//! old-style serif (EB Garamond); icons are either white glyphs tinted at the place of use or
+//! painted emblems (see `art/forge/emblems.py`); the one primary control (ending the day) is
+//! dark green with a gilt edge. On the map, names and counts sit on small parchment banners, and
+//! a nation is its flag in a gold-rimmed disc.
 //!
-//! Nothing here depends on the pack: no UI picture is needed but the glyphs, and the shapes the
-//! map labels use are made at start-up (see [`Shapes`]).
+//! The map labels' shapes are made at start-up (see [`Shapes`]); the frames, paper and emblems
+//! are files of the pack (`ui/chrome/`), and a pack without them still gets flat panels in the
+//! colours below.
 use super::*;
 use bevy::asset::AssetId;
 use bevy::sprite::{BorderRect, SliceScaleMode, SpriteImageMode, TextureSlicer};
@@ -16,16 +19,20 @@ use bevy::text::{Font, FontWeight};
 
 /// Room the two cards along the top edge take: their height plus the margin around them. The
 /// pane under them is kept clear of it.
-pub(crate) const TOP_BAR: f32 = 62.0;
+pub(crate) const TOP_BAR: f32 = 74.0;
 /// Distance of the top cards from the edges of the window.
-pub(crate) const TOP_MARGIN: f32 = 10.0;
+pub(crate) const TOP_MARGIN: f32 = 8.0;
 
-/// The face every `Text` uses (see [`install_font`]). Inter, SIL OFL 1.1: `fonts/Inter-OFL.txt`.
-const INTER: &[u8] = include_bytes!("../fonts/Inter-Variable.ttf");
+/// The face every `Text` uses (see [`install_font`]). EB Garamond, SIL OFL 1.1:
+/// `fonts/EBGaramond-OFL.txt`.
+const SERIF: &[u8] = include_bytes!("../fonts/EBGaramond-Variable.ttf");
 
-/// Make Inter the face of every text that names no font of its own, which is all of them.
+/// Old-style serifs are small for their size: every text is drawn this much larger than asked.
+const TYPE_SCALE: f32 = 1.16;
+
+/// Make EB Garamond the face of every text that names no font of its own.
 pub(crate) fn install_font(app: &mut App) {
-    let font = Font::try_from_bytes(INTER.to_vec()).expect("the bundled font is a font");
+    let font = Font::try_from_bytes(SERIF.to_vec()).expect("the bundled font is a font");
     let mut fonts = app.world_mut().resource_mut::<Assets<Font>>();
     fonts
         .insert(AssetId::default(), font)
@@ -33,40 +40,37 @@ pub(crate) fn install_font(app: &mut App) {
 }
 
 // --- palette ---------------------------------------------------------------------------------
-/// A card: the surface panels, windows and the inspector are made of.
-pub(crate) const CARD: Color = Color::srgba(0.969, 0.953, 0.914, 0.97);
-/// The top bar: the card, a little brighter and a little less opaque.
-pub(crate) const BAR: Color = Color::srgba(0.984, 0.976, 0.949, 0.95);
-/// A control or a recessed field on a card, with its hover and pressed fills.
-pub(crate) const WELL: Color = Color::srgb(0.925, 0.906, 0.855);
-pub(crate) const WELL_HOVER: Color = Color::srgb(0.878, 0.855, 0.792);
-pub(crate) const WELL_PRESSED: Color = Color::srgb(0.820, 0.796, 0.725);
-/// The hairline around a card, and the rules inside one.
-pub(crate) const EDGE: Color = Color::srgba(0.07, 0.10, 0.14, 0.10);
-pub(crate) const RULE: Color = Color::srgba(0.07, 0.10, 0.14, 0.13);
-/// Text: slate, and the same slate pulled back for what is secondary.
-pub(crate) const INK: Color = Color::srgb(0.110, 0.149, 0.188);
-pub(crate) const INK_SOFT: Color = Color::srgba(0.110, 0.149, 0.188, 0.60);
-/// Steel blue: the one primary action, and the chosen thing among alternatives.
-pub(crate) const ACCENT: Color = Color::srgb(0.263, 0.435, 0.592);
-pub(crate) const ACCENT_HOVER: Color = Color::srgb(0.322, 0.502, 0.665);
-pub(crate) const ACCENT_PRESSED: Color = Color::srgb(0.204, 0.357, 0.494);
+/// Aged paper: what a panel's surface is where its picture has not loaded, and the colour of the
+/// plain cards of a pack without chrome.
+pub(crate) const CARD: Color = Color::srgb(0.918, 0.851, 0.694);
+/// Dark slate, the surface of the nation's panel and the minimap's frame.
+pub(crate) const SLATE: Color = Color::srgb(0.145, 0.157, 0.180);
+/// A control or a recessed field on paper, with its hover and pressed fills.
+pub(crate) const WELL: Color = Color::srgb(0.855, 0.776, 0.608);
+pub(crate) const WELL_HOVER: Color = Color::srgb(0.906, 0.835, 0.663);
+pub(crate) const WELL_PRESSED: Color = Color::srgb(0.773, 0.690, 0.529);
+/// The hairline around a control, and the rules inside a panel: brown, soft.
+pub(crate) const EDGE: Color = Color::srgba(0.298, 0.196, 0.071, 0.42);
+pub(crate) const RULE: Color = Color::srgba(0.337, 0.235, 0.098, 0.26);
+/// Text on paper: dark brown, and the same pulled back for what is secondary.
+pub(crate) const INK: Color = Color::srgb(0.118, 0.086, 0.055);
+pub(crate) const INK_SOFT: Color = Color::srgba(0.32, 0.239, 0.141, 0.82);
+/// Dark green: the one primary action, and the chosen thing among alternatives.
+pub(crate) const ACCENT: Color = Color::srgb(0.137, 0.282, 0.224);
+pub(crate) const ACCENT_HOVER: Color = Color::srgb(0.184, 0.357, 0.278);
+pub(crate) const ACCENT_PRESSED: Color = Color::srgb(0.094, 0.208, 0.161);
 /// Text and glyphs on the accent.
-pub(crate) const ON_ACCENT: Color = Color::srgb(0.984, 0.980, 0.961);
-/// Dark navy plates for labels over the map, and the text on them.
-pub(crate) const PLATE: Color = Color::srgba(0.086, 0.133, 0.200, 0.92);
-pub(crate) const ON_PLATE: Color = Color::srgb(0.965, 0.957, 0.925);
-/// Good news, bad news, and a caution.
-pub(crate) const GOOD: Color = Color::srgb(0.239, 0.576, 0.361);
-pub(crate) const BAD: Color = Color::srgb(0.765, 0.235, 0.216);
-pub(crate) const AMBER: Color = Color::srgb(0.835, 0.600, 0.157);
-/// The badges of the top bar's readouts: a gold coin, a violet flask, a forge's glow.
-pub(crate) const COIN: Color = Color::srgb(0.878, 0.639, 0.110);
-pub(crate) const LORE: Color = Color::srgb(0.451, 0.384, 0.769);
-pub(crate) const FORGE: Color = Color::srgb(0.847, 0.384, 0.196);
+pub(crate) const ON_ACCENT: Color = Color::srgb(0.965, 0.929, 0.816);
+/// Dark plates for labels over the map, and the cream text on them (and on slate).
+pub(crate) const PLATE: Color = Color::srgba(0.102, 0.110, 0.125, 0.94);
+pub(crate) const ON_PLATE: Color = Color::srgb(0.949, 0.910, 0.804);
+/// Good news, bad news, and a caution, as read on paper.
+pub(crate) const GOOD: Color = Color::srgb(0.169, 0.490, 0.145);
+pub(crate) const BAD: Color = Color::srgb(0.690, 0.176, 0.125);
+pub(crate) const AMBER: Color = Color::srgb(0.808, 0.553, 0.098);
 /// An income, and a loss, read on the dark panel of the nation.
-pub(crate) const GAIN: Color = Color::srgb(0.490, 0.827, 0.545);
-pub(crate) const LOSS: Color = Color::srgb(0.929, 0.463, 0.416);
+pub(crate) const GAIN: Color = Color::srgb(0.455, 0.792, 0.376);
+pub(crate) const LOSS: Color = Color::srgb(0.929, 0.455, 0.384);
 /// A spent health pip on a dark track: near-black, so it reads as missing.
 pub(crate) const SPENT: Color = Color::srgba(0.012, 0.020, 0.032, 0.92);
 /// The gap between two neighbouring health pips, in px.
@@ -76,11 +80,18 @@ pub(crate) const PIP_GAP: f32 = 2.0;
 pub(crate) const MAX_PIPS: i32 = 24;
 /// The white of a selection on the map, and of the route that leads out of it.
 pub(crate) const SELECT: Color = Color::srgb(0.965, 0.957, 0.925);
+/// Gilt: the trim of every frame, and the headings on slate.
+pub(crate) const TRIM: Color = Color::srgb(0.847, 0.667, 0.298);
+/// The dark bronze outline of a frame, and the ink of the labels on the map's banners.
+pub(crate) const BRONZE: Color = Color::srgb(0.110, 0.067, 0.035);
+/// The parchment of a banner on the map, and its dark rim.
+pub(crate) const BANNER: Color = Color::srgb(0.929, 0.855, 0.690);
+pub(crate) const BANNER_RIM: Color = Color::srgb(0.337, 0.224, 0.098);
 
 // --- text --------------------------------------------------------------------------------------
-fn font(size: f32, weight: FontWeight) -> TextFont {
+pub(crate) fn font(size: f32, weight: FontWeight) -> TextFont {
     TextFont {
-        font_size: size,
+        font_size: size * TYPE_SCALE,
         weight,
         ..default()
     }
@@ -137,11 +148,11 @@ pub(crate) fn rounded(radius: f32) -> BorderRadius {
 /// A card floating over the map: a long, soft shadow.
 pub(crate) fn lift() -> BoxShadow {
     BoxShadow::new(
-        Color::srgba(0.02, 0.05, 0.09, 0.30),
+        Color::srgba(0.02, 0.03, 0.05, 0.50),
         px(0),
-        px(8),
+        px(6),
         px(0),
-        px(24),
+        px(16),
     )
 }
 
@@ -160,11 +171,10 @@ pub(crate) fn lift_small() -> BoxShadow {
 pub(crate) fn card() -> Node {
     Node {
         position_type: PositionType::Absolute,
-        padding: UiRect::all(px(16)),
-        border: UiRect::all(px(1)),
+        // The frame's band and the shade inside it take the first twenty pixels or so.
+        padding: UiRect::axes(px(24), px(20)),
         flex_direction: FlexDirection::Column,
-        row_gap: px(8),
-        border_radius: rounded(16.0),
+        row_gap: px(4),
         ..default()
     }
 }
@@ -182,23 +192,44 @@ pub(crate) fn rule(parent: &mut ChildSpawnerCommands) {
     ));
 }
 
-/// A section heading: the small label, the way a card sets its parts apart.
+/// A section heading: a line running into a diamond at either side of a small label.
 pub(crate) fn heading(parent: &mut ChildSpawnerCommands, label: &str) {
+    let line = || Node {
+        flex_grow: 1.0,
+        height: px(1),
+        ..default()
+    };
+    let diamond = || {
+        (
+            Node {
+                width: px(5),
+                height: px(5),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(INK_SOFT),
+            UiTransform::from_rotation(Rot2::degrees(45.0)),
+        )
+    };
     parent
         .spawn(Node {
-            flex_direction: FlexDirection::Column,
+            width: percent(100),
             flex_shrink: 0.0,
-            row_gap: px(6),
-            margin: UiRect::top(px(2)),
+            align_items: AlignItems::Center,
+            column_gap: px(7),
+            margin: UiRect::vertical(px(6)),
             ..default()
         })
         .with_children(|p| {
+            p.spawn((line(), BackgroundColor(INK_SOFT.with_alpha(0.5))));
+            p.spawn(diamond());
             caption(p, label);
-            rule(p);
+            p.spawn(diamond());
+            p.spawn((line(), BackgroundColor(INK_SOFT.with_alpha(0.5))));
         });
 }
 
-/// A name on the left and its figure on the right, the way the reference sets its numbers.
+/// A name on the left and its figure on the right, over a hairline.
 pub(crate) fn row(
     parent: &mut ChildSpawnerCommands,
     label: &str,
@@ -206,14 +237,19 @@ pub(crate) fn row(
     tint: Color,
 ) {
     parent
-        .spawn(Node {
-            width: percent(100),
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: px(12),
-            flex_shrink: 0.0,
-            ..default()
-        })
+        .spawn((
+            Node {
+                width: percent(100),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: px(12),
+                flex_shrink: 0.0,
+                padding: UiRect::vertical(px(4)),
+                border: UiRect::bottom(px(1)),
+                ..default()
+            },
+            BorderColor::all(RULE),
+        ))
         .with_children(|p| {
             text(p, label, 13.0, INK_SOFT);
             bold(p, value, 13.0, tint);
@@ -337,23 +373,13 @@ pub(crate) fn nation_flag(parent: &mut ChildSpawnerCommands, color: Color, width
             height: px(width * 0.7),
             flex_shrink: 0.0,
             border: UiRect::all(px(1)),
-            border_radius: rounded(width * 0.14),
+            border_radius: rounded(2.0),
             ..default()
         },
         BackgroundColor(color),
-        BorderColor::all(Color::WHITE.with_alpha(0.85)),
-        BoxShadow::new(
-            Color::srgba(0.0, 0.0, 0.0, 0.25),
-            px(0),
-            px(1),
-            px(0),
-            px(3),
-        ),
+        BorderColor::all(BRONZE),
     ));
 }
-
-/// Gold of the trim around a flag.
-pub(crate) const TRIM: Color = Color::srgb(0.800, 0.647, 0.290);
 
 /// A nation's flag in a gilt frame: the pack's picture of it when there is one, else its colour
 /// set in one of five layouts, picked from the nation's tag so the same nation always flies the
@@ -509,12 +535,10 @@ pub(crate) fn glyph(
 /// one; [`paint`] does the rest.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Tone {
-    /// Steel blue, white text: the one action that moves the game on.
+    /// Dark green with a gilt edge, cream text: the one action that moves the game on.
     Primary,
-    /// A quiet well on a card: every other control.
+    /// A quiet well on paper: every other control.
     Quiet,
-    /// The alternative that is already chosen: blue-tinted, so it reads as on.
-    Chosen,
     /// Cannot be used now: drawn faint, and the pointer changes nothing.
     Dormant,
 }
@@ -525,11 +549,6 @@ impl Tone {
         let (rest, hover, pressed) = match self {
             Tone::Primary => (ACCENT, ACCENT_HOVER, ACCENT_PRESSED),
             Tone::Quiet => (WELL, WELL_HOVER, WELL_PRESSED),
-            Tone::Chosen => (
-                Color::srgb(0.847, 0.894, 0.941),
-                Color::srgb(0.800, 0.859, 0.918),
-                Color::srgb(0.749, 0.820, 0.894),
-            ),
             Tone::Dormant => return WELL.with_alpha(0.55),
         };
         match interaction {
@@ -543,7 +562,7 @@ impl Tone {
     pub(crate) fn ink(self) -> Color {
         match self {
             Tone::Primary => ON_ACCENT,
-            Tone::Quiet | Tone::Chosen => INK,
+            Tone::Quiet => INK,
             Tone::Dormant => INK.with_alpha(0.32),
         }
     }
@@ -565,6 +584,10 @@ pub(crate) fn button(
     action: Action,
     tone: Tone,
 ) {
+    let edge = match tone {
+        Tone::Primary => TRIM.with_alpha(0.9),
+        Tone::Quiet | Tone::Dormant => EDGE,
+    };
     parent
         .spawn((
             Button,
@@ -573,12 +596,14 @@ pub(crate) fn button(
             Node {
                 min_height: px(34),
                 flex_shrink: 0.0,
-                padding: UiRect::axes(px(14), px(7)),
-                border_radius: rounded(10.0),
+                padding: UiRect::axes(px(14), px(6)),
+                border: UiRect::all(px(1.5)),
+                border_radius: rounded(4.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
+            BorderColor::all(edge),
             BackgroundColor(tone.fill(Interaction::None)),
         ))
         .with_children(|p| bold(p, title, 13.0, tone.ink()));
@@ -669,16 +694,64 @@ pub(crate) fn disc(
     ));
 }
 
-/// A nation's flag on the map: its colour in a disc with a white rim.
+/// A nation's flag on the map, `width` across: its picture (a nation without one is its colour)
+/// in a gold rim with a dark edge.
 pub(crate) fn map_flag(
+    commands: &mut Commands,
+    at: Vec3,
+    width: f32,
+    color: Color,
+    art: Option<Handle<Image>>,
+) {
+    let height = width * 0.72;
+    for (inset, tint, lift) in [(0.0, BRONZE, 0.0), (1.5, TRIM, 0.03)] {
+        commands.spawn((
+            Sprite::from_color(tint, Vec2::new(width - 2.0 * inset, height - 2.0 * inset)),
+            Transform::from_translation(at + Vec3::Z * lift),
+            WorldVisual,
+        ));
+    }
+    let size = Vec2::new(width - 6.0, height - 6.0);
+    let flag = match art {
+        // The picture is a portrait of a waving cloth: show a landscape from its middle.
+        Some(image) => {
+            let mut sprite = Sprite::from_image(image);
+            let crop = 200.0 / size.x * size.y;
+            sprite.rect = Some(Rect::new(
+                0.0,
+                120.0 - crop / 2.0,
+                200.0,
+                120.0 + crop / 2.0,
+            ));
+            sprite.custom_size = Some(size);
+            sprite
+        }
+        None => Sprite::from_color(color, size),
+    };
+    commands.spawn((
+        flag,
+        Transform::from_translation(at + Vec3::Z * 0.06),
+        WorldVisual,
+    ));
+}
+
+/// A banner on the map: parchment inside a dark rim, `size` across.
+pub(crate) fn label_plate(commands: &mut Commands, shapes: &Shapes, at: Vec3, size: Vec2) {
+    pill(commands, shapes, at, size + Vec2::splat(3.0), BANNER_RIM);
+    pill(commands, shapes, at + Vec3::Z * 0.02, size, BANNER);
+}
+
+/// A round badge on the map: `fill` inside a gold ring, for a count in cream.
+pub(crate) fn medallion(
     commands: &mut Commands,
     shapes: &Shapes,
     at: Vec3,
     diameter: f32,
-    color: Color,
+    fill: Color,
 ) {
-    disc(commands, shapes, at, diameter, Color::WHITE);
-    disc(commands, shapes, at + Vec3::Z * 0.05, diameter - 4.0, color);
+    disc(commands, shapes, at, diameter, BRONZE);
+    disc(commands, shapes, at + Vec3::Z * 0.03, diameter - 2.0, TRIM);
+    disc(commands, shapes, at + Vec3::Z * 0.05, diameter - 5.0, fill);
 }
 
 /// Text on the map, centred on `at`.
@@ -700,7 +773,7 @@ pub(crate) fn map_text(
 
 /// How wide a label of `chars` characters is at `size`, near enough to size a pill around it.
 pub(crate) fn text_width(chars: usize, size: f32) -> f32 {
-    chars as f32 * size * 0.56
+    chars as f32 * size * TYPE_SCALE * 0.42
 }
 
 #[cfg(test)]

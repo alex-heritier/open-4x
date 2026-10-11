@@ -2,7 +2,7 @@
 """Render every picture in the base pack: SVG scenes -> rsvg-convert -> painterly finishing -> PNG.
 
     python build.py                 # everything
-    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | units | ships | icons | resources)
+    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | units | ships | icons | chrome | resources)
 
 Writes PNGs into ../assets/packs/base and the vector sources into ./svg.
 Needs: python3 + numpy + pillow (see requirements.txt) and `rsvg-convert` (librsvg) on PATH.
@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from PIL import Image
 
-from forge import cities, fleet, icons, improvements, nature, overlay, relief, resources, rivers, roads, terrain, troops
+from forge import chrome, cities, emblems, fleet, icons, improvements, nature, overlay, parchment, relief, resources, rivers, roads, scenes, terrain, troops
 from forge.paint import paint, render_sprite
 from forge.util import PACK, downsample, indexed, save_png, write_svg
 
@@ -177,6 +177,20 @@ def build_icons():
         save_png(im, f"ui/icons/{name}.png")
 
 
+def build_parchment():
+    """The city view's paper, gilt corner and engravings (see `forge/parchment.py`)."""
+    for name, im in parchment.render_all().items():
+        save_png(im, f"ui/{name}.png")
+        print(f"  {name}", flush=True)
+
+
+def build_chrome():
+    """The window chrome: frames, paper and slate, painted emblems and the terrain panel's landscapes."""
+    for module in (chrome, emblems, scenes):
+        for name, im in module.render_all().items():
+            save_png(im, f"ui/chrome/{name}.png")
+
+
 def build_resources():
     """One round badge per natural resource, 96x96 shown at 44x44, named by the resource's id."""
     for name in resources.RESOURCES:
@@ -217,6 +231,8 @@ GROUPS = {
     "flavor": build_flavor_units,
     "ships": build_ships,
     "icons": build_icons,
+    "chrome": build_chrome,
+    "parchment": build_parchment,
     "resources": build_resources,
 }
 
