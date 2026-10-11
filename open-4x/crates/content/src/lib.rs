@@ -909,6 +909,29 @@ mod tests {
         assert_eq!(flavors, [EastAsian, Western]);
     }
     #[test]
+    fn nations_have_distinct_colours() {
+        use crate::scenario::{MIN_NATION_COLOR_DISTANCE, nation_color_distance};
+        let content = Content::base();
+        for (id, scenario) in &content.scenarios {
+            let mut closest = (f64::MAX, "", "");
+            for (i, a) in scenario.nations.iter().enumerate() {
+                for b in &scenario.nations[..i] {
+                    let distance = nation_color_distance(a.color.0, b.color.0);
+                    if distance < closest.0 {
+                        closest = (distance, a.id.as_str(), b.id.as_str());
+                    }
+                }
+            }
+            assert!(
+                closest.0 >= MIN_NATION_COLOR_DISTANCE,
+                "{id}: nations {:?} and {:?} are only {:.1} apart",
+                closest.1,
+                closest.2,
+                closest.0
+            );
+        }
+    }
+    #[test]
     fn scenario_lookup_reports_available_ids() {
         let content = Content::base();
         assert!(content.scenario(None).is_ok());
@@ -972,6 +995,10 @@ mod tests {
         rejects(
             |s| s.nations[1].id = s.nations[0].id.clone(),
             "duplicate nation",
+        );
+        rejects(
+            |s| s.nations[1].color = s.nations[0].color,
+            "overly similar nation colours",
         );
         rejects(|s| s.nations[0].id = "Not Valid".into(), "bad identifier");
         rejects(

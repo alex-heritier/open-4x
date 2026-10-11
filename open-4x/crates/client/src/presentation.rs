@@ -1,10 +1,11 @@
 use super::*;
 use crate::puppet::Puppet;
 use bevy::image::{ImageLoaderSettings, ImageSampler};
+use bevy::input::mouse::MouseWheel;
 use bevy::ui::RelativeCursorPosition;
 use fourx_content::{Visuals, animation::Clip};
 use fourx_sim::{
-    Date, Flavor, Order, Unit, UnitDef, VISION_RADIUS,
+    Command, Date, Flavor, Order, Unit, UnitDef, VISION_RADIUS,
     terrain::{Cover, Relief, Terrain, Tile},
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -912,9 +913,11 @@ pub(super) fn refresh(
             commands.spawn((sprite, Transform::from_xyz(sx, sy, Z_FOG), WorldVisual));
         }
     }
-    // Culture borders: a dashed line in the owner's colour just inside the edge of each owned
-    // tile that faces another nation's tile or nobody's, never an overlay on the whole
-    // territory. Edges that face the unknown or the edge of the world get none.
+    // Culture borders: a bold dashed line in the owner's colour just inside the edge of each
+    // owned tile that faces another nation's tile or nobody's, never an overlay on the whole
+    // territory. Each dash carries a black outline in its texture (see `border_masks`) plus a
+    // dark halo spawned beneath it, so it reads on any ground like the reference's frontiers.
+    // Edges that face the unknown or the edge of the world get none.
     let mut inks: HashMap<Id, Color> = HashMap::new();
     let mut contour_images: HashMap<&str, Handle<Image>> = HashMap::new();
     for y in y0..=y1 {
@@ -944,7 +947,7 @@ pub(super) fn refresh(
                 let surface = resolved_overlay_names(tile, visuals)
                     .0
                     .and_then(|name| visuals.relief_borders.get(name));
-                let (mut dashes, lift) = if let Some((path, (_, layout))) =
+                let (mut dashes, lift, size) = if let Some((path, (_, layout))) =
                     surface.and_then(|path| art.relief_borders.get(path).map(|entry| (path, entry)))
                 {
                     let image = contour_images
@@ -956,8 +959,9 @@ pub(super) fn refresh(
                         layout: layout.clone(),
                         index,
                     });
-                    sprite.custom_size = Some(Vec2::new(128.0, 112.0));
-                    (sprite, 24.0)
+                    let size = Vec2::new(128.0, 112.0);
+                    sprite.custom_size = Some(size);
+                    (sprite, 24.0, size)
                 } else {
                     let mut sprite = Sprite::from_atlas_image(
                         border_sheet.clone(),
@@ -966,10 +970,21 @@ pub(super) fn refresh(
                             index,
                         },
                     );
-                    sprite.custom_size = Some(Vec2::new(128.0, 64.0));
-                    (sprite, 0.0)
+                    let size = Vec2::new(128.0, 64.0);
+                    sprite.custom_size = Some(size);
+                    (sprite, 0.0, size)
                 };
                 dashes.color = ink;
+                // A dark halo beneath the coloured dash: the same beads slightly enlarged,
+                // so the frontier keeps its edge on pale ground.
+                let mut halo = dashes.clone();
+                halo.color = Color::srgba(0.02, 0.02, 0.02, 0.9);
+                halo.custom_size = Some(size * 1.12);
+                commands.spawn((
+                    halo,
+                    Transform::from_xyz(sx, sy + lift, Z_BORDER + depth(sy) - 0.001),
+                    WorldVisual,
+                ));
                 commands.spawn((
                     dashes,
                     Transform::from_xyz(sx, sy + lift, Z_BORDER + depth(sy)),
@@ -1035,19 +1050,26 @@ pub(super) fn refresh(
                     flag,
                 );
             }
-            // The banner: the nation's flag at one end, the city's size at the other, its name between.
+            // The plate: the city's size in its nation's colour at one end, the days
+            // until its current work is done at the other, its name between.
             let width = text_width(city.name.chars().count(), 15.0) + 60.0;
             let plate = Vec3::new(x, y - 26.0, z + 0.1);
             label_plate(&mut commands, &shapes, plate, Vec2::new(width, 24.0));
             let ours = city.owner == session.player;
-            map_flag(
+            let left = plate + Vec3::new(5.0 - width / 2.0, 0.0, 0.1);
+            medallion(
                 &mut commands,
-                plate + Vec3::new(8.0 - width / 2.0, 0.0, 0.1),
-                30.0,
+                &shapes,
+                left,
+                28.0,
                 nation_color(game, city.owner, 1.0),
-                game.factions
-                    .get(&city.owner)
-                    .and_then(|f| nation_art(&session, &assets, &f.tag)),
+            );
+            map_text(
+                &mut commands,
+                city.population.to_string(),
+                13.0,
+                ON_ACCENT,
+                left + Vec3::Z * 0.2,
             );
             map_text(
                 &mut commands,
@@ -1056,10 +1078,11 @@ pub(super) fn refresh(
                 BRONZE,
                 plate + Vec3::Z * 0.3,
             );
+            let right = plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.1);
             medallion(
                 &mut commands,
                 &shapes,
-                plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.1),
+                right,
                 28.0,
                 if ours {
                     Color::srgb(0.082, 0.157, 0.122)
@@ -1069,10 +1092,18 @@ pub(super) fn refresh(
             );
             map_text(
                 &mut commands,
-                city.population.to_string(),
-                14.0,
-                ON_PLATE,
-                plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.3),
+                builds_in(
+                    city
+                        .production
+                        .as_ref()
+                        .and_then(|id| session.rules.units.get(id))
+                        .map(|def| def.cost),
+                    city.progress,
+                    city.shields(),
+                ),
+                13.0,
+                ON_ACCENT,
+                right + Vec3::Z * 0.2,
             );
         }
     }
@@ -1207,12 +1238,14 @@ pub(super) fn refresh(
     }
 }
 
-/// How big a design's sprite is drawn: ships are wider than they are tall.
+/// How big a design's sprite is drawn: ships are wider than they are tall. Land
+/// pieces stand about two thirds of a tile tall, as in the reference, where a
+/// garrisoned unit fills its city's square.
 pub(super) fn unit_size(def: &UnitDef) -> Vec2 {
     if def.is_naval() {
-        Vec2::new(144.0, 108.0)
+        Vec2::new(216.0, 162.0)
     } else {
-        Vec2::splat(70.0)
+        Vec2::splat(105.0)
     }
 }
 
@@ -1229,15 +1262,13 @@ fn draw_unit_badges(
     let max = unit.max_hp(def).max(1);
     let hp = unit.hp(def).clamp(0, max);
     let fraction = hp as f32 / max as f32;
-    // A dark track with one pip per hit point in it, like the reference's segmented bar.
-    let (width, inner) = (50.0, 42.0);
-    pill(
-        commands,
-        shapes,
-        Vec3::new(x, y - 22.0, z + 0.1),
-        Vec2::new(width, 10.0),
-        PLATE,
-    );
+    let size = unit_size(def);
+    // A dark track with one pip per hit point in it, standing left of the piece
+    // like the reference's vertical segmented bar. The first pips sit at the
+    // bottom, so wounds empty from the top.
+    let (length, inner) = (50.0, 42.0);
+    let bar = Vec3::new(x - size.x / 2.0 - 9.0, y + 12.0, z + 0.1);
+    pill(commands, shapes, bar, Vec2::new(10.0, length), PLATE);
     let lit = hp_color(fraction);
     let pips = pip_layout(hp, max, inner);
     if pips.is_empty() {
@@ -1245,8 +1276,8 @@ fn draw_unit_badges(
         pill(
             commands,
             shapes,
-            Vec3::new(x - inner / 2.0 + fill / 2.0, y - 22.0, z + 0.2),
-            Vec2::new(fill, 6.0),
+            Vec3::new(bar.x, bar.y - inner / 2.0 + fill / 2.0, z + 0.2),
+            Vec2::new(6.0, fill),
             lit,
         );
     } else {
@@ -1254,8 +1285,8 @@ fn draw_unit_badges(
             pill(
                 commands,
                 shapes,
-                Vec3::new(x + pip.centre, y - 22.0, z + 0.2),
-                Vec2::new(pip.width, 6.0),
+                Vec3::new(bar.x, bar.y + pip.centre, z + 0.2),
+                Vec2::new(6.0, pip.width),
                 if pip.lit { lit } else { SPENT },
             );
         }
@@ -1270,12 +1301,14 @@ fn draw_unit_badges(
     };
     let stars = "*".repeat(usize::from(unit.level.saturating_sub(1)));
     let mark = format!("{order}{stars}");
+    // The corners ride the sprite's shoulders, whatever its design's size.
+    let corner = Vec2::new(size.x / 2.0 - 7.0, 12.0 + size.y / 2.0 - 9.0);
     if !mark.is_empty() {
         badge(
             commands,
             shapes,
             &mark,
-            Vec3::new(x - 28.0, y + 38.0, z),
+            Vec3::new(x - corner.x, y + corner.y, z),
             text_width(mark.len(), 11.0) + 12.0,
         );
     }
@@ -1284,9 +1317,20 @@ fn draw_unit_badges(
             commands,
             shapes,
             &format!("x{stack}"),
-            Vec3::new(x + 28.0, y + 38.0, z),
+            Vec3::new(x + corner.x, y + corner.y, z),
             text_width(2, 11.0) + 14.0,
         );
+    }
+}
+
+/// Days until a city's current work of `cost` finishes, for the map plate: "-"
+/// when nothing is being built or nothing is gathered toward it. Same count as
+/// the city view's "Ready in".
+fn builds_in(cost: Option<i32>, progress: i32, shields: i32) -> String {
+    let days = cost.and_then(|cost| crate::city::days(cost - progress, shields));
+    match days {
+        Some(n) => n.max(1).to_string(),
+        None => "-".into(),
     }
 }
 
@@ -2196,6 +2240,7 @@ fn build_ui(
     if let Some(nation) = session.diplomacy {
         crate::diplomacy::spawn(commands, assets, session, game, nation, narrow);
     }
+    context_menu(commands, session, size);
     if let Some(winner) = game.winner {
         commands
             .spawn((
@@ -2249,6 +2294,201 @@ fn build_ui(
                     });
                 });
             });
+    }
+}
+
+/// One row of the right-click menu: a labelled button across the menu's width. It carries
+/// the menu's own mark, so the pointer resting on a row still counts as resting on the menu:
+/// a button captures the hover (see `FocusPolicy`), hiding the card under it from the map.
+fn menu_button(parent: &mut ChildSpawnerCommands, title: String, action: Action, tone: Tone) {
+    parent
+        .spawn((
+            Button,
+            action,
+            tone,
+            ContextMenuPane,
+            Node {
+                width: percent(100),
+                min_height: px(32),
+                flex_shrink: 0.0,
+                padding: UiRect::axes(px(12), px(6)),
+                border_radius: rounded(10.0),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(tone.fill(Interaction::None)),
+        ))
+        .with_children(|p| bold(p, title, 13.0, tone.ink()));
+}
+
+/// Width of the right-click menu, and how far from the window's edges it stays.
+const MENU_WIDTH: f32 = 280.0;
+const MENU_MARGIN: f32 = 12.0;
+
+/// The right-click menu over the map: the order a selected unit could take there, what a city
+/// there offers, and who stands there. A city and a stack share one menu when a unit stands
+/// in a city. Entries that name nothing still on the map are left out.
+fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
+    let Some(menu) = &session.menu else {
+        return;
+    };
+    let Some(game) = &session.game else {
+        return;
+    };
+    let city = menu.city.and_then(|id| game.cities.get(&id));
+    let units: Vec<&Unit> = menu
+        .units
+        .iter()
+        .filter_map(|id| game.units.get(id))
+        .collect();
+    if city.is_none() && units.is_empty() {
+        return;
+    }
+    let left = menu
+        .at
+        .x
+        .min((size.x - MENU_WIDTH - MENU_MARGIN).max(MENU_MARGIN));
+    let top = menu.at.y.min((size.y - MENU_MARGIN * 2.0).max(MENU_MARGIN));
+    let mut face = card();
+    face.left = px(left.max(MENU_MARGIN));
+    face.top = px(top.max(MENU_MARGIN));
+    face.width = px(MENU_WIDTH);
+    face.max_height = px((size.y - top - MENU_MARGIN).max(120.0));
+    face.overflow = Overflow::scroll_y();
+    face.align_items = AlignItems::Stretch;
+    commands
+        .spawn((
+            face,
+            floating(),
+            GlobalZIndex(30),
+            UiRoot,
+            ContextMenuPane,
+            Interaction::default(),
+            // The wheel scrolls a long menu instead of zooming the map under it (see
+            // `controls`).
+            ScrollPosition::default(),
+        ))
+        .with_children(|p| {
+            // The selected unit's order for the square stays one click away, so striking an
+            // enemy there still goes through the right button.
+            if let Selection::Unit(id) = session.selection
+                && let Some(command) = order_for(session, id, menu.tile)
+            {
+                let label = match &command {
+                    Command::Move { destination, .. } => {
+                        format!("March to {},{}", destination.x, destination.y)
+                    }
+                    Command::Attack { target, .. } => {
+                        format!("Attack {},{}", target.x, target.y)
+                    }
+                    Command::Bombard { target, .. } => {
+                        format!("Bombard {},{}", target.x, target.y)
+                    }
+                    _ => "Order this unit here".to_string(),
+                };
+                menu_button(p, label, Action::Strike(menu.tile), Tone::Primary);
+            }
+            if let Some(c) = city {
+                caption(p, "city");
+                bold(p, c.name.clone(), 16.0, INK);
+                text(
+                    p,
+                    game.factions
+                        .get(&c.owner)
+                        .map_or("Unknown".to_string(), |f| f.adjective.clone()),
+                    12.0,
+                    INK_SOFT,
+                );
+                menu_button(
+                    p,
+                    format!("Open {}", c.name),
+                    Action::SelectCity(c.id),
+                    Tone::Quiet,
+                );
+                menu_button(
+                    p,
+                    format!("Zoom to {}", c.name),
+                    Action::ZoomCity(c.id),
+                    Tone::Quiet,
+                );
+                if c.owner == session.player {
+                    heading(p, "production");
+                    let coastal = game.coastal(c.position);
+                    for def in session.rules.units.values() {
+                        if def.is_naval() && !coastal {
+                            continue;
+                        }
+                        let chosen = c.production.as_deref() == Some(def.id.as_str());
+                        menu_button(
+                            p,
+                            if chosen {
+                                format!("{} ({}) · building", def.name, def.cost)
+                            } else {
+                                format!("{} ({})", def.name, def.cost)
+                            },
+                            Action::ProduceAt {
+                                city: c.id,
+                                unit: def.id.clone(),
+                            },
+                            if chosen { Tone::Primary } else { Tone::Quiet },
+                        );
+                    }
+                }
+            }
+            if !units.is_empty() {
+                if city.is_some() {
+                    rule(p);
+                }
+                caption(
+                    p,
+                    if units.len() == 1 {
+                        "unit here"
+                    } else {
+                        "units here"
+                    },
+                );
+                for u in units {
+                    let def = session.rules.def(u);
+                    let owner = game
+                        .factions
+                        .get(&u.owner)
+                        .map_or("Unknown".to_string(), |f| f.adjective.clone());
+                    menu_button(
+                        p,
+                        if u.owner == session.player {
+                            format!(
+                                "{} · {} · {} moves",
+                                def.name,
+                                owner,
+                                moves_text(u.moves_left(def))
+                            )
+                        } else {
+                            format!("{} · {}", def.name, owner)
+                        },
+                        Action::SelectUnit(u.id),
+                        Tone::Quiet,
+                    );
+                }
+            }
+            rule(p);
+            menu_button(p, "Close".to_string(), Action::CloseMenu, Tone::Quiet);
+        });
+}
+
+/// Scroll a long right-click menu with the wheel when the pointer is over it. Bevy itself
+/// does not scroll; every scrolling view drives its own (see `city::scroll`).
+pub(super) fn scroll_menu(
+    mut wheel: MessageReader<MouseWheel>,
+    hovered: Query<&Interaction, With<ContextMenuPane>>,
+    mut scrolled: Query<(&ComputedNode, &mut ScrollPosition), With<ContextMenuPane>>,
+) {
+    let delta: f32 = wheel.read().map(|e| -e.y * 30.0).sum();
+    if delta == 0.0 || hovered.iter().all(|i| *i == Interaction::None) {
+        return;
+    }
+    for (node, mut scroll) in &mut scrolled {
+        let max = (node.content_size().y - node.size().y) * node.inverse_scale_factor();
+        scroll.y = (scroll.y + delta).clamp(0.0, max.max(0.0));
     }
 }
 
@@ -2853,6 +3093,40 @@ mod tests {
         assert!(Z_RELIEF + depth(-32.0) > Z_BORDER + depth(0.0));
         const { assert!(Z_BORDER + 1.0 < Z_FOG && Z_FOG < Z_CITY) };
         const { assert!(Z_CITY + 1.0 < Z_UNIT) };
+    }
+
+    #[test]
+    fn pieces_stand_half_again_as_tall_as_before() {
+        let host = fourx_runtime::Host::base_scenario("dawn-straits", 42)
+            .expect("the starter scenario starts");
+        assert_eq!(
+            unit_size(&host.rules.units["infantry"]),
+            Vec2::splat(105.0)
+        );
+        assert_eq!(
+            unit_size(&host.rules.units["ironclad"]),
+            Vec2::new(216.0, 162.0)
+        );
+    }
+
+    #[test]
+    fn the_plate_counts_down_the_current_work() {
+        assert_eq!(builds_in(Some(30), 0, 10), "3");
+        assert_eq!(builds_in(Some(10), 9, 5), "1");
+        assert_eq!(builds_in(None, 0, 10), "-");
+        assert_eq!(builds_in(Some(30), 0, 0), "-");
+    }
+
+    #[test]
+    fn vertical_pips_fit_their_track() {
+        for (hp, max) in [(4, 4), (2, 4), (3, 3)] {
+            for pip in pip_layout(hp, max, 42.0) {
+                assert!(
+                    pip.centre.abs() + pip.width / 2.0 <= 21.0 + 1e-3,
+                    "{hp}/{max}"
+                );
+            }
+        }
     }
 
     #[test]

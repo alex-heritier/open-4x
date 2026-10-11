@@ -10,9 +10,10 @@ Both are sheets of 2:1 tile diamonds (256 x 128 at 2x, drawn 128 x 64), like the
   the vertices of their common edge, so they agree there. The masks are half-open, so adjacent
   diamonds partition the plane exactly: no overlap, no gaps, and nearest-neighbour sampling never
   shows a seam.
-* `border_sheet`: four diamonds side by side, each carrying a dashed line along one edge just inside
-  it, in the order up-right, down-right, down-left, up-left. The dashes are white so the client can
-  tint them with the owner's colour; a darker rim keeps them legible on any ground.
+* `border_sheet`: four diamonds side by side, each carrying a bold dashed line along one edge
+  just inside it, in the order up-right, down-right, down-left, up-left. Each dash is a white core
+  ringed by a black outline so the client can tint it with the owner's colour (white becomes the
+  nation colour, black stays black) and it stays legible on any ground.
 """
 
 import numpy as np

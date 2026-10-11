@@ -9,6 +9,17 @@ pub const MAX_NATIONS: usize = 250;
 pub const MAX_REGIONS: usize = 1024;
 pub const MAX_CITIES: usize = 4096;
 pub const MAX_UNITS: usize = 16384;
+/// Minimum sRGB distance between two nations' colours. Borders, banners, units and the
+/// minimap all paint in the national colour, so neighbours that share a hue are unreadable.
+/// A distance of 40 keeps clearly different colours (dark red vs bright red is ~190) while
+/// rejecting near-duplicates (two pinks 12 apart).
+pub const MIN_NATION_COLOR_DISTANCE: f64 = 40.0;
+
+/// Euclidean distance between two `#rrggbb` colours in sRGB space (0–441.7).
+pub fn nation_color_distance(a: [u8; 3], b: [u8; 3]) -> f64 {
+    let channel = |i: usize| f64::from(a[i]) - f64::from(b[i]);
+    (channel(0).powi(2) + channel(1).powi(2) + channel(2).powi(2)).sqrt()
+}
 /// Most units that may start stacked on one square.
 pub const MAX_STACK: usize = 64;
 pub const MIN_DIMENSION: i32 = 8;
@@ -116,6 +127,21 @@ pub fn validate_scenario(s: &Scenario, rules: &Rules) -> Result<(), ContentError
                     Some(next) => cursor = next,
                     None => break,
                 }
+            }
+        }
+    }
+    // Every nation must be told apart at a glance: borders, banners, units and the
+    // minimap all paint in the national colour, so no two nations may share a hue.
+    for (i, a) in s.nations.iter().enumerate() {
+        for b in &s.nations[..i] {
+            if nation_color_distance(a.color.0, b.color.0) < MIN_NATION_COLOR_DISTANCE {
+                return fail(format!(
+                    "nations {:?} and {:?} have overly similar colours ({} and {})",
+                    a.id,
+                    b.id,
+                    a.color.hex(),
+                    b.color.hex()
+                ));
             }
         }
     }

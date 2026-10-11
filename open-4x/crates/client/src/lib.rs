@@ -58,6 +58,31 @@ struct Session {
     staging: bool,
     /// The nation whose leader the diplomacy window shows, if it is open.
     diplomacy: Option<Id>,
+    /// The right-click menu over the map, if one is open.
+    menu: Option<ContextMenu>,
+}
+
+/// A right-click menu over the map: where the pointer was, what tile it names, and the city
+/// and units standing there when it opened.
+#[derive(Clone, Debug)]
+struct ContextMenu {
+    /// The pointer in window pixels, with the origin at the top left.
+    at: Vec2,
+    tile: Coord,
+    city: Option<Id>,
+    units: Vec<Id>,
+}
+
+/// What sits on a right-clicked tile: the city there, if any, and every unit there.
+fn context_targets(game: &Game, tile: Coord) -> (Option<Id>, Vec<Id>) {
+    (game.city_at(tile), game.unit_ids_at(tile))
+}
+
+/// Whether a right click on a tile with this city and these units opens the menu. A click on
+/// a city or on any unit does; a click on an empty square stays an order for the selected
+/// unit instead.
+fn should_open_menu(city: Option<Id>, units: &[Id]) -> bool {
+    city.is_some() || !units.is_empty()
 }
 
 /// A rectangle of the world in screen units (what the camera shows). Only tiles, cities and
@@ -331,8 +356,12 @@ struct InfoPane;
 /// is not a click on the map under it.
 #[derive(Component)]
 struct TopCard;
+/// The menu's own card. Like `InfoPane` it carries an `Interaction`, so that the pointer
+/// resting on its empty space is not a click on the map under it.
+#[derive(Component)]
+struct ContextMenuPane;
 /// The cards that block clicks to the map under them.
-type Panels = (With<InfoPane>, With<TopCard>);
+type Panels = (With<InfoPane>, With<TopCard>, With<ContextMenuPane>);
 #[derive(Component, Clone)]
 enum Action {
     EndTurn,
@@ -348,6 +377,15 @@ enum Action {
     Save,
     SelectUnit(Id),
     SelectCity(Id),
+    /// Centre the camera on a city without opening its detail view.
+    ZoomCity(Id),
+    /// Build a design in a city without opening its detail view.
+    ProduceAt {
+        city: Id,
+        unit: String,
+    },
+    /// Dismiss the right-click menu.
+    CloseMenu,
     /// Close the city's detail view.
     CloseCity,
     /// Open the diplomacy window with a nation's leader.
@@ -597,6 +635,7 @@ pub fn run() {
             screenshot: option("--screenshot"),
             smoke: flag("--smoke"),
             previous_pinch: None,
+            menu: None,
             staging: false,
             diplomacy: option("--talk").and_then(|id| id.parse().ok()),
         })
@@ -627,14 +666,14 @@ pub fn run() {
         .add_systems(
             Update,
             (
-                receive,
-                buttons,
+                (receive, buttons).chain(),
                 theme::paint,
                 city::paint,
                 bar::update,
                 city::scroll,
                 diplomacy::music,
                 scroll_inspector,
+                presentation::scroll_menu,
                 minimap_click,
                 controls,
                 // Before the stage, which waits for the walks; before `refresh`, so the walking
@@ -828,6 +867,8 @@ fn receive(
                 session.rules = rules;
                 session.pending = false;
                 if newer {
+                    // A newer state may have moved what the menu named.
+                    session.menu = None;
                     session.dirty = true;
                     session.message = if player == 0 {
                         "Spectator | another client commands this campaign".into()
@@ -959,8 +1000,14 @@ fn next_city(session: &Session) -> Option<Id> {
 }
 
 fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
+    // Every control dismisses the right-click menu, including the menu's own: its choice is
+    // carried out below, and anything else replaces it.
+    if session.menu.take().is_some() {
+        session.dirty = true;
+    }
     let unit = selected_unit(session).map(|u| u.id);
     let command = match action {
+        Action::CloseMenu => None,
         Action::EndTurn => Some(Command::EndTurn),
         Action::Found => unit.map(|unit| Command::FoundCity {
             unit,
@@ -1000,6 +1047,25 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             session.selection = Selection::City(*id);
             session.dirty = true;
             None
+        }
+        Action::ZoomCity(_) => {
+            session.dirty = true;
+            None
+        }
+        Action::ProduceAt { city, unit } => {
+            let own = session
+                .game
+                .as_ref()
+                .and_then(|g| g.cities.get(city))
+                .is_some_and(|c| c.owner == session.player);
+            if own && session.rules.units.contains_key(unit) {
+                Some(Command::Produce {
+                    city: *city,
+                    unit: unit.clone(),
+                })
+            } else {
+                None
+            }
         }
         Action::Talk(nation) => {
             session.diplomacy = Some(*nation);
@@ -1131,6 +1197,11 @@ fn buttons(
                     _ => None,
                 })
             }
+            Action::ZoomCity(id) => session
+                .game
+                .as_ref()
+                .and_then(|g| g.cities.get(id))
+                .map(|c| c.position),
             _ => None,
         };
         if let Some(pos) = pos
@@ -1330,6 +1401,7 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::Escape) {
         session.selection = Selection::None;
+        session.menu = None;
         session.dirty = true;
     }
     if keys.just_pressed(KeyCode::Tab)
@@ -1402,22 +1474,39 @@ fn controls(
     let Some(position) = game.map.normalize(Coord::from_screen(world.x, world.y)) else {
         return;
     };
-    let own: Vec<_> = game
-        .unit_ids_at(position)
-        .into_iter()
-        .filter(|id| game.units[id].owner == session.player)
+    let (city, present) = context_targets(game, position);
+    let own: Vec<Id> = present
+        .iter()
+        .filter(|id| game.units[*id].owner == session.player)
+        .copied()
         .collect();
-    let city = game
-        .cities
-        .values()
-        .find(|c| c.position == position)
-        .map(|c| c.id);
     if mouse.just_pressed(MouseButton::Right) {
+        if should_open_menu(city, &present) {
+            // A city or a stack of units: offer what fits, rather than marching into it.
+            // The menu carries the order along when one applies, so an enemy in reach can
+            // still be struck from it.
+            session.menu = Some(ContextMenu {
+                at: cursor,
+                tile: position,
+                city,
+                units: present,
+            });
+            session.dirty = true;
+            return;
+        }
+        if session.menu.take().is_some() {
+            session.dirty = true;
+        }
         if let Selection::Unit(unit) = session.selection
             && let Some(command) = order_for(&session, unit, position)
         {
             issue(&mut session, &mut connection, command);
         }
+        return;
+    }
+    // A click anywhere else dismisses the menu instead of selecting under it.
+    if session.menu.take().is_some() {
+        session.dirty = true;
         return;
     }
     // A second click on the same square soon after the first is a double click, which opens
@@ -1529,6 +1618,31 @@ mod tests {
         let copies = view.copies(&map, east);
         assert_eq!(copies, vec![west.offset(-1, 1)]);
         assert_eq!(map.normalize(copies[0]), Some(east));
+    }
+
+    #[test]
+    fn the_menu_opens_for_cities_and_stacks_but_not_empty_squares() {
+        assert!(!should_open_menu(None, &[]));
+        assert!(should_open_menu(Some(1), &[]));
+        assert!(should_open_menu(None, &[7]));
+        assert!(should_open_menu(Some(1), &[7, 8]));
+    }
+
+    #[test]
+    fn right_click_names_the_city_and_every_unit_on_its_square() {
+        let host = fourx_runtime::Host::base_scenario("dawn-straits", 42)
+            .expect("the starter scenario starts");
+        let game = &host.game;
+        let city = game.cities.values().next().expect("a city");
+        let (found, units) = context_targets(game, city.position);
+        assert_eq!(found, Some(city.id));
+        for id in &units {
+            assert_eq!(game.units[id].position, city.position);
+        }
+        let unit = game.units.values().next().expect("a unit");
+        let (at_unit, stack) = context_targets(game, unit.position);
+        assert!(stack.contains(&unit.id));
+        assert_eq!(at_unit, game.city_at(unit.position));
     }
 
     #[test]

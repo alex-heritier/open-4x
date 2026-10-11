@@ -296,18 +296,25 @@ def border_layers(h, u, v):
 
 
 def border_masks(u, v, bow=0.0):
-    """Shared bead/thread paint for flat and lifted borders; eight periods per edge."""
+    """Shared bead/thread paint for flat and lifted borders; eight periods per edge.
+
+    Bold Civ3-style dashes: a thick white core (tinted to the nation's colour by
+    the client) ringed by a black outline that survives the tint, so the border
+    reads on any ground. The outline works because the client multiplies the
+    texture by the nation colour: white becomes the nation colour, black stays
+    black.
+    """
     # Orient parameters clockwise N->E->S->W->N, matching the client's edge neighbours.
     for t, distance in ((u, v), (v, 1-u), (1-u, 1-v), (1-v, u)):
         inset = 0.055 + bow * np.sin(np.pi * t) ** 2
         delta = np.abs(distance - inset) * 143.1  # source pixels normal to an edge
         phase = (t * 143.1) % 18.0
-        bead = (phase >= 5) & (phase < 16)
-        rim = 1 - smoothstep(2.0, 3.2, delta)
-        core = 1 - smoothstep(0.9, 1.8, delta)
-        alpha = np.where(bead, rim, (1 - smoothstep(0.35, 0.8, delta)) * 0.65)
+        bead = (phase >= 4) & (phase < 17)
+        rim = 1 - smoothstep(3.4, 4.8, delta)
+        core = 1 - smoothstep(1.6, 3.0, delta)
+        alpha = np.where(bead, rim, (1 - smoothstep(0.5, 1.1, delta)) * 0.75)
         alpha *= smoothstep(0.025, 0.05, t) * (1-smoothstep(0.95, 0.975, t))
-        col = np.ones((*u.shape, 3), dtype=np.float32) * (0.34 + 0.66 * core)[..., None]
+        col = np.ones((*u.shape, 3), dtype=np.float32) * core[..., None]
         yield col, alpha
 
 

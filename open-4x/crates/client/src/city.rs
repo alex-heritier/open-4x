@@ -335,7 +335,7 @@ fn readout(
 }
 
 /// Whole days until `needed` is gathered at `per_day`, or `None` if it never will be.
-fn days(needed: i32, per_day: i32) -> Option<i32> {
+pub(crate) fn days(needed: i32, per_day: i32) -> Option<i32> {
     (per_day > 0).then(|| (needed.max(0) + per_day - 1) / per_day)
 }
 fn in_days(n: i32) -> String {

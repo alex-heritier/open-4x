@@ -35,6 +35,7 @@ fn session() -> Session {
         screenshot: None,
         smoke: false,
         previous_pinch: None,
+        menu: None,
         staging: false,
         diplomacy: None,
     }
