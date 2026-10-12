@@ -170,14 +170,14 @@ HILL_STYLES = {
         snow=2.0,
     ),
     "arid": dict(
-        cover=[(0, "#74663a"), (0.5, "#92804a"), (1.0, "#b4a068")],
-        dry=[(0, "#86724a"), (1.0, "#c0aa80")],
+        cover=[(0, "#9a8e6c"), (0.5, "#b4a986"), (1.0, "#cdc4a2")],
+        dry=[(0, "#a6976e"), (1.0, "#cec29e")],
         rock=[(0, "#7a5e44"), (1.0, "#b8996e")],
         snow=2.0,
     ),
     "arctic": dict(
-        cover=[(0, "#5a6450"), (0.5, "#7a8670"), (1.0, "#a2ad96")],
-        dry=[(0, "#6e7866"), (1.0, "#a8b2a0")],
+        cover=[(0, "#7e8274"), (0.5, "#9a9c8c"), (1.0, "#b6b8a9")],
+        dry=[(0, "#8a8a7a"), (1.0, "#b2b2a2")],
         rock=[(0, "#585e66"), (1.0, "#a0a8b0")],
         snow=0.45,
     ),
@@ -223,7 +223,8 @@ def shade_hills(h, u, v, seed=21, style="temperate"):
     snow_col = P.mix(P.hx("#a9b6c6"), P.hx("#e6e8e2"), np.clip(lam * 1.15, 0, 1))
     col = P.mix(col, snow_col / np.maximum(lit[..., None], 0.35) * 0.95, snow)
     col = col * (lit * (1.0 - 0.18 * ao))[..., None] * 1.05
-    alpha = smoothstep(1.0, 5.0, h + 2.0 * n2)
+    # a long feathered skirt: the lower slopes thin out so the ground's own texture shows through
+    alpha = smoothstep(0.5, 9.0, h + 2.0 * n2)
     return np.clip(col, 0, 1), alpha
 
 
