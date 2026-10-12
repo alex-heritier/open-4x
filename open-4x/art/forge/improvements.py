@@ -81,60 +81,94 @@ def build_farm() -> Svg:
     return svg
 
 
+# The rice country: (x0, y0, x1, y1, ground colour, rows run along "x" or "y"). Big flat fields
+# cut by thin dikes, in the yellow-greens of a crop ripening at different rates.
+RICE_FIELDS = [
+    (0.0, 0.0, 3.3, 2.4, "#c3cc4e", "y"),
+    (0.0, 2.4, 1.6, 6.0, "#d9c94f", "x"),
+    (1.6, 2.4, 3.3, 4.5, "#a9c644", "y"),
+    (1.6, 4.5, 3.3, 6.0, "#cdd058", "x"),
+    (3.3, 0.0, 4.7, 3.6, "#8fba3e", "x"),
+    (4.7, 0.0, 6.0, 3.6, "#e0cf62", "y"),
+    (3.3, 3.6, 5.0, 6.0, "#c8cc50", "y"),
+]
+RICE_YARD = (5.0, 3.6, 6.0, 6.0)  # a farmyard in the last corner: house, pond and trees
+RICE_DIKE = "#a99a62"
+
+
 def build_rice() -> Svg:
-    """Flooded paddies in a grid of earthen bunds, planted at every stage from seedlings in
-    bright water to golden heads ready for the sickle."""
+    """Flat rice fields from the air: wide rectangles in greens and golds with fine row streaks,
+    thin dikes between them, a line of trees along two of the dikes, and a red-roofed farmhouse
+    beside a pond."""
     svg = Svg(W, H)
     iso = _iso()
     rng = random.Random(11)
-    svg.poly(_corners(iso), "#8d7b4a")
-    plots, m = 3, 0.16  # a 3 x 3 grid; m is half the width of a bund
-    span = N / plots
-    # how far along each paddy's crop is: 0 just transplanted, 1 ready to harvest
-    ripeness = [[0.10, 0.50, 0.90], [0.60, 0.25, 0.75], [0.95, 0.40, 0.05]]
-    water = svg.lin([(0, "#b4dad0"), (1, "#5a9795")], 0, 0, 1, 1)
-    plants = []
-    for i in range(plots):
-        for j in range(plots):
-            x0, y0, x1, y1 = i * span + m, j * span + m, (i + 1) * span - m, (j + 1) * span - m
-            paddy = [iso.p(x0, y0), iso.p(x1, y0), iso.p(x1, y1), iso.p(x0, y1)]
-            # a bund: a lit top, then the paddy sunk below it with a shadow under the near bank
-            svg.poly([iso.p(x0 - m, y0 - m), iso.p(x1 + m, y0 - m), iso.p(x1 + m, y1 + m), iso.p(x0 - m, y1 + m)], "#a8975c", "#6a5a34", 0.8)
-            svg.poly(paddy, water, "#3f7670", 1.0)
-            svg.line(iso.p(x0, y0), iso.p(x1, y0), "#2f625e", 2.2, 0.55)
-            svg.line(iso.p(x0, y0), iso.p(x0, y1), "#2f625e", 2.2, 0.55)
-            for s in range(2):  # sky glinting off the water
-                gy = y0 + (y1 - y0) * (0.3 + 0.4 * s)
-                svg.line(iso.p(x0 + 0.3 + 0.3 * s, gy), iso.p(x0 + 0.9 + 0.3 * s, gy), "#f2fbf4", 1.3, 0.55)
-            ripe = ripeness[i][j]
-            rows, per_row = 5, 5
-            for r in range(rows):
-                for c in range(per_row):
-                    px = x0 + 0.3 + (x1 - x0 - 0.6) * (r + 0.5) / rows + rng.uniform(-0.04, 0.04)
-                    py = y0 + 0.3 + (y1 - y0 - 0.6) * (c + 0.5) / per_row + rng.uniform(-0.05, 0.05)
-                    plants.append((px + py, lambda px=px, py=py, ripe=ripe: _rice_clump(svg, iso, rng, px, py, ripe)))
-    _paint_in_depth(plants)
+    svg.poly(_corners(iso), RICE_DIKE)
+    m = 0.1  # half the width of a dike
+    for x0, y0, x1, y1, ground, along in RICE_FIELDS:
+        x0, y0, x1, y1 = x0 + m, y0 + m, x1 - m, y1 - m
+        quad = [iso.p(x0, y0), iso.p(x1, y0), iso.p(x1, y1), iso.p(x0, y1)]
+        svg.poly(quad, svg.lin([(0, shade(ground, 1.12)), (1, shade(ground, 0.9))], 0, 0, 1, 1), shade(ground, 0.62), 0.9)
+        rows = int(((y1 - y0) if along == "x" else (x1 - x0)) / 0.2)
+        for r in range(rows):  # fine streaks, one per row of plants
+            t = (r + 0.5) / rows
+            tone = shade(ground, 0.84 if r % 2 else 1.14)
+            if along == "x":
+                y = y0 + (y1 - y0) * t
+                svg.line(iso.p(x0 + 0.08, y), iso.p(x1 - 0.08, y), tone, 1.0, 0.55)
+            else:
+                x = x0 + (x1 - x0) * t
+                svg.line(iso.p(x, y0 + 0.08), iso.p(x, y1 - 0.08), tone, 1.0, 0.55)
+        for _ in range(int((x1 - x0) * (y1 - y0) * 3)):  # a few darker patches
+            px, py = iso.p(rng.uniform(x0 + 0.1, x1 - 0.1), rng.uniform(y0 + 0.1, y1 - 0.1))
+            svg.ellipse(px, py, rng.uniform(3, 6), rng.uniform(1.2, 2.2), shade(ground, 0.8), op=0.35)
+        # the near and far dikes catch the light differently
+        svg.line(quad[0], quad[1], shade(RICE_DIKE, 1.2), 1.1, 0.8)
+        svg.line(quad[0], quad[3], shade(RICE_DIKE, 1.2), 1.1, 0.8)
+    # the farmyard: grass, a pond, and the house
+    x0, y0, x1, y1 = RICE_YARD
+    svg.poly([iso.p(x0 + m, y0 + m), iso.p(x1 - m, y0 + m), iso.p(x1 - m, y1 - m), iso.p(x0 + m, y1 - m)], "#86b048", shade(RICE_DIKE, 0.7), 0.9)
+    pond = iso.p(5.5, 5.35)
+    svg.ellipse(pond[0], pond[1], 11, 5.5, "#4f8a8a", "#30605f", 1.0)
+    svg.ellipse(pond[0] - 2, pond[1] - 1, 7, 3, "#a5d0cc", op=0.75)
+    standing = []
+    for i in range(9):  # trees along the dike at x = 3.3 and the one at y = 2.4
+        y = 1.0 + 0.45 * i + rng.uniform(-0.08, 0.08)
+        standing.append((3.3 + y, lambda y=y: _tree(svg, iso, rng, 3.3, y)))
+    for i in range(5):
+        x = 1.0 + 0.45 * i + rng.uniform(-0.08, 0.08)
+        standing.append((x + 2.4, lambda x=x: _tree(svg, iso, rng, x, 2.4)))
+    for x, y in ((5.2, 3.9), (5.8, 3.95)):  # behind the house
+        standing.append((x + y, lambda x=x, y=y: _tree(svg, iso, rng, x, y)))
+    standing.append((5.45 + 4.35, lambda: _farmhouse(svg, iso, 5.45, 4.35)))
+    _paint_in_depth(standing)
     return svg
 
 
-def _rice_clump(svg, iso, rng, x, y, ripe):
-    """A tuft of rice: a fan of blades, greener when young and heavy with gold heads when ripe."""
+def _tree(svg, iso, rng, x, y):
+    """A round tree seen from above and the side: a dark crown with a lit upper left."""
     px, py = iso.p(x, y)
-    height = 5.5 + 5.0 * ripe
-    young, grown, golden = "#8fd24e", "#58a83a", "#d2bd48"
-    base = mixc(young, grown, min(1.0, ripe * 2.0)) if ripe < 0.5 else mixc(grown, golden, (ripe - 0.5) * 2.0)
-    svg.ellipse(px, py + 0.8, 3.2, 1.2, "#2f625e", op=0.45)  # reflection under the tuft
-    for blade in range(5):
-        lean = (blade - 2) * (1.5 + 1.5 * ripe) + rng.uniform(-0.6, 0.6)
-        top = (px + lean, py - height * (0.85 + 0.15 * (blade % 2)))
-        svg.path(
-            f"M{px + (blade - 2) * 0.5:.1f},{py:.1f} Q{px + lean * 0.4:.1f},{py - height * 0.6:.1f} {top[0]:.1f},{top[1]:.1f}",
-            stroke=shade(base, 0.85 + 0.12 * (blade % 3)),
-            sw=1.5,
-        )
-    if ripe > 0.6:  # drooping heads
-        svg.ellipse(px + 3.0, py - height * 0.8, 2.6, 1.2, "#e9d56a", INK, 0.4, rot=-25)
-        svg.ellipse(px - 2.6, py - height * 0.7, 2.4, 1.1, "#dcc558", INK, 0.4, rot=20)
+    r = rng.uniform(3.4, 4.6)
+    svg.ellipse(px + 2, py + 1, r + 1, r * 0.45, "#1a2410", op=0.4)
+    svg.line((px, py), (px, py - r), "#4a3622", 1.4)
+    svg.circle(px, py - r - 2, r, "#2d5726", stroke="#1c3a18", sw=0.6)
+    svg.circle(px - r * 0.3, py - r - 2 - r * 0.3, r * 0.62, "#4f8a38", op=0.95)
+    svg.circle(px - r * 0.45, py - r - 2 - r * 0.45, r * 0.25, "#8fc058", op=0.8)
+
+
+def _farmhouse(svg, iso, x, y):
+    """A small whitewashed house under a red tiled roof."""
+    w, d, wall, ridge = 0.5, 0.36, 4.5, 6.0
+    svg.ellipse(*iso.p(x + w / 2, y + d / 2), 14, 6, "#1a2410", op=0.35)
+    a, b, c, e = iso.p(x, y + d, 0), iso.p(x + w, y + d, 0), iso.p(x + w, y, 0), iso.p(x, y, 0)
+    up = lambda p, h: (p[0], p[1] - h)
+    svg.poly([a, b, up(b, wall), up(a, wall)], "#f1e8d2", INK, 0.6)  # the lit front, facing lower left
+    svg.poly([b, c, up(c, wall), up(b, wall)], "#b9ad94", INK, 0.6)  # the shaded end
+    r0, r1 = lerp(up(a, wall), up(e, wall), 0.5), lerp(up(b, wall), up(c, wall), 0.5)
+    svg.poly([up(a, wall), up(b, wall), up(r1, ridge), up(r0, ridge)], "#d2523a", INK, 0.6)
+    svg.poly([up(b, wall), up(c, wall), up(r1, ridge)], "#a63a28", INK, 0.6)
+    svg.poly([up(a, wall), up(e, wall), up(r0, ridge)], "#c04a34", INK, 0.6)
+    svg.poly([up(e, wall), up(c, wall), up(r1, ridge), up(r0, ridge)], "#e0644a", INK, 0.6)
 
 
 def build_corn() -> Svg:

@@ -3,6 +3,7 @@ mod chrome;
 mod city;
 mod connection;
 mod diplomacy;
+mod margin;
 mod march;
 mod music;
 mod presentation;
@@ -33,6 +34,8 @@ const PAN_BOOST: f32 = 3.0;
 const DEFAULT_ZOOM: f32 = 0.84;
 /// What shows behind a map that has no void of its own: deep water.
 const BACKDROP: Color = Color::srgb(0.055, 0.13, 0.15);
+/// What shows past the margin of an upright world: dark walnut.
+const DESK: Color = Color::srgb(0.13, 0.08, 0.05);
 
 #[derive(Resource)]
 struct Session {
@@ -346,7 +349,7 @@ enum Selection {
     Tile(Coord),
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct WorldVisual;
 #[derive(Component)]
 struct UiRoot;
@@ -834,9 +837,10 @@ fn receive(
                 }
                 // Snapshots carry no lookup tables; build them so queries stay cheap.
                 game.reindex();
-                // Beyond the edge of an upright world is nothing, and nothing is black.
+                // Beyond the edge of an upright world lies the desk the chart is spread on
+                // (see `margin`); its walnut shows wherever its tiles are not yet drawn.
                 let backdrop = if game.map.lattice.is_some() {
-                    Color::BLACK
+                    DESK
                 } else {
                     BACKDROP
                 };
@@ -1340,14 +1344,17 @@ fn controls(
     let Some(game) = &session.game else {
         return;
     };
-    // Keep the camera over the map: the world is large and empty space is disorienting.
+    // Keep the camera near the map, but let it travel far enough past an edge that the last
+    // squares can be brought to the middle of the screen and beyond (see `margin::reach`).
     let (left, bottom, right, top) = game.map.screen_bounds();
+    let reach = margin::reach(window.height() * 0.5 * ortho.scale);
     transform.translation.x = if let Some(period) = game.map.screen_period() {
         (transform.translation.x - left).rem_euclid(period) + left
     } else {
-        transform.translation.x.clamp(left - 200.0, right + 200.0)
+        let reach_x = margin::reach(window.width() * 0.5 * ortho.scale);
+        transform.translation.x.clamp(left - reach_x, right + reach_x)
     };
-    transform.translation.y = transform.translation.y.clamp(bottom - 100.0, top + 100.0);
+    transform.translation.y = transform.translation.y.clamp(bottom - reach, top + reach);
     if keys.just_pressed(KeyCode::Home) || keys.just_pressed(KeyCode::KeyH) {
         if let Some(position) = home(game, session.player) {
             focus(&mut transform, position);

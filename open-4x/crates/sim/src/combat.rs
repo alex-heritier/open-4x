@@ -12,7 +12,7 @@ use std::cmp::Reverse;
 /// Dice are drawn from 0..1024; a die at or above the odds is a hit for the attacker.
 const DIE: u32 = 1024;
 /// City size classes: towns up to this many citizens, cities up to the next.
-const TOWN_MAX: i32 = 6;
+pub(crate) const TOWN_MAX: i32 = 6;
 const CITY_MAX: i32 = 12;
 /// Defender bonus of a city by size class: town, city, metropolis.
 const CITY_PERCENT: [i32; 3] = [0, 50, 100];

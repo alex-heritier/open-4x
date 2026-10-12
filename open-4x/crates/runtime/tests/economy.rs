@@ -3,7 +3,7 @@ use fourx_content::Content;
 use fourx_runtime::{Host, Start};
 use fourx_sim::Command;
 
-fn starter_at_peace(seed: u64) -> Host {
+fn starter_content_at_peace() -> Content {
     let mut content = Content::base();
     content
         .scenarios
@@ -11,8 +11,12 @@ fn starter_at_peace(seed: u64) -> Host {
         .expect("the starter ships with the base pack")
         .wars
         .clear();
+    content
+}
+
+fn starter_at_peace(seed: u64) -> Host {
     Host::start(
-        content,
+        starter_content_at_peace(),
         Start {
             scenario: Some("russo-japanese-war"),
             seed,
@@ -44,7 +48,24 @@ fn the_starter_is_won_by_industry_in_weeks() {
 
 #[test]
 fn every_city_gathers_something_and_cities_level_off() {
-    let mut host = starter_at_peace(2);
+    // The computer nations expand and improve their land, so left alone they win by industry
+    // within the month. Put the victory out of reach: this test is about the land, not the race.
+    let mut content = starter_content_at_peace();
+    content
+        .scenarios
+        .get_mut("russo-japanese-war")
+        .expect("the starter ships with the base pack")
+        .rules
+        .victory_industry = Some(1_000_000);
+    let mut host = Host::start(
+        content,
+        Start {
+            scenario: Some("russo-japanese-war"),
+            seed: 2,
+            ..Start::default()
+        },
+    )
+    .expect("the starter starts");
     let starting: Vec<_> = host.game.cities.values().map(|c| c.population).collect();
     for _ in 0..30 {
         end_turn(&mut host);

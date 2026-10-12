@@ -82,6 +82,7 @@
       "oceanic": "sprites/city_oceanic.png"
     },
     "fog": "terrain/fog.png",
+    "margin": "margin/",
     "borders": "terrain/borders.png",
     "resources": {
       "australia": "sprites/resources/australia.png",

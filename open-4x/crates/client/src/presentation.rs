@@ -917,8 +917,8 @@ pub(super) fn refresh(
     // The fog of war lies over the terrain, the relief and the improvements, and under the
     // cities and units. Borders belong to their terrain surface and dim with it.
     // Its tiles are blended across their corners, so the edge of the known world and of what
-    // is in sight this turn is a soft gradient. Past the edge of an upright world the cells
-    // the terrain spills into are covered solid black.
+    // is in sight this turn is a soft gradient. Past the edge of an upright world the terrain
+    // spills one ring further, under the chart's frame.
     for y in (y0 - 1)..=(y1 + 1) {
         for x in (x0 - 1)..=(x1 + 1) {
             let p = Coord::new(x, y);
@@ -926,6 +926,8 @@ pub(super) fn refresh(
             if !built.has(Vec2::new(sx, sy)) {
                 continue;
             }
+            // The void ring just past an upright world's edge fades from its neighbours, as the
+            // chart's frame covers the rest of it; without a frame it is covered solid black.
             let index = if game.map.normalize(p).is_some() {
                 sight.fog_cell(p)
             } else if upright
@@ -933,7 +935,11 @@ pub(super) fn refresh(
                     .iter()
                     .any(|&(dx, dy)| game.map.normalize(p.offset(dx, dy)).is_some())
             {
-                FOG_BLACK
+                if visuals.margin.is_empty() {
+                    FOG_BLACK
+                } else {
+                    sight.fog_cell(p)
+                }
             } else {
                 continue;
             };
@@ -1247,6 +1253,16 @@ pub(super) fn refresh(
             Vec3::new(x, y, z),
         );
     }
+    // Past the top and bottom of an upright world: the chart's frame and margin.
+    crate::margin::spawn(
+        &mut commands,
+        &assets,
+        game,
+        &built,
+        prefix,
+        &visuals.margin,
+        WorldVisual,
+    );
     // Unhurried map typography echoes printed campaign charts.
     if game.scenario == "russo-japanese-war" {
         // Placed on the chart, where the hand-drawn map's squares are.
