@@ -14,11 +14,13 @@ def in_diamond(x, y, margin=0.0):
 
 
 # ---- trees ---------------------------------------------------------------------------------------
-LEAF_STOPS = [(0.0, "#16301a"), (0.28, "#25481f"), (0.52, "#3a6828"), (0.76, "#5b8a30"), (1.0, "#8fb040")]
-FIR_STOPS = [(0.0, "#12291a"), (0.30, "#1f4222"), (0.55, "#325d28"), (0.80, "#4d7a2d"), (1.0, "#78a038")]
-JUNGLE_STOPS = [(0.0, "#0c3317"), (0.28, "#145a24"), (0.52, "#23812c"), (0.76, "#46a834"), (1.0, "#8fd048")]
-FROST_STOPS = [(0.0, "#10282a"), (0.30, "#1d4236"), (0.55, "#2f5f46"), (0.80, "#557f5d"), (1.0, "#8fb09c")]
-AUTUMN = ["#b9702a", "#cf9236", "#a2532a", "#d9a443", "#c4622b"]
+# Terrain cover is backdrop: the ramps are short (lifted darks, tamed lights) so a stand of trees
+# stays close in value to the ground and never outshouts a city or a unit.
+LEAF_STOPS = [(0.0, "#3a4a24"), (0.28, "#48602a"), (0.52, "#5b7632"), (0.76, "#73903a"), (1.0, "#90ac48")]
+FIR_STOPS = [(0.0, "#38482c"), (0.30, "#445a30"), (0.55, "#566e35"), (0.80, "#6d853c"), (1.0, "#869c48")]
+JUNGLE_STOPS = [(0.0, "#2a4e28"), (0.28, "#365f2f"), (0.52, "#467a36"), (0.76, "#5f9840"), (1.0, "#82b050")]
+FROST_STOPS = [(0.0, "#34463a"), (0.30, "#415848"), (0.55, "#526e56"), (0.80, "#6c876a"), (1.0, "#8ea590")]
+AUTUMN = ["#a98048", "#b89050", "#9c7044", "#bb9a58", "#a67a48"]  # muted: a hint of turning leaves
 LIGHT = (-0.55, -0.83)  # towards the upper-left sun, in screen space
 
 
@@ -31,14 +33,14 @@ def _ramp(stops, t):
 
 
 def trunk(svg, x, y, h, w=3.0):
-    svg.poly([(x - w / 2, y), (x + w / 2, y), (x + w * 0.35, y - h), (x - w * 0.35, y - h)], "#3a2a1c", "#1d130c", 0.4)
+    svg.poly([(x - w / 2, y), (x + w / 2, y), (x + w * 0.35, y - h), (x - w * 0.35, y - h)], "#4a3a28", "#2e231a", 0.4)
 
 
 def ground_shadow(svg, x, y, r, soft):
-    svg.ellipse(x + r * 0.6, y + r * 0.12, r * 1.25, r * 0.42, "#0b1107", op=0.5, blur=soft)
+    svg.ellipse(x + r * 0.6, y + r * 0.12, r * 1.25, r * 0.42, "#16200f", op=0.30, blur=soft)
 
 
-def _dabs(svg, rng, inside, bbox, n, stops, centre, radius, size=(2.3, 1.5), droop=0.0, autumn=0.075):
+def _dabs(svg, rng, inside, bbox, n, stops, centre, radius, size=(2.3, 1.5), droop=0.0, autumn=0.02):
     """Scatter paint dabs inside a silhouette; tone follows the upper-left light."""
     x0, y0, x1, y1 = bbox
     done = 0
@@ -51,7 +53,7 @@ def _dabs(svg, rng, inside, bbox, n, stops, centre, radius, size=(2.3, 1.5), dro
     pts.sort(key=lambda q: q[1])  # lower dabs first so upper ones overlap them
     for px, py in pts:
         nx, ny = (px - centre[0]) / radius, (py - centre[1]) / radius
-        t = 0.50 + 0.42 * (nx * LIGHT[0] + ny * LIGHT[1]) + rng.uniform(-0.17, 0.17)
+        t = 0.52 + 0.30 * (nx * LIGHT[0] + ny * LIGHT[1]) + rng.uniform(-0.09, 0.09)
         if rng.random() < autumn and t > 0.45:
             col = rng.choice(AUTUMN)
         else:
@@ -61,7 +63,7 @@ def _dabs(svg, rng, inside, bbox, n, stops, centre, radius, size=(2.3, 1.5), dro
         svg.ellipse(px, py, sx, sy, col, op=0.93, rot=rng.uniform(-35, 35) + droop)
 
 
-def broadleaf(svg, x, y, h, rng, soft, stops=LEAF_STOPS, autumn=0.075):
+def broadleaf(svg, x, y, h, rng, soft, stops=LEAF_STOPS, autumn=0.02):
     """Round crown of paint dabs: dark rim, sun-struck upper-left, amber flecks."""
     w = h * 0.34
     ground_shadow(svg, x, y, w * 0.9, soft)
@@ -75,7 +77,7 @@ def broadleaf(svg, x, y, h, rng, soft, stops=LEAF_STOPS, autumn=0.075):
 
     # dark silhouette first
     for dx, dy, r in lobes:
-        svg.ellipse(cx + dx * rx, cy + dy * ry * 1.2, rx * r * 1.04, ry * r * 1.04, "#142a14", stroke="#0e1d0d", sw=0.8)
+        svg.ellipse(cx + dx * rx, cy + dy * ry * 1.2, rx * r * 1.04, ry * r * 1.04, "#38482a", stroke="#2e3e22", sw=0.8)
     n = int(rx * ry * 0.5)
     _dabs(svg, rng, inside, (cx - rx * 1.4, cy - ry * 1.4, cx + rx * 1.4, cy + ry * 1.6), n, stops, (cx, cy), rx * 1.2, (2.6, 1.7), autumn=autumn)
 
@@ -93,7 +95,7 @@ def conifer(svg, x, y, h, rng, soft, stops=FIR_STOPS):
         th = h * 0.36
         apex = (x, ty - th)
         tri = [apex, (x + tw / 2, ty + 1.2), (x - tw / 2, ty + 1.2)]
-        svg.poly(tri, "#10241a", "#0b1a10", 0.7)
+        svg.poly(tri, "#34482c", "#2b3f26", 0.7)
 
         def inside(px, py, apex=apex, ty=ty, tw=tw, th=th):
             if py < apex[1] or py > ty + 2.0:
@@ -101,8 +103,8 @@ def conifer(svg, x, y, h, rng, soft, stops=FIR_STOPS):
             return abs(px - x) <= (py - apex[1]) / th * tw / 2 + 1.2
 
         n = int(tw * th * 0.5)
-        _dabs(svg, rng, inside, (x - tw / 2 - 1, apex[1], x + tw / 2 + 1, ty + 2), n, stops, (x, ty - th * 0.5), max(tw * 0.55, th * 0.6), (2.4, 1.3), droop=18, autumn=0.0 if stops is not FIR_STOPS else 0.075)
-        svg.line((x - tw * 0.5, ty + 1.8), (x + tw * 0.5, ty + 2.6), "#0a160d", 1.5, 0.45)
+        _dabs(svg, rng, inside, (x - tw / 2 - 1, apex[1], x + tw / 2 + 1, ty + 2), n, stops, (x, ty - th * 0.5), max(tw * 0.55, th * 0.6), (2.4, 1.3), droop=18, autumn=0.0 if stops is not FIR_STOPS else 0.02)
+        svg.line((x - tw * 0.5, ty + 1.8), (x + tw * 0.5, ty + 2.6), "#1c3022", 1.5, 0.30)
 
 
 def scatter(rng, n, min_d, margin=6.0, tries=600):
@@ -125,7 +127,7 @@ def palm(svg, x, y, h, rng, soft):
     lean = rng.uniform(-0.22, 0.22) * h
     top = (x + lean, y - h)
     ctrl = (x - lean * 0.3, y - h * 0.55)
-    svg.path(f"M{x - 1.6:.1f},{y:.1f} Q{ctrl[0]:.1f},{ctrl[1]:.1f} {top[0]:.1f},{top[1]:.1f}", stroke="#2e2014", sw=4.2)
+    svg.path(f"M{x - 1.6:.1f},{y:.1f} Q{ctrl[0]:.1f},{ctrl[1]:.1f} {top[0]:.1f},{top[1]:.1f}", stroke="#3e2e20", sw=4.2)
     svg.path(f"M{x - 1.2:.1f},{y:.1f} Q{ctrl[0]:.1f},{ctrl[1]:.1f} {top[0]:.1f},{top[1]:.1f}", stroke="#8a6a3e", sw=2.8)
     for k in range(1, 6):
         t = k / 6
@@ -153,7 +155,7 @@ def palm(svg, x, y, h, rng, soft):
     svg.ellipse(cx, cy + 0.8, 2.4, 2.0, "#4d3822")
 
 
-def build_forest_svg(seed=11, trees=34, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_STOPS, palms=0.0, floor="#16210c", size=(38, 54), spacing=17) -> Svg:
+def build_forest_svg(seed=11, trees=28, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_STOPS, palms=0.0, floor="#2a3a1c", size=(38, 54), spacing=19) -> Svg:
     """A stand of trees on the tile.  `conifers` and `palms` are shares of the trees; the rest are
     broadleaf.  The palettes turn it into temperate forest, boreal pine or jungle."""
     rng = random.Random(seed)
@@ -161,7 +163,7 @@ def build_forest_svg(seed=11, trees=34, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_
     soft = svg.blur(1.8)
     pts = sorted(scatter(rng, trees, spacing, margin=8), key=lambda q: q[1])
     # dark forest floor so the ground below reads as shade between crowns
-    svg.ellipse(CX, CY + 4, 108, 48, floor, op=0.55, blur=svg.blur(9))
+    svg.ellipse(CX, CY + 4, 108, 48, floor, op=0.40, blur=svg.blur(9))
     for x, y in pts:
         depth = (y - (CY - 64)) / 128  # nearer trees are larger
         h = rng.uniform(*size) * (0.88 + 0.26 * depth)
@@ -171,24 +173,24 @@ def build_forest_svg(seed=11, trees=34, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_
         elif roll < palms + conifers:
             conifer(svg, x, y, h, rng, soft, fir)
         else:
-            broadleaf(svg, x, y, h, rng, soft, leaf, 0.0 if leaf is not LEAF_STOPS else 0.075)
+            broadleaf(svg, x, y, h, rng, soft, leaf, 0.0 if leaf is not LEAF_STOPS else 0.02)
     return svg
 
 
 def build_pine_svg(seed=13) -> Svg:
     """Boreal pine: only firs, paler and bluer, a little sparser than the mixed forest."""
-    return build_forest_svg(seed, trees=32, conifers=1.0, fir=FROST_STOPS, floor="#11221d", size=(40, 58), spacing=18)
+    return build_forest_svg(seed, trees=26, conifers=1.0, fir=FROST_STOPS, floor="#26382f", size=(40, 58), spacing=20)
 
 
 def build_jungle_svg(seed=17) -> Svg:
     """Dense, saturated canopy with palms standing out of it."""
-    svg = build_forest_svg(seed, trees=44, conifers=0.0, leaf=JUNGLE_STOPS, palms=0.28, floor="#0b2410", size=(40, 56), spacing=14)
+    svg = build_forest_svg(seed, trees=36, conifers=0.0, leaf=JUNGLE_STOPS, palms=0.28, floor="#1c3a22", size=(40, 56), spacing=16)
     rng = random.Random(seed + 5)
     soft = svg.blur(1.4)
-    for _ in range(26):  # undergrowth: bright ferns between the trunks
+    for _ in range(16):  # undergrowth: soft ferns between the trunks
         x, y = rng.uniform(CX - 100, CX + 100), rng.uniform(CY - 40, CY + 56)
         if in_diamond(x, y, 10):
-            svg.ellipse(x, y, rng.uniform(4, 8), rng.uniform(2, 3.4), _ramp(JUNGLE_STOPS, rng.uniform(0.5, 1.0)), op=0.55, rot=rng.uniform(-30, 30), blur=soft)
+            svg.ellipse(x, y, rng.uniform(4, 8), rng.uniform(2, 3.4), _ramp(JUNGLE_STOPS, rng.uniform(0.4, 0.8)), op=0.45, rot=rng.uniform(-30, 30), blur=soft)
     return svg
 
 
@@ -197,7 +199,7 @@ def build_marsh_svg(seed=19) -> Svg:
     rng = random.Random(seed)
     svg = Svg(W, H)
     soft = svg.blur(2.2)
-    svg.ellipse(CX, CY + 2, 112, 54, "#2b3b25", op=0.55, blur=svg.blur(9))
+    svg.ellipse(CX, CY + 2, 112, 54, "#3a4a30", op=0.40, blur=svg.blur(9))
     pools = []
     for _ in range(40):
         if len(pools) >= 7:
@@ -208,9 +210,9 @@ def build_marsh_svg(seed=19) -> Svg:
             pools.append((x, y, r))
     pools = [(x, y, r) for x, y, r in pools]
     for x, y, r in pools:
-        svg.ellipse(x, y + 1, r + 3, r * 0.5 + 2.2, "#2d3a1f", op=0.75, blur=soft)  # muddy rim
-        svg.ellipse(x, y, r, r * 0.5, svg.rad([(0, "#6fb7b1"), (0.6, "#3f8f8f"), (1, "#2f6e72")], 0.4, 0.35, 0.75), stroke="#1f4a4a", sw=0.8)
-        svg.ellipse(x - r * 0.25, y - r * 0.12, r * 0.45, r * 0.12, "#cdeae4", op=0.45)  # sky glint
+        svg.ellipse(x, y + 1, r + 3, r * 0.5 + 2.2, "#3a4628", op=0.60, blur=soft)  # muddy rim
+        svg.ellipse(x, y, r, r * 0.5, svg.rad([(0, "#6fb7b1"), (0.6, "#3f8f8f"), (1, "#2f6e72")], 0.4, 0.35, 0.75), stroke="#2f5a58", sw=0.8)
+        svg.ellipse(x - r * 0.25, y - r * 0.12, r * 0.45, r * 0.12, "#cdeae4", op=0.25)  # sky glint
     for _ in range(26):  # tussocks of sedge
         x, y = rng.uniform(CX - 105, CX + 105), rng.uniform(CY - 48, CY + 52)
         if in_diamond(x, y, 10):
@@ -228,7 +230,7 @@ def build_marsh_svg(seed=19) -> Svg:
         if rng.random() < 0.45:  # cattail
             bx = x + rng.uniform(-2, 2)
             svg.path(f"M{bx:.1f},{y:.1f} L{bx + 1:.1f},{y - h * 1.05:.1f}", stroke="#6b5a32", sw=0.9)
-            svg.ellipse(bx + 1, y - h * 1.12, 1.6, 4.4, "#4b3420", stroke="#2a1c10", sw=0.4)
+            svg.ellipse(bx + 1, y - h * 1.12, 1.6, 4.4, "#5a4630", stroke="#3a2c1c", sw=0.4)
     return svg
 
 

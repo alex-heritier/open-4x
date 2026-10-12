@@ -2,7 +2,7 @@
 
 Every picture in `assets/packs/base/` is generated here: **procedural SVG scenes -> `rsvg-convert` -> painterly finishing (NumPy) -> PNG.**
 The target look is a hand-painted, saturated "Civ-style" strategy-game finish: olive land, tan beaches, deep teal sea with turquoise shallows,
-dark painted forests, snow-capped relief, gritty brick-and-slate industrial cities, a UI of aged parchment and dark slate under gilt frames, with white glyphs for small controls.
+muted painted forests, snow-capped relief, gritty brick-and-slate industrial cities, a UI of aged parchment and dark slate under gilt frames, with white glyphs for small controls.
 
 ## Regenerate
 
@@ -18,6 +18,10 @@ brew install librsvg                                                   # provide
 
 Output goes to `assets/packs/base/`; the vector sources of the sprites are written to `art/svg/` (git-ignored, reproducible). Builds are deterministic (fixed seeds).
 `preview_*.py` are scratch scripts that render contact sheets into `art/preview/` (git-ignored).
+
+## Terrain is backdrop
+
+Cities and units are the focus, so terrain art stays low in contrast, saturation and fine grain: detail is kept, but it is quiet. Ground types are pulled toward their mean colour (`terrain._calm`), water glints and foam are faint, tree ramps are short with lifted darks and no bright flecks, and relief and cover use a flatter grade (`build.COVER_GRADE`) with pale grey-blue snow instead of white. When adding terrain art, check it with a city and a unit on top (`cargo run -p fourx-client -- --scenario dawn-straits --focus 13,17 --zoom 0.5`): the sprite should win against the ground, not the other way round.
 
 ## Originality
 
@@ -71,6 +75,8 @@ Map overlays (`terrain/fog.png`, `terrain/borders.png`, built by `forge/overlay.
   the owner's colour; a darker rim keeps them legible on any ground.
 
 Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`, `hills_cold`, `mountain`, `mountain_dry`, `mountain_cold`; `python build.py overlays` rebuilds them.
+
+**Margin** (`margin/`, `forge/margin.py`, `python build.py margin`): what lies past the top and bottom of an upright world, drawn like the border of a Victorian atlas plate. `band.png` is the neatline frame (a gilt cable, a meander frieze, a chequered degree scale), a 256x240 tile drawn 128x120 along the edge with its last 8 units a shadow over the map; `edge.png` is the torn end of the sheet and `desk.png` the walnut it lies on. Strips are authored for the north edge, map side down, and flipped for the south. The engravings (`compass`, `cartouche`, `ribbon`, `ship`, `steamer`, `serpent`, and `instruments` for the desk) are drawn at half their file size; the client letters the cartouche with the campaign's name and the ribbons with mottoes.
 
 ## Modules (`forge/`)
 

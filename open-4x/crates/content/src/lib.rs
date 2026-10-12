@@ -66,6 +66,11 @@ pub struct Visuals {
     /// channel. Cell `(3*W + N, 3*S + E)` holds a tile whose north, east, south and west
     /// vertices are each 0 never seen, 1 remembered, or 2 in sight.
     pub fog: String,
+    /// Optional: the folder of the chart's margin, drawn past the top and bottom of an upright
+    /// world (`band.png`, `edge.png`, `desk.png` and the engravings; see `art/forge/margin.py`).
+    /// Without it the world simply ends there.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub margin: String,
     /// Culture borders: four tile diamonds side by side, each with a dashed line along one
     /// edge, in the order up-right, down-right, down-left, up-left. The client tints them with
     /// the nation's colour.

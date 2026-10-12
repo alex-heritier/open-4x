@@ -22,20 +22,20 @@ GRID = 512
 # summit) where snow starts, `foot` how far the scrub climbs the slopes.
 STYLES = {
     "temperate": dict(
-        rock=[(0, "#6a5f50"), (0.35, "#8a8070"), (0.65, "#a79d88"), (1.0, "#c6bca4")],
-        scrub=[(0, "#3d4c20"), (0.5, "#5b6d2c"), (1.0, "#7b8c3a")],
-        snow=0.40,
+        rock=[(0, "#7a6f60"), (0.35, "#8e8574"), (0.65, "#a39a86"), (1.0, "#bbb29c")],
+        scrub=[(0, "#52632e"), (0.5, "#66763a"), (1.0, "#7f8f48")],
+        snow=0.46,
         foot=0.42,
     ),
     "arid": dict(
-        rock=[(0, "#6f5a42"), (0.35, "#94775a"), (0.65, "#b99a74"), (1.0, "#d9bf94")],
-        scrub=[(0, "#6d5f32"), (0.5, "#8b7a42"), (1.0, "#aa9856")],
+        rock=[(0, "#806a52"), (0.35, "#9a8062"), (0.65, "#b79b78"), (1.0, "#d0b78f")],
+        scrub=[(0, "#7a6c3c"), (0.5, "#908047"), (1.0, "#aa9a5a")],
         snow=0.95,
         foot=0.22,
     ),
     "arctic": dict(
-        rock=[(0, "#4f5762"), (0.35, "#6e7782"), (0.65, "#97a0a8"), (1.0, "#c2c9ce")],
-        scrub=[(0, "#4a5544"), (0.5, "#66725c"), (1.0, "#8a9580")],
+        rock=[(0, "#5f6770"), (0.35, "#79828b"), (0.65, "#97a0a8"), (1.0, "#b8c0c5")],
+        scrub=[(0, "#566150"), (0.5, "#6c7862"), (1.0, "#8a9580")],
         snow=0.15,
         foot=0.14,
     ),
@@ -86,8 +86,8 @@ def shade_height(h, u, v, seed=3, style="temperate"):
     st = STYLES[style]
     rock = P.ramp(t, st["rock"])
     strata = 0.5 + 0.5 * np.sin(h * 0.28 + n1 * 5.0)
-    rock = rock * (0.93 + 0.14 * strata)[..., None]
-    rock = P.mix(rock, np.array([0.34, 0.26, 0.20], dtype=np.float32), np.clip(steep * 2.0, 0, 0.5))
+    rock = rock * (0.96 + 0.08 * strata)[..., None]
+    rock = P.mix(rock, np.array([0.34, 0.26, 0.20], dtype=np.float32), np.clip(steep * 2.0, 0, 0.30))
 
     # foothills: olive scrub that fades up into rock
     green_t = np.clip(0.45 + 0.8 * n1 + 0.4 * n2, 0, 1)
@@ -97,11 +97,11 @@ def shade_height(h, u, v, seed=3, style="temperate"):
 
     snow_line = st["snow"] + 0.09 * n1 + 0.05 * n2
     snow = smoothstep(snow_line - 0.04, snow_line + 0.05, hn) * (1.0 - smoothstep(0.24, 0.46, steep + 0.03 * n2))
-    lit = 0.46 + 0.78 * lam
-    snow_col = P.mix(P.hx("#9fb0c8"), P.hx("#f8f6ec"), np.clip(lam * 1.15, 0, 1))
+    lit = 0.62 + 0.52 * lam
+    snow_col = P.mix(P.hx("#a9b6c6"), P.hx("#e6e8e2"), np.clip(lam * 1.15, 0, 1))
     col = P.mix(col, snow_col / np.maximum(lit[..., None], 0.35) * 0.95, snow)
 
-    col = col * (lit * (1.0 - 0.35 * ao))[..., None] * 1.12
+    col = col * (lit * (1.0 - 0.22 * ao))[..., None] * 1.05
     alpha = smoothstep(1.5, 9.0, h + 3.0 * n2)
     return np.clip(col, 0, 1), alpha
 
@@ -164,15 +164,15 @@ def hills_height(seed=21):
 
 HILL_STYLES = {
     "temperate": dict(
-        cover=[(0, "#496a26"), (0.5, "#6a8b31"), (1.0, "#93ab46")],
-        dry=[(0, "#7a7a34"), (1.0, "#b0a552")],
-        rock=[(0, "#7b705d"), (1.0, "#b2a78f")],
+        cover=[(0, "#5d7438"), (0.5, "#74893f"), (1.0, "#919f50")],
+        dry=[(0, "#7e7e40"), (1.0, "#aaa05a")],
+        rock=[(0, "#7a6e5a"), (1.0, "#b5a98e")],
         snow=2.0,
     ),
     "arid": dict(
-        cover=[(0, "#86743a"), (0.5, "#a99049"), (1.0, "#cbb36a")],
-        dry=[(0, "#9b8149"), (1.0, "#d4bd86")],
-        rock=[(0, "#8b6e4e"), (1.0, "#cfb289")],
+        cover=[(0, "#8e7c46"), (0.5, "#a89052"), (1.0, "#c3ad70")],
+        dry=[(0, "#9b8650"), (1.0, "#cdb88a")],
+        rock=[(0, "#92765a"), (1.0, "#c8ad88")],
         snow=2.0,
     ),
     "arctic": dict(
@@ -203,14 +203,26 @@ def shade_hills(h, u, v, seed=21, style="temperate"):
     t = np.clip(0.5 + 0.8 * n1 + 0.5 * n2, 0, 1)
     col = P.ramp(t, st["cover"])
     dry = P.smoothstep(0.05, 0.5, n1 * 1.6 + 0.2 * hn)
-    col = P.mix(col, P.ramp(np.clip(0.5 + n2, 0, 1), st["dry"]), dry * 0.45)
-    outcrop = P.smoothstep(0.095, 0.165, steep + 0.02 * n2) * 0.7
-    col = P.mix(col, P.ramp(np.clip(0.5 + 0.8 * n2, 0, 1), st["rock"]), outcrop * 0.85)
+    col = P.mix(col, P.ramp(np.clip(0.5 + n2, 0, 1), st["dry"]), dry * 0.35)
+    # rockiness: bare stone on every steep flank, on the crowns, and in broken ledges between
+    # (a ridged noise gives the outcrops hard edges), so a hill never reads as a mound of grass
+    ledge = 1.0 - np.abs(fbm(a, b, 13, 3, seed=seed + 8, warp=0.1) * 2.6)
+    crown = P.smoothstep(0.50, 0.85, hn + 0.20 * n1)
+    outcrop = np.clip(
+        P.smoothstep(0.045, 0.10, steep + 0.02 * n2) * 0.9
+        + crown * P.smoothstep(0.35, 0.70, ledge) * 0.7
+        + P.smoothstep(0.72, 0.92, ledge) * P.smoothstep(0.15, 0.5, hn) * 0.55,
+        0.0, 1.0,
+    )
+    rock_col = P.ramp(np.clip(0.5 + 0.8 * n2 + 0.25 * (ledge - 0.5), 0, 1), st["rock"])
+    strata = 0.5 + 0.5 * np.sin(h * 0.55 + n1 * 6.0)
+    rock_col = rock_col * (0.90 + 0.18 * strata)[..., None]
+    col = P.mix(col, rock_col, outcrop * 0.92)
     snow = P.smoothstep(st["snow"] - 0.08, st["snow"] + 0.06, hn + 0.12 * n1) * (1.0 - outcrop * 0.8)
-    lit = 0.50 + 0.72 * lam
-    snow_col = P.mix(P.hx("#9fb0c8"), P.hx("#f8f6ec"), np.clip(lam * 1.15, 0, 1))
+    lit = 0.60 + 0.58 * lam
+    snow_col = P.mix(P.hx("#a9b6c6"), P.hx("#e6e8e2"), np.clip(lam * 1.15, 0, 1))
     col = P.mix(col, snow_col / np.maximum(lit[..., None], 0.35) * 0.95, snow)
-    col = col * (lit * (1.0 - 0.30 * ao))[..., None] * 1.10
+    col = col * (lit * (1.0 - 0.28 * ao))[..., None] * 1.05
     alpha = smoothstep(1.0, 5.0, h + 2.0 * n2)
     return np.clip(col, 0, 1), alpha
 
@@ -264,9 +276,9 @@ def vegetation_surface(h, u, v, col, alpha, seed, cover, style):
         tree_top = np.where(visible, top, tree_top)
         leaves = np.where(visible, smoothstep(0.0, 0.20, crown), leaves)
         light = np.where(visible, np.clip(0.55 + (cv - v) / radius * 0.22 + (cu - u) / radius * 0.12 + crown * 0.22, 0, 1), light)
-    colors = ("#153e28", "#548635") if jungle else ("#1d382b", "#527149")
+    colors = ("#365a30", "#6a9448") if jungle else ("#3d5230", "#6f8a4c")
     if style == "arctic":
-        colors = ("#233f3d", "#83988a")
+        colors = ("#3f5442", "#92a68c")
     canopy = P.mix(P.hx(colors[0]), P.hx(colors[1]), light)
     col = P.mix(col, canopy, leaves)
     alpha = np.maximum(alpha, leaves)

@@ -819,10 +819,27 @@ impl Map {
         }
         neighbors
     }
-    /// Base terrain at `(x, y)`, wrapping horizontally; past bounded edges is open ocean.
+    /// Base terrain at `(x, y)`, wrapping horizontally; past bounded edges is open ocean. Past
+    /// the top and bottom of a lattice the rows are mirrored, so the ground drawn under the
+    /// frame there carries on the edge's own coast and land instead of inventing a shore.
     fn terrain_at(&self, x: i32, y: i32) -> Terrain {
-        self.get(Coord::new(x, y))
-            .map_or(Terrain::Ocean, |t| t.terrain)
+        let p = Coord::new(x, y);
+        let p = match self.lattice {
+            Some(lattice) => {
+                let (cx, cy) = lattice.native(p);
+                let last = lattice.rows - 1;
+                let mirrored = if cy < 0 {
+                    -cy
+                } else if cy > last {
+                    2 * last - cy
+                } else {
+                    cy
+                };
+                lattice.cell(cx, mirrored)
+            }
+            None => p,
+        };
+        self.get(p).map_or(Terrain::Ocean, |t| t.terrain)
     }
     /// The eight neighbours, orthogonal ones first, so ties between land types break the same way
     /// for every cell that touches a tile.
@@ -1509,6 +1526,26 @@ mod tests {
         assert_eq!(upright.screen_bounds(), bounds_of(&upright));
         let square = Map::filled(7, 4, Terrain::Ocean);
         assert_eq!(square.screen_bounds(), bounds_of(&square));
+    }
+    #[test]
+    fn past_a_lattice_edge_the_ground_mirrors_the_edge_rows() {
+        let lattice = Lattice {
+            columns: 4,
+            rows: 6,
+        };
+        let mut map = Map::embedded(lattice, Terrain::Ocean);
+        for cx in 0..2 * lattice.columns {
+            for cy in 0..5 {
+                if (cx + cy) % 2 == 0 {
+                    map.get_mut(lattice.cell(cx, cy)).unwrap().terrain = Terrain::Grass;
+                }
+            }
+        }
+        // A cell wholly past the top edge carries on the land there, with no shore.
+        let corner = lattice.cell(2, -4);
+        assert!(!map.contains(corner));
+        assert_eq!(map.ground_cell(corner), Some(0));
+        assert_eq!(map.water_cell(corner), None);
     }
     #[test]
     fn a_lattice_roundtrips_and_its_void_must_be_empty() {

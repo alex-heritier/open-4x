@@ -37,13 +37,15 @@ def kuwahara(arr: np.ndarray, radius: int = 2) -> np.ndarray:
     return out
 
 
-def grade(rgb, alpha_shape, sat=1.14, contrast=1.1, key=0.13):
+def grade(rgb, alpha_shape, sat=1.14, contrast=1.1, key=0.13, warm=0.0):
     """Colour grade: richer saturation, a touch more contrast, and the shared upper-left key light
     (brighter top-left, falling off to the lower right) so every sprite agrees with the terrain."""
     h, w = rgb.shape[:2]
     lum = (rgb @ np.array([0.3, 0.59, 0.11], dtype=np.float32))[..., None]
     rgb = lum + (rgb - lum) * sat
     rgb = (rgb - 0.42) * contrast + 0.42
+    if warm:  # push reds up and blues down: a sunlit, golden cast
+        rgb = rgb * np.array([1.0 + warm, 1.0 + warm * 0.25, 1.0 - warm], dtype=np.float32)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     ramp = 1.0 + key * (0.5 - (0.55 * xx / w + 0.45 * yy / h)) * 2.0
     return rgb * ramp[..., None]

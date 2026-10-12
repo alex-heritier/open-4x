@@ -2,7 +2,7 @@
 """Render every picture in the base pack: SVG scenes -> rsvg-convert -> painterly finishing -> PNG.
 
     python build.py                 # everything
-    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | farms | units | ships | icons | chrome | resources)
+    python build.py terrain roads   # only some groups (terrain | roads | overlays | relief | sprites | farms | units | ships | icons | chrome | margin | resources)
 
 Writes PNGs into ../assets/packs/base and the vector sources into ./svg.
 Needs: python3 + numpy + pillow (see requirements.txt) and `rsvg-convert` (librsvg) on PATH.
@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from PIL import Image
 
-from forge import chrome, cities, emblems, fleet, icons, improvements, nature, overlay, parchment, relief, resources, rivers, roads, scenes, terrain, troops
+from forge import chrome, cities, emblems, fleet, icons, improvements, margin, nature, overlay, parchment, relief, resources, rivers, roads, scenes, terrain, troops
 from forge.paint import paint, render_sprite
 from forge.util import PACK, downsample, indexed, save_png, write_svg
 
@@ -59,15 +59,19 @@ def build_roads():
 
 
 def relief_sprite(layer, rel):
-    img = paint(layer, radius=1, grain=0.10, strokes=0.05, grade_kw={"sat": 1.1, "contrast": 1.08, "key": 0.10})
+    img = paint(layer, radius=1, grain=0.10, strokes=0.05, grade_kw={"sat": 0.95, "contrast": 0.92, "key": 0.08, "warm": 0.04})
     save_png(downsample(img, 256, 224), rel)
+
+
+# Terrain cover and relief are backdrop for the cities and units: a flatter, less saturated grade.
+COVER_GRADE = {"sat": 0.95, "contrast": 0.90, "key": 0.08, "warm": 0.05}
 
 
 def build_overlays():
     """Cover and relief that sit on top of the ground: pine, jungle, marsh, hills and mountains."""
-    sprite("pine", nature.build_pine_svg(), (256, 224), "sprites/pine.png", ss=4, seed=4, radius=1)
-    sprite("jungle", nature.build_jungle_svg(), (256, 224), "sprites/jungle.png", ss=4, seed=5, radius=1)
-    sprite("marsh", nature.build_marsh_svg(), (256, 224), "sprites/marsh.png", ss=4, seed=6, radius=1)
+    sprite("pine", nature.build_pine_svg(), (256, 224), "sprites/pine.png", ss=4, seed=4, radius=1, grade_kw=COVER_GRADE)
+    sprite("jungle", nature.build_jungle_svg(), (256, 224), "sprites/jungle.png", ss=4, seed=5, radius=1, grade_kw=COVER_GRADE)
+    sprite("marsh", nature.build_marsh_svg(), (256, 224), "sprites/marsh.png", ss=4, seed=6, radius=1, grade_kw=COVER_GRADE)
     build_relief()
 
 
@@ -91,7 +95,7 @@ def city_scene(flavor, build):
 
 
 def build_sprites():
-    sprite("forest", nature.build_forest_svg(), (256, 224), "sprites/forest.png", ss=4, seed=4, radius=1)
+    sprite("forest", nature.build_forest_svg(), (256, 224), "sprites/forest.png", ss=4, seed=4, radius=1, grade_kw=COVER_GRADE)
     build_cities()
     build_farms()
     # Tile overlay: the same 2:1 diamond as a terrain cell, 256x128 shown at 128x64.
@@ -202,6 +206,13 @@ def build_parchment():
         print(f"  {name}", flush=True)
 
 
+def build_margin():
+    """The chart's margin past the top and bottom of an upright world (see `forge/margin.py`)."""
+    for name, im in margin.render_all().items():
+        save_png(im, f"margin/{name}.png")
+        print(f"  {name}", flush=True)
+
+
 def build_chrome():
     """The window chrome: frames, paper and slate, painted emblems and the terrain panel's landscapes."""
     for module in (chrome, emblems, scenes):
@@ -252,6 +263,7 @@ GROUPS = {
     "icons": build_icons,
     "chrome": build_chrome,
     "parchment": build_parchment,
+    "margin": build_margin,
     "resources": build_resources,
 }
 

@@ -41,6 +41,24 @@ DESERT_STOPS = [(0.00, "#ad8b4a"), (0.35, "#c9a766"), (0.65, "#ddc183"), (1.00, 
 TUNDRA_STOPS = [(0.00, "#566049"), (0.30, "#6e7860"), (0.60, "#8a9378"), (1.00, "#b0b6a2")]
 
 
+# Terrain is the stage, not the cast: cities and units must read first.  Every ground type is
+# pulled toward its own mean colour (less contrast, a little less saturation) and loses its finest
+# grain, so the tile keeps its character but never competes with the sprites standing on it.
+GROUND_CALM = 0.55  # share of the painted variation kept
+GROUND_SAT = 0.92
+GROUND_WARM = np.array([1.025, 1.005, 0.965], dtype=np.float32)  # sun-warmed, never cold
+_LUM = np.array([0.3, 0.59, 0.11], dtype=np.float32)
+
+
+def _calm(col, keep=GROUND_CALM, sat=GROUND_SAT):
+    """Compress `col` toward its mean, per channel.  The mean is a constant of the periodic field,
+    so cells that share an edge still agree there."""
+    mean = col.reshape(-1, 3).mean(axis=0)
+    col = mean + (col - mean) * keep
+    lum = (col @ _LUM)[..., None]
+    return np.clip((lum + (col - lum) * sat) * GROUND_WARM, 0, 1)
+
+
 def _vertex_weights(u, v):
     """Pyramid weights of the N/E/S/W vertices plus the centre share."""
     w = np.stack([np.maximum(-v, 0), np.maximum(u, 0), np.maximum(v, 0), np.maximum(-u, 0)])
@@ -85,37 +103,37 @@ class Fields:
         low = fbm(a, b, 3, 3, seed=11, warp=0.2)
         mid = fbm(a, b, 11, 3, seed=12, warp=0.12)
         fine = fbm(a, b, 46, 2, seed=13)
-        t = unit(1.15 * low + 1.0 * mid + 0.7 * fine)
+        t = unit(1.15 * low + 1.0 * mid + 0.35 * fine)
         col = P.ramp(t, GRASSLAND_STOPS)
         meadow = P.smoothstep(0.15, 0.55, fbm(a, b, 5, 3, seed=14, warp=0.25) * 1.5)
         col = P.mix(col, P.hx("#95a548"), meadow * 0.30)
         shade = P.smoothstep(0.10, 0.45, fbm(a, b, 18, 2, seed=15) * 1.5)
-        col = col * (1.0 - 0.26 * shade)[..., None]
-        col = col * (1.0 + 0.30 * self.bump)[..., None]
+        col = col * (1.0 - 0.18 * shade)[..., None]
+        col = col * (1.0 + 0.16 * self.bump)[..., None]
         tuft = P.smoothstep(0.28, 0.5, fbm(a, b, 64, 1, seed=16) * 1.7)
-        col = col * (1.0 - 0.22 * tuft)[..., None]
-        return np.clip(col, 0, 1)
+        col = col * (1.0 - 0.07 * tuft)[..., None]
+        return _calm(col)
 
     def _plains(self):
         a, b = self.a, self.b
         low = fbm(a, b, 3, 3, seed=111, warp=0.2)
         mid = fbm(a, b, 9, 3, seed=112, warp=0.12)
         fine = fbm(a, b, 42, 2, seed=113)
-        t = unit(1.1 * low + 1.0 * mid + 0.8 * fine)
+        t = unit(1.1 * low + 1.0 * mid + 0.4 * fine)
         col = P.ramp(t, PLAINS_STOPS)
         # sun-bleached ochre drifts and the odd strip of darker scrub, like mottled steppe
         ochre = P.smoothstep(0.0, 0.40, fbm(a, b, 5, 3, seed=114, warp=0.25) * 1.4)
         col = P.mix(col, P.hx("#a98f4a"), ochre * 0.45)
         scrub = P.smoothstep(0.12, 0.5, fbm(a, b, 14, 2, seed=115) * 1.5)
-        col = P.mix(col, P.hx("#6a6a30"), scrub * 0.32)
+        col = P.mix(col, P.hx("#6a6a30"), scrub * 0.22)
         streak = fbm(a, b, 10, 2, seed=116, aniso=3.0, warp=0.1)
         col = col * (1.0 + 0.07 * streak)[..., None]
-        col = col * (1.0 + 0.28 * self.bump)[..., None]
-        return np.clip(col, 0, 1)
+        col = col * (1.0 + 0.15 * self.bump)[..., None]
+        return _calm(col)
 
     def _desert(self):
         a, b = self.a, self.b
-        t = unit(1.3 * fbm(a, b, 6, 3, seed=41, warp=0.2) + 0.8 * fbm(a, b, 40, 2, seed=42))
+        t = unit(1.3 * fbm(a, b, 6, 3, seed=41, warp=0.2) + 0.4 * fbm(a, b, 40, 2, seed=42))
         col = P.ramp(t, DESERT_STOPS)
         dunes = fbm(a, b, 7, 2, seed=43, aniso=4.0, warp=0.25)
         crest = 1.0 - np.abs(dunes * 3.0)
@@ -123,12 +141,12 @@ class Fields:
         col = col * (1.0 + 0.07 * dunes)[..., None]
         rock = P.smoothstep(0.30, 0.55, fbm(a, b, 9, 3, seed=44, warp=0.2) * 1.6)
         col = P.mix(col, P.hx("#9b7c4a"), rock * 0.28)
-        col = col * (1.0 + 0.20 * self.bump)[..., None]
-        return np.clip(col, 0, 1)
+        col = col * (1.0 + 0.11 * self.bump)[..., None]
+        return _calm(col)
 
     def _tundra(self):
         a, b = self.a, self.b
-        t = unit(1.2 * fbm(a, b, 4, 3, seed=141, warp=0.2) + 0.9 * fbm(a, b, 30, 2, seed=142))
+        t = unit(1.2 * fbm(a, b, 4, 3, seed=141, warp=0.2) + 0.45 * fbm(a, b, 30, 2, seed=142))
         col = P.ramp(t, TUNDRA_STOPS)
         moss = P.smoothstep(0.05, 0.45, fbm(a, b, 8, 3, seed=143, warp=0.2) * 1.5)
         col = P.mix(col, P.hx("#6b7a43"), moss * 0.30)
@@ -137,9 +155,9 @@ class Fields:
         lit = 0.95 + 0.22 * np.clip(self.bump, -0.25, 0.25) + 0.025 * fbm(a, b, 30, 2, seed=147)
         col = P.mix(col, P.hx("#e4ecef") * lit[..., None], snow * 0.9)
         speck = P.smoothstep(0.30, 0.5, fbm(a, b, 56, 1, seed=145) * 1.7)
-        col = col * (1.0 - 0.20 * speck)[..., None]
-        col = col * (1.0 + 0.22 * self.bump)[..., None]
-        return np.clip(col, 0, 1)
+        col = col * (1.0 - 0.08 * speck)[..., None]
+        col = col * (1.0 + 0.12 * self.bump)[..., None]
+        return _calm(col)
 
     def _beach(self):
         """Pale shingle/sand that rims every shoreline, whatever the land behind it."""
@@ -147,7 +165,7 @@ class Fields:
         t = unit(1.3 * fbm(a, b, 6, 3, seed=241, warp=0.2) + 0.8 * fbm(a, b, 40, 2, seed=242))
         col = P.ramp(t, DESERT_STOPS)
         col = P.mix(col, P.hx("#e9dfc0"), 0.35)
-        return np.clip(col * (1.0 + 0.20 * self.bump)[..., None], 0, 1)
+        return _calm(col * (1.0 + 0.12 * self.bump)[..., None], keep=0.65)
 
 
 def _edge_alpha(f):
@@ -179,15 +197,15 @@ def _water(f: Fields, depth):
     """Painted sea.  `depth` in 0..1 picks the colour ramp; ripples and glints are fine-grained on
     purpose: open-sea cells repeat, so no blob may stand out per tile."""
     base = P.ramp(depth, P.WATER_STOPS)
-    shade = 1.0 + 0.30 * f.ripple + 0.16 * f.ripple2
+    shade = 1.0 + 0.17 * f.ripple + 0.06 * f.ripple2
     base = base * shade[..., None]
     ridge = 1.0 - np.abs(f.ripple2 * 3.2)
     streak = P.smoothstep(0.72, 0.97, ridge)
-    base = P.mix(base, P.hx("#78c4cc"), streak * 0.20 * (1.0 - 0.5 * depth))
+    base = P.mix(base, P.hx("#78c4cc"), streak * 0.10 * (1.0 - 0.5 * depth))
     ridge1 = 1.0 - np.abs(f.ripple * 3.0)
-    base = P.mix(base, P.hx("#0f3f52"), P.smoothstep(0.78, 0.97, ridge1) * 0.20)
+    base = P.mix(base, P.hx("#0f3f52"), P.smoothstep(0.78, 0.97, ridge1) * 0.10)
     glint = P.smoothstep(0.55, 0.85, f.sparkle * 1.7)
-    return P.mix(base, P.hx("#d8f1ec"), glint * (0.24 - 0.10 * depth))
+    return P.mix(base, P.hx("#d8f1ec"), glint * (0.10 - 0.05 * depth))
 
 
 def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
@@ -217,9 +235,9 @@ def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
     foam = 1.0 - P.smoothstep(0.010, 0.050, near + 0.030 * f.foam_noise)
     swell = 1.0 - P.smoothstep(0.012, 0.040, np.abs(m - 0.17 + 0.03 * f.foam_noise))
     swell = swell * P.smoothstep(0.0, 0.3, np.abs(f.foam_noise) + 0.2)
-    water = P.mix(water, P.hx(P.FOAM), np.clip(swell * 0.34, 0, 1))
+    water = P.mix(water, P.hx(P.FOAM), np.clip(swell * 0.20, 0, 1))
     shore_glow = (1.0 - P.smoothstep(0.0, 0.16, m)) * P.smoothstep(-0.01, 0.01, m)
-    water = P.mix(water, P.hx("#8fd6cc"), shore_glow * 0.30)
+    water = P.mix(water, P.hx("#8fcbc2"), shore_glow * 0.20)
 
     # beach strip on the land side, fading out inland (alpha), darker where the sea wets it
     strip = P.smoothstep(-0.40, -0.07, m + f.beach_edge * 0.10) * (1.0 - P.smoothstep(0.0, 0.03, m))
@@ -231,12 +249,12 @@ def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
 
     rgb = P.mix(beach, water, water_amt)
     alpha = water_amt + (1.0 - water_amt) * beach_a
-    rgb = P.mix(rgb, P.hx(P.FOAM), np.clip(foam * 0.92, 0, 1))
-    alpha = np.maximum(alpha, np.clip(foam * 0.92, 0, 1))
+    rgb = P.mix(rgb, P.hx(P.FOAM), np.clip(foam * 0.70, 0, 1))
+    alpha = np.maximum(alpha, np.clip(foam * 0.70, 0, 1))
     # a hair-thin dark waterline under the foam reads as the painted shore contour
     contour = 1.0 - P.smoothstep(0.0, 0.020, np.abs(m + 0.045))
-    rgb = rgb * (1.0 - 0.20 * contour * (1.0 - foam))[..., None]
-    alpha = np.maximum(alpha, 0.55 * contour)
+    rgb = rgb * (1.0 - 0.12 * contour * (1.0 - foam))[..., None]
+    alpha = np.maximum(alpha, 0.40 * contour)
     return np.dstack([np.clip(rgb, 0, 1), np.clip(alpha, 0, 1) * alpha_edge])
 
 
@@ -248,15 +266,15 @@ def interior_weight(f: Fields):
 
 # soft tonal drift per pure terrain: (amplitude, per-channel response)
 _GROUND_VARIANT = {
-    0: (0.20, np.array([0.95, 1.00, 0.72], dtype=np.float32)),  # grassland drifts yellow <-> deep green
-    1: (0.20, np.array([1.00, 0.97, 0.78], dtype=np.float32)),
-    2: (0.18, np.array([1.00, 0.95, 0.82], dtype=np.float32)),
-    3: (0.18, np.array([0.97, 1.00, 0.97], dtype=np.float32)),
+    0: (0.12, np.array([0.95, 1.00, 0.72], dtype=np.float32)),  # grassland drifts yellow <-> deep green
+    1: (0.12, np.array([1.00, 0.97, 0.78], dtype=np.float32)),
+    2: (0.11, np.array([1.00, 0.95, 0.82], dtype=np.float32)),
+    3: (0.11, np.array([0.97, 1.00, 0.97], dtype=np.float32)),
 }
 _WATER_VARIANT = {
-    1: (0.20, np.array([0.80, 1.00, 1.04], dtype=np.float32)),
-    2: (0.26, np.array([0.80, 1.00, 1.08], dtype=np.float32)),
-    3: (0.30, np.array([0.78, 0.98, 1.10], dtype=np.float32)),
+    1: (0.12, np.array([0.80, 1.00, 1.04], dtype=np.float32)),
+    2: (0.15, np.array([0.80, 1.00, 1.08], dtype=np.float32)),
+    3: (0.17, np.array([0.78, 0.98, 1.10], dtype=np.float32)),
 }
 
 
