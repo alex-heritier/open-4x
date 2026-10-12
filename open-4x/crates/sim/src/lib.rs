@@ -421,6 +421,9 @@ impl Game {
                 .unwrap_or_else(|| borders::default_level(start.population, start.capital));
         }
         game.assign_start_territory();
+        if scenario.regional_fill {
+            game.fill_regional_territory();
+        }
         game.refresh_harvest();
         for start in &scenario.units {
             let owner = nation(&start.nation)?;

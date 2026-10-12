@@ -167,6 +167,10 @@ pub struct Scenario {
     /// unit or city. Meant for historical scenarios whose geography is common knowledge.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub charted: bool,
+    /// Assign named-region land left outside normal city borders to the nearest city of
+    /// that region's nation. Intended for whole-world historical maps with remote interiors.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub regional_fill: bool,
     #[serde(default)]
     pub rules: RuleOverrides,
     /// Terrain glyph rows plus the region layer, and optionally pre-built improvements.

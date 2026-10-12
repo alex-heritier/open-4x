@@ -96,6 +96,58 @@ impl Game {
         self.sync_territory_owners();
     }
 
+    /// Fill named historical regions left outside normal cultural borders. Each remaining
+    /// land tile goes to the nearest city owned by its region's nation; unnamed fringe and
+    /// regions without such a city stay unclaimed.
+    pub(crate) fn fill_regional_territory(&mut self) {
+        let cities: Vec<(Id, Id, Coord, u8, i32)> = self
+            .cities
+            .values()
+            .map(|city| {
+                (
+                    city.id,
+                    city.owner,
+                    city.position,
+                    city.border,
+                    city.population,
+                )
+            })
+            .collect();
+        for i in 0..self.map.tiles.len() {
+            let (position, land, claimed, region) = {
+                let tile = &self.map.tiles[i];
+                (tile.position, tile.is_land(), tile.claim, tile.region)
+            };
+            if !land || claimed != 0 || region == 0 {
+                continue;
+            }
+            let Some(nation) = self
+                .regions
+                .get(usize::from(region) - 1)
+                .map(|region| region.nation)
+            else {
+                continue;
+            };
+            let nearest = cities
+                .iter()
+                .filter(|(_, owner, ..)| *owner == nation)
+                .map(|city| {
+                    (
+                        self.map.distance_squared(city.2, position),
+                        std::cmp::Reverse(city.3),
+                        std::cmp::Reverse(city.4),
+                        city.0,
+                    )
+                })
+                .min();
+            if let Some((_, _, _, city)) = nearest {
+                self.map.tiles[i].claim = city;
+                self.map.tiles[i].owner = nation;
+            }
+        }
+        self.sync_territory_owners();
+    }
+
     /// A new city claims only land nobody holds yet, plus the square it stands on.
     pub(crate) fn claim_for_new_city(&mut self, id: Id) {
         let city = self.cities[&id].clone();
@@ -142,6 +194,8 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Region;
+    use crate::tests::arena;
 
     #[test]
     fn reach_matches_civ3_tile_counts() {
@@ -165,5 +219,31 @@ mod tests {
         assert_eq!(default_level(9, false), 4);
         assert_eq!(default_level(3, true), 3);
         assert_eq!(default_level(12, true), 5);
+    }
+
+    #[test]
+    fn regional_fill_puts_remote_named_land_with_the_nearest_matching_city() {
+        let mut game = arena(24, 12);
+        let capital = game.city_at(Coord::new(1, 1)).unwrap();
+        let fringe = Coord::new(22, 0);
+        for tile in &mut game.map.tiles {
+            tile.region = 1;
+        }
+        game.map.get_mut(fringe).unwrap().region = 0;
+        game.regions = vec![Region {
+            id: "red-land".to_string(),
+            name: "Red Land".to_string(),
+            nation: 1,
+        }];
+
+        game.assign_start_territory();
+        let remote = Coord::new(12, 6);
+        assert_eq!(game.map.get(remote).unwrap().claim, 0);
+        game.fill_regional_territory();
+
+        assert_eq!(game.map.get(remote).unwrap().claim, capital);
+        assert_eq!(game.map.get(remote).unwrap().owner, 1);
+        assert_eq!(game.map.get(fringe).unwrap().claim, 0);
+        assert_eq!(game.map.get(fringe).unwrap().owner, 0);
     }
 }

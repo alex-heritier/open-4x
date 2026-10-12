@@ -77,6 +77,20 @@ struct Placed {
     pop: u32,
     capital: bool,
     dev: u32,
+    border: Option<u8>,
+}
+
+/// The explicit cultural border level of a city table entry, if it names a
+/// valid one. `None` keeps the size-derived default.
+fn city_border(city: &CitySource) -> Result<Option<u8>, String> {
+    match city.border {
+        Some(level) if (1..=6).contains(&level) => Ok(Some(level)),
+        Some(level) => Err(format!(
+            "city {} ({}) names border {level}, want 1-6",
+            city.name, city.nation
+        )),
+        None => Ok(None),
+    }
 }
 
 pub fn build(
@@ -262,6 +276,7 @@ pub fn build(
                     pop: city.pop,
                     capital: city.capital,
                     dev: city.dev.unwrap_or(src.nations[nation].dev),
+                    border: city_border(city)?,
                 });
             }
             None if city.capital => {
@@ -400,7 +415,7 @@ pub fn build(
             population: pop,
             industry,
             capital: city.capital,
-            border: None,
+            border: city.border,
         });
     }
     cities.sort_by(|a, b| {
@@ -430,6 +445,7 @@ pub fn build(
         commander: src.meta.commander.clone(),
         intro: src.meta.intro.clone(),
         charted: src.meta.charted,
+        regional_fill: src.meta.regional_fill,
         rules: src.meta.rules.clone(),
         map,
         nations,
@@ -615,4 +631,57 @@ fn connectivity(scenario: &Scenario) -> Vec<String> {
         format!("water bodies ({}): {}", seas.len(), describe(&seas, 24)),
         format!("land masses ({}): {}", lands.len(), describe(&lands, 24)),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(border: Option<u8>) -> CitySource {
+        CitySource {
+            nation: "canada".to_string(),
+            name: "Winnipeg".to_string(),
+            lon: -97.14,
+            lat: 49.9,
+            pop: 5,
+            capital: false,
+            dev: None,
+            border,
+        }
+    }
+
+    #[test]
+    fn explicit_border_reaches_the_scenario() {
+        assert_eq!(city_border(&entry(Some(6))).unwrap(), Some(6));
+        assert_eq!(city_border(&entry(Some(1))).unwrap(), Some(1));
+    }
+
+    #[test]
+    fn missing_border_keeps_the_size_derived_default() {
+        assert_eq!(city_border(&entry(None)).unwrap(), None);
+    }
+
+    #[test]
+    fn out_of_range_border_fails_the_build() {
+        for level in [0, 7, 255] {
+            assert!(
+                city_border(&entry(Some(level))).is_err(),
+                "border {level} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn city_table_entries_read_an_explicit_border() {
+        let parsed: CitySource = serde_json::from_str(
+            r#"{"nation":"canada","name":"Winnipeg","lon":-97.14,"lat":49.9,"pop":5,"border":6}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.border, Some(6));
+        let plain: CitySource = serde_json::from_str(
+            r#"{"nation":"canada","name":"Winnipeg","lon":-97.14,"lat":49.9,"pop":5}"#,
+        )
+        .unwrap();
+        assert_eq!(plain.border, None);
+    }
 }

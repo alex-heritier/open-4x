@@ -142,8 +142,14 @@ fn build(args: &[String]) -> Result<(), String> {
     }
 
     let land = scenario.map.tiles.iter().filter(|t| t.is_land()).count();
+    let unclaimed = game
+        .map
+        .tiles
+        .iter()
+        .filter(|t| t.is_land() && t.owner == 0)
+        .count();
     println!(
-        "{}: {} nations, {} regions, {} cities, {} units, {} wars, {land} land tiles; {} bytes in {:.1}s",
+        "{}: {} nations, {} regions, {} cities, {} units, {} wars, {land} land tiles ({unclaimed} beyond any city's border); {} bytes in {:.1}s",
         scenario.id,
         scenario.nations.len(),
         scenario.regions.len(),

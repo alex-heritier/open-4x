@@ -24,6 +24,8 @@ pub struct Meta {
     #[serde(default)]
     pub charted: bool,
     #[serde(default)]
+    pub regional_fill: bool,
+    #[serde(default)]
     pub rules: RuleOverrides,
     #[serde(default)]
     pub wars: Vec<WarStart>,
@@ -110,6 +112,11 @@ pub struct CitySource {
     /// Development tier 0-10 for this city when it differs from its nation's (colonies).
     #[serde(default)]
     pub dev: Option<u32>,
+    /// Cultural border level 1-6 for this city when it differs from the
+    /// size-derived default: isolated outposts that anchor wide country reach
+    /// farther than their population alone would allow.
+    #[serde(default)]
+    pub border: Option<u8>,
 }
 
 /// A hand correction to the terrain the climate and elevation data produce: every tile of

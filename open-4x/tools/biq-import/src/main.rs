@@ -215,6 +215,7 @@ fn run(input: &str, out: &str) -> Result<(), String> {
             with --nation."
             .into(),
         charted: true,
+        regional_fill: false,
         rules: RuleOverrides {
             victory_industry: Some(1_000_000),
             research_cost: Some(3000),
