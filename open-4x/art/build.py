@@ -103,7 +103,7 @@ def build_sprites():
 # style's own boundary (hedge, earthen bund, fence).
 FARMS = {
     "farm": (improvements.build_farm, 6, improvements.HEDGE),
-    "farm_rice": (improvements.build_rice, 7, (0x8D / 255, 0x7B / 255, 0x4A / 255)),
+    "farm_rice": (improvements.build_rice, 7, (0xA9 / 255, 0x9A / 255, 0x62 / 255)),
     "farm_corn": (improvements.build_corn, 8, (0x6A / 255, 0x4A / 255, 0x2A / 255)),
     "farm_wheat": (improvements.build_wheat, 9, improvements.HEDGE),
 }

@@ -3,7 +3,7 @@ use fourx_content::Content;
 use fourx_runtime::{Host, Start};
 use fourx_sim::Command;
 
-fn dawn_at_peace(seed: u64) -> Host {
+fn dawn_content_at_peace() -> Content {
     let mut content = Content::base();
     content
         .scenarios
@@ -11,6 +11,10 @@ fn dawn_at_peace(seed: u64) -> Host {
         .expect("the starter ships with the base pack")
         .wars
         .clear();
+    content
+}
+
+fn start_dawn(content: Content, seed: u64) -> Host {
     Host::start(
         content,
         Start {
@@ -20,6 +24,10 @@ fn dawn_at_peace(seed: u64) -> Host {
         },
     )
     .expect("the starter starts")
+}
+
+fn dawn_at_peace(seed: u64) -> Host {
+    start_dawn(dawn_content_at_peace(), seed)
 }
 
 fn end_turn(host: &mut Host) {
@@ -44,7 +52,16 @@ fn the_starter_is_won_by_industry_in_weeks() {
 
 #[test]
 fn every_city_gathers_something_and_cities_level_off() {
-    let mut host = dawn_at_peace(2);
+    // The computer nations expand and improve their land, so left alone they win by industry
+    // within the month. Put the victory out of reach: this test is about the land, not the race.
+    let mut content = dawn_content_at_peace();
+    content
+        .scenarios
+        .get_mut("dawn-straits")
+        .expect("the starter ships with the base pack")
+        .rules
+        .victory_industry = Some(1_000_000);
+    let mut host = start_dawn(content, 2);
     let starting: Vec<_> = host.game.cities.values().map(|c| c.population).collect();
     for _ in 0..30 {
         end_turn(&mut host);
