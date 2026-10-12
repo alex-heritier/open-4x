@@ -146,19 +146,19 @@ def project(h, col, alpha):
 
 
 def hills_height(seed=21):
-    """Soft rounded rises: three overlapping domes, a few tens of pixels tall (mountains reach 130+)."""
+    """Subtle rolling swells: one broad low dome plus two faint shoulders (mountains reach 130+)."""
     u, v = np.meshgrid(np.linspace(0, 1, GRID, dtype=np.float32), np.linspace(0, 1, GRID, dtype=np.float32), indexing="ij")
 
     def dome(cu, cv, radius, amp):
         r = np.clip(np.hypot(u - cu, v - cv) / radius, 0.0, 1.0)
-        return amp * (0.5 + 0.5 * np.cos(np.pi * r)) ** 1.15  # flat top, soft skirts
+        return amp * (0.5 + 0.5 * np.cos(np.pi * r))  # round top, wide soft skirts
 
     rng = np.random.default_rng(seed)
     j = rng.uniform(-0.04, 0.04, 6)
-    h = dome(0.50 + j[0], 0.50 + j[1], 0.44, 50.0) + dome(0.27 + j[2], 0.66 + j[3], 0.27, 34.0) + dome(0.74 + j[4], 0.32 + j[5], 0.30, 38.0)
+    h = dome(0.50 + j[0], 0.50 + j[1], 0.52, 30.0) + dome(0.28 + j[2], 0.66 + j[3], 0.30, 12.0) + dome(0.73 + j[4], 0.33 + j[5], 0.32, 14.0)
     a, b = u * 0.97, v * 0.97
-    env = np.clip(h / 20.0, 0.0, 1.0)
-    h = h + env * (fbm(a, b, 7, 3, seed=seed, warp=0.15) * 7.0 + fbm(a, b, 22, 2, seed=seed + 3) * 1.8)
+    env = np.clip(h / 12.0, 0.0, 1.0)
+    h = h + env * (fbm(a, b, 4, 3, seed=seed, warp=0.15) * 3.2 + fbm(a, b, 18, 2, seed=seed + 3) * 1.0)
     return np.maximum(h, 0.0).astype(np.float32), u, v
 
 
@@ -186,7 +186,7 @@ HILL_STYLES = {
 
 def shade_hills(h, u, v, seed=21, style="temperate"):
     st = HILL_STYLES[style]
-    G = 400.0
+    G = 560.0  # wider ground units than the mountains' 400: the same rise reads as a gentler slope
     gy, gx = np.gradient(h, G / GRID)
     nz = 1.0 / np.sqrt(1.0 + gx**2 + gy**2)
     nx, ny = -gx * nz, -gy * nz
@@ -198,31 +198,31 @@ def shade_hills(h, u, v, seed=21, style="temperate"):
     n1 = fbm(a, b, 9, 3, seed=seed + 4)
     n2 = fbm(a, b, 38, 2, seed=seed + 5)
     ao = np.clip((_window_mean(h, -5, 5, -5, 5) - h) / 7.0, 0.0, 1.0)
-    hn = np.clip(h / 55.0, 0.0, 1.2)
+    hn = np.clip(h / 34.0, 0.0, 1.2)
 
     t = np.clip(0.5 + 0.8 * n1 + 0.5 * n2, 0, 1)
     col = P.ramp(t, st["cover"])
     dry = P.smoothstep(0.05, 0.5, n1 * 1.6 + 0.2 * hn)
     col = P.mix(col, P.ramp(np.clip(0.5 + n2, 0, 1), st["dry"]), dry * 0.35)
-    # rockiness: bare stone on every steep flank, on the crowns, and in broken ledges between
-    # (a ridged noise gives the outcrops hard edges), so a hill never reads as a mound of grass
+    # outcrops: faint stone flecks on the steepest flanks and highest crowns only,
+    # so the hill reads as grass first and rock a distant second
     ledge = 1.0 - np.abs(fbm(a, b, 13, 3, seed=seed + 8, warp=0.1) * 2.6)
-    crown = P.smoothstep(0.50, 0.85, hn + 0.20 * n1)
+    crown = P.smoothstep(0.62, 0.95, hn + 0.20 * n1)
     outcrop = np.clip(
-        P.smoothstep(0.045, 0.10, steep + 0.02 * n2) * 0.9
-        + crown * P.smoothstep(0.35, 0.70, ledge) * 0.7
-        + P.smoothstep(0.72, 0.92, ledge) * P.smoothstep(0.15, 0.5, hn) * 0.55,
+        P.smoothstep(0.10, 0.20, steep + 0.02 * n2) * 0.55
+        + crown * P.smoothstep(0.45, 0.75, ledge) * 0.35
+        + P.smoothstep(0.80, 0.95, ledge) * P.smoothstep(0.25, 0.6, hn) * 0.30,
         0.0, 1.0,
     )
     rock_col = P.ramp(np.clip(0.5 + 0.8 * n2 + 0.25 * (ledge - 0.5), 0, 1), st["rock"])
     strata = 0.5 + 0.5 * np.sin(h * 0.55 + n1 * 6.0)
     rock_col = rock_col * (0.90 + 0.18 * strata)[..., None]
-    col = P.mix(col, rock_col, outcrop * 0.92)
+    col = P.mix(col, rock_col, outcrop * 0.85)
     snow = P.smoothstep(st["snow"] - 0.08, st["snow"] + 0.06, hn + 0.12 * n1) * (1.0 - outcrop * 0.8)
-    lit = 0.60 + 0.58 * lam
+    lit = 0.72 + 0.36 * lam
     snow_col = P.mix(P.hx("#a9b6c6"), P.hx("#e6e8e2"), np.clip(lam * 1.15, 0, 1))
     col = P.mix(col, snow_col / np.maximum(lit[..., None], 0.35) * 0.95, snow)
-    col = col * (lit * (1.0 - 0.28 * ao))[..., None] * 1.05
+    col = col * (lit * (1.0 - 0.18 * ao))[..., None] * 1.05
     alpha = smoothstep(1.0, 5.0, h + 2.0 * n2)
     return np.clip(col, 0, 1), alpha
 
