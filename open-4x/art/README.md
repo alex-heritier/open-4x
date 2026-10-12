@@ -1,8 +1,8 @@
 # Art pipeline
 
 Every picture in `assets/packs/base/` is generated here: **procedural SVG scenes -> `rsvg-convert` -> painterly finishing (NumPy) -> PNG.**
-The target look is a hand-painted, saturated "Civ-style" strategy-game finish: olive land, tan beaches, deep teal sea with turquoise shallows,
-muted painted forests, snow-capped relief, gritty brick-and-slate industrial cities, a UI of aged parchment and dark slate under gilt frames, with white glyphs for small controls.
+The target look is a hand-painted, saturated "Civ-style" strategy-game finish: olive and khaki land, tan beaches, azure shallows over a navy sea,
+dark painted forests, brown rocky relief, gritty brick-and-slate industrial cities, a UI of aged parchment and dark slate under gilt frames, with white glyphs for small controls.
 
 ## Regenerate
 
@@ -19,9 +19,11 @@ brew install librsvg                                                   # provide
 Output goes to `assets/packs/base/`; the vector sources of the sprites are written to `art/svg/` (git-ignored, reproducible). Builds are deterministic (fixed seeds).
 `preview_*.py` are scratch scripts that render contact sheets into `art/preview/` (git-ignored).
 
-## Terrain is backdrop
+## Terrain look
 
-Cities and units are the focus, so terrain art stays low in contrast, saturation and fine grain: detail is kept, but it is quiet. Ground types are pulled toward their mean colour (`terrain._calm`), water glints and foam are faint, tree ramps are short with lifted darks and no bright flecks, and relief and cover use a flatter grade (`build.COVER_GRADE`) with pale grey-blue snow instead of white. When adding terrain art, check it with a city and a unit on top (`cargo run -p fourx-client -- --scenario russo-japanese-war --focus 13,17 --zoom 0.5`): the sprite should win against the ground, not the other way round.
+The terrain follows the look of a hand-painted Civ3 map: dry olive and khaki land with broad light and shadow rolling across it (`terrain.Fields.rolling`, plus a different set of knolls in each tonal variant), dense dark-green woods (`nature.py` ramps run to near-black in the crown shade), brown rocky mountains with only a small summit of snow and olive scrub at their feet (`relief.STYLES`), and a sea in three flat bands: bright azure shelf (coast), royal-blue sea, navy ocean (`terrain.COAST_STOPS`, `SEA_STOPS`, `OCEAN_STOPS`). The bands meet along a ragged isoline with a dark lip on the deep side and a pale lip on the shallow side, so deeper water cuts into the shallows with a hard edge instead of fading.
+
+Isoline wander is capped (`terrain.ZONE_JITTER`) below the gap between two depth digits, so a cell edge whose two vertices share a digit never changes band and sheets keep tiling. Land is still pulled slightly toward its mean colour (`terrain._calm`) and cover uses `build.COVER_GRADE`. When adding terrain art, check it with a city and a unit on top (`cargo run -p fourx-client -- --scenario age-of-imperialism --focus 112,34 --zoom 1`): the sprite should still win against the ground.
 
 ## Originality
 

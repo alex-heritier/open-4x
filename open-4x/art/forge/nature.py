@@ -14,12 +14,12 @@ def in_diamond(x, y, margin=0.0):
 
 
 # ---- trees ---------------------------------------------------------------------------------------
-# Terrain cover is backdrop: the ramps are short (lifted darks, tamed lights) so a stand of trees
-# stays close in value to the ground and never outshouts a city or a unit.
-LEAF_STOPS = [(0.0, "#3a4a24"), (0.28, "#48602a"), (0.52, "#5b7632"), (0.76, "#73903a"), (1.0, "#90ac48")]
-FIR_STOPS = [(0.0, "#38482c"), (0.30, "#445a30"), (0.55, "#566e35"), (0.80, "#6d853c"), (1.0, "#869c48")]
-JUNGLE_STOPS = [(0.0, "#2a4e28"), (0.28, "#365f2f"), (0.52, "#467a36"), (0.76, "#5f9840"), (1.0, "#82b050")]
-FROST_STOPS = [(0.0, "#34463a"), (0.30, "#415848"), (0.55, "#526e56"), (0.80, "#6c876a"), (1.0, "#8ea590")]
+# Woods are dark and dense: near-black green in the shade of a crown, a dry yellow-green where the sun
+# strikes it, so a stand reads as a mass against the olive ground with the crowns picked out on top.
+LEAF_STOPS = [(0.0, "#1b3216"), (0.28, "#294a1c"), (0.52, "#3b6126"), (0.76, "#58802f"), (1.0, "#7d9d3e")]
+FIR_STOPS = [(0.0, "#132a1a"), (0.30, "#1e3d26"), (0.55, "#2f5630"), (0.80, "#477238"), (1.0, "#658c44")]
+JUNGLE_STOPS = [(0.0, "#173a1c"), (0.28, "#235426"), (0.52, "#37722e"), (0.76, "#58943a"), (1.0, "#80b04c")]
+FROST_STOPS = [(0.0, "#1f342a"), (0.30, "#2d4638"), (0.55, "#42614e"), (0.80, "#5c8068"), (1.0, "#80a088")]
 AUTUMN = ["#a98048", "#b89050", "#9c7044", "#bb9a58", "#a67a48"]  # muted: a hint of turning leaves
 LIGHT = (-0.55, -0.83)  # towards the upper-left sun, in screen space
 
@@ -37,7 +37,7 @@ def trunk(svg, x, y, h, w=3.0):
 
 
 def ground_shadow(svg, x, y, r, soft):
-    svg.ellipse(x + r * 0.6, y + r * 0.12, r * 1.25, r * 0.42, "#16200f", op=0.30, blur=soft)
+    svg.ellipse(x + r * 0.6, y + r * 0.12, r * 1.25, r * 0.42, "#0c1408", op=0.42, blur=soft)
 
 
 def _dabs(svg, rng, inside, bbox, n, stops, centre, radius, size=(2.3, 1.5), droop=0.0, autumn=0.02):
@@ -77,7 +77,7 @@ def broadleaf(svg, x, y, h, rng, soft, stops=LEAF_STOPS, autumn=0.02):
 
     # dark silhouette first
     for dx, dy, r in lobes:
-        svg.ellipse(cx + dx * rx, cy + dy * ry * 1.2, rx * r * 1.04, ry * r * 1.04, "#38482a", stroke="#2e3e22", sw=0.8)
+        svg.ellipse(cx + dx * rx, cy + dy * ry * 1.2, rx * r * 1.04, ry * r * 1.04, "#1a2c13", stroke="#14230d", sw=0.8)
     n = int(rx * ry * 0.5)
     _dabs(svg, rng, inside, (cx - rx * 1.4, cy - ry * 1.4, cx + rx * 1.4, cy + ry * 1.6), n, stops, (cx, cy), rx * 1.2, (2.6, 1.7), autumn=autumn)
 
@@ -95,7 +95,7 @@ def conifer(svg, x, y, h, rng, soft, stops=FIR_STOPS):
         th = h * 0.36
         apex = (x, ty - th)
         tri = [apex, (x + tw / 2, ty + 1.2), (x - tw / 2, ty + 1.2)]
-        svg.poly(tri, "#34482c", "#2b3f26", 0.7)
+        svg.poly(tri, "#1a301f", "#12241a", 0.7)
 
         def inside(px, py, apex=apex, ty=ty, tw=tw, th=th):
             if py < apex[1] or py > ty + 2.0:
@@ -155,7 +155,7 @@ def palm(svg, x, y, h, rng, soft):
     svg.ellipse(cx, cy + 0.8, 2.4, 2.0, "#4d3822")
 
 
-def build_forest_svg(seed=11, trees=28, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_STOPS, palms=0.0, floor="#2a3a1c", size=(38, 54), spacing=19) -> Svg:
+def build_forest_svg(seed=11, trees=28, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_STOPS, palms=0.0, floor="#101c0a", size=(38, 54), spacing=19) -> Svg:
     """A stand of trees on the tile.  `conifers` and `palms` are shares of the trees; the rest are
     broadleaf.  The palettes turn it into temperate forest, boreal pine or jungle."""
     rng = random.Random(seed)
@@ -163,7 +163,7 @@ def build_forest_svg(seed=11, trees=28, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_
     soft = svg.blur(1.8)
     pts = sorted(scatter(rng, trees, spacing, margin=8), key=lambda q: q[1])
     # dark forest floor so the ground below reads as shade between crowns
-    svg.ellipse(CX, CY + 4, 108, 48, floor, op=0.40, blur=svg.blur(9))
+    svg.ellipse(CX, CY + 4, 108, 48, floor, op=0.58, blur=svg.blur(9))
     for x, y in pts:
         depth = (y - (CY - 64)) / 128  # nearer trees are larger
         h = rng.uniform(*size) * (0.88 + 0.26 * depth)
@@ -179,12 +179,12 @@ def build_forest_svg(seed=11, trees=28, conifers=0.55, leaf=LEAF_STOPS, fir=FIR_
 
 def build_pine_svg(seed=13) -> Svg:
     """Boreal pine: only firs, paler and bluer, a little sparser than the mixed forest."""
-    return build_forest_svg(seed, trees=26, conifers=1.0, fir=FROST_STOPS, floor="#26382f", size=(40, 58), spacing=20)
+    return build_forest_svg(seed, trees=26, conifers=1.0, fir=FROST_STOPS, floor="#0e1a14", size=(40, 58), spacing=20)
 
 
 def build_jungle_svg(seed=17) -> Svg:
     """Dense, saturated canopy with palms standing out of it."""
-    svg = build_forest_svg(seed, trees=36, conifers=0.0, leaf=JUNGLE_STOPS, palms=0.28, floor="#1c3a22", size=(40, 56), spacing=16)
+    svg = build_forest_svg(seed, trees=36, conifers=0.0, leaf=JUNGLE_STOPS, palms=0.28, floor="#0c200f", size=(40, 56), spacing=16)
     rng = random.Random(seed + 5)
     soft = svg.blur(1.4)
     for _ in range(16):  # undergrowth: soft ferns between the trunks

@@ -22,20 +22,20 @@ GRID = 512
 # summit) where snow starts, `foot` how far the scrub climbs the slopes.
 STYLES = {
     "temperate": dict(
-        rock=[(0, "#7a6f60"), (0.35, "#8e8574"), (0.65, "#a39a86"), (1.0, "#bbb29c")],
-        scrub=[(0, "#52632e"), (0.5, "#66763a"), (1.0, "#7f8f48")],
-        snow=0.46,
-        foot=0.42,
+        rock=[(0, "#4a3426"), (0.35, "#6b4c33"), (0.65, "#8c6844"), (1.0, "#ad8a5e")],
+        scrub=[(0, "#3f4c22"), (0.5, "#566330"), (1.0, "#727c3e")],
+        snow=0.62,
+        foot=0.40,
     ),
     "arid": dict(
-        rock=[(0, "#806a52"), (0.35, "#9a8062"), (0.65, "#b79b78"), (1.0, "#d0b78f")],
-        scrub=[(0, "#7a6c3c"), (0.5, "#908047"), (1.0, "#aa9a5a")],
+        rock=[(0, "#6a5238"), (0.35, "#8a6c48"), (0.65, "#aa8c64"), (1.0, "#c9ad84")],
+        scrub=[(0, "#6a5f36"), (0.5, "#807446"), (1.0, "#9c9060")],
         snow=0.95,
         foot=0.22,
     ),
     "arctic": dict(
-        rock=[(0, "#5f6770"), (0.35, "#79828b"), (0.65, "#97a0a8"), (1.0, "#b8c0c5")],
-        scrub=[(0, "#566150"), (0.5, "#6c7862"), (1.0, "#8a9580")],
+        rock=[(0, "#4e545a"), (0.35, "#6c7279"), (0.65, "#8e949a"), (1.0, "#b4babf")],
+        scrub=[(0, "#4c5744"), (0.5, "#626e58"), (1.0, "#808c76")],
         snow=0.15,
         foot=0.14,
     ),
@@ -164,21 +164,21 @@ def hills_height(seed=21):
 
 HILL_STYLES = {
     "temperate": dict(
-        cover=[(0, "#5d7438"), (0.5, "#74893f"), (1.0, "#919f50")],
-        dry=[(0, "#7e7e40"), (1.0, "#aaa05a")],
-        rock=[(0, "#7a6e5a"), (1.0, "#b5a98e")],
+        cover=[(0, "#3d4c20"), (0.5, "#5a6a2a"), (1.0, "#848f40")],
+        dry=[(0, "#6a6434"), (1.0, "#9c9050")],
+        rock=[(0, "#5a4430"), (1.0, "#9a7c56")],
         snow=2.0,
     ),
     "arid": dict(
-        cover=[(0, "#8e7c46"), (0.5, "#a89052"), (1.0, "#c3ad70")],
-        dry=[(0, "#9b8650"), (1.0, "#cdb88a")],
-        rock=[(0, "#92765a"), (1.0, "#c8ad88")],
+        cover=[(0, "#74663a"), (0.5, "#92804a"), (1.0, "#b4a068")],
+        dry=[(0, "#86724a"), (1.0, "#c0aa80")],
+        rock=[(0, "#7a5e44"), (1.0, "#b8996e")],
         snow=2.0,
     ),
     "arctic": dict(
-        cover=[(0, "#566049"), (0.5, "#74806a"), (1.0, "#98a38b")],
-        dry=[(0, "#6a7461"), (1.0, "#a3ae9a")],
-        rock=[(0, "#6a717a"), (1.0, "#a8b0b8")],
+        cover=[(0, "#5a6450"), (0.5, "#7a8670"), (1.0, "#a2ad96")],
+        dry=[(0, "#6e7866"), (1.0, "#a8b2a0")],
+        rock=[(0, "#585e66"), (1.0, "#a0a8b0")],
         snow=0.45,
     ),
 }
@@ -276,9 +276,9 @@ def vegetation_surface(h, u, v, col, alpha, seed, cover, style):
         tree_top = np.where(visible, top, tree_top)
         leaves = np.where(visible, smoothstep(0.0, 0.20, crown), leaves)
         light = np.where(visible, np.clip(0.55 + (cv - v) / radius * 0.22 + (cu - u) / radius * 0.12 + crown * 0.22, 0, 1), light)
-    colors = ("#365a30", "#6a9448") if jungle else ("#3d5230", "#6f8a4c")
+    colors = ("#24471f", "#5a8a3a") if jungle else ("#263e1f", "#5a7a36")
     if style == "arctic":
-        colors = ("#3f5442", "#92a68c")
+        colors = ("#2e4535", "#7c9684")
     canopy = P.mix(P.hx(colors[0]), P.hx(colors[1]), light)
     col = P.mix(col, canopy, leaves)
     alpha = np.maximum(alpha, leaves)

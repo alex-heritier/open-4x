@@ -35,18 +35,21 @@ WATER_NAMES = ("land", "coast", "sea", "ocean")
 # how deep each water digit reads, 0 = shoreline shallows, 1 = open ocean
 WATER_DEPTH = np.array([0.0, 0.16, 0.58, 1.0], dtype=np.float32)
 
-GRASSLAND_STOPS = [(0.00, "#3a5c1e"), (0.25, "#4c7223"), (0.50, "#63892b"), (0.75, "#7c9d35"), (1.00, "#9ab648")]
-PLAINS_STOPS = [(0.00, "#686c2d"), (0.25, "#80833a"), (0.50, "#979441"), (0.75, "#b0a752"), (1.00, "#c9bb6c")]
-DESERT_STOPS = [(0.00, "#ad8b4a"), (0.35, "#c9a766"), (0.65, "#ddc183"), (1.00, "#eddcab")]
-TUNDRA_STOPS = [(0.00, "#566049"), (0.30, "#6e7860"), (0.60, "#8a9378"), (1.00, "#b0b6a2")]
+# Olive-drab, khaki and brown: the land is a worn, sun-baked painting, not a lawn.  Shadow runs to
+# a brown-green near black, the lit crowns to a dry yellow-olive.
+GRASSLAND_STOPS = [(0.00, "#2e3b18"), (0.22, "#434f1f"), (0.48, "#5d6b27"), (0.74, "#7d8a33"), (1.00, "#a2a748")]
+PLAINS_STOPS = [(0.00, "#48442a"), (0.25, "#645d34"), (0.52, "#7f7642"), (0.78, "#9b9059"), (1.00, "#b9ad82")]
+DESERT_STOPS = [(0.00, "#8f8264"), (0.35, "#b0a482"), (0.65, "#cbc1a0"), (1.00, "#e3dbc0")]
+TUNDRA_STOPS = [(0.00, "#767a68"), (0.30, "#969886"), (0.60, "#b9baac"), (1.00, "#dcddd3")]
+BEACH_STOPS = [(0.00, "#9a8a58"), (0.40, "#bfb078"), (0.75, "#d9cc96"), (1.00, "#ebe2b8")]
 
 
-# Terrain is the stage, not the cast: cities and units must read first.  Every ground type is
-# pulled toward its own mean colour (less contrast, a little less saturation) and loses its finest
-# grain, so the tile keeps its character but never competes with the sprites standing on it.
-GROUND_CALM = 0.55  # share of the painted variation kept
-GROUND_SAT = 0.92
-GROUND_WARM = np.array([1.025, 1.005, 0.965], dtype=np.float32)  # sun-warmed, never cold
+# The land is painted like a shaded relief map: broad rolling light and shadow across every tile
+# (`Fields.rolling`), dry mottled colour on top, and just enough pull toward the mean colour that
+# the sprites standing on it still win.
+GROUND_CALM = 0.95  # share of the painted variation kept
+GROUND_SAT = 0.96
+GROUND_WARM = np.array([1.015, 1.0, 0.975], dtype=np.float32)  # sun-warmed, never cold
 _LUM = np.array([0.3, 0.59, 0.11], dtype=np.float32)
 
 
@@ -78,6 +81,7 @@ class Fields:
         self.sand_noise = np.clip(fbm(a, b, 5, 4, seed=3, warp=0.15) * 1.8, -1, 1)
         self.foam_noise = fbm(a, b, 44, 2, seed=4)
         self.bump = self._bump()
+        self.rolling = self._rolling()
         self.ground = [self._grassland(), self._plains(), self._desert(), self._tundra()]
         # one low-frequency perturbation per ground type: ragged, organic ecotones
         self.edge_noise = [fbm(a, b, 6, 3, seed=60 + 7 * k, warp=0.2) * 1.5 for k in range(4)]
@@ -86,6 +90,10 @@ class Fields:
         self.ripple2 = fbm(a, b, 16, 2, seed=32, aniso=3.5, warp=0.10)
         self.sparkle = fbm(a, b, 70, 1, seed=33)
         self.swell = fbm(a, b, 3, 2, seed=34, warp=0.15)
+        # where the depth bands meet: a ragged, blotchy isoline rather than a smooth gradient
+        self.zone = np.clip(fbm(a, b, 5, 3, seed=35, warp=0.25, gain=0.55) * 1.7, -1, 1)
+        self.zone_fine = fbm(a, b, 18, 2, seed=36, warp=0.1)
+        self.chop = fbm(a, b, 12, 3, seed=37, aniso=2.0, warp=0.2)
 
     def _height(self, du=0.0, dv=0.0):
         """Small-scale relief used for the painterly bump shading (periodic)."""
@@ -97,6 +105,22 @@ class Fields:
         e = 1.2 / (W / 2)
         # light from the upper left: lit where the height falls toward the lower right
         return (self._height(-e, -e * 2) - self._height(e, e * 2)) * 2.4
+
+    def _rolling(self):
+        """Broad hill-shading: soft knolls lit from the upper left, a few tiles' worth of relief
+        compressed into one cell.  Periodic like every field, so cells still tile."""
+        def h(du, dv):
+            da, db = (du + dv) / 2, (du - dv) / 2
+            return fbm(self.a + da, self.b + db, 3, 3, seed=51, warp=0.22, gain=0.45)
+
+        e = 5.0 / (W / 2)
+        return np.clip((h(-e, -e * 2) - h(e, e * 2)) * 3.2, -1.0, 1.0)
+
+    def _relief_light(self, col, amount):
+        """Multiply the rolling light into `col`: sunlit knolls warm and bright, lee sides deep."""
+        shade = 1.0 + amount * self.rolling
+        warm = np.stack([1.0 + 0.05 * self.rolling, 1.0 + 0.015 * self.rolling, 1.0 - 0.07 * self.rolling], axis=-1)
+        return col * shade[..., None] * warm
 
     def _grassland(self):
         a, b = self.a, self.b
@@ -111,7 +135,8 @@ class Fields:
         col = col * (1.0 - 0.18 * shade)[..., None]
         col = col * (1.0 + 0.16 * self.bump)[..., None]
         tuft = P.smoothstep(0.28, 0.5, fbm(a, b, 64, 1, seed=16) * 1.7)
-        col = col * (1.0 - 0.07 * tuft)[..., None]
+        col = col * (1.0 - 0.10 * tuft)[..., None]
+        col = self._relief_light(col, 0.16)
         return _calm(col)
 
     def _plains(self):
@@ -128,7 +153,8 @@ class Fields:
         col = P.mix(col, P.hx("#6a6a30"), scrub * 0.22)
         streak = fbm(a, b, 10, 2, seed=116, aniso=3.0, warp=0.1)
         col = col * (1.0 + 0.07 * streak)[..., None]
-        col = col * (1.0 + 0.15 * self.bump)[..., None]
+        col = col * (1.0 + 0.18 * self.bump)[..., None]
+        col = self._relief_light(col, 0.14)
         return _calm(col)
 
     def _desert(self):
@@ -141,7 +167,8 @@ class Fields:
         col = col * (1.0 + 0.07 * dunes)[..., None]
         rock = P.smoothstep(0.30, 0.55, fbm(a, b, 9, 3, seed=44, warp=0.2) * 1.6)
         col = P.mix(col, P.hx("#9b7c4a"), rock * 0.28)
-        col = col * (1.0 + 0.11 * self.bump)[..., None]
+        col = col * (1.0 + 0.13 * self.bump)[..., None]
+        col = self._relief_light(col, 0.10)
         return _calm(col)
 
     def _tundra(self):
@@ -153,19 +180,19 @@ class Fields:
         drift = fbm(a, b, 2, 3, seed=144, warp=0.3, gain=0.4) * 2.0
         snow = P.smoothstep(-0.12, 0.34, drift) * (0.80 + 0.20 * P.smoothstep(-0.3, 0.3, fbm(a, b, 9, 2, seed=146) * 1.6))
         lit = 0.95 + 0.22 * np.clip(self.bump, -0.25, 0.25) + 0.025 * fbm(a, b, 30, 2, seed=147)
-        col = P.mix(col, P.hx("#e4ecef") * lit[..., None], snow * 0.9)
+        col = P.mix(col, P.hx("#e4ecef") * lit[..., None], snow * 0.55)
         speck = P.smoothstep(0.30, 0.5, fbm(a, b, 56, 1, seed=145) * 1.7)
         col = col * (1.0 - 0.08 * speck)[..., None]
         col = col * (1.0 + 0.12 * self.bump)[..., None]
+        col = self._relief_light(col, 0.09)
         return _calm(col)
 
     def _beach(self):
         """Pale shingle/sand that rims every shoreline, whatever the land behind it."""
         a, b = self.a, self.b
         t = unit(1.3 * fbm(a, b, 6, 3, seed=241, warp=0.2) + 0.8 * fbm(a, b, 40, 2, seed=242))
-        col = P.ramp(t, DESERT_STOPS)
-        col = P.mix(col, P.hx("#e9dfc0"), 0.35)
-        return _calm(col * (1.0 + 0.12 * self.bump)[..., None], keep=0.65)
+        col = P.ramp(t, BEACH_STOPS)
+        return _calm(col * (1.0 + 0.12 * self.bump)[..., None], keep=0.80)
 
 
 def _edge_alpha(f):
@@ -193,19 +220,52 @@ def render_ground(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
     return np.dstack([np.clip(rgb, 0, 1), _edge_alpha(f)])
 
 
-def _water(f: Fields, depth):
-    """Painted sea.  `depth` in 0..1 picks the colour ramp; ripples and glints are fine-grained on
-    purpose: open-sea cells repeat, so no blob may stand out per tile."""
-    base = P.ramp(depth, P.WATER_STOPS)
-    shade = 1.0 + 0.17 * f.ripple + 0.06 * f.ripple2
-    base = base * shade[..., None]
-    ridge = 1.0 - np.abs(f.ripple2 * 3.2)
-    streak = P.smoothstep(0.72, 0.97, ridge)
-    base = P.mix(base, P.hx("#78c4cc"), streak * 0.10 * (1.0 - 0.5 * depth))
+# Water reads in three flat bands, like a painted chart: bright azure over the shelf (coast),
+# royal blue in the sea, near-black navy in the ocean.  The bands meet along a ragged isoline with a
+# dark lip on the deep side, so a sea tile cuts into the shallows instead of fading into them.
+COAST_STOPS = [(0.00, "#86dcee"), (0.30, "#5ecbe6"), (0.65, "#42b5de"), (1.00, "#33a3d3")]
+SEA_STOPS = [(0.00, "#1a56a6"), (0.50, "#2169b6"), (1.00, "#2c7cc6")]
+OCEAN_STOPS = [(0.00, "#071f5e"), (0.50, "#0b2a72"), (1.00, "#12388a")]
+SURF = "#d2f3f6"  # the thin pale line where water meets sand
+SEA_AT, OCEAN_AT = 0.37, 0.79  # halfway between the depth digits 0.16 / 0.58 / 1.0
+ZONE_JITTER = (0.12, 0.05)  # isoline wander; its sum stays under the 0.21 gap, so edges of equal digits never flip
+
+
+def _water(f: Fields, depth, shore=1.0):
+    """Painted sea.  `depth` is the depth the vertices ask for (0.16 coast, 0.58 sea, 1.0 ocean),
+    `shore` runs 0 at the beach to 1 away from it and brightens the shelf.  Ripples are fine-grained
+    on purpose: open-sea cells repeat, so no blob may stand out per tile."""
+    d = depth + ZONE_JITTER[0] * f.zone + ZONE_JITTER[1] * f.zone_fine
+    sea_w = P.smoothstep(SEA_AT - 0.018, SEA_AT + 0.018, d)
+    ocean_w = P.smoothstep(OCEAN_AT - 0.018, OCEAN_AT + 0.018, d)
+
+    chop = np.clip(f.ripple * 1.5 + 0.6 * f.chop, -1, 1)
+    grain = 0.5 + 0.5 * chop
+    coast = P.ramp(np.clip(0.80 * shore + 0.42 * grain - 0.12, 0, 1), COAST_STOPS)
+    sea = P.ramp(grain, SEA_STOPS)
+    ocean = P.ramp(grain, OCEAN_STOPS)
+    col = P.mix(P.mix(coast, sea, sea_w), ocean, ocean_w)
+
+    # wave strokes: pale on the shelf, a lighter blue in the sea, barely there in the ocean
+    ridge2 = 1.0 - np.abs(f.ripple2 * 3.2)
+    streak = P.smoothstep(0.70, 0.96, ridge2)
+    col = P.mix(col, P.hx("#b4ecf6"), streak * 0.16 * (1.0 - sea_w))
+    col = P.mix(col, P.hx("#5b9ad8"), streak * 0.20 * sea_w * (1.0 - ocean_w))
+    col = P.mix(col, P.hx("#2a58a8"), streak * 0.20 * ocean_w)
     ridge1 = 1.0 - np.abs(f.ripple * 3.0)
-    base = P.mix(base, P.hx("#0f3f52"), P.smoothstep(0.78, 0.97, ridge1) * 0.10)
-    glint = P.smoothstep(0.55, 0.85, f.sparkle * 1.7)
-    return P.mix(base, P.hx("#d8f1ec"), glint * (0.10 - 0.05 * depth))
+    trough = P.smoothstep(0.78, 0.97, ridge1)
+    col = col * (1.0 - 0.10 * trough)[..., None]
+
+    # lips along the band edges: lighter just inside the shallow side, a dark rim on the deep side
+    for at, deep_lip, shallow_lip in ((SEA_AT, "#0f3c7e", "#8fe3f4"), (OCEAN_AT, "#041440", "#2e72c4")):
+        above = P.smoothstep(at - 0.004, at + 0.004, d)  # 1 on the deep side
+        lip_dark = above * (1.0 - P.smoothstep(0.012, 0.075, d - at))
+        lip_light = (1.0 - above) * (1.0 - P.smoothstep(0.012, 0.060, at - d))
+        col = P.mix(col, P.hx(deep_lip), lip_dark * 0.80)
+        col = P.mix(col, P.hx(shallow_lip), lip_light * 0.45)
+
+    glint = P.smoothstep(0.62, 0.90, f.sparkle * 1.7)
+    return P.mix(col, P.hx("#e4f8fa"), glint * 0.16 * (1.0 - sea_w))
 
 
 def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
@@ -219,7 +279,7 @@ def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
     ask = sum(vw[i] * is_water[i] * WATER_DEPTH[digits[i]] for i in range(4)) / np.maximum(t_water, 1e-4)
 
     if t_water.min() >= 1.0 - 1e-6:  # open water: no shoreline anywhere in this cell
-        rgb = _water(f, np.clip(ask + 0.07 * f.swell, 0, 1))
+        rgb = _water(f, ask)
         return np.dstack([np.clip(rgb, 0, 1), alpha_edge])
 
     # signed shoreline margin: > 0 water, < 0 land
@@ -229,15 +289,14 @@ def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
 
     # shallows hug the shore and deepen toward whatever the water vertices ask for
     shore = np.clip(m / 0.9, 0.0, 1.0)
-    depth = np.clip((ask + 0.07 * f.swell) * shore, 0.0, 1.0)  # == the open-water formula once m >= 0.9
-    water = _water(f, depth)
+    water = _water(f, ask, shore)  # == the open-water formula once m >= 0.9
     near = np.abs(m - 0.02)
     foam = 1.0 - P.smoothstep(0.010, 0.050, near + 0.030 * f.foam_noise)
     swell = 1.0 - P.smoothstep(0.012, 0.040, np.abs(m - 0.17 + 0.03 * f.foam_noise))
     swell = swell * P.smoothstep(0.0, 0.3, np.abs(f.foam_noise) + 0.2)
-    water = P.mix(water, P.hx(P.FOAM), np.clip(swell * 0.20, 0, 1))
+    water = P.mix(water, P.hx(SURF), np.clip(swell * 0.22, 0, 1))
     shore_glow = (1.0 - P.smoothstep(0.0, 0.16, m)) * P.smoothstep(-0.01, 0.01, m)
-    water = P.mix(water, P.hx("#8fcbc2"), shore_glow * 0.20)
+    water = P.mix(water, P.hx("#a6eaf6"), shore_glow * 0.30)
 
     # beach strip on the land side, fading out inland (alpha), darker where the sea wets it
     strip = P.smoothstep(-0.40, -0.07, m + f.beach_edge * 0.10) * (1.0 - P.smoothstep(0.0, 0.03, m))
@@ -249,8 +308,8 @@ def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
 
     rgb = P.mix(beach, water, water_amt)
     alpha = water_amt + (1.0 - water_amt) * beach_a
-    rgb = P.mix(rgb, P.hx(P.FOAM), np.clip(foam * 0.70, 0, 1))
-    alpha = np.maximum(alpha, np.clip(foam * 0.70, 0, 1))
+    rgb = P.mix(rgb, P.hx(SURF), np.clip(foam * 0.55, 0, 1))
+    alpha = np.maximum(alpha, np.clip(foam * 0.55, 0, 1))
     # a hair-thin dark waterline under the foam reads as the painted shore contour
     contour = 1.0 - P.smoothstep(0.0, 0.020, np.abs(m + 0.045))
     rgb = rgb * (1.0 - 0.12 * contour * (1.0 - foam))[..., None]
@@ -272,17 +331,28 @@ _GROUND_VARIANT = {
     3: (0.11, np.array([0.97, 1.00, 0.97], dtype=np.float32)),
 }
 _WATER_VARIANT = {
-    1: (0.12, np.array([0.80, 1.00, 1.04], dtype=np.float32)),
+    1: (0.10, np.array([0.90, 1.00, 1.04], dtype=np.float32)),
     2: (0.15, np.array([0.80, 1.00, 1.08], dtype=np.float32)),
     3: (0.17, np.array([0.78, 0.98, 1.10], dtype=np.float32)),
 }
 
 
-def _drift(base, style, seed, f):
+def _knolls(seed, w=W, h=H):
+    """Non-periodic hill-shading for a variant's interior: soft knolls lit from the upper left, so
+    each variant lights a different landscape while its border pixels stay those of the base cell."""
+    n = flat_noise(w, h, 3, 3, seed=seed, gain=0.5)
+    return np.clip((np.roll(n, (-3, -2), (0, 1)) - np.roll(n, (3, 2), (0, 1))) * 3.4, -1.0, 1.0)
+
+
+def _drift(base, style, seed, f, relief=0.0):
     amp, resp = style
     drift = 0.6 * flat_noise(W, H, 2, 3, seed=seed) + 0.4 * flat_noise(W, H, 5, 2, seed=seed + 1)
     delta = np.clip(drift * 1.7, -1, 1) * amp * interior_weight(f)
     rgb = base[..., :3] * (1.0 + delta[..., None] * resp)
+    if relief:
+        k = _knolls(seed + 2) * relief * interior_weight(f)
+        warm = np.stack([1.0 + 0.05 * k / relief, 1.0 + 0.015 * k / relief, 1.0 - 0.07 * k / relief], axis=-1)
+        rgb = rgb * (1.0 + k)[..., None] * warm
     return np.dstack([np.clip(rgb, 0, 1), base[..., 3]])
 
 
@@ -314,7 +384,7 @@ def build_ground(f: Fields | None = None, progress=None) -> Image.Image:
     for k in range(1, VARIANTS + 1):
         for digit in range(BASE):
             base = render_ground(f, digit, digit, digit, digit)
-            _put(sheet, GRID * GRID + BASE * (k - 1) + digit, _drift(base, _GROUND_VARIANT[digit], 500 + 31 * digit + 7 * k, f))
+            _put(sheet, GRID * GRID + BASE * (k - 1) + digit, _drift(base, _GROUND_VARIANT[digit], 500 + 31 * digit + 7 * k, f, relief=0.27))
     return to_image(sheet)
 
 

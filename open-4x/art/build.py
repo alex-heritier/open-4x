@@ -59,12 +59,12 @@ def build_roads():
 
 
 def relief_sprite(layer, rel):
-    img = paint(layer, radius=1, grain=0.10, strokes=0.05, grade_kw={"sat": 0.95, "contrast": 0.92, "key": 0.08, "warm": 0.04})
+    img = paint(layer, radius=1, grain=0.10, strokes=0.05, grade_kw={"sat": 1.02, "contrast": 1.02, "key": 0.08, "warm": 0.04})
     save_png(downsample(img, 256, 224), rel)
 
 
-# Terrain cover and relief are backdrop for the cities and units: a flatter, less saturated grade.
-COVER_GRADE = {"sat": 0.95, "contrast": 0.90, "key": 0.08, "warm": 0.05}
+# Terrain cover and relief: a full-bodied grade, close to the ground's own, so woods and rock sit in the landscape.
+COVER_GRADE = {"sat": 1.02, "contrast": 1.02, "key": 0.08, "warm": 0.04}
 
 
 def build_overlays():
