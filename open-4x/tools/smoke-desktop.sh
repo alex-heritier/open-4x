@@ -4,8 +4,8 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
 evidence_dir="$(mktemp -d -t open4x-smoke.XXXXXX)"
 cd "$evidence_dir"
-# The assertions below are written for the compact two-empire starter, not the world scenario.
-"$project_dir/target/quick/fourx-client" --smoke --scenario dawn-straits --screenshot "$evidence_dir/campaign.png" > "$evidence_dir/client.log" 2>&1 &
+# The assertions below are written for the compact starter, not the great campaign.
+"$project_dir/target/quick/fourx-client" --smoke --scenario russo-japanese-war --screenshot "$evidence_dir/campaign.png" > "$evidence_dir/client.log" 2>&1 &
 client_pid=$!
 trap 'kill "$client_pid" 2>/dev/null || true' EXIT
 window_id="$(timeout 30 xdotool search --sync --name 'Open 4X')"

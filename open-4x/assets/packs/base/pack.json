@@ -632,8 +632,7 @@
   },
   "scenarios": [
     {"id": "age-of-imperialism", "path": "scenarios/age-of-imperialism.json"},
-    {"id": "world-1876", "path": "scenarios/world-1876.json"},
-    {"id": "dawn-straits", "path": "scenarios/dawn-straits.json"},
+    {"id": "russo-japanese-war", "path": "scenarios/russo-japanese-war.json"},
     {"id": "terrain-study", "path": "scenarios/terrain-study.json"}
   ],
   "default_scenario": "age-of-imperialism"

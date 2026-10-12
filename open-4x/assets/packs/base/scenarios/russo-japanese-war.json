@@ -1,11 +1,11 @@
 {
   "format": 3,
-  "id": "dawn-straits",
-  "name": "Dawn over the Straits",
-  "description": "The original starter campaign: two rival powers on a 24x18 archipelago, laid out upright like the world map. A compact scenario for learning the rules and for fast tests.",
-  "start_date": "1892-01-01",
-  "commander": "dawn-empire",
-  "intro": "The straits are open. An empire awaits your orders.",
+  "id": "russo-japanese-war",
+  "name": "The Russo-Japanese War",
+  "description": "The compact starter: Japan against Russia on a schematic chart of the Yellow Sea theater in February 1904, from Chemulpo to Port Arthur. A small scenario for learning the rules and for fast tests.",
+  "start_date": "1904-02-08",
+  "commander": "japan",
+  "intro": "8 February 1904. Japanese torpedo boats are steaming for Port Arthur. The Empire awaits your orders.",
   "map": {
     "width": 30,
     "height": 30,
@@ -48,43 +48,45 @@
   },
   "nations": [
     {
-      "id": "dawn-empire",
-      "name": "The Dawn Empire",
-      "adjective": "Imperial",
-      "color": "#bf3d33",
+      "id": "japan",
+      "name": "Japan",
+      "adjective": "Japanese",
+      "color": "#e24b6a",
       "flavor": "east_asian",
       "status": "sovereign",
-      "government": "Imperial monarchy"
+      "government": "Meiji Oligarchy",
+      "leader": "Matsuhito"
     },
     {
-      "id": "northern-league",
-      "name": "The Northern League",
-      "adjective": "League",
-      "color": "#597ac7",
-      "flavor": "western",
+      "id": "russia",
+      "name": "Russia",
+      "adjective": "Russian",
+      "color": "#109345",
+      "flavor": "orthodox",
       "status": "sovereign",
-      "government": "Confederation of free cities"
+      "government": "Tsarist Monarchy",
+      "leader": "Tsar Nicolas II"
     }
   ],
   "cities": [
     {
-      "nation": "dawn-empire",
+      "nation": "japan",
       "position": {
         "x": 13,
         "y": 17
       },
-      "name": "Akatsuki",
+      "name": "Chemulpo",
       "population": 3,
       "industry": 4,
       "capital": true
     },
     {
-      "nation": "northern-league",
+      "nation": "russia",
       "position": {
         "x": 18,
         "y": 11
       },
-      "name": "Northwatch",
+      "name": "Port Arthur",
       "population": 3,
       "industry": 4,
       "capital": true
@@ -92,7 +94,7 @@
   ],
   "units": [
     {
-      "nation": "dawn-empire",
+      "nation": "japan",
       "position": {
         "x": 13,
         "y": 17
@@ -101,7 +103,7 @@
       "fortified": true
     },
     {
-      "nation": "dawn-empire",
+      "nation": "japan",
       "position": {
         "x": 13,
         "y": 17
@@ -109,7 +111,7 @@
       "kind": "cavalry"
     },
     {
-      "nation": "dawn-empire",
+      "nation": "japan",
       "position": {
         "x": 13,
         "y": 17
@@ -117,7 +119,7 @@
       "kind": "artillery"
     },
     {
-      "nation": "dawn-empire",
+      "nation": "japan",
       "position": {
         "x": 13,
         "y": 17
@@ -125,7 +127,7 @@
       "kind": "pioneer"
     },
     {
-      "nation": "dawn-empire",
+      "nation": "japan",
       "position": {
         "x": 13,
         "y": 17
@@ -133,7 +135,7 @@
       "kind": "worker"
     },
     {
-      "nation": "northern-league",
+      "nation": "russia",
       "position": {
         "x": 18,
         "y": 11
@@ -142,7 +144,7 @@
       "fortified": true
     },
     {
-      "nation": "northern-league",
+      "nation": "russia",
       "position": {
         "x": 18,
         "y": 11
@@ -150,7 +152,7 @@
       "kind": "cavalry"
     },
     {
-      "nation": "northern-league",
+      "nation": "russia",
       "position": {
         "x": 18,
         "y": 11
@@ -158,7 +160,7 @@
       "kind": "artillery"
     },
     {
-      "nation": "northern-league",
+      "nation": "russia",
       "position": {
         "x": 18,
         "y": 11
@@ -166,7 +168,7 @@
       "kind": "pioneer"
     },
     {
-      "nation": "northern-league",
+      "nation": "russia",
       "position": {
         "x": 18,
         "y": 11
@@ -174,7 +176,7 @@
       "kind": "worker"
     },
     {
-      "nation": "dawn-empire",
+      "nation": "japan",
       "position": {
         "x": 15,
         "y": 23
@@ -182,7 +184,7 @@
       "kind": "ironclad"
     },
     {
-      "nation": "northern-league",
+      "nation": "russia",
       "position": {
         "x": 18,
         "y": 26
@@ -192,9 +194,9 @@
   ],
   "wars": [
     {
-      "a": "dawn-empire",
-      "b": "northern-league",
-      "name": "The Straits War"
+      "a": "japan",
+      "b": "russia",
+      "name": "The Russo-Japanese War"
     }
   ]
 }

@@ -227,34 +227,34 @@ mod tests {
     use fourx_sim::terrain::{Coord, Cover, Relief, Terrain};
     use fourx_sim::{Domain, Job, Order};
 
-    /// The compact two-empire starter campaign, which the fixtures below are written against.
-    fn dawn(seed: u64) -> Host {
-        Host::base_scenario("dawn-straits", seed).unwrap()
+    /// The compact starter campaign, which the fixtures below are written against.
+    fn starter(seed: u64) -> Host {
+        Host::base_scenario("russo-japanese-war", seed).unwrap()
     }
-    fn dawn_with_script(script: &str, seed: u64) -> Result<Host, HostError> {
+    fn starter_with_script(script: &str, seed: u64) -> Result<Host, HostError> {
         let mut content = Content::base();
         content.script = script.into();
         Host::start(
             content,
             Start {
-                scenario: Some("dawn-straits"),
+                scenario: Some("russo-japanese-war"),
                 seed,
                 ..Start::default()
             },
         )
     }
-    fn dawn_at_peace(seed: u64) -> Host {
+    fn starter_at_peace(seed: u64) -> Host {
         let mut content = Content::base();
         content
             .scenarios
-            .get_mut("dawn-straits")
+            .get_mut("russo-japanese-war")
             .unwrap()
             .wars
             .clear();
         Host::start(
             content,
             Start {
-                scenario: Some("dawn-straits"),
+                scenario: Some("russo-japanese-war"),
                 seed,
                 ..Start::default()
             },
@@ -286,39 +286,6 @@ mod tests {
         assert_eq!(h.game.date().iso(), "1895-01-01");
         assert!(h.game.factions.len() >= 30);
         assert_eq!(h.game.factions[&h.commander()].tag, "japan");
-    }
-    #[test]
-    fn the_whole_world_in_1876_can_be_chosen() {
-        let h = Host::base_scenario("world-1876", 1).unwrap();
-        // An upright rectangle of 256 x 684 tiles, held in the 598 x 598 square the sim runs on.
-        let lattice = h.game.map.lattice.expect("the world stands upright");
-        assert_eq!((lattice.columns, lattice.rows), (256, 684));
-        assert_eq!((h.game.map.width, h.game.map.height), (598, 598));
-        assert_eq!(h.game.date().iso(), "1876-01-01");
-        assert_eq!(h.game.date().weekday(), "Saturday");
-        assert!(
-            h.game.factions.len() >= 100,
-            "{} nations",
-            h.game.factions.len()
-        );
-        for faction in h.game.factions.values() {
-            assert!(
-                h.game.cities.values().any(|c| c.owner == faction.id),
-                "{} has no city",
-                faction.name
-            );
-        }
-        assert_eq!(h.game.factions[&h.commander()].tag, "japan");
-        for tag in [
-            "united-kingdom",
-            "qing-china",
-            "united-states",
-            "russia",
-            "ottoman-empire",
-            "hawaii",
-        ] {
-            assert!(h.game.factions.values().any(|f| f.tag == tag), "{tag}");
-        }
     }
     #[test]
     fn the_world_turns_over_deterministically_and_round_trips_through_a_save() {
@@ -383,7 +350,7 @@ mod tests {
         }
         // The search buffers are shared per thread. A smaller map in between must not
         // corrupt them, and a repeated search must give the same answer.
-        let small = dawn(1);
+        let small = starter(1);
         let city = small.game.cities.values().next().unwrap().position;
         assert_eq!(
             small.game.path(1, land, city, city, 100).unwrap(),
@@ -467,7 +434,7 @@ mod tests {
     }
     #[test]
     fn an_uncharted_scenario_starts_in_fog() {
-        let h = dawn(3);
+        let h = starter(3);
         let commander = h.commander();
         let Response::Snapshot { game, .. } = h.snapshot(commander) else {
             panic!("expected a snapshot");
@@ -483,7 +450,7 @@ mod tests {
     }
     #[test]
     fn snapshot_json_roundtrip() {
-        let h = dawn(42);
+        let h = starter(42);
         for player in [0, 1] {
             let response = h.snapshot(player);
             let json = serde_json::to_string(&response).unwrap();
@@ -493,8 +460,8 @@ mod tests {
     }
     #[test]
     fn deterministic_save_and_replay() {
-        let mut a = dawn(42);
-        let mut b = dawn(42);
+        let mut a = starter(42);
+        let mut b = starter(42);
         for _ in 0..2 {
             a.command(1, Command::EndTurn).unwrap();
             b.command(1, Command::EndTurn).unwrap();
@@ -507,7 +474,7 @@ mod tests {
     }
     #[test]
     fn saves_from_other_formats_are_refused_clearly() {
-        let json = dawn(1).save().unwrap().replacen(
+        let json = starter(1).save().unwrap().replacen(
             &format!("\"format\":{SAVE_FORMAT}"),
             "\"format\":2",
             1,
@@ -517,7 +484,7 @@ mod tests {
     }
     #[test]
     fn invalid_command_is_atomic() {
-        let mut h = dawn(1);
+        let mut h = starter(1);
         let before = h.game.clone();
         assert!(
             h.command(
@@ -533,7 +500,7 @@ mod tests {
     }
     #[test]
     fn stale_revision_and_authority_checked() {
-        let mut h = dawn(1);
+        let mut h = starter(1);
         let r = Request {
             version: PROTOCOL_VERSION,
             sequence: 1,
@@ -563,30 +530,31 @@ mod tests {
     }
     #[test]
     fn scripts_change_economy() {
-        let mut a = dawn(1);
+        let mut a = starter(1);
         let script = "function on_turn(c) return {income_percent=200} end";
-        let mut b = dawn_with_script(script, 1).unwrap();
+        let mut b = starter_with_script(script, 1).unwrap();
         a.command(1, Command::EndTurn).unwrap();
         b.command(1, Command::EndTurn).unwrap();
         assert!(b.game.factions[&1].gold > a.game.factions[&1].gold);
     }
     #[test]
     fn scripts_see_the_calendar() {
-        // The turn about to begin is reported with its calendar date: turn 2 of the Dawn
-        // campaign is 2 January 1892, and the script uses it to pay a bonus only that day.
-        let script = "function on_turn(c) local p = 100 if c.date == '1892-01-02' and c.month == 1 and c.day == 2 and c.year == 1892 then p = 300 end return {income_percent=p} end";
-        let mut dated = dawn_with_script(script, 1).unwrap();
-        let mut plain = dawn(1);
+        // The turn about to begin is reported with its calendar date: turn 2 of the
+        // theater campaign is 9 February 1904, and the script uses it to pay a bonus
+        // only that day.
+        let script = "function on_turn(c) local p = 100 if c.date == '1904-02-09' and c.month == 2 and c.day == 9 and c.year == 1904 then p = 300 end return {income_percent=p} end";
+        let mut dated = starter_with_script(script, 1).unwrap();
+        let mut plain = starter(1);
         dated.command(1, Command::EndTurn).unwrap();
         plain.command(1, Command::EndTurn).unwrap();
         assert!(dated.game.factions[&1].gold > plain.game.factions[&1].gold);
     }
     #[test]
     fn scripts_see_the_units_in_the_field() {
-        // Dawn starts with twelve units; the script pays a bonus only while that holds.
+        // The starter starts with twelve units; the script pays a bonus only while that holds.
         let script = "function on_turn(c) local n = 0 for _ in pairs(c.campaign.units) do n = n + 1 end local p = 100 if n == 12 then p = 300 end return {income_percent=p} end";
-        let mut counting = dawn_with_script(script, 1).unwrap();
-        let mut plain = dawn(1);
+        let mut counting = starter_with_script(script, 1).unwrap();
+        let mut plain = starter(1);
         assert_eq!(counting.game.units.len(), 12);
         counting.command(1, Command::EndTurn).unwrap();
         plain.command(1, Command::EndTurn).unwrap();
@@ -595,12 +563,12 @@ mod tests {
     #[test]
     fn out_of_range_script_results_are_refused() {
         let script = "function on_turn(c) return {income_percent=5000} end";
-        assert!(dawn_with_script(script, 1).is_err());
+        assert!(starter_with_script(script, 1).is_err());
     }
     #[test]
     fn failed_turn_script_preserves_state() {
         let script = "function on_turn(c) if c.turn >= 3 then error('a scripted failure') end return {income_percent=100} end";
-        let mut host = dawn_with_script(script, 42).unwrap();
+        let mut host = starter_with_script(script, 42).unwrap();
         host.command(1, Command::EndTurn).unwrap();
         let before = host.game.clone();
         assert!(host.command(1, Command::EndTurn).is_err());
@@ -608,13 +576,13 @@ mod tests {
     }
     #[test]
     fn infinite_script_and_unsafe_apis_rejected() {
-        assert!(dawn_with_script("while true do end", 1).is_err());
-        assert!(dawn_with_script("os.execute('echo unsafe')", 1).is_err());
-        assert!(dawn_with_script("print('pollute headless stdout')", 1).is_err());
+        assert!(starter_with_script("while true do end", 1).is_err());
+        assert!(starter_with_script("os.execute('echo unsafe')", 1).is_err());
+        assert!(starter_with_script("print('pollute headless stdout')", 1).is_err());
     }
     #[test]
     fn hidden_enemies_not_in_player_snapshot() {
-        let h = dawn(1);
+        let h = starter(1);
         let v = h.game.view(1);
         // Rival land forces are out of sight; only ships near our own are spotted.
         assert!(
@@ -631,7 +599,7 @@ mod tests {
     }
     #[test]
     fn unexplored_ground_and_ownership_are_masked() {
-        let h = dawn(1);
+        let h = starter(1);
         let v = h.game.view(1);
         let far = Coord::new(21, 14);
         assert!(!h.game.factions[&1].explored.contains(far));
@@ -646,14 +614,14 @@ mod tests {
     }
     #[test]
     fn the_campaign_calendar_advances_one_day_per_turn() {
-        let mut h = dawn(3);
-        assert_eq!(h.game.date().iso(), "1892-01-01");
+        let mut h = starter(3);
+        assert_eq!(h.game.date().iso(), "1904-02-08");
         for _ in 0..3 {
             h.command(1, Command::EndTurn).unwrap();
         }
         assert_eq!(h.game.turn, 4);
-        assert_eq!(h.game.date().iso(), "1892-01-04");
-        assert!(h.game.log.iter().any(|l| l.starts_with("1 Jan 1892 |")));
+        assert_eq!(h.game.date().iso(), "1904-02-11");
+        assert!(h.game.log.iter().any(|l| l.starts_with("8 Feb 1904 |")));
         assert_eq!(h.game.view(1).date(), h.game.date());
     }
     #[test]
@@ -662,8 +630,8 @@ mod tests {
         let host = Host::start(
             content,
             Start {
-                scenario: Some("dawn-straits"),
-                nation: Some("northern-league"),
+                scenario: Some("russo-japanese-war"),
+                nation: Some("russia"),
                 seed: 1,
             },
         )
@@ -672,7 +640,7 @@ mod tests {
         let mut host = host;
         assert!(host.command(1, Command::EndTurn).is_err());
         host.command(2, Command::EndTurn).unwrap();
-        for (scenario, nation) in [("dawn-straits", "atlantis"), ("missing", "dawn-empire")] {
+        for (scenario, nation) in [("russo-japanese-war", "atlantis"), ("missing", "japan")] {
             let result = Host::start(
                 Content::base(),
                 Start {
@@ -686,7 +654,7 @@ mod tests {
     }
     #[test]
     fn scenario_wars_drive_the_ai_and_peace_keeps_it_home() {
-        // At war: the League's cavalry rides on the Dawn capital. At peace: it stays home.
+        // At war: Russia's cavalry rides on the Japanese capital. At peace: it stays home.
         let ride = |mut h: Host| {
             let id = unit_of(&h, 2, "cavalry");
             let start = h.game.units[&id].position;
@@ -695,14 +663,14 @@ mod tests {
             }
             (start, h.game.units[&id].position)
         };
-        let (start, after) = ride(dawn(1));
+        let (start, after) = ride(starter(1));
         assert_ne!(start, after);
-        let (start, after) = ride(dawn_at_peace(1));
+        let (start, after) = ride(starter_at_peace(1));
         assert_eq!(start, after);
     }
     #[test]
     fn attacking_a_neutral_nation_declares_war() {
-        let mut h = dawn_at_peace(9);
+        let mut h = starter_at_peace(9);
         assert!(!h.game.at_war(1, 2));
         let attacker = unit_of(&h, 1, "cavalry");
         let target = unit_of(&h, 2, "infantry");
@@ -723,7 +691,7 @@ mod tests {
     }
     #[test]
     fn a_battle_wounds_or_kills_with_civ3_combat() {
-        let mut h = dawn(9);
+        let mut h = starter(9);
         let attacker = unit_of(&h, 1, "cavalry");
         let defender = unit_of(&h, 2, "infantry");
         let capital = h.game.cities[&1].position;
@@ -754,7 +722,7 @@ mod tests {
     }
     #[test]
     fn artillery_bombards_without_killing_and_cannot_melee() {
-        let mut h = dawn(5);
+        let mut h = starter(5);
         let gun = unit_of(&h, 1, "artillery");
         let defender = unit_of(&h, 2, "infantry");
         let capital = h.game.cities[&1].position;
@@ -781,7 +749,7 @@ mod tests {
     }
     #[test]
     fn founding_and_conquering_cities_move_borders() {
-        let mut h = dawn(7);
+        let mut h = starter(7);
         let capital = h.game.cities[&1].position;
         let near = Coord::new(capital.x + 1, capital.y);
         assert_eq!(h.game.map.get(near).unwrap().owner, 1);
@@ -810,7 +778,7 @@ mod tests {
     }
     #[test]
     fn settlement_production_and_victory() {
-        let mut h = dawn_at_peace(7);
+        let mut h = starter_at_peace(7);
         let pioneer = unit_of(&h, 1, "pioneer");
         // Make a known fixture site three tiles away, then exercise real movement/settlement.
         let capital = h.game.cities[&1].position;
@@ -873,7 +841,7 @@ mod tests {
     }
     #[test]
     fn workers_fortify_and_build_through_the_host() {
-        let mut h = dawn(2);
+        let mut h = starter(2);
         let worker = unit_of(&h, 1, "worker");
         let guard = unit_of(&h, 1, "infantry");
         let capital = h.game.cities[&1].position;
@@ -947,7 +915,7 @@ mod tests {
     }
     #[test]
     fn a_marching_unit_is_sent_with_the_route_it_will_walk() {
-        let mut h = dawn(1);
+        let mut h = starter(1);
         let player = h.commander();
         let (unit, goal) = infantry_and_goal(&h, usize::MAX);
         assert!(seen_by(&h, player).units[&unit].route.is_empty());
@@ -986,7 +954,7 @@ mod tests {
     }
     #[test]
     fn the_unit_walks_exactly_the_squares_it_was_sent() {
-        let mut h = dawn(1);
+        let mut h = starter(1);
         let player = h.commander();
         let (unit, goal) = infantry_and_goal(&h, 5);
         h.command(

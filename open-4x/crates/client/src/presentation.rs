@@ -1248,12 +1248,12 @@ pub(super) fn refresh(
         );
     }
     // Unhurried map typography echoes printed campaign charts.
-    if game.scenario == "dawn-straits" {
+    if game.scenario == "russo-japanese-war" {
         // Placed on the chart, where the hand-drawn map's squares are.
         let chart = Chart::of(&game.map);
         for (label, pos) in [
-            ("THE JADE STRAITS", chart.tile(14, 2)),
-            ("SOUTHERN SEA", chart.tile(4, 15)),
+            ("YELLOW SEA", chart.tile(14, 2)),
+            ("KOREA BAY", chart.tile(4, 15)),
         ] {
             for position in built.copies(&game.map, pos) {
                 let (x, y) = position.screen();
@@ -2114,16 +2114,14 @@ fn build_ui(
         }
     }
     if !narrow {
-        // The minimap is the map's own shape, set in a slate frame with a column of tools beside it.
+        // The minimap is the map's own shape, set in a slate frame.
         let image = chart_size(size.y, &game.map);
         let mut chart = card();
         chart.left = px(CHART_LEFT);
         chart.bottom = px(CHART_BOTTOM);
-        chart.width = px(image.x + 2.0 * CHART_FRAME + TOOLS_WIDTH + TOOLS_GAP);
+        chart.width = px(image.x + 2.0 * CHART_FRAME);
         chart.height = px(image.y + 2.0 * CHART_FRAME);
         chart.padding = UiRect::all(px(CHART_FRAME));
-        chart.flex_direction = FlexDirection::Row;
-        chart.column_gap = px(TOOLS_GAP);
         commands
             .spawn((
                 chart,
@@ -2171,42 +2169,6 @@ fn build_ui(
                         }
                     });
                 });
-                // The tools: the capital, the next unit, the next city.
-                p.spawn((
-                    Node {
-                        width: px(TOOLS_WIDTH),
-                        height: px(image.y),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::all(px(3)),
-                        border: UiRect::all(px(2)),
-                        row_gap: px(2),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.067, 0.075, 0.086)),
-                    BorderColor::all(TRIM.with_alpha(0.8)),
-                ))
-                .with_children(|p| {
-                    for (emblem, action) in [
-                        ("globe", Action::Home),
-                        ("ship", Action::NextUnit),
-                        ("lens", Action::NextCity),
-                    ] {
-                        p.spawn((
-                            Button,
-                            action,
-                            crate::chrome::Tool,
-                            Node {
-                                flex_grow: 1.0,
-                                width: percent(100),
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },
-                            BackgroundColor(crate::chrome::TOOL),
-                        ))
-                        .with_children(|b| crate::chrome::emblem(b, assets, prefix, emblem, 34.0));
-                    }
-                });
             });
     }
     // The selected unit's orders float over the foot of the map, in the space the minimap and
@@ -2223,7 +2185,7 @@ fn build_ui(
         } else {
             let chart = chart_size(size.y, &game.map);
             crate::bar::Placement {
-                left: CHART_LEFT + chart.x + 2.0 * CHART_FRAME + TOOLS_WIDTH + TOOLS_GAP + 16.0,
+                left: CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
                 right: 16.0 + INFO_WIDTH + 12.0,
                 bottom: CHART_BOTTOM + MESSAGE_HEIGHT + 10.0,
             }
@@ -2238,7 +2200,7 @@ fn build_ui(
     } else {
         let chart = chart_size(size.y, &game.map);
         (
-            CHART_LEFT + chart.x + 2.0 * CHART_FRAME + TOOLS_WIDTH + TOOLS_GAP + 16.0,
+            CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
             16.0 + INFO_WIDTH + 16.0,
             CHART_BOTTOM,
         )
@@ -2531,9 +2493,6 @@ const CHART_LEFT: f32 = 12.0;
 const CHART_BOTTOM: f32 = 12.0;
 /// The frame's rim and padding around the minimap picture.
 const CHART_FRAME: f32 = 14.0;
-/// The column of tools beside the minimap, and the gap between it and the picture.
-const TOOLS_WIDTH: f32 = 52.0;
-const TOOLS_GAP: f32 = 8.0;
 /// Width of the pane that describes the selection, and height of the pill that carries the
 /// game's message (map clicks under both are blocked, see `controls`).
 const INFO_WIDTH: f32 = 320.0;
@@ -2804,15 +2763,15 @@ pub(super) fn draw_overlays(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn dawn() -> Game {
-        fourx_runtime::Host::base_scenario("dawn-straits", 42)
+    fn starter() -> Game {
+        fourx_runtime::Host::base_scenario("russo-japanese-war", 42)
             .expect("the starter scenario starts")
             .game
     }
 
     #[test]
     fn fog_matches_on_both_images_of_the_seam() {
-        let mut game = dawn();
+        let mut game = starter();
         let lattice = game.map.lattice.unwrap();
         let city = game
             .cities
@@ -2839,7 +2798,7 @@ mod tests {
 
     #[test]
     fn the_minimap_panel_has_the_maps_proportions_and_fits_its_longer_side() {
-        let game = dawn();
+        let game = starter();
         let chart = Chart::of(&game.map);
         for height in [400.0, 900.0, 2000.0] {
             let size = chart_size(height, &game.map);
@@ -2855,7 +2814,7 @@ mod tests {
 
     #[test]
     fn the_minimap_fills_a_nations_land_and_darkens_its_frontier() {
-        let game = dawn();
+        let game = starter();
         let player = game.commander;
         let (width, _, painted) = minimap_pixels(&game, player);
         let mut bare = game.clone();
@@ -2910,7 +2869,7 @@ mod tests {
 
     #[test]
     fn only_the_players_own_cities_are_picked_out() {
-        let game = dawn();
+        let game = starter();
         let player = game.commander;
         let (width, _, data) = minimap_pixels(&game, player);
         let chart = Chart::of(&game.map);
@@ -3093,7 +3052,7 @@ mod tests {
 
     #[test]
     fn sight_is_what_the_player_has_charted_and_what_their_pieces_can_see() {
-        let host = fourx_runtime::Host::base_scenario("dawn-straits", 1).unwrap();
+        let host = fourx_runtime::Host::base_scenario("russo-japanese-war", 1).unwrap();
         let game = host.game.clone();
         let capital = game.cities[&1].position;
         let rect = (0, 0, game.map.width - 1, game.map.height - 1);
@@ -3131,7 +3090,7 @@ mod tests {
 
     #[test]
     fn pieces_stand_half_again_as_tall_as_before() {
-        let host = fourx_runtime::Host::base_scenario("dawn-straits", 42)
+        let host = fourx_runtime::Host::base_scenario("russo-japanese-war", 42)
             .expect("the starter scenario starts");
         assert_eq!(unit_size(&host.rules.units["infantry"]), Vec2::splat(105.0));
         assert_eq!(
@@ -3162,7 +3121,7 @@ mod tests {
 
     #[test]
     fn the_chart_stands_a_lattice_map_upright() {
-        let host = fourx_runtime::Host::base_scenario("dawn-straits", 1).unwrap();
+        let host = fourx_runtime::Host::base_scenario("russo-japanese-war", 1).unwrap();
         let map = &host.game.map;
         let chart = Chart::of(map);
         // 24 columns of 18 rows: one pixel for every tile, none shared, none left over.

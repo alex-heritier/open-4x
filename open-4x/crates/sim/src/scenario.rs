@@ -150,7 +150,7 @@ impl Rules {
 pub struct Scenario {
     /// Always [`SCENARIO_FORMAT`].
     pub format: u32,
-    /// Stable lowercase identifier, e.g. `world-1876`.
+    /// Stable lowercase identifier, e.g. `russo-japanese-war`.
     pub id: String,
     pub name: String,
     #[serde(default)]

@@ -283,7 +283,9 @@ mod tests {
     async fn websocket_authority_revision_replay_and_spectators() {
         let (changed, _) = broadcast::channel(32);
         let shared = Shared {
-            host: Arc::new(Mutex::new(Host::base_scenario("dawn-straits", 42).unwrap())),
+            host: Arc::new(Mutex::new(
+                Host::base_scenario("russo-japanese-war", 42).unwrap(),
+            )),
             commander_id: 1,
             changed,
             commander: Arc::new(Mutex::new(false)),

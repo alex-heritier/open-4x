@@ -1,5 +1,6 @@
-//! Builds `world-1876.json`, the default scenario: the world from 84°N to 58°S on a 512×342
-//! Mercator plane, laid out upright as 175,104 tiles, as it stood on 1 January 1876.
+//! Builds a `world-1876.json` whole-world scenario (not bundled with the pack): the world
+//! from 84°N to 58°S on a 512×342 Mercator plane, laid out upright as 175,104 tiles,
+//! as it stood on 1 January 1876.
 //!
 //! ```text
 //! scenario-forge build [--out FILE] [--preview FILE] [--terrain FILE] [--crop X,Y,W,H,SCALE,FILE]...

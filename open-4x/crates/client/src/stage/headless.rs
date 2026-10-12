@@ -14,7 +14,7 @@ use std::time::Duration;
 const CAMERA: Vec2 = Vec2::new(300.0, -200.0);
 
 fn session() -> Session {
-    let host = Host::base_scenario("dawn-straits", 42).expect("the starter scenario starts");
+    let host = Host::base_scenario("russo-japanese-war", 42).expect("the starter scenario starts");
     Session {
         player: host.commander(),
         game: Some(host.game),
@@ -223,7 +223,8 @@ fn a_real_attack_reaches_the_stage_and_holds_orders_back_until_it_is_over() {
     use crate::{BACKDROP, connection::Connection, issue, receive};
     use fourx_sim::Command;
 
-    let mut host = Host::base_scenario("dawn-straits", 42).expect("the starter scenario starts");
+    let mut host =
+        Host::base_scenario("russo-japanese-war", 42).expect("the starter scenario starts");
     let me = host.commander();
     // Put one of the enemy's infantrymen next to the player's cavalry, so one order is a fight.
     let (rider, from) = {
@@ -338,7 +339,7 @@ fn a_real_march_is_walked_square_by_square() {
     use crate::{BACKDROP, connection::Connection, issue, march::WalkerSprite, receive};
     use fourx_sim::Command;
 
-    let host = Host::base_scenario("dawn-straits", 42).expect("the starter scenario starts");
+    let host = Host::base_scenario("russo-japanese-war", 42).expect("the starter scenario starts");
     let me = host.commander();
     let (unit, from) = {
         let u = (host.game.units.values())

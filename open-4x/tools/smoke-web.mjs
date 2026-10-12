@@ -20,8 +20,8 @@ const server=createServer(async(req,res)=>{
   }catch{res.writeHead(404);res.end();}
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
-// The assertions below are written for the compact two-empire starter, not the world scenario.
-const url=`http://127.0.0.1:${server.address().port}/?scenario=dawn-straits`;
+// The assertions below are written for the compact starter, not the great campaign.
+const url=`http://127.0.0.1:${server.address().port}/?scenario=russo-japanese-war`;
 const chrome=spawn(process.env.FOURX_CHROMIUM||'/usr/bin/chromium-browser',[
   '--headless','--no-sandbox','--disable-dev-shm-usage','--use-angle=swiftshader','--enable-unsafe-swiftshader',
   '--remote-debugging-port=0',`--user-data-dir=${evidence}/profile`,'about:blank',

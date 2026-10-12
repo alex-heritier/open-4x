@@ -49,27 +49,6 @@ impl Frame {
     }
 }
 
-/// A button of the minimap's column of tools, and its fills: dark, brighter under the pointer.
-#[derive(Component)]
-pub(crate) struct Tool;
-
-pub(crate) const TOOL: Color = Color::srgb(0.114, 0.125, 0.141);
-const TOOL_HOVER: Color = Color::srgb(0.196, 0.204, 0.212);
-const TOOL_PRESSED: Color = Color::srgb(0.078, 0.086, 0.098);
-
-type ToolChanged = (With<Tool>, Changed<Interaction>);
-
-/// Repaint a tool as the pointer crosses it.
-pub(crate) fn tools(mut tools: Query<(&Interaction, &mut BackgroundColor), ToolChanged>) {
-    for (interaction, mut fill) in &mut tools {
-        fill.0 = match interaction {
-            Interaction::Pressed => TOOL_PRESSED,
-            Interaction::Hovered => TOOL_HOVER,
-            Interaction::None => TOOL,
-        };
-    }
-}
-
 /// A file of the pack's chrome.
 pub(crate) fn picture(assets: &AssetServer, prefix: &str, name: &str) -> Handle<Image> {
     assets.load(format!("{prefix}ui/chrome/{name}.png"))

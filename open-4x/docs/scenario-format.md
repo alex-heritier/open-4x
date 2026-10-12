@@ -8,9 +8,10 @@ the default.
 
 The bundled default is [`age-of-imperialism`](../assets/packs/base/scenarios/age-of-imperialism.json):
 the Civ3 *Age of Imperialism 5.0* map (90 × 180 upright, 43 resource kinds) on 1 January 1895,
-converted by `tools/biq-import`. The pack also holds [`world-1876`](../assets/packs/base/scenarios/world-1876.json): the whole
-world on an upright Mercator map of 175,104 tiles (84°N to 58°S, no Antarctica) on **Saturday, 1 January 1876**, with 119 nations. The compact
-`dawn-straits` scenario is the small fixture the tests use.
+converted by `tools/biq-import`. The compact
+[`russo-japanese-war`](../assets/packs/base/scenarios/russo-japanese-war.json) scenario —
+Japan against Russia on a schematic chart of the Yellow Sea theater on 8 February 1904 —
+is the small fixture the tests use.
 
 ## Conventions
 
@@ -31,7 +32,7 @@ world on an upright Mercator map of 175,104 tiles (84°N to 58°S, no Antarctica
 | Field | Type | Notes |
 | --- | --- | --- |
 | `format` | integer | Must be `3`. Older documents are refused: version 1 had `armies`, and version 2 maps were plain rectangles that showed turned 45° on screen. |
-| `id` | string | Scenario ID, e.g. `world-1876`. |
+| `id` | string | Scenario ID, e.g. `russo-japanese-war`. |
 | `name` | string | Shown in the title bar. 1–96 characters. |
 | `description` | string | Up to 4000 characters. Not used by the simulation. |
 | `start_date` | date | Calendar date of turn 1. **One turn is one day.** |
@@ -48,9 +49,9 @@ world on an upright Mercator map of 175,104 tiles (84°N to 58°S, no Antarctica
 
 `rules` may set `victory_industry` (1–1 000 000, the total shields a nation must produce to win
 by industry), `research_cost` (1–100 000), `starting_gold`
-(0–1 000 000). Anything omitted keeps the pack's value. The world
+(0–1 000 000). Anything omitted keeps the pack's value. The Age of Imperialism
 scenario raises `victory_industry` and `research_cost`, because the default values are tuned for
-the two-empire starter.
+the two-belligerent starter.
 
 ## Map
 
@@ -127,8 +128,8 @@ Civ3 draws its map as a rectangle that stands upright on screen: north up, east 
 other row shifted half a tile. The simulation works on a square grid, and a plain `width × height`
 rectangle of that grid is shown turned 45°, as a diamond. `lattice` fixes this. It says the world has
 `rows` rows of `columns` tiles each, and the document stores them in a square grid of side
-`columns + rows / 2` (`rows` must be even), which `width` and `height` must equal. In the world
-scenario that is `256` columns and `684` rows in a `598 × 598` grid, and `dawn-straits` uses `12` and
+`columns + rows / 2` (`rows` must be even), which `width` and `height` must equal. In the
+Age of Imperialism map that is `90` columns and `180` rows, and `russo-japanese-war` uses `12` and
 `36` in `30 × 30`.
 
 With a tile's native Civ3 position written `(cx, cy)` (`cx` counts half tiles across, `cy` counts
@@ -234,8 +235,7 @@ A pack lists its scenarios and the default in `pack.json`:
 ```json
 "scenarios": [
   {"id": "age-of-imperialism", "path": "scenarios/age-of-imperialism.json"},
-  {"id": "world-1876", "path": "scenarios/world-1876.json"},
-  {"id": "dawn-straits", "path": "scenarios/dawn-straits.json"}
+  {"id": "russo-japanese-war", "path": "scenarios/russo-japanese-war.json"}
 ],
 "default_scenario": "age-of-imperialism"
 ```
@@ -243,19 +243,20 @@ A pack lists its scenarios and the default in `pack.json`:
 ```sh
 cargo run -p fourx-server -- --list                          # scenarios and their nations
 cargo run -p fourx-client                                    # the default: age-of-imperialism, as Japan
-cargo run -p fourx-client -- --nation united-kingdom         # same world, another nation
-cargo run -p fourx-client -- --scenario dawn-straits         # the compact starter
-cargo run -p fourx-server -- --scenario world-1876 --nation russia --simulate 30
+cargo run -p fourx-client -- --nation british-empire         # same campaign, another nation
+cargo run -p fourx-client -- --scenario russo-japanese-war   # the compact starter
+cargo run -p fourx-server -- --scenario russo-japanese-war --nation russia --simulate 30
 ```
 
 Paths are relative to the pack directory and may not leave it. A save embeds the pack, rules,
 script, and the full game state, so it resumes independently of later edits to the files. Saves
 and packs from earlier versions (pack format 1, save format 1) are refused with a clear message.
 
-## Building the world scenario
+## Building a world scenario
 
-`world-1876.json` is generated, not hand-edited. `tools/scenario-forge` combines curated
-history tables in `tools/scenario-forge/data/` with public geographic data:
+`tools/scenario-forge` generates a whole-world 1876 scenario (not currently bundled) from
+curated history tables in `tools/scenario-forge/data/` combined with public geographic data.
+Its output is hand-edited nowhere; the tool owns it:
 
 | Source | Used for | Licence |
 | --- | --- | --- |

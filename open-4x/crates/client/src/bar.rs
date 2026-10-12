@@ -1,7 +1,7 @@
-//! The action bar: what the selected unit can be ordered to do, as a tray of glyph buttons
-//! floating at the foot of the map, the way Civ3 lays out its unit commands.
+//! The action bar: what the selected unit can be ordered to do, as separate circle
+//! buttons floating at the foot of the map, the way Civ3 lays out its unit commands.
 //!
-//! Two rows, packed close and centred. Above go the orders of the unit's own trade:
+//! Two rows, spaced apart and centred. Above go the orders of the unit's own trade:
 //! found a city, build a road, a mine or a farm, and every blow it can strike from where it
 //! stands. Below go the standing orders every unit can be given: fortify, cancel its orders,
 //! disband it. A button appears for every order the design can give at all; one that cannot be
@@ -11,14 +11,11 @@
 //! Right-clicking the map is how a unit is sent somewhere or at an enemy (see `controls`);
 //! the strike buttons offer the same blows from the bar.
 use super::*;
-use crate::chrome::{Frame, Skin, dress};
-use crate::theme::{
-    BAD, CARD, EDGE, INK, INK_SOFT, ON_PLATE, PLATE, TRIM, Tone, card, glyph, lift_small, rounded,
-};
+use crate::theme::{BAD, INK, INK_SOFT, ON_PLATE, PLATE, TRIM, Tone, glyph, lift_small, rounded};
 use fourx_sim::{Domain, Order, Unit};
 
-/// Side of a button on screen.
-const BUTTON: f32 = 44.0;
+/// Diameter of a button on screen.
+const BUTTON: f32 = 48.0;
 /// Side of the glyph on it. The glyphs are 64 px, drawn at under half for crisp scaling.
 const GLYPH: f32 = 26.0;
 
@@ -267,29 +264,21 @@ pub(super) fn spawn(
                 },
                 TextColor(ON_PLATE),
             ));
-            let mut tray = card();
-            tray.position_type = PositionType::Relative;
-            tray.padding = UiRect::axes(px(16), px(14));
-            tray.row_gap = px(4);
-            bar.spawn((tray, BackgroundColor(CARD), lift_small()))
-                .with_children(|tray| {
-                    dress(tray, assets, prefix, Skin::Paper, Frame::Small, false);
-                    for row in rows {
-                        tray.spawn(Node {
-                            flex_direction: FlexDirection::Row,
-                            flex_wrap: FlexWrap::Wrap,
-                            justify_content: JustifyContent::Center,
-                            column_gap: px(4),
-                            row_gap: px(4),
-                            ..default()
-                        })
-                        .with_children(|row_node| {
-                            for entry in row {
-                                button(row_node, assets, prefix, entry);
-                            }
-                        });
+            for row in rows {
+                bar.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    justify_content: JustifyContent::Center,
+                    column_gap: px(10),
+                    row_gap: px(10),
+                    ..default()
+                })
+                .with_children(|row_node| {
+                    for entry in row {
+                        button(row_node, assets, prefix, entry);
                     }
                 });
+            }
         });
 }
 
@@ -318,11 +307,17 @@ fn button(row: &mut ChildSpawnerCommands, assets: &AssetServer, prefix: &str, en
             height: px(BUTTON),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: UiRect::all(px(1.5)),
-            border_radius: rounded(4.0),
+            border: UiRect::all(px(2.0)),
+            border_radius: rounded(BUTTON / 2.0),
+            overflow: Overflow::clip(),
             ..default()
         },
-        BorderColor::all(if dormant { EDGE.with_alpha(0.2) } else { EDGE }),
+        BorderColor::all(if dormant {
+            TRIM.with_alpha(0.25)
+        } else {
+            TRIM.with_alpha(0.9)
+        }),
+        lift_small(),
     ))
     .with_children(|b| {
         glyph(b, assets, prefix, entry.icon, GLYPH, face);
@@ -382,7 +377,8 @@ mod tests {
     use fourx_runtime::Host;
 
     fn start() -> (Host, Id) {
-        let host = Host::base_scenario("dawn-straits", 42).expect("the starter scenario starts");
+        let host =
+            Host::base_scenario("russo-japanese-war", 42).expect("the starter scenario starts");
         let player = host.commander();
         (host, player)
     }

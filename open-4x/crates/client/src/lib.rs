@@ -400,12 +400,6 @@ enum Action {
     CloseTalk,
     /// A control that is drawn but does nothing yet.
     Idle,
-    /// Bring the camera to the capital.
-    Home,
-    /// Select the next unit that waits for orders, and show it.
-    NextUnit,
-    /// Open the next of the player's cities.
-    NextCity,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -699,7 +693,6 @@ pub fn run() {
             )
                 .chain(),
         );
-    app.add_systems(Update, chrome::tools);
     app.insert_gizmo_config(route::RouteGizmos, route::gizmo_config());
     theme::install_font(&mut app);
     city::install_fonts(&mut app);
@@ -1090,22 +1083,6 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             None
         }
         Action::Idle => None,
-        // The camera is the caller's to move (see `buttons`).
-        Action::Home => None,
-        Action::NextUnit => {
-            if let Some(id) = next_unit(session) {
-                session.selection = Selection::Unit(id);
-                session.dirty = true;
-            }
-            None
-        }
-        Action::NextCity => {
-            if let Some(id) = next_city(session) {
-                session.selection = Selection::City(id);
-                session.dirty = true;
-            }
-            None
-        }
         Action::CloseCity => {
             if matches!(session.selection, Selection::City(_)) {
                 session.selection = Selection::None;
@@ -1200,14 +1177,6 @@ fn buttons(
                 .as_ref()
                 .and_then(|g| g.cities.get(id))
                 .map(|c| c.position),
-            Action::Home => session.game.as_ref().and_then(|g| home(g, session.player)),
-            Action::NextUnit | Action::NextCity => {
-                session.game.as_ref().and_then(|g| match session.selection {
-                    Selection::Unit(id) => g.units.get(&id).map(|u| u.position),
-                    Selection::City(id) => g.cities.get(&id).map(|c| c.position),
-                    _ => None,
-                })
-            }
             Action::ZoomCity(id) => session
                 .game
                 .as_ref()
@@ -1650,7 +1619,7 @@ mod tests {
 
     #[test]
     fn right_click_names_the_city_and_every_unit_on_its_square() {
-        let host = fourx_runtime::Host::base_scenario("dawn-straits", 42)
+        let host = fourx_runtime::Host::base_scenario("russo-japanese-war", 42)
             .expect("the starter scenario starts");
         let game = &host.game;
         let city = game.cities.values().next().expect("a city");

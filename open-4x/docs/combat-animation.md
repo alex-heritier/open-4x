@@ -259,7 +259,7 @@ naval ones at sea. `--combat-speed N` (or `FOURX_COMBAT_SPEED`) scales the clock
 a late freeze moment inside the screenshot's frame budget.
 
 ```bash
-cargo run -p fourx-client -- --scenario dawn-straits --zoom 0.7 \
+cargo run -p fourx-client -- --scenario russo-japanese-war --zoom 0.7 \
   --demo-combat duel@1.5 --screenshot /tmp/duel.png --smoke
-cargo run -p fourx-client -- --scenario dawn-straits --focus 15,23 --demo-combat naval
+cargo run -p fourx-client -- --scenario russo-japanese-war --focus 15,23 --demo-combat naval
 ```

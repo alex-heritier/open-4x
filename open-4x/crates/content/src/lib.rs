@@ -22,12 +22,8 @@ pub const BASE_SCENARIOS: &[(&str, &str)] = &[
         include_str!("../../../assets/packs/base/scenarios/age-of-imperialism.json"),
     ),
     (
-        "scenarios/world-1876.json",
-        include_str!("../../../assets/packs/base/scenarios/world-1876.json"),
-    ),
-    (
-        "scenarios/dawn-straits.json",
-        include_str!("../../../assets/packs/base/scenarios/dawn-straits.json"),
+        "scenarios/russo-japanese-war.json",
+        include_str!("../../../assets/packs/base/scenarios/russo-japanese-war.json"),
     ),
     (
         "scenarios/terrain-study.json",
@@ -523,9 +519,9 @@ mod tests {
     use super::*;
     use fourx_sim::{Game, terrain::Coord};
 
-    fn dawn() -> Scenario {
+    fn starter() -> Scenario {
         Content::base()
-            .scenario(Some("dawn-straits"))
+            .scenario(Some("russo-japanese-war"))
             .unwrap()
             .clone()
     }
@@ -710,155 +706,45 @@ mod tests {
         p.scenarios.push(p.scenarios[0].clone());
         assert!(p.validate().is_err());
     }
-    /// The world is a Web-Mercator map from 84°N to 58°S (no Antarctica), painted in layers.
-    fn world_is_painted_with_layered_terrain(world: &Scenario) {
-        use fourx_sim::terrain::{Cover, Relief, Terrain};
-        let map = &world.map;
-        // An upright world of 512 x 684 half-tile cells: 256 tiles across, 684 rows down,
-        // turned into the square grid the simulation runs on.
-        let lattice = map.lattice.expect("the world stands upright");
-        assert_eq!((lattice.columns, lattice.rows), (256, 684));
-        assert_eq!((map.width, map.height), (598, 598));
-        assert_eq!(map.tile_count(), 256 * 684);
-        // Where a longitude and latitude fall on the plane the tiles tile: 512 units across
-        // for 360 degrees, a tile 2 wide and 1 tall, its centre at `(column, row / 2)`.
-        let plane = |lon: f64, lat: f64| {
-            let unit = (1.0 - lat.to_radians().tan().asinh() / std::f64::consts::PI) / 2.0;
-            ((lon + 180.0) / 360.0 * 512.0, unit * 512.0 - 16.0)
-        };
-        let centre = |p: Coord| {
-            let (cx, cy) = lattice.native(p);
-            (f64::from(cx), f64::from(cy) / 2.0)
-        };
-        let at = |lon: f64, lat: f64| {
-            let (px, py) = plane(lon, lat);
-            map.positions()
-                .filter(|&p| {
-                    let (x, y) = centre(p);
-                    (x - px).abs() <= 2.0 && (y - py).abs() <= 1.0
-                })
-                .min_by(|&a, &b| {
-                    let metric = |p: Coord| {
-                        let (x, y) = centre(p);
-                        (x - px).abs() / 2.0 + (y - py).abs()
-                    };
-                    metric(a).total_cmp(&metric(b))
-                })
-                .and_then(|p| map.get(p))
-                .unwrap()
-        };
+    /// The compact starter stands its lattice map upright like the great campaigns do.
+    fn starter_chart_is_upright(scenario: &Scenario) {
+        let map = &scenario.map;
+        let lattice = map.lattice.expect("the starter stands upright");
+        assert_eq!((lattice.columns, lattice.rows), (12, 36));
+        assert_eq!((map.width, map.height), (30, 30));
+        assert_eq!(map.tile_count(), 12 * 36);
         assert!(map.tiles.iter().all(|t| t.layers_valid()));
-        // Nothing below Cape Horn: the bottom rows are all open water.
-        assert!(
-            map.positions()
-                .filter(|&p| lattice.native(p).1 >= lattice.rows - 2)
-                .all(|p| map.get(p).unwrap().is_water())
-        );
-        // Climate decides the base, elevation the relief, and growth the cover.
-        assert_eq!(at(12.0, 23.0).terrain, Terrain::Desert, "Sahara");
-        assert_eq!(at(86.9, 28.0).relief, Relief::Mountains, "Himalaya");
-        assert_eq!(at(6.9, 45.8).relief, Relief::Mountains, "Alps");
-        assert_eq!(at(23.0, 0.0).cover, Cover::Jungle, "Congo");
-        assert_eq!(at(100.0, 62.0).cover, Cover::Forest, "Siberian taiga");
-        assert_eq!(at(51.0, 42.0).terrain, Terrain::Sea, "Caspian Sea");
-        assert_eq!(at(-40.0, 30.0).terrain, Terrain::Ocean, "mid-Atlantic");
-        assert_eq!(at(-19.0, 65.0).terrain, Terrain::Tundra, "Iceland");
-        // The Nile runs through Egypt, and the Congo and Amazon have rivers too.
-        let rivers_in = |west: f64, south: f64, east: f64, north: f64| {
-            let ((x0, y0), (x1, y1)) = (plane(west, north), plane(east, south));
-            map.positions()
-                .filter(|&p| {
-                    let (x, y) = centre(p);
-                    (x0..=x1).contains(&x)
-                        && (y0..=y1).contains(&y)
-                        && map.get(p).is_some_and(|t| t.river != 0)
-                })
-                .count()
-        };
-        assert!(rivers_in(29.0, 22.0, 33.0, 31.0) >= 8, "Nile");
-        assert!(rivers_in(-75.0, -10.0, -48.0, 0.0) >= 20, "Amazon");
-        // Shares of the land, in the range of a Civ3 world.
-        let land: Vec<_> = map.tiles.iter().filter(|t| t.is_land()).collect();
-        let share = |wanted: &dyn Fn(&&fourx_sim::terrain::Tile) -> bool| {
-            land.iter().filter(|t| wanted(t)).count() as f64 / land.len() as f64
-        };
-        assert!((0.04..0.10).contains(&share(&|t| t.relief == Relief::Mountains)));
-        assert!((0.10..0.25).contains(&share(&|t| t.relief == Relief::Hills)));
-        assert!((0.15..0.40).contains(&share(&|t| t.cover == Cover::Forest)));
-        assert!(share(&|t| t.cover == Cover::Marsh) > 0.002);
-        assert!(share(&|t| t.cover == Cover::Jungle) > 0.01);
-        assert!(share(&|t| t.terrain == Terrain::Desert) > 0.05);
-        // Water comes in three depths.
-        for depth in [Terrain::Coast, Terrain::Sea, Terrain::Ocean] {
-            assert!(
-                map.tiles.iter().filter(|t| t.terrain == depth).count() > 1000,
-                "{depth:?}"
-            );
-        }
     }
     #[test]
-    fn the_world_of_january_1876_is_still_shipped() {
-        use fourx_sim::Status;
+    fn the_theater_chart_of_february_1904_is_still_shipped() {
         let content = Content::base();
-        let world = content.scenario(Some("world-1876")).unwrap();
-        assert_eq!(world.id, "world-1876");
-        assert_eq!(world.start_date.iso(), "1876-01-01");
-        world_is_painted_with_layered_terrain(world);
-        // Great powers, minor states, dependencies and unrecognised polities all appear.
-        for id in [
-            "united-kingdom",
-            "france",
-            "germany",
-            "austria-hungary",
-            "russia",
-            "ottoman-empire",
-            "italy",
-            "spain",
-            "united-states",
-            "mexico",
-            "brazil",
-            "argentina",
-            "qing-china",
-            "japan",
-            "korea",
-            "persia",
-            "siam",
-            "egypt",
-            "ethiopia",
-            "transvaal",
-            "hawaii",
-            "tonga",
-        ] {
-            assert!(world.nations.iter().any(|n| n.id == id), "{id}");
-        }
-        let count = |status| world.nations.iter().filter(|n| n.status == status).count();
-        assert!(
-            count(Status::Sovereign) > 60,
-            "{}",
-            count(Status::Sovereign)
-        );
-        assert!(
-            count(Status::Dependent) >= 20,
-            "{}",
-            count(Status::Dependent)
-        );
-        assert!(
-            count(Status::Unrecognized) >= 5,
-            "{}",
-            count(Status::Unrecognized)
-        );
-        for nation in &world.nations {
-            let capitals = world
+        let theater = content.scenario(Some("russo-japanese-war")).unwrap();
+        assert_eq!(theater.id, "russo-japanese-war");
+        assert_eq!(theater.start_date.iso(), "1904-02-08");
+        starter_chart_is_upright(theater);
+        // Japan against Russia, commanded by Japan.
+        let nations: Vec<_> = theater.nations.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(nations, ["japan", "russia"]);
+        assert_eq!(theater.commander, "japan");
+        for nation in &theater.nations {
+            let capitals = theater
                 .cities
                 .iter()
                 .filter(|c| c.nation == nation.id && c.capital)
                 .count();
             assert_eq!(capitals, 1, "{} needs exactly one capital", nation.id);
         }
-        // The same world can be entered as a great power or as a speck in the Pacific.
-        let rules = content.pack.rules.with_overrides(&world.rules);
-        for id in ["japan", "united-kingdom", "tonga"] {
-            let game = Game::from_scenario(1, &rules, world, Some(id)).unwrap();
+        assert!(
+            theater
+                .wars
+                .iter()
+                .any(|w| w.name == "The Russo-Japanese War"),
+            "the war is under way"
+        );
+        // Either belligerent can be commanded.
+        let rules = content.pack.rules.with_overrides(&theater.rules);
+        for id in ["japan", "russia"] {
+            let game = Game::from_scenario(1, &rules, theater, Some(id)).unwrap();
             assert_eq!(game.factions[&game.commander].tag, id);
         }
     }
@@ -969,31 +855,30 @@ mod tests {
     fn nations_are_dealt_the_architecture_of_their_part_of_the_world() {
         use fourx_sim::Flavor::*;
         let content = Content::base();
-        let world = content.scenario(Some("world-1876")).unwrap();
-        let flavor = |id: &str| world.nations.iter().find(|n| n.id == id).expect(id).flavor;
+        let imperialism = content.scenario(Some("age-of-imperialism")).unwrap();
+        let flavor = |id: &str| {
+            imperialism
+                .nations
+                .iter()
+                .find(|n| n.id == id)
+                .expect(id)
+                .flavor
+        };
         for (id, wanted) in [
-            ("united-kingdom", Western),
-            ("spain", Latin),
+            ("british-empire", Western),
+            ("italy", Latin),
             ("russia", Orthodox),
             ("ottoman-empire", Arab),
-            ("qing-china", EastAsian),
+            ("china", EastAsian),
             ("siam", SoutheastAsian),
-            ("ethiopia", African),
-            ("mongolia", Steppe),
-            ("tonga", Oceanic),
+            ("abyssinia", African),
         ] {
             assert_eq!(flavor(id), wanted, "{id}");
         }
-        let used: std::collections::BTreeSet<_> = world.nations.iter().map(|n| n.flavor).collect();
-        assert_eq!(
-            used.len(),
-            fourx_sim::Flavor::ALL.len(),
-            "every skin is used"
-        );
-        // The hand-made fixture has an eastern empire against a western league.
-        let dawn = content.scenario(Some("dawn-straits")).unwrap();
-        let flavors: Vec<_> = dawn.nations.iter().map(|n| n.flavor).collect();
-        assert_eq!(flavors, [EastAsian, Western]);
+        // The hand-made fixture pits an eastern empire against an orthodox one.
+        let theater = content.scenario(Some("russo-japanese-war")).unwrap();
+        let flavors: Vec<_> = theater.nations.iter().map(|n| n.flavor).collect();
+        assert_eq!(flavors, [EastAsian, Orthodox]);
     }
     #[test]
     fn nations_have_distinct_colours() {
@@ -1023,15 +908,15 @@ mod tests {
         let content = Content::base();
         assert!(content.scenario(None).is_ok());
         let message = content.scenario(Some("nope")).err().unwrap().to_string();
-        assert!(message.contains("dawn-straits"), "{message}");
+        assert!(message.contains("russo-japanese-war"), "{message}");
     }
 
     fn rejects(edit: impl FnOnce(&mut Scenario), why: &str) {
-        let mut s = dawn();
+        let mut s = starter();
         edit(&mut s);
         let rules = &Pack::base().rules;
         let error = scenario::validate_scenario(&s, rules).expect_err(why);
-        assert!(error.to_string().contains("dawn-straits"), "{error}");
+        assert!(error.to_string().contains("russo-japanese-war"), "{error}");
     }
     #[test]
     fn malformed_scenarios_rejected_without_panics() {
@@ -1053,7 +938,7 @@ mod tests {
             |s| {
                 // a second nation's unit on the first nation's square
                 let mut intruder = s.units[0].clone();
-                intruder.nation = "northern-league".into();
+                intruder.nation = "russia".into();
                 s.units.push(intruder);
             },
             "two nations on one square",
@@ -1089,7 +974,7 @@ mod tests {
         );
         rejects(|s| s.nations[0].id = "Not Valid".into(), "bad identifier");
         rejects(
-            |s| s.cities.retain(|c| c.nation != "northern-league"),
+            |s| s.cities.retain(|c| c.nation != "russia"),
             "city-less nation",
         );
         rejects(|s| s.wars.push(s.wars[0].clone()), "duplicate war");
@@ -1149,10 +1034,10 @@ mod tests {
     fn ships_may_start_in_their_own_coastal_cities_only() {
         use fourx_sim::terrain::Terrain;
         let rules = &Pack::base().rules;
-        // Dawn's cities are inland. Berth a ship of `nation` in city `city`, optionally
-        // opening a harbour beside it first.
+        // The starter's cities are inland. Berth a ship of `nation` in city `city`,
+        // optionally opening a harbour beside it first.
         let berth = |nation: &str, city: usize, harbour: bool| {
-            let mut s = dawn();
+            let mut s = starter();
             let square = s.cities[city].position;
             if harbour {
                 let water = Coord::new(square.x - 1, square.y);
@@ -1166,8 +1051,8 @@ mod tests {
             s.units[ship].position = square;
             s
         };
-        let own = dawn().cities[0].nation.clone();
-        let rival = dawn().cities[1].nation.clone();
+        let own = starter().cities[0].nation.clone();
+        let rival = starter().cities[1].nation.clone();
 
         let s = berth(&own, 0, true);
         scenario::validate_scenario(&s, rules).unwrap();
@@ -1193,7 +1078,7 @@ mod tests {
     #[test]
     fn scenario_names_and_starting_industry_are_moddable() {
         let content = Content::base();
-        let mut scenario = dawn();
+        let mut scenario = starter();
         scenario.nations[0].name = "A custom empire".into();
         scenario.cities[0].industry = 9;
         scenario::validate_scenario(&scenario, &content.pack.rules).unwrap();
@@ -1204,7 +1089,7 @@ mod tests {
     #[test]
     fn rule_overrides_apply_only_to_their_scenario() {
         let content = Content::base();
-        let mut scenario = dawn();
+        let mut scenario = starter();
         scenario.rules.victory_industry = Some(12_345);
         scenario.rules.starting_gold = Some(7);
         let rules = content.pack.rules.with_overrides(&scenario.rules);

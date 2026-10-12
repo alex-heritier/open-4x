@@ -3,18 +3,18 @@ use fourx_content::Content;
 use fourx_runtime::{Host, Start};
 use fourx_sim::Command;
 
-fn dawn_at_peace(seed: u64) -> Host {
+fn starter_at_peace(seed: u64) -> Host {
     let mut content = Content::base();
     content
         .scenarios
-        .get_mut("dawn-straits")
+        .get_mut("russo-japanese-war")
         .expect("the starter ships with the base pack")
         .wars
         .clear();
     Host::start(
         content,
         Start {
-            scenario: Some("dawn-straits"),
+            scenario: Some("russo-japanese-war"),
             seed,
             ..Start::default()
         },
@@ -32,7 +32,7 @@ fn the_starter_is_won_by_industry_in_weeks() {
     // Cities produce shields from their land, not a flat rate, and the shields add up to the
     // industrial victory. The pack's threshold is tuned so the compact starter is decided in
     // weeks: not on the tenth day, and not after a year of peace.
-    let mut host = dawn_at_peace(1);
+    let mut host = starter_at_peace(1);
     let mut days = 0;
     while host.game.winner.is_none() && days < 400 {
         end_turn(&mut host);
@@ -44,7 +44,7 @@ fn the_starter_is_won_by_industry_in_weeks() {
 
 #[test]
 fn every_city_gathers_something_and_cities_level_off() {
-    let mut host = dawn_at_peace(2);
+    let mut host = starter_at_peace(2);
     let starting: Vec<_> = host.game.cities.values().map(|c| c.population).collect();
     for _ in 0..30 {
         end_turn(&mut host);
@@ -99,7 +99,7 @@ fn the_world_economy_is_deterministic_and_survives_a_save() {
 
 #[test]
 fn clients_receive_the_economy_in_their_snapshot() {
-    let mut host = dawn_at_peace(3);
+    let mut host = starter_at_peace(3);
     end_turn(&mut host);
     let player = host.commander();
     let fourx_sim::Response::Snapshot { game, .. } = host.snapshot(player) else {
