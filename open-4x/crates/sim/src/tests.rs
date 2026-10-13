@@ -191,7 +191,10 @@ fn rough_ground_costs_the_whole_move_and_roads_cost_a_third() {
     let mut game = arena(10, 4);
     let a = spawn(&mut game, RED, "infantry", 0, 3);
     for x in 0..10 {
-        game.map.get_mut(Coord::new(x, 3)).unwrap().improvements = Tile::ROAD;
+        // The road is Red's own, so Red keeps the road speed-up (a foreign road would not help).
+        let tile = game.map.get_mut(Coord::new(x, 3)).unwrap();
+        tile.improvements = Tile::ROAD;
+        tile.owner = RED;
     }
     run(
         &mut game,
@@ -207,7 +210,9 @@ fn rough_ground_costs_the_whole_move_and_roads_cost_a_third() {
     let mut game = arena(10, 4);
     let a = spawn(&mut game, RED, "infantry", 0, 3);
     for x in 0..10 {
-        game.map.get_mut(Coord::new(x, 3)).unwrap().improvements = Tile::ROAD | Tile::RAIL;
+        let tile = game.map.get_mut(Coord::new(x, 3)).unwrap();
+        tile.improvements = Tile::ROAD | Tile::RAIL;
+        tile.owner = RED;
     }
     run(
         &mut game,
@@ -220,6 +225,34 @@ fn rough_ground_costs_the_whole_move_and_roads_cost_a_third() {
     .unwrap();
     assert_eq!(unit(&game, a).position, Coord::new(9, 3));
     assert_eq!(unit(&game, a).moves_used, 0);
+}
+
+#[test]
+fn foreign_roads_do_not_speed_a_march() {
+    // Mountains wall off the road row, so the march must follow it (open ground beside it would
+    // be crossed otherwise, since a foreign road costs the same as grass).
+    let rows: Vec<String> = ["mmmmmmmmmm", "mmmmmmmmmm", "mmmmmmmmmm", ".........."]
+        .map(String::from)
+        .into();
+    let mut game = arena_rows(&rows);
+    let a = spawn(&mut game, RED, "infantry", 0, 3);
+    // A road that belongs to Blue: Red may cross it, but it gives Red no speed-up, so two
+    // full-cost steps are all an infantryman's turn buys (the same road carries its owner six).
+    for x in 0..10 {
+        let tile = game.map.get_mut(Coord::new(x, 3)).unwrap();
+        tile.improvements = Tile::ROAD;
+        tile.owner = BLUE;
+    }
+    run(
+        &mut game,
+        RED,
+        Command::Move {
+            unit: a,
+            destination: Coord::new(9, 3),
+        },
+    )
+    .unwrap();
+    assert_eq!(unit(&game, a).position, Coord::new(2, 3));
 }
 
 #[test]

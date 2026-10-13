@@ -35,7 +35,7 @@ The map is far larger than the screen, so the client only builds sprites near th
 
 ## Rules in this slice
 
-The map is a Civ3 square grid with eight neighbours (diagonals count as one step). Movement is counted in thirds of a move: rough ground costs its whole move cost, a step between roads costs a third, and a step between railroads is free. Cities count as railroad. A unit with any movement left may always take a step. Orders given with a right-click persist as a goto; the unit keeps walking each day, and the computer nations use the same pathfinder.
+The map is a Civ3 square grid with eight neighbours (diagonals count as one step). Movement is counted in thirds of a move: rough ground costs its whole move cost, a step between roads costs a third, and a step between railroads is free. Roads and railroads only give this speed-up on your own or unclaimed ground; inside another nation's borders they do not help, so a foreign network is no faster than the bare terrain. Cities count as railroad, but only for their own nation. A unit with any movement left may always take a step. Orders given with a right-click persist as a goto; the unit keeps walking each day, and the computer nations use the same pathfinder.
 
 **Units** are individual pieces with hit points by experience level (Conscript 2, Regular 3, Veteran 4, Elite 5, plus the design's own), movement, and a standing order. The base pack ships ten designs:
 

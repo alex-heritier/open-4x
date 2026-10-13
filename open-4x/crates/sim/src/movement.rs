@@ -2,7 +2,9 @@
 //!
 //! Movement is eight-directional, counted in thirds of a move. Entering rough ground costs its
 //! whole move cost, a step between two roads costs a third of a move, and a step between two
-//! railroads is free. A unit with any movement left may always make a step, spending what it has.
+//! railroads is free. Roads and railroads only help a nation on its own or unclaimed ground, so a
+//! square held by another nation gives no speed-up. A unit with any movement left may always make
+//! a step, spending what it has.
 //!
 //! Every walk is also written down as a [`March`], square by square, so the interface can show
 //! the unit walking instead of jumping. The simulation never reads them back.
@@ -259,8 +261,11 @@ impl Game {
         }
     }
 
-    /// Movement, in thirds, to step from `from` to the adjacent `to`.
-    pub fn step_cost(&self, from: Coord, to: Coord, domain: Domain) -> u32 {
+    /// Movement, in thirds, to step from `from` to the adjacent `to` for a unit of `owner`.
+    /// Roads, railroads and city hubs only help on `owner`'s own or unclaimed ground: a square
+    /// held by another nation gives no speed-up (Civ3 grants no road bonus inside a foreign
+    /// border).
+    pub fn step_cost(&self, from: Coord, to: Coord, domain: Domain, owner: Id) -> u32 {
         let Some(tile) = self.map.get(to) else {
             return 0;
         };
@@ -269,8 +274,9 @@ impl Game {
         }
         let from_tile = self.map.get(from);
         let connected = |tile: Option<&crate::terrain::Tile>, p: Coord, rail: bool| {
-            self.city_at(p).is_some()
-                || tile.is_some_and(|t| if rail { t.has_rail() } else { t.has_road() })
+            self.roads_usable(owner, p)
+                && (self.city_at(p).is_some()
+                    || tile.is_some_and(|t| if rail { t.has_rail() } else { t.has_road() }))
         };
         if connected(from_tile, from, true) && connected(Some(tile), to, true) {
             0
@@ -279,6 +285,18 @@ impl Game {
         } else {
             tile.move_cost() * MOVE_UNIT
         }
+    }
+
+    /// Whether `owner` may use the roads, railroads and city hubs on `p`: the square must be the
+    /// nation's own or unclaimed. One held by another nation is unusable, so its roads never
+    /// speed a foreign unit.
+    fn roads_usable(&self, owner: Id, p: Coord) -> bool {
+        let held = self
+            .city_at(p)
+            .map(|c| self.cities[&c].owner)
+            .or_else(|| self.map.get(p).map(|t| t.owner))
+            .unwrap_or(0);
+        held == 0 || held == owner
     }
 
     /// Cheapest route for a unit of `owner`, giving up once more than `limit` squares have
@@ -335,7 +353,7 @@ impl Game {
                     {
                         continue;
                     }
-                    let total = cost + self.step_cost(here, next, domain) * STEP_WEIGHT + 1;
+                    let total = cost + self.step_cost(here, next, domain, owner) * STEP_WEIGHT + 1;
                     if search.seen[i] != stamp {
                         discovered += 1;
                         if discovered > limit {
@@ -400,7 +418,7 @@ impl Game {
             let spend = if landing {
                 left
             } else {
-                self.step_cost(unit.position, next, domain).min(left)
+                self.step_cost(unit.position, next, domain, owner).min(left)
             };
             self.set_position(id, next);
             let unit = self.units.get_mut(&id).unwrap();
@@ -581,25 +599,52 @@ mod tests {
     fn roads_and_rails_make_steps_cheaper() {
         let mut game = arena(8, 3);
         let (a, b, c) = (
-            crate::terrain::Coord::new(0, 1),
-            crate::terrain::Coord::new(1, 1),
-            crate::terrain::Coord::new(2, 1),
+            crate::terrain::Coord::new(0, 0),
+            crate::terrain::Coord::new(1, 0),
+            crate::terrain::Coord::new(2, 0),
         );
         let land = crate::units::Domain::Land;
-        assert_eq!(game.step_cost(a, b, land), MOVE_UNIT);
+        let red = 1;
+        assert_eq!(game.step_cost(a, b, land, red), MOVE_UNIT);
         for p in [a, b, c] {
             game.map.get_mut(p).unwrap().improvements = crate::terrain::Tile::ROAD;
         }
-        assert_eq!(game.step_cost(a, b, land), 1);
+        assert_eq!(game.step_cost(a, b, land, red), 1);
         // a road does not help a step onto bare ground
         assert_eq!(
-            game.step_cost(c, crate::terrain::Coord::new(3, 1), land),
+            game.step_cost(c, crate::terrain::Coord::new(3, 1), land, red),
             MOVE_UNIT
         );
         for p in [a, b] {
             game.map.get_mut(p).unwrap().improvements |= crate::terrain::Tile::RAIL;
         }
-        assert_eq!(game.step_cost(a, b, land), 0);
-        assert_eq!(game.step_cost(b, c, land), 1);
+        assert_eq!(game.step_cost(a, b, land, red), 0);
+        assert_eq!(game.step_cost(b, c, land, red), 1);
+    }
+
+    #[test]
+    fn foreign_roads_do_not_speed_a_step() {
+        let mut game = arena(8, 3);
+        let (a, b, c) = (
+            crate::terrain::Coord::new(0, 0),
+            crate::terrain::Coord::new(1, 0),
+            crate::terrain::Coord::new(2, 0),
+        );
+        let land = crate::units::Domain::Land;
+        let (red, blue) = (1, 2);
+        // A full road and rail line built by blue, crossing blue's own territory.
+        for p in [a, b, c] {
+            let tile = game.map.get_mut(p).unwrap();
+            tile.improvements = crate::terrain::Tile::ROAD | crate::terrain::Tile::RAIL;
+            tile.owner = blue;
+        }
+        // Blue rides its own network free; red may cross it, but pays the ground's full cost.
+        assert_eq!(game.step_cost(a, b, land, blue), 0);
+        assert_eq!(game.step_cost(a, b, land, red), MOVE_UNIT);
+        // Unclaimed ground still gives the bonus: only another nation's land denies it.
+        for p in [a, b, c] {
+            game.map.get_mut(p).unwrap().owner = 0;
+        }
+        assert_eq!(game.step_cost(a, b, land, red), 0);
     }
 }
