@@ -27,7 +27,7 @@ Left-click one of your units (click again to cycle a stack) to select it, or Tab
 
 Useful client flags: `--scenario ID`, `--nation ID`, `--seed N`, `--pack DIR`, `--zoom SCALE` (0.4 to 4), `--talk NATION_ID` (open the diplomacy window), `--focus X,Y` (start the camera on a tile), `--load SAVE`, `--combat-speed N` (scale fight playback, default 1; also `FOURX_COMBAT_SPEED`), `--demo-combat NAME[@SECONDS]` (play a hand-made fight, see [`docs/combat-animation.md`](docs/combat-animation.md) §10).
 
-Save with F5 or the Save button; resume with `cargo run -p fourx-client -- --load dawn.save.json`. Custom saves require the matching `--pack` for their artwork. Browser saves use local storage and resume with `?load=browser`. Saves from earlier builds (save format 1) cannot be loaded.
+Save with F5 or the Save button; resume with `cargo run -p fourx-client -- --load dawn.save.json`. Custom saves require the matching `--pack` for their artwork. Browser saves use local storage and resume with `?load=browser`. Saves from earlier builds (before save format 4) cannot be loaded.
 
 ### The campaign at scale
 
@@ -75,7 +75,7 @@ The map is a Civ3 square grid with eight neighbours (diagonals count as one step
 | Tundra | 1 / 0 / 0 | Mountains | 0 / 1 / 0 |
 | Coast, sea, ocean | 1 / 0 / 2 | River on an edge | +1 gold |
 
-Mountains hide whatever grows on them, then forest, jungle, and marsh replace the soil and hills. Workers add to a square: a **farm** +1 food, a **mine** +2 shields, a **road** +1 gold, and a **railroad** +1 shield and +1 gold on top of its road. A city's own square counts as roaded, as farmed if it is open ground, and yields at least one shield. Food feeds the citizens (2 each); the surplus fills a granary of `20 × (citizens + 1)` and the city grows a citizen when it is full, while a shortfall drains it and starves a citizen at a time, never below one. A city's land cannot feed more people than its food allows, so cities level off where the land runs out. Shields are the city's production each day, plus the city's own industry (what **Develop** adds), and they add up to the nation's industrial output for the industrial victory. Gold is the nation's income; the campaign script's `income_percent` scales the whole sum. The city panel shows the food balance, granary, shields, and gold; the treasury shows the daily income; selecting a square shows what it yields. Research still comes from population and industry.
+Mountains hide whatever grows on them, then forest, jungle, and marsh replace the soil and hills. Workers add to a square: a **farm** +1 food, a **mine** +2 shields, a **road** +1 gold, and a **railroad** +1 shield and +1 gold on top of its road. A city's own square counts as roaded, as farmed if it is open ground, and yields at least one shield. Food feeds the citizens (2 each); the surplus fills a granary of `20 × (citizens + 1)` and the city grows a citizen when it is full, while a shortfall drains it and starves a citizen at a time, never below one. A city's land cannot feed more people than its food allows, so cities level off where the land runs out. Shields are the city's production each day, plus the city's own industry (what **Develop** adds), and they add up to the nation's industrial output for the industrial victory. Gold is the nation's income; the campaign's boom cycle scales the whole sum, paying 120% every twelfth turn. The city panel shows the food balance, granary, shields, and gold; the treasury shows the daily income; selecting a square shows what it yields. Research still comes from population and industry.
 
 Known simplifications: no zones of control, no fortress or wall effects, rivers neither slow movement nor help defenders (they water farms and add gold), ships heal only in their own ports, computer nations neither build nor use transports and never spend gold, which has one use so far (Develop).
 
@@ -85,38 +85,34 @@ Known simplifications: no zones of control, no fortress or wall effects, rivers 
 | --- | --- |
 | `fourx-sim` | Pure deterministic Rust state machine, calendar, map, combat, AI, orders, the scenario document type, serializable protocol. No Bevy, Lua, IO, or system clock. |
 | `fourx-content` | Portable JSON pack schema, scenario validation, pack-relative asset paths. |
-| `fourx-runtime` | Authoritative host, transactional commands, bounded Lua execution, saves/replays. No Bevy. Runs on native and WASM. |
-| `fourx-server` | Headless CLI and HTTP/WebSocket service. |
-| `fourx-client` | Bevy rendering, UI, input, embedded/remote transport. |
+| `fourx-runtime` | Authoritative host, transactional commands, boom-cycle turn rule, saves/replays. No Bevy. Runs on native and WASM. |
+| `fourx-server` | Headless CLI (`--list`, `--simulate`). |
+| `fourx-client` | Bevy rendering, UI, input, embedded authoritative host. |
 | `asset-forge` | Synthesizes the starter WAVs (`bell.wav` and the combat sound effects). |
 | `aoi-art` | `import.py` copies the leader/flag pictures and the diplomacy music of the Age of Imperialism scenario from a local Civ3 install into the base pack (see `assets/PROVENANCE.md`). |
 | `biq-import` | Standalone offline tool (not a workspace member) that converts a Civ3 `.biq` scenario (map, rivers, resources, nations, cities) into a scenario document; produced `age-of-imperialism.json`. See `assets/PROVENANCE.md`. |
 | `scenario-forge` | Builds a whole-world 1876 scenario from curated history tables and public geographic data (coastlines, rivers, elevation, climate), then validates it like the game does. Its output is not bundled with the pack. |
 | `art/` (Python) | Reproducible original PNG art: SVG scenes, painterly finishing, flat UI glyphs. See `art/README.md`. |
 
-This workspace has no dependency on `open-civ3/` or its reference code. Ordered containers, seeded integer combat, and explicit command/revision state make headless runs reproducible. Server snapshots mask uncharted terrain and enemies outside the player's vision. The spectator view reveals the campaign.
+This workspace has no dependency on `open-civ3/` or its reference code. Ordered containers, seeded integer combat, and explicit command/revision state make headless runs reproducible. Snapshots mask uncharted terrain and enemies outside the player's vision. The spectator view reveals the campaign.
 
-The default desktop run uses one executable for the client and embedded authoritative server. It does not require a separate server process or open a network listener. Use `--server URL` to connect to a remote server instead.
+The desktop run uses one executable for the client and embedded authoritative server. It does not require a separate server process or open a network listener.
 
 ## Server
 
+The server is a headless command line for catalogs and simulations, not a network service:
+
 ```sh
-cargo run -p fourx-server -- --bind 127.0.0.1:7878 --save campaign.save.json
-cargo run -p fourx-server -- --scenario russo-japanese-war --nation russia   # choose the campaign and nation
-cargo run -p fourx-client -- --server ws://127.0.0.1:7878/ws
+cargo run -p fourx-server -- --list
+cargo run -p fourx-server -- --scenario russo-japanese-war --nation russia --simulate 30
+cargo run -p fourx-server -- --simulate 10 --seed 42 --save campaign.save.json
 ```
 
-The server sends each client a whole snapshot on connect and after every change, which is fine on loopback or a LAN but wasteful over a slow link. Delta snapshots are future work.
-
-`GET /health` reports readiness, `/pack` exposes the current pack manifest, and `/assets/` serves its PNG/WAV files. Clients receive the manifest before their first snapshot and use the same pack visuals as the server. The first authorized connection is the commander; later connections spectate. Disconnecting releases the commander slot. This is a solo campaign with remote access/spectating, not simultaneous multiplayer factions.
-
-For non-local exposure, set `FOURX_TOKEN`, pass `--token TOKEN` to the client, and place the server behind a TLS reverse proxy (`wss://`). Do not pass secrets in public URLs. There is no lobby/account service. The default bind is loopback. WebSocket messages are capped at 16 KiB; the server assigns player authority and checks versions, revisions, and strictly increasing request sequences. Saves are trusted local files and cannot be uploaded through the protocol.
-
-For automation: `--simulate DAYS --seed SEED --save PATH`; `--load PATH` resumes a host. Simulation JSON is written to stdout. Script/validation failures exit unsuccessfully. `cargo run -p fourx-client -- --smoke --screenshot /tmp/fourx.png` captures a rendered desktop frame and exits after 200 frames.
+For automation: `--simulate DAYS --seed SEED --save PATH`; `--load PATH` resumes a host. Simulation JSON is written to stdout. Validation failures exit unsuccessfully. `cargo run -p fourx-client -- --smoke --screenshot /tmp/fourx.png` captures a rendered desktop frame and exits after 200 frames.
 
 ## Modding
 
-Use a complete replacement pack directory containing `pack.json`, scripts, and ordinary PNG/WAV files:
+Use a complete replacement pack directory containing `pack.json` and ordinary PNG/WAV files:
 
 ```sh
 cargo run -p fourx-client -- --pack /absolute/path/to/my-pack
@@ -125,7 +121,7 @@ cargo run -p asset-forge              # regenerate bundled audio
 (cd art && .venv/bin/python build.py) # regenerate bundled art (see art/README.md)
 ```
 
-The base pack is the working format example in `assets/packs/base/`. `format: 5` is mandatory; earlier pack formats are no longer read. Units have stable string IDs, names, costs, Civ3-style attack, defense, hit-point, movement, bombard, blitz, work-rate, and settler values, a land or sea domain, and a single sprite. Ships may carry land units (`capacity`, at most 16), and a design with a bombard may be lethal against land or sea targets (`lethal_land`, `lethal_sea`). All numeric values are bounded. Packs define research cost, starting treasury, victory industry, visual paths, and the campaign script.
+The base pack is the working format example in `assets/packs/base/`. `format: 6` is mandatory; earlier pack formats are no longer read. Units have stable string IDs, names, costs, Civ3-style attack, defense, hit-point, movement, bombard, blitz, work-rate, and settler values, a land or sea domain, and a single sprite. Ships may carry land units (`capacity`, at most 16), and a design with a bombard may be lethal against land or sea targets (`lethal_land`, `lethal_sea`). All numeric values are bounded. Packs define research cost, starting treasury, victory industry, and visual paths.
 
 Worlds live in **scenarios**, separate JSON documents listed in the pack's `scenarios` array (`{"id", "path"}`, paths relative to the pack directory) with one named by `default_scenario`. A scenario sets the start date, map (up to 1024 × 1024 tiles), any number of nations with their status, suzerain, colour, leader and treasury, regions, cities, starting units, and wars, and may override the pack's victory, research, and treasury rules for itself. Every cross-reference is validated at load time and the simulation never sees an inconsistent scenario. The full field-by-field specification is in [`docs/scenario-format.md`](docs/scenario-format.md).
 
@@ -133,7 +129,7 @@ To add a campaign, drop a scenario file into a pack, list it in `pack.json`, and
 
 Paths may not traverse outside the pack; symlinks are canonicalized and checked. Current packs replace the entire definitions table; there is no implicit or filesystem-dependent merge order.
 
-Scripts use **plain Lua 5.4 through OmniLua**, following the decision to use a pure-Rust interpreter for native/mobile/browser parity. There is no mlua dependency and no Bevy scripting bridge. The same interpreter executes the same script in browser offline campaigns and dedicated servers. `on_turn(context)` gets the next turn, seed (string), city count, and a `campaign` table containing the current turn, cities, units, and factions. Entity keys in that table are strings. It returns an integer `income_percent`, 25–400. The host creates a fresh sandbox for each turn, enforces a 200,000-instruction / 8 MiB budget, and removes host services, dynamic loading, randomness, and stdout printing. Scripts currently customize these effects; arbitrary custom gameplay commands and UI scripting are not exposed yet. A failure leaves the campaign unchanged. Saves include the exact pack and script, so they replay independently of later content edits.
+Turn income follows a fixed boom cycle in the host (`crates/runtime/src/lib.rs`): every twelfth turn pays 120% income, other turns pay 100%. The rule is a pure function of the turn about to begin, so saves and replays need no extra state. Saves include the exact pack and rules, so they replay independently of later content edits.
 
 ## Terrain format
 
@@ -148,7 +144,7 @@ Rendering uses 128×64 diamonds (authored at 1.5× for crisp scaling) and depth-
 
 That preserves tile-center terrain and smoothly joins coasts. It is freshly implemented from the documented geometry under `open-civ3/reverse-engineering/blending.md`; no reference implementation or Civ3 asset loader is used. Relief and cover are sprites that stand on the tile: `forest`, `pine` (forest on slopes and tundra), `jungle`, `marsh`, `hills`/`hills_dry`/`hills_cold`, and `mountain`/`mountain_dry`/`mountain_cold` (by the ground beneath); forested and jungle-covered relief uses dedicated combined sprites, with dry and cold variants. Border ribbons are projected onto the same surface and share its painter order, so nearer peaks obscure terrain and border segments behind them. See [`docs/terrain-surfaces.md`](docs/terrain-surfaces.md) for the clean-room behavior, art contract, and reproducible `terrain-study` scenario. The base pack's art is 1.5× the drawn size for the terrain sheets (cells 192×96), and 2× for the rest: units 160×160 (ships 256×192), city/relief PNGs 256×224, farm and mine overlays 256×128, scaled by the client; transparent padding defines their anchor. The big terrain sheets are palette PNGs (no dithering, so cells that share an edge still agree on it).
 
-**City skins.** Every nation has a `flavor` in its scenario entry (`western`, `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, `oceanic`; default `western`), and the pack's `visuals.cities` maps each flavor to its own 256×224 city sprite: brick and slate for the north-west, terracotta and bell towers for the Mediterranean and Latin America, onion domes for Orthodox lands, domes and minarets for the Islamic world, upswept tiled roofs and pagodas for East Asia, chhatris and spires for the subcontinent, stilt houses and stupas for South-East Asia, thatched huts in palisades for Africa, felt tents on the steppe, tipis and mounds for the indigenous Americas, and thatched halls under palms for the Pacific. A pack must supply all eleven. The flavor is cosmetic: the simulation never reads it, but it travels with the snapshot, so remote clients draw the same skins. Age of Imperialism assigns it per nation (Japan, China, and Tibet are `east_asian`; the Ottomans and Persia `arab`; Abyssinia `african`).
+**City skins.** Every nation has a `flavor` in its scenario entry (`western`, `latin`, `orthodox`, `arab`, `east_asian`, `south_asian`, `southeast_asian`, `african`, `steppe`, `native`, `oceanic`; default `western`), and the pack's `visuals.cities` maps each flavor to its own 256×224 city sprite: brick and slate for the north-west, terracotta and bell towers for the Mediterranean and Latin America, onion domes for Orthodox lands, domes and minarets for the Islamic world, upswept tiled roofs and pagodas for East Asia, chhatris and spires for the subcontinent, stilt houses and stupas for South-East Asia, thatched huts in palisades for Africa, felt tents on the steppe, tipis and mounds for the indigenous Americas, and thatched halls under palms for the Pacific. A pack must supply all eleven. The flavor is cosmetic: the simulation never reads it, but it travels with the snapshot, so every client draws the same skins. Age of Imperialism assigns it per nation (Japan, China, and Tibet are `east_asian`; the Ottomans and Persia `arab`; Abyssinia `african`).
 
 **Farm crops.** A farm is drawn in the crop of the culture that owns its land: `visuals.farms` maps a flavor key to a `farm` overlay and an optional `farm_shore` sheet (the same 256×128 diamond and 8 × 4 shore pieces as the plain `visuals.farm` and `visuals.farm_shore`). The base pack grows flooded rice paddies for `east_asian`, `south_asian`, and `southeast_asian` nations, maize behind a split-rail fence for `native` ones, and wheat with stooked sheaves for `western`, `latin`, and `orthodox` ones. Every other flavor, and land nobody owns, keeps the plain mixed-crop farm. Like the city skin, the crop is cosmetic.
 
@@ -164,10 +160,10 @@ The pack ships flat white glyph icons (`ui/icons/`) and window chrome (`ui/chrom
 
 ## Platforms
 
-Development is currently focused only on the desktop build. The other targets below are documented for reference and are not actively developed or tested.
+Development is currently focused only on the desktop build. The other targets below are deferred until a second user needs them: documented for reference, not built or tested here.
 
 - Desktop: Linux/X11/Wayland, Windows, macOS through Bevy. Linux requires the usual window/audio development packages (ALSA, udev, X11/Wayland).
-- Web: `wasm32-unknown-unknown`, WebGL2, pure-Rust Lua. Install the Rust target and Trunk, then `cd web && trunk serve`. Offline local play is the default. Append `?server=ws://localhost:7878/ws` for a server; HTTPS pages require `wss://`. Remote packs load through the server's HTTP(S) asset URL and require appropriate same-origin hosting or CORS configuration.
+- Web: `wasm32-unknown-unknown`, WebGL2. Install the Rust target and Trunk, then `cd web && trunk serve`. Offline local play is the default.
 - Android: the client exposes a `cdylib` and `android_main`, with the `android` feature enabling Bevy NativeActivity. APK metadata bundles the assets; `cargo apk run -p fourx-client --lib --no-default-features --features android` uses an Android SDK/NDK/toolchain. Desktop features must stay disabled.
 - iOS: an exported C entry and XcodeGen project configuration live in `platforms/ios/`. Build a static client library for `aarch64-apple-ios`, generate the project, select a signing team, and run from Xcode. See `platforms/README.md`. Platform SDKs, signing, and device testing are required and have not been performed here.
 

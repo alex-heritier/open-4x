@@ -362,6 +362,8 @@ fn in_view(battle: &Battle, view: WorldRect) -> bool {
 }
 
 /// Begins the next battle in the queue that the player can see. The others are dropped.
+/// Eight already-borrowed inputs, always passed together from `drive`.
+#[allow(clippy::too_many_arguments)]
 fn start_next(
     commands: &mut Commands,
     stage: &mut Stage,

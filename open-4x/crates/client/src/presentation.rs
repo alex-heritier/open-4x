@@ -508,7 +508,7 @@ fn scatter(p: Coord) -> usize {
 /// tonal variants; `first_digit` is the first digit that has them (the water sheet's land digit
 /// is empty).
 fn varied(index: usize, p: Coord, variants: usize, first_digit: usize) -> usize {
-    if variants == 0 || index >= 256 || index % 85 != 0 || index / 85 < first_digit {
+    if variants == 0 || index >= 256 || !index.is_multiple_of(85) || index / 85 < first_digit {
         return index;
     }
     match scatter(p) % (variants + 1) {
@@ -575,34 +575,55 @@ fn resolved_overlay_names(
             relief = overlay_names(&bare).0;
             cover = cover_name(tile);
         }
-        if let Some(name) = relief {
-            if name != "mountain" && !visuals.overlays.contains_key(name) {
-                relief = Some("mountain");
-            }
+        if let Some(name) = relief
+            && name != "mountain"
+            && !visuals.overlays.contains_key(name)
+        {
+            relief = Some("mountain");
         }
     }
     (relief, cover)
 }
 
+/// The map rebuild's inputs, bundled so the system takes one argument.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct Refresh<'w, 's> {
+    commands: Commands<'w, 's>,
+    session: ResMut<'w, Session>,
+    assets: Res<'w, AssetServer>,
+    art: Res<'w, Art>,
+    minimap: Res<'w, Minimap>,
+    world: Query<'w, 's, Entity, With<WorldVisual>>,
+    ui: Query<'w, 's, Entity, With<UiRoot>>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    camera: Query<'w, 's, (&'static mut Transform, &'static Projection), With<Camera2d>>,
+    previous_size: Local<'s, Vec2>,
+    stage: Res<'w, crate::stage::Stage>,
+    walks: Res<'w, crate::march::Walks>,
+    shapes: Res<'w, Shapes>,
+    puppetry: crate::puppet::Puppetry<'w>,
+}
+
 /// Spawn the sprites and the interface, and respawn them when the game changes or the camera
 /// drifts outside what is already built. The map is far too big to draw whole, so tiles,
 /// cities and units are only created for the part of the world around the camera.
-pub(super) fn refresh(
-    mut commands: Commands,
-    mut session: ResMut<Session>,
-    assets: Res<AssetServer>,
-    art: Res<Art>,
-    minimap: Res<Minimap>,
-    world: Query<Entity, With<WorldVisual>>,
-    ui: Query<Entity, With<UiRoot>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut camera: Query<(&mut Transform, &Projection), With<Camera2d>>,
-    mut previous_size: Local<Vec2>,
-    stage: Res<crate::stage::Stage>,
-    walks: Res<crate::march::Walks>,
-    shapes: Res<Shapes>,
-    mut puppetry: crate::puppet::Puppetry,
-) {
+pub(super) fn refresh(params: Refresh) {
+    let Refresh {
+        mut commands,
+        mut session,
+        assets,
+        art,
+        minimap,
+        world,
+        ui,
+        windows,
+        mut camera,
+        mut previous_size,
+        stage,
+        walks,
+        shapes,
+        mut puppetry,
+    } = params;
     let Ok(window) = windows.single() else {
         return;
     };
@@ -1210,9 +1231,7 @@ pub(super) fn refresh(
         let at = Vec3::new(x, y + 12.0, z);
         let mut clip = |kind: &str, which: Clip| {
             puppetry.art.clip(
-                prefix,
-                &session.pack.id,
-                visuals,
+                &session,
                 &assets,
                 &mut puppetry.layouts,
                 kind,

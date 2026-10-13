@@ -78,6 +78,14 @@ pub(super) fn step_secs(steps: usize) -> f32 {
     STEP_SECS.min(LONGEST_WALK / steps.max(1) as f32)
 }
 
+/// The walkers' sprites, separate from the camera.
+type WalkerSprites<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Transform, &'static mut Sprite),
+    (With<WalkerSprite>, Without<Camera2d>),
+>;
+
 /// Starts the walks of a new snapshot, advances the ones under way, and ends them.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn walk(
@@ -89,7 +97,7 @@ pub(super) fn walk(
     mut puppetry: Puppetry,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Transform, &Projection), With<Camera2d>>,
-    mut sprites: Query<(&mut Transform, &mut Sprite), (With<WalkerSprite>, Without<Camera2d>)>,
+    mut sprites: WalkerSprites<'_, '_>,
 ) {
     if !walks.waiting.is_empty() {
         finish(&mut commands, &mut walks, &mut puppetry, &mut session);
@@ -183,9 +191,7 @@ fn start(
         return None;
     }
     let art = puppetry.art.clip(
-        &session.asset_prefix,
-        &session.pack.id,
-        &session.pack.visuals,
+        session,
         assets,
         &mut puppetry.layouts,
         &march.kind,

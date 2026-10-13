@@ -52,7 +52,8 @@ fn fetch() -> Result<(), String> {
 }
 
 fn build(args: &[String]) -> Result<(), String> {
-    let mut out = root().join("../../assets/packs/base/scenarios/world-1876.json");
+    // Builds land in the tool cache, never in the shipped pack: pass --out to publish.
+    let mut out = root().join("cache/world-1876.json");
     let mut preview_path = root().join("cache/world-1876.png");
     let mut terrain_path: Option<PathBuf> = None;
     let mut crops: Vec<String> = Vec::new();

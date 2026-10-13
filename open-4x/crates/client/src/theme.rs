@@ -701,47 +701,6 @@ pub(crate) fn disc(
     ));
 }
 
-/// A nation's flag on the map, `width` across: its picture (a nation without one is its colour)
-/// in a gold rim with a dark edge.
-pub(crate) fn map_flag(
-    commands: &mut Commands,
-    at: Vec3,
-    width: f32,
-    color: Color,
-    art: Option<Handle<Image>>,
-) {
-    let height = width * 0.72;
-    for (inset, tint, lift) in [(0.0, BRONZE, 0.0), (1.5, TRIM, 0.03)] {
-        commands.spawn((
-            Sprite::from_color(tint, Vec2::new(width - 2.0 * inset, height - 2.0 * inset)),
-            Transform::from_translation(at + Vec3::Z * lift),
-            WorldVisual,
-        ));
-    }
-    let size = Vec2::new(width - 6.0, height - 6.0);
-    let flag = match art {
-        // The picture is a portrait of a waving cloth: show a landscape from its middle.
-        Some(image) => {
-            let mut sprite = Sprite::from_image(image);
-            let crop = 200.0 / size.x * size.y;
-            sprite.rect = Some(Rect::new(
-                0.0,
-                120.0 - crop / 2.0,
-                200.0,
-                120.0 + crop / 2.0,
-            ));
-            sprite.custom_size = Some(size);
-            sprite
-        }
-        None => Sprite::from_color(color, size),
-    };
-    commands.spawn((
-        flag,
-        Transform::from_translation(at + Vec3::Z * 0.06),
-        WorldVisual,
-    ));
-}
-
 /// A banner on the map: parchment inside a dark rim, `size` across.
 pub(crate) fn label_plate(commands: &mut Commands, shapes: &Shapes, at: Vec3, size: Vec2) {
     pill(commands, shapes, at, size + Vec2::splat(3.0), BANNER_RIM);

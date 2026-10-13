@@ -2,8 +2,8 @@
 
 A **scenario** is one JSON document that holds everything needed to start a campaign: a calendar
 date, a map, the nations, and their starting cities, units, and wars. It is separate from a
-content pack. The pack supplies rules (unit designs, costs, research), art, sounds, and the
-turn script; the scenario supplies the world. A pack can ship several scenarios and names one as
+content pack. The pack supplies rules (unit designs, costs, research), art, and sounds;
+the scenario supplies the world. A pack can ship several scenarios and names one as
 the default.
 
 The bundled default is [`age-of-imperialism`](../assets/packs/base/scenarios/age-of-imperialism.json):
@@ -224,8 +224,7 @@ from 1 in document order when the game is built; `0` always means "nobody".
 
 The date is part of the game state, not a display setting. Turn 1 is `start_date`; turn *n* is
 `start_date + (n − 1)` days, with real leap years. `Game::date()` reports it, snapshots carry it,
-the HUD prints it, and the Lua `on_turn` context receives the date of the turn about to be played
-as `date` (ISO text), `year`, `month`, and `day`. Turns, saves, and replays stay in lockstep with
+and the HUD prints it. Turns, saves, and replays stay in lockstep with
 the calendar, because it is derived from the turn counter.
 
 ## Using a scenario
@@ -249,8 +248,8 @@ cargo run -p fourx-server -- --scenario russo-japanese-war --nation russia --sim
 ```
 
 Paths are relative to the pack directory and may not leave it. A save embeds the pack, rules,
-script, and the full game state, so it resumes independently of later edits to the files. Saves
-and packs from earlier versions (pack format 1, save format 1) are refused with a clear message.
+and the full game state, so it resumes independently of later edits to the files. Saves
+and packs from earlier versions (pack format 1, save formats before 4) are refused with a clear message.
 
 ## Building a world scenario
 

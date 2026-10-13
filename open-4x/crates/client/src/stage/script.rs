@@ -293,7 +293,7 @@ impl Script {
                 Motion::Step { by } if by != Vec2::ZERO => Some(by),
                 _ => None,
             })
-            .last()
+            .next_back()
             .unwrap_or(a.toward)
     }
 

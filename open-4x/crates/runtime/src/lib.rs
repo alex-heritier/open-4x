@@ -1,14 +1,11 @@
 //! Authoritative host. The simulation remains a portable, Bevy-free Rust library.
 use fourx_content::{Content, Pack};
 use fourx_sim::{Command, Game, Id, PROTOCOL_VERSION, Request, Response, Rules, TickRules};
-use omnilua::{Lua, LuaSerdeExt, SandboxConfig};
 
-pub const SAVE_FORMAT: u32 = 3;
+pub const SAVE_FORMAT: u32 = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
-    #[error(transparent)]
-    Script(#[from] omnilua::Error),
     #[error(transparent)]
     Game(#[from] fourx_sim::GameError),
     #[error(transparent)]
@@ -34,7 +31,6 @@ pub struct Host {
     pub pack: Pack,
     /// Pack rules with the scenario's overrides applied. This is what the game plays by.
     pub rules: Rules,
-    script: String,
 }
 impl Host {
     /// The bundled pack's default scenario.
@@ -67,83 +63,28 @@ impl Host {
             game,
             pack: content.pack,
             rules,
-            script: content.script,
         };
-        host.tick_rules()?;
         Ok(host)
     }
     /// The nation this host's player commands.
     pub fn commander(&self) -> Id {
         self.game.commander
     }
-    fn tick_rules(&self) -> Result<TickRules, HostError> {
-        // A fresh sandbox avoids hidden VM state in saves and replays.
-        let mut config = SandboxConfig::strict();
-        config.instruction_limit = Some(200_000);
-        config.memory_limit_bytes = Some(8 * 1024 * 1024);
-        config.check_interval = 100;
-        config.remove_globals.extend([
-            b"math.random".to_vec(),
-            b"math.randomseed".to_vec(),
-            b"collectgarbage".to_vec(),
-            b"os".to_vec(),
-            b"print".to_vec(),
-            b"warn".to_vec(),
-        ]);
-        let (lua, _sandbox) = Lua::sandboxed(config)?;
-        lua.load(&self.script).set_name(&self.pack.script).exec()?;
-        let function: omnilua::Function = lua.globals().get("on_turn")?;
-        let game = &self.game;
-        let next = game.start_date.add_days(game.turn);
-        let context = lua.create_table()?;
-        context.set("turn", game.turn + 1)?;
-        context.set("date", next.iso())?;
-        context.set("year", next.year())?;
-        context.set("month", u32::from(next.month()))?;
-        context.set("day", u32::from(next.day()))?;
-        context.set("seed", game.seed.to_string())?;
-        context.set("city_count", game.cities.len())?;
-        // Scripts see public nation facts only. The fog-of-war layers are large and are not
-        // script business, so they are left out of the table.
-        let factions: std::collections::BTreeMap<_, _> = game
-            .factions
-            .values()
-            .map(|f| {
-                (
-                    f.id,
-                    serde_json::json!({
-                        "id": f.id, "tag": f.tag, "name": f.name, "gold": f.gold,
-                        "research": f.research, "technology": f.technology, "industry": f.industry,
-                    }),
-                )
-            })
-            .collect();
-        context.set(
-            "campaign",
-            lua.to_value(&serde_json::json!({
-                "turn": game.turn,
-                "date": game.date().iso(),
-                "cities": game.cities,
-                "units": game.units,
-                "factions": factions,
-            }))?,
-        )?;
-        let value: omnilua::Value = function.call(context)?;
-        let tick: TickRules = lua.from_value(value)?;
-        if !(25..=400).contains(&tick.income_percent) {
-            return Err(HostError::Invalid(
-                "Script percentages must be between 25 and 400".into(),
-            ));
+    /// The campaign's boom cycle: every twelfth turn pays 120% income, other turns 100%.
+    /// A pure function of the turn about to begin, so saves and replays need no VM state.
+    fn tick_rules(&self) -> TickRules {
+        let next = self.game.turn + 1;
+        TickRules {
+            income_percent: if next.is_multiple_of(12) { 120 } else { 100 },
         }
-        Ok(tick)
     }
     pub fn command(&mut self, player: Id, command: Command) -> Result<(), HostError> {
         let tick = if matches!(command, Command::EndTurn) {
-            self.tick_rules()?
+            self.tick_rules()
         } else {
             TickRules::default()
         };
-        // Validation and script errors never partially mutate the live campaign.
+        // Command errors never partially mutate the live campaign.
         let mut candidate = self.game.clone();
         candidate.apply(player, command, &self.rules, tick)?;
         self.game = candidate;
@@ -182,7 +123,6 @@ impl Host {
         Ok(serde_json::to_string(&serde_json::json!({
             "format": SAVE_FORMAT,
             "pack": self.pack,
-            "script": self.script,
             "rules": self.rules,
             "game": self.game,
         }))?)
@@ -192,7 +132,6 @@ impl Host {
         struct Save {
             format: u32,
             pack: Pack,
-            script: String,
             rules: Rules,
             game: Game,
         }
@@ -214,9 +153,7 @@ impl Host {
             game,
             pack: saved.pack,
             rules: saved.rules,
-            script: saved.script,
         };
-        host.tick_rules()?;
         Ok(host)
     }
 }
@@ -231,17 +168,13 @@ mod tests {
     fn starter(seed: u64) -> Host {
         Host::base_scenario("russo-japanese-war", seed).unwrap()
     }
-    fn starter_with_script(script: &str, seed: u64) -> Result<Host, HostError> {
-        let mut content = Content::base();
-        content.script = script.into();
-        Host::start(
-            content,
-            Start {
-                scenario: Some("russo-japanese-war"),
-                seed,
-                ..Start::default()
-            },
-        )
+    /// A host whose next turn is a boom turn: the starter opens on turn 1 and the
+    /// twelfth turn pays out. The turn is set directly so the test does not depend
+    /// on the fixture surviving eleven turns of war.
+    fn starter_before_boom(seed: u64) -> Host {
+        let mut host = starter(seed);
+        host.game.turn = 11;
+        host
     }
     fn starter_at_peace(seed: u64) -> Host {
         let mut content = Content::base();
@@ -529,56 +462,23 @@ mod tests {
         }
     }
     #[test]
-    fn scripts_change_economy() {
-        let mut a = starter(1);
-        let script = "function on_turn(c) return {income_percent=200} end";
-        let mut b = starter_with_script(script, 1).unwrap();
-        a.command(1, Command::EndTurn).unwrap();
-        b.command(1, Command::EndTurn).unwrap();
-        assert!(b.game.factions[&1].gold > a.game.factions[&1].gold);
+    fn the_twelfth_turn_pays_the_boom() {
+        let host = starter(1);
+        assert_eq!(host.tick_rules().income_percent, 100);
+        let boom = starter_before_boom(1);
+        assert_eq!(boom.tick_rules().income_percent, 120);
+        let mut past = starter(1);
+        past.game.turn = 12;
+        assert_eq!(past.tick_rules().income_percent, 100);
     }
     #[test]
-    fn scripts_see_the_calendar() {
-        // The turn about to begin is reported with its calendar date: turn 2 of the
-        // theater campaign is 9 February 1904, and the script uses it to pay a bonus
-        // only that day.
-        let script = "function on_turn(c) local p = 100 if c.date == '1904-02-09' and c.month == 2 and c.day == 9 and c.year == 1904 then p = 300 end return {income_percent=p} end";
-        let mut dated = starter_with_script(script, 1).unwrap();
-        let mut plain = starter(1);
-        dated.command(1, Command::EndTurn).unwrap();
-        plain.command(1, Command::EndTurn).unwrap();
-        assert!(dated.game.factions[&1].gold > plain.game.factions[&1].gold);
-    }
-    #[test]
-    fn scripts_see_the_units_in_the_field() {
-        // The starter starts with twelve units; the script pays a bonus only while that holds.
-        let script = "function on_turn(c) local n = 0 for _ in pairs(c.campaign.units) do n = n + 1 end local p = 100 if n == 12 then p = 300 end return {income_percent=p} end";
-        let mut counting = starter_with_script(script, 1).unwrap();
-        let mut plain = starter(1);
-        assert_eq!(counting.game.units.len(), 12);
-        counting.command(1, Command::EndTurn).unwrap();
-        plain.command(1, Command::EndTurn).unwrap();
-        assert!(counting.game.factions[&1].gold > plain.game.factions[&1].gold);
-    }
-    #[test]
-    fn out_of_range_script_results_are_refused() {
-        let script = "function on_turn(c) return {income_percent=5000} end";
-        assert!(starter_with_script(script, 1).is_err());
-    }
-    #[test]
-    fn failed_turn_script_preserves_state() {
-        let script = "function on_turn(c) if c.turn >= 3 then error('a scripted failure') end return {income_percent=100} end";
-        let mut host = starter_with_script(script, 42).unwrap();
-        host.command(1, Command::EndTurn).unwrap();
-        let before = host.game.clone();
-        assert!(host.command(1, Command::EndTurn).is_err());
-        assert_eq!(before, host.game);
-    }
-    #[test]
-    fn infinite_script_and_unsafe_apis_rejected() {
-        assert!(starter_with_script("while true do end", 1).is_err());
-        assert!(starter_with_script("os.execute('echo unsafe')", 1).is_err());
-        assert!(starter_with_script("print('pollute headless stdout')", 1).is_err());
+    fn the_boom_turn_scales_income() {
+        let mut boom = starter_before_boom(1);
+        let before = boom.game.factions[&1].gold;
+        boom.command(1, Command::EndTurn).unwrap();
+        assert_eq!(boom.game.turn, 12);
+        // Computer nations never spend gold, so the scaled payout lands directly.
+        assert!(boom.game.factions[&1].gold > before);
     }
     #[test]
     fn hidden_enemies_not_in_player_snapshot() {

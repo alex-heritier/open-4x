@@ -1,6 +1,6 @@
 //! Versioned, portable JSON content. Asset identifiers are pack-relative paths.
 //!
-//! A *pack* (`pack.json`) defines rules, art, and the campaign script. A *scenario*
+//! A *pack* (`pack.json`) defines rules and art. A *scenario*
 //! (see [`fourx_sim::Scenario`]) defines a map, nations, and a start date. A pack lists the
 //! scenario files it ships and names one as the default.
 pub mod animation;
@@ -12,9 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
-pub const PACK_FORMAT: u32 = 5;
+pub const PACK_FORMAT: u32 = 6;
 pub const BASE_JSON: &str = include_str!("../../../assets/packs/base/pack.json");
-pub const BASE_SCRIPT: &str = include_str!("../../../assets/packs/base/scripts/campaign.lua");
 /// Scenario files embedded in the binary, keyed by their pack-relative path.
 pub const BASE_SCENARIOS: &[(&str, &str)] = &[
     (
@@ -233,7 +232,6 @@ pub struct Pack {
     pub id: String,
     pub name: String,
     pub rules: Rules,
-    pub script: String,
     pub visuals: Visuals,
     pub scenarios: Vec<ScenarioRef>,
     /// The scenario started when none is requested.
@@ -360,7 +358,7 @@ impl Pack {
                 )));
             }
         }
-        for path in std::iter::once(&self.script).chain(self.visuals.paths()) {
+        for path in self.visuals.paths() {
             if !safe_path(path) {
                 return Err(invalid("Asset paths must stay inside the pack"));
             }
@@ -410,10 +408,9 @@ impl Pack {
     }
 }
 
-/// Everything loaded for a game: the pack, its campaign script, and each scenario document.
+/// Everything loaded for a game: the pack and each scenario document.
 pub struct Content {
     pub pack: Pack,
-    pub script: String,
     pub scenarios: BTreeMap<String, Scenario>,
 }
 impl Content {
@@ -433,11 +430,7 @@ impl Content {
                 (entry.id.clone(), scenario)
             })
             .collect();
-        Self {
-            pack,
-            script: BASE_SCRIPT.into(),
-            scenarios,
-        }
+        Self { pack, scenarios }
     }
     /// Look up a scenario by ID, or the pack's default when `id` is `None`.
     pub fn scenario(&self, id: Option<&str>) -> Result<&Scenario, ContentError> {
@@ -486,15 +479,12 @@ pub fn load_directory(directory: &Path) -> Result<Content, ContentError> {
         }
         Ok(path)
     };
-    for relative in std::iter::once(&pack.script)
-        .chain(pack.visuals.paths())
+    for relative in pack
+        .visuals
+        .paths()
         .chain(pack.rules.units.values().map(|u| &u.sprite))
     {
         inside(relative)?;
-    }
-    let script = std::fs::read_to_string(root.join(&pack.script))?;
-    if script.len() > 256 * 1024 {
-        return Err(ContentError::Invalid("Script exceeds 256 KiB".into()));
     }
     let mut scenarios = BTreeMap::new();
     for entry in &pack.scenarios {
@@ -510,11 +500,7 @@ pub fn load_directory(directory: &Path) -> Result<Content, ContentError> {
             .map_err(|e| ContentError::Invalid(format!("{}: {e}", entry.path)))?;
         scenarios.insert(entry.id.clone(), scenario);
     }
-    let content = Content {
-        pack,
-        script,
-        scenarios,
-    };
+    let content = Content { pack, scenarios };
     content.validate()?;
     Ok(content)
 }

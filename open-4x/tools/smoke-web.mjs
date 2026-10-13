@@ -1,5 +1,5 @@
 // Linux Chromium fallback for machines without an attached collaborative preview.
-// Real WebGL rendering, keyboard orders, browser Lua, and local-storage save assertions.
+// Real WebGL rendering, keyboard orders, boom-cycle turns, and local-storage save assertions.
 import {createServer} from 'node:http';
 import {readFile,writeFile,mkdtemp,stat} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
@@ -86,7 +86,7 @@ try {
     await writeFile(`${evidence}/${name}.png`,Buffer.from(shot.data,'base64'));
   }
   assert.equal(errors.length,0);
-  console.log(`PASS: browser WebGL, embedded Lua, development, recruitment, turns, and saves. Evidence: ${evidence}`);
+  console.log(`PASS: browser WebGL, boom-cycle income, development, recruitment, turns, and saves. Evidence: ${evidence}`);
 }finally{
   socket?.close();chrome.kill();server.close();await writeFile(`${evidence}/chromium.log`,chromeLog);
 }

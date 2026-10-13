@@ -1,5 +1,5 @@
 {
-  "format": 5,
+  "format": 6,
   "id": "open-4x-base",
   "name": "Open 4X base pack",
   "rules": {
@@ -19,7 +19,6 @@
       "torpedo-boat": {"id":"torpedo-boat","name":"Torpedo Boat","cost":90,"sprite":"sprites/torpedo-boat.png","domain":"sea","attack":8,"defense":2,"moves":3,"bombard":8,"range":1,"rate_of_fire":2,"lethal_land":true,"lethal_sea":true}
     }
   },
-  "script": "scripts/campaign.lua",
   "visuals": {
     "terrain": "terrain/ground.png",
     "water": "terrain/water.png",

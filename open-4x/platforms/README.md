@@ -1,6 +1,8 @@
-# Mobile launchers
+# Mobile launchers (deferred)
 
-These are build entry points; SDK builds/device runs must be checked on the platform toolchains.
+These targets are deferred until a second user needs them: documented for reference, not built
+or tested here. What follows are build entry points; SDK builds/device runs must be checked on
+the platform toolchains.
 
 Android uses Bevy NativeActivity and the APK configuration in the client manifest. Install Android SDK/NDK, the `aarch64-linux-android` Rust target, and `cargo-apk`, set the SDK/NDK variables required by that tool, then:
 

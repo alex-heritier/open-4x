@@ -3,8 +3,8 @@ mod chrome;
 mod city;
 mod connection;
 mod diplomacy;
-mod margin;
 mod march;
+mod margin;
 mod music;
 mod presentation;
 mod production;
@@ -800,7 +800,7 @@ fn receive(
     for event in connection.poll() {
         match event {
             Event::Content(pack) => {
-                session.pack = pack;
+                session.pack = *pack;
                 session.dirty = true;
             }
             Event::Error(error) => {
@@ -808,76 +808,78 @@ fn receive(
                 session.pending = false;
                 session.dirty = true;
             }
-            Event::Response(Response::Snapshot {
-                version,
-                player,
-                mut game,
-                rules,
-            }) => {
-                if version != PROTOCOL_VERSION {
-                    session.message = "Incompatible server protocol".into();
-                    continue;
-                }
-                let newer = session
-                    .game
-                    .as_ref()
-                    .is_none_or(|old| old.revision != game.revision);
-                if session
-                    .game
-                    .as_ref()
-                    .is_some_and(|old| game.turn > old.turn)
-                {
-                    commands.spawn((
-                        AudioPlayer::new(assets.load(format!(
-                            "{}{}",
-                            session.asset_prefix, session.pack.visuals.turn_sound
-                        ))),
-                        PlaybackSettings::DESPAWN,
-                    ));
-                }
-                // Snapshots carry no lookup tables; build them so queries stay cheap.
-                game.reindex();
-                // Beyond the edge of an upright world lies the desk the chart is spread on
-                // (see `margin`); its walnut shows wherever its tiles are not yet drawn.
-                let backdrop = if game.map.lattice.is_some() {
-                    DESK
-                } else {
-                    BACKDROP
-                };
-                if clear.0 != backdrop {
-                    clear.0 = backdrop;
-                }
-                // A newer state brings the fights of the command that made it. The first
-                // snapshot is only the starting point, so whatever a save held is not replayed.
-                if newer && session.game.is_some() && !game.battles.is_empty() {
-                    stage.enqueue(&game.battles);
-                    session.staging = true;
-                }
-                // Likewise its walks, which play before its fights.
-                if newer && session.game.is_some() && !game.marches.is_empty() {
-                    walks.enqueue(&game.marches);
-                }
-                session.player = player;
-                session.game = Some(game);
-                session.rules = rules;
-                session.pending = false;
-                if newer {
-                    // A newer state may have moved what the menu named.
-                    session.menu = None;
-                    session.dirty = true;
-                    session.message = if player == 0 {
-                        "Spectator | another client commands this campaign".into()
+            Event::Response(response) => match *response {
+                Response::Snapshot {
+                    version,
+                    player,
+                    mut game,
+                    rules,
+                } => {
+                    if version != PROTOCOL_VERSION {
+                        session.message = "Incompatible server protocol".into();
+                        continue;
+                    }
+                    let newer = session
+                        .game
+                        .as_ref()
+                        .is_none_or(|old| old.revision != game.revision);
+                    if session
+                        .game
+                        .as_ref()
+                        .is_some_and(|old| game.turn > old.turn)
+                    {
+                        commands.spawn((
+                            AudioPlayer::new(assets.load(format!(
+                                "{}{}",
+                                session.asset_prefix, session.pack.visuals.turn_sound
+                            ))),
+                            PlaybackSettings::DESPAWN,
+                        ));
+                    }
+                    // Snapshots carry no lookup tables; build them so queries stay cheap.
+                    game.reindex();
+                    // Beyond the edge of an upright world lies the desk the chart is spread on
+                    // (see `margin`); its walnut shows wherever its tiles are not yet drawn.
+                    let backdrop = if game.map.lattice.is_some() {
+                        DESK
                     } else {
-                        "Select a unit; right-click a square to move, an enemy to attack. Space advances one day."
-                            .into()
+                        BACKDROP
                     };
+                    if clear.0 != backdrop {
+                        clear.0 = backdrop;
+                    }
+                    // A newer state brings the fights of the command that made it. The first
+                    // snapshot is only the starting point, so whatever a save held is not replayed.
+                    if newer && session.game.is_some() && !game.battles.is_empty() {
+                        stage.enqueue(&game.battles);
+                        session.staging = true;
+                    }
+                    // Likewise its walks, which play before its fights.
+                    if newer && session.game.is_some() && !game.marches.is_empty() {
+                        walks.enqueue(&game.marches);
+                    }
+                    session.player = player;
+                    session.game = Some(game);
+                    session.rules = rules;
+                    session.pending = false;
+                    if newer {
+                        // A newer state may have moved what the menu named.
+                        session.menu = None;
+                        session.dirty = true;
+                        session.message = if player == 0 {
+                            "Spectator | another client commands this campaign".into()
+                        } else {
+                            "Select a unit; right-click a square to move, an enemy to attack. Space advances one day."
+                            .into()
+                        };
+                    }
                 }
-            }
-            Event::Response(Response::Rejected { reason, .. }) => {
-                session.pending = false;
-                session.message = reason;
-                session.dirty = true;
-            }
+                Response::Rejected { reason, .. } => {
+                    session.pending = false;
+                    session.message = reason;
+                    session.dirty = true;
+                }
+            },
         }
     }
 }
@@ -1161,12 +1163,11 @@ fn buttons(
             }
         }
     }
-    if let Some(touch) = touches.iter_just_released().next() {
-        if let Some(action) = touch_action.take()
-            && touch.position().distance(touch.start_position()) < 12.0
-        {
-            activated.push(action);
-        }
+    if let Some(touch) = touches.iter_just_released().next()
+        && let Some(action) = touch_action.take()
+        && touch.position().distance(touch.start_position()) < 12.0
+    {
+        activated.push(action);
     }
     for action in &activated {
         act(action, &mut session, &mut connection);
@@ -1257,20 +1258,47 @@ fn scroll_inspector(
         scroll.y = (scroll.y + delta).clamp(0.0, max.max(0.0));
     }
 }
-fn controls(
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
-    time: Res<Time>,
-    mut wheel: MessageReader<MouseWheel>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut camera: Query<(&Camera, &GlobalTransform, &mut Transform, &mut Projection), With<Camera2d>>,
-    ui: Query<&Interaction, With<Button>>,
-    info: Query<&Interaction, Or<Panels>>,
-    mut session: ResMut<Session>,
-    mut connection: NonSendMut<Connection>,
-    mut last_click: Local<Option<(Coord, f64)>>,
-) {
+/// The input system's reads and writes, bundled so the system takes one argument.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Controls<'w, 's> {
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    mouse: Res<'w, ButtonInput<MouseButton>>,
+    touches: Res<'w, Touches>,
+    time: Res<'w, Time>,
+    wheel: MessageReader<'w, 's, MouseWheel>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    camera: Query<
+        'w,
+        's,
+        (
+            &'static Camera,
+            &'static GlobalTransform,
+            &'static mut Transform,
+            &'static mut Projection,
+        ),
+        With<Camera2d>,
+    >,
+    ui: Query<'w, 's, &'static Interaction, With<Button>>,
+    info: Query<'w, 's, &'static Interaction, Or<Panels>>,
+    session: ResMut<'w, Session>,
+    connection: NonSendMut<'w, Connection>,
+    last_click: Local<'s, Option<(Coord, f64)>>,
+}
+fn controls(params: Controls) {
+    let Controls {
+        keys,
+        mouse,
+        touches,
+        time,
+        mut wheel,
+        windows,
+        mut camera,
+        ui,
+        info,
+        mut session,
+        mut connection,
+        mut last_click,
+    } = params;
     let Ok(window) = windows.single() else {
         return;
     };
@@ -1352,13 +1380,16 @@ fn controls(
         (transform.translation.x - left).rem_euclid(period) + left
     } else {
         let reach_x = margin::reach(window.width() * 0.5 * ortho.scale);
-        transform.translation.x.clamp(left - reach_x, right + reach_x)
+        transform
+            .translation
+            .x
+            .clamp(left - reach_x, right + reach_x)
     };
     transform.translation.y = transform.translation.y.clamp(bottom - reach, top + reach);
-    if keys.just_pressed(KeyCode::Home) || keys.just_pressed(KeyCode::KeyH) {
-        if let Some(position) = home(game, session.player) {
-            focus(&mut transform, position);
-        }
+    if (keys.just_pressed(KeyCode::Home) || keys.just_pressed(KeyCode::KeyH))
+        && let Some(position) = home(game, session.player)
+    {
+        focus(&mut transform, position);
     }
     // While a fight is on stage Space skips it (see `stage::drive`) rather than ending the day.
     if keys.just_pressed(KeyCode::Space) && !session.staging {

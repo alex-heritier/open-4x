@@ -7,10 +7,7 @@
 //! stage, and the asset server lets them go after.
 use super::Session;
 use bevy::{ecs::system::SystemParam, prelude::*};
-use fourx_content::{
-    Visuals,
-    animation::{Clip, FACINGS},
-};
+use fourx_content::animation::{Clip, FACINGS};
 use fourx_sim::{Flavor, Id};
 use std::collections::HashMap;
 
@@ -109,19 +106,18 @@ impl UnitArt {
     /// design that was actually drawn (so callers can fall back to its sprite).
     pub fn clip(
         &mut self,
-        prefix: &str,
-        pack_id: &str,
-        visuals: &Visuals,
+        session: &Session,
         assets: &AssetServer,
         layouts: &mut Assets<TextureAtlasLayout>,
         kind: &str,
         flavor: Flavor,
         clip: Clip,
     ) -> Option<(String, ClipArt)> {
-        let key = format!("{prefix}|{pack_id}");
+        let key = format!("{}|{}", session.asset_prefix, session.pack.id);
         if self.key != key {
             *self = UnitArt { key, ..default() };
         }
+        let visuals = &session.pack.visuals;
         let visual = visuals.unit(kind, flavor)?;
         let design = visuals.unit_design(kind, flavor).to_string();
         let unit = visual.clips?;
@@ -140,7 +136,7 @@ impl UnitArt {
                 ))
             })
             .clone();
-        let path = format!("{prefix}{}", sheet.sheet);
+        let path = format!("{}{}", session.asset_prefix, sheet.sheet);
         let image = if clip.loops() {
             self.resident
                 .entry(id)
@@ -173,19 +169,7 @@ impl UnitArt {
     ) -> Option<ClipSet> {
         let mut clips = Vec::with_capacity(5);
         for clip in Clip::ALL {
-            clips.push(
-                self.clip(
-                    &session.asset_prefix,
-                    &session.pack.id,
-                    &session.pack.visuals,
-                    assets,
-                    layouts,
-                    kind,
-                    flavor,
-                    clip,
-                )?
-                .1,
-            );
+            clips.push(self.clip(session, assets, layouts, kind, flavor, clip)?.1);
         }
         Some(ClipSet {
             clips: clips.try_into().ok()?,

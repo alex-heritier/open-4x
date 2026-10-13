@@ -9,5 +9,4 @@ fourx-sim.workspace = true
 fourx-content.workspace = true
 serde_json.workspace = true
 serde.workspace = true
-omnilua = { version = "0.7.1", default-features = false, features = ["serde"] }
 thiserror.workspace = true

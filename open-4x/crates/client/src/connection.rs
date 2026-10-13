@@ -5,20 +5,22 @@ use fourx_sim::{Id, Request, Response};
 use std::collections::VecDeque;
 
 pub enum Event {
-    Response(Response),
-    Content(Pack),
+    /// Boxed: a snapshot carries the whole game, and a pack carries every scenario,
+    /// dwarfing the error variant.
+    Response(Box<Response>),
+    Content(Box<Pack>),
     Error(String),
 }
 fn decode(text: &str) -> Event {
     match serde_json::from_str::<serde_json::Value>(text) {
         Ok(v) if v["type"] == "content" => {
             match serde_json::from_value::<Pack>(v["pack"].clone()) {
-                Ok(p) if p.validate().is_ok() => Event::Content(p),
+                Ok(p) if p.validate().is_ok() => Event::Content(Box::new(p)),
                 _ => Event::Error("Invalid server content manifest".into()),
             }
         }
         _ => match serde_json::from_str(text) {
-            Ok(r) => Event::Response(r),
+            Ok(r) => Event::Response(Box::new(r)),
             Err(e) => Event::Error(format!("Invalid server response: {e}")),
         },
     }
@@ -38,8 +40,8 @@ impl Connection {
     pub fn local(host: Host) -> Self {
         let player = host.commander();
         let inbox = VecDeque::from([
-            Event::Content(host.pack.clone()),
-            Event::Response(host.snapshot(player)),
+            Event::Content(Box::new(host.pack.clone())),
+            Event::Response(Box::new(host.snapshot(player))),
         ]);
         Self {
             host: Some(host),
@@ -63,12 +65,13 @@ impl Connection {
     }
     pub fn send(&mut self, request: Request) {
         if let Some(host) = &mut self.host {
-            self.inbox
-                .push_back(Event::Response(host.request(self.player, request)));
-        } else if let Some(remote) = &mut self.remote {
-            if let Err(e) = remote.send(serde_json::to_string(&request).unwrap()) {
-                self.inbox.push_back(Event::Error(e));
-            }
+            self.inbox.push_back(Event::Response(Box::new(
+                host.request(self.player, request),
+            )));
+        } else if let Some(remote) = &mut self.remote
+            && let Err(e) = remote.send(serde_json::to_string(&request).unwrap())
+        {
+            self.inbox.push_back(Event::Error(e));
         }
     }
     pub fn poll(&mut self) -> Vec<Event> {
