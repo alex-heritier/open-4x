@@ -22,9 +22,9 @@ GRID = 512
 # summit) where snow starts, `foot` how far the scrub climbs the slopes.
 STYLES = {
     "temperate": dict(
-        rock=[(0, "#4a3426"), (0.35, "#6b4c33"), (0.65, "#8c6844"), (1.0, "#ad8a5e")],
-        scrub=[(0, "#3f4c22"), (0.5, "#566330"), (1.0, "#727c3e")],
-        snow=0.62,
+        rock=[(0, "#3f3934"), (0.35, "#5e564e"), (0.65, "#827970"), (1.0, "#aaa297")],
+        scrub=[(0, "#3e5420"), (0.5, "#5a752a"), (1.0, "#86983c")],
+        snow=0.50,
         foot=0.40,
     ),
     "arid": dict(
@@ -164,8 +164,8 @@ def hills_height(seed=21):
 
 HILL_STYLES = {
     "temperate": dict(
-        cover=[(0, "#3d4c20"), (0.5, "#5a6a2a"), (1.0, "#848f40")],
-        dry=[(0, "#6a6434"), (1.0, "#9c9050")],
+        cover=[(0, "#3c5420"), (0.5, "#5e7a2a"), (1.0, "#93a03e")],
+        dry=[(0, "#76703a"), (1.0, "#b0a456")],
         rock=[(0, "#5a4430"), (1.0, "#9a7c56")],
         snow=2.0,
     ),

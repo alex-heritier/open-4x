@@ -113,11 +113,11 @@ def render_river(mask: int, variant: int) -> np.ndarray:
     mud_a = P.smoothstep(half + BANK + MUD, half + BANK, d) * 0.30
     across = np.clip(lat / half, -1, 1)  # -1 .. 1 over the water
     deep = P.smoothstep(1.0, 0.0, np.abs(across))  # 1 mid-stream
-    water = P.mix(P.hx("#2d86b8"), P.hx("#4cb4de"), deep)
+    water = P.mix(P.hx("#2d7695"), P.hx("#4b9fb5"), deep)
     lit = np.clip(0.5 - 0.5 * across, 0, 1)  # the upper-left bank catches the light
-    water = P.mix(water, P.hx("#9ae2f0"), P.smoothstep(0.55, 1.0, lit) * 0.30 * (1 - deep * 0.4))
+    water = P.mix(water, P.hx("#9fd2d6"), P.smoothstep(0.55, 1.0, lit) * 0.30 * (1 - deep * 0.4))
     water = water * (1.0 + 0.16 * flow)[..., None]
-    water = P.mix(water, P.hx("#dcf6fa"), P.smoothstep(0.62, 0.9, shimmer * 1.7) * 0.22 * deep)
+    water = P.mix(water, P.hx("#e0f2f0"), P.smoothstep(0.62, 0.9, shimmer * 1.7) * 0.22 * deep)
 
     rgb = P.hx("#4a4128") * np.ones((h, w, 1), dtype=np.float32)  # wet earth
     alpha = mud_a

@@ -16,8 +16,8 @@ def in_diamond(x, y, margin=0.0):
 # ---- trees ---------------------------------------------------------------------------------------
 # Woods are dark and dense: near-black green in the shade of a crown, a dry yellow-green where the sun
 # strikes it, so a stand reads as a mass against the olive ground with the crowns picked out on top.
-LEAF_STOPS = [(0.0, "#1b3216"), (0.28, "#294a1c"), (0.52, "#3b6126"), (0.76, "#58802f"), (1.0, "#7d9d3e")]
-FIR_STOPS = [(0.0, "#132a1a"), (0.30, "#1e3d26"), (0.55, "#2f5630"), (0.80, "#477238"), (1.0, "#658c44")]
+LEAF_STOPS = [(0.0, "#1b3416"), (0.28, "#2c501c"), (0.52, "#456e26"), (0.76, "#6c9030"), (1.0, "#a6ad48")]
+FIR_STOPS = [(0.0, "#132c1a"), (0.30, "#1f4626"), (0.55, "#33622e"), (0.80, "#558636"), (1.0, "#8aa448")]
 JUNGLE_STOPS = [(0.0, "#173a1c"), (0.28, "#235426"), (0.52, "#37722e"), (0.76, "#58943a"), (1.0, "#80b04c")]
 FROST_STOPS = [(0.0, "#1f342a"), (0.30, "#2d4638"), (0.55, "#42614e"), (0.80, "#5c8068"), (1.0, "#80a088")]
 AUTUMN = ["#a98048", "#b89050", "#9c7044", "#bb9a58", "#a67a48"]  # muted: a hint of turning leaves

@@ -35,10 +35,10 @@ WATER_NAMES = ("land", "coast", "sea", "ocean")
 # how deep each water digit reads, 0 = shoreline shallows, 1 = open ocean
 WATER_DEPTH = np.array([0.0, 0.16, 0.58, 1.0], dtype=np.float32)
 
-# Olive-drab, khaki and brown: the land is a worn, sun-baked painting, not a lawn.  Shadow runs to
-# a brown-green near black, the lit crowns to a dry yellow-olive.
-GRASSLAND_STOPS = [(0.00, "#2e3b18"), (0.22, "#434f1f"), (0.48, "#5d6b27"), (0.74, "#7d8a33"), (1.00, "#a2a748")]
-PLAINS_STOPS = [(0.00, "#48442a"), (0.25, "#645d34"), (0.52, "#7f7642"), (0.78, "#9b9059"), (1.00, "#b9ad82")]
+# Sunlit meadow green running to a warm yellow-olive on the lit crowns; shadow runs to a deep
+# green-brown.  Plains are the same land gone to straw and khaki.
+GRASSLAND_STOPS = [(0.00, "#34481a"), (0.22, "#4e6620"), (0.48, "#6c8428"), (0.74, "#8f9e33"), (1.00, "#bab650")]
+PLAINS_STOPS = [(0.00, "#504a26"), (0.25, "#6e6a32"), (0.52, "#8c8540"), (0.78, "#aa9f56"), (1.00, "#c9b97a")]
 DESERT_STOPS = [(0.00, "#8f8264"), (0.35, "#b0a482"), (0.65, "#cbc1a0"), (1.00, "#e3dbc0")]
 TUNDRA_STOPS = [(0.00, "#767a68"), (0.30, "#969886"), (0.60, "#b9baac"), (1.00, "#dcddd3")]
 BEACH_STOPS = [(0.00, "#9a8a58"), (0.40, "#bfb078"), (0.75, "#d9cc96"), (1.00, "#ebe2b8")]
@@ -130,7 +130,7 @@ class Fields:
         t = unit(1.15 * low + 1.0 * mid + 0.35 * fine)
         col = P.ramp(t, GRASSLAND_STOPS)
         meadow = P.smoothstep(0.15, 0.55, fbm(a, b, 5, 3, seed=14, warp=0.25) * 1.5)
-        col = P.mix(col, P.hx("#95a548"), meadow * 0.30)
+        col = P.mix(col, P.hx("#a8b04a"), meadow * 0.30)
         shade = P.smoothstep(0.10, 0.45, fbm(a, b, 18, 2, seed=15) * 1.5)
         col = col * (1.0 - 0.18 * shade)[..., None]
         col = col * (1.0 + 0.16 * self.bump)[..., None]
@@ -220,13 +220,14 @@ def render_ground(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
     return np.dstack([np.clip(rgb, 0, 1), _edge_alpha(f)])
 
 
-# Water reads in three flat bands, like a painted chart: bright azure over the shelf (coast),
-# royal blue in the sea, near-black navy in the ocean.  The bands meet along a ragged isoline with a
-# dark lip on the deep side, so a sea tile cuts into the shallows instead of fading into them.
-COAST_STOPS = [(0.00, "#86dcee"), (0.30, "#5ecbe6"), (0.65, "#42b5de"), (1.00, "#33a3d3")]
-SEA_STOPS = [(0.00, "#1a56a6"), (0.50, "#2169b6"), (1.00, "#2c7cc6")]
-OCEAN_STOPS = [(0.00, "#071f5e"), (0.50, "#0b2a72"), (1.00, "#12388a")]
-SURF = "#d2f3f6"  # the thin pale line where water meets sand
+# Water is one painted teal sea that deepens with distance from shore: pale turquoise over the
+# shelf (coast), steel teal in the sea, deep slate blue in the ocean.  The depths fade into each
+# other over a wide, ragged band, and wave strokes run across all of them.
+COAST_STOPS = [(0.00, "#86c9cc"), (0.30, "#62afbd"), (0.65, "#4893a9"), (1.00, "#3b839c")]
+SEA_STOPS = [(0.00, "#235f7b"), (0.50, "#2b6c88"), (1.00, "#377b95")]
+OCEAN_STOPS = [(0.00, "#1c4c68"), (0.50, "#225873"), (1.00, "#2a647f")]
+SURF = "#e8f1ea"  # the thin pale line where water meets sand
+BAND_SOFT = 0.11  # half-width of the fade between depth bands
 SEA_AT, OCEAN_AT = 0.37, 0.79  # halfway between the depth digits 0.16 / 0.58 / 1.0
 ZONE_JITTER = (0.12, 0.05)  # isoline wander; its sum stays under the 0.21 gap, so edges of equal digits never flip
 
@@ -236,8 +237,8 @@ def _water(f: Fields, depth, shore=1.0):
     `shore` runs 0 at the beach to 1 away from it and brightens the shelf.  Ripples are fine-grained
     on purpose: open-sea cells repeat, so no blob may stand out per tile."""
     d = depth + ZONE_JITTER[0] * f.zone + ZONE_JITTER[1] * f.zone_fine
-    sea_w = P.smoothstep(SEA_AT - 0.018, SEA_AT + 0.018, d)
-    ocean_w = P.smoothstep(OCEAN_AT - 0.018, OCEAN_AT + 0.018, d)
+    sea_w = P.smoothstep(SEA_AT - BAND_SOFT, SEA_AT + BAND_SOFT, d)
+    ocean_w = P.smoothstep(OCEAN_AT - BAND_SOFT, OCEAN_AT + BAND_SOFT, d)
 
     chop = np.clip(f.ripple * 1.5 + 0.6 * f.chop, -1, 1)
     grain = 0.5 + 0.5 * chop
@@ -246,26 +247,20 @@ def _water(f: Fields, depth, shore=1.0):
     ocean = P.ramp(grain, OCEAN_STOPS)
     col = P.mix(P.mix(coast, sea, sea_w), ocean, ocean_w)
 
-    # wave strokes: pale on the shelf, a lighter blue in the sea, barely there in the ocean
+    # broad swell: soft light and shade rolling across the open water
+    col = col * (1.0 + 0.07 * f.swell)[..., None]
+    # wave strokes: pale crests on every depth, a darker trough under each
     ridge2 = 1.0 - np.abs(f.ripple2 * 3.2)
-    streak = P.smoothstep(0.70, 0.96, ridge2)
-    col = P.mix(col, P.hx("#b4ecf6"), streak * 0.16 * (1.0 - sea_w))
-    col = P.mix(col, P.hx("#5b9ad8"), streak * 0.20 * sea_w * (1.0 - ocean_w))
-    col = P.mix(col, P.hx("#2a58a8"), streak * 0.20 * ocean_w)
+    streak = P.smoothstep(0.66, 0.96, ridge2)
+    col = P.mix(col, P.hx("#b8e2e2"), streak * 0.20 * (1.0 - sea_w))
+    col = P.mix(col, P.hx("#6ea6b6"), streak * 0.24 * sea_w * (1.0 - ocean_w))
+    col = P.mix(col, P.hx("#5189a1"), streak * 0.22 * ocean_w)
     ridge1 = 1.0 - np.abs(f.ripple * 3.0)
-    trough = P.smoothstep(0.78, 0.97, ridge1)
-    col = col * (1.0 - 0.10 * trough)[..., None]
-
-    # lips along the band edges: lighter just inside the shallow side, a dark rim on the deep side
-    for at, deep_lip, shallow_lip in ((SEA_AT, "#0f3c7e", "#8fe3f4"), (OCEAN_AT, "#041440", "#2e72c4")):
-        above = P.smoothstep(at - 0.004, at + 0.004, d)  # 1 on the deep side
-        lip_dark = above * (1.0 - P.smoothstep(0.012, 0.075, d - at))
-        lip_light = (1.0 - above) * (1.0 - P.smoothstep(0.012, 0.060, at - d))
-        col = P.mix(col, P.hx(deep_lip), lip_dark * 0.80)
-        col = P.mix(col, P.hx(shallow_lip), lip_light * 0.45)
+    trough = P.smoothstep(0.74, 0.97, ridge1)
+    col = col * (1.0 - 0.13 * trough)[..., None]
 
     glint = P.smoothstep(0.62, 0.90, f.sparkle * 1.7)
-    return P.mix(col, P.hx("#e4f8fa"), glint * 0.16 * (1.0 - sea_w))
+    return P.mix(col, P.hx("#e4f4f2"), glint * (0.16 - 0.08 * sea_w))
 
 
 def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
@@ -296,7 +291,7 @@ def render_water(f: Fields, n: int, e: int, s: int, w_: int) -> np.ndarray:
     swell = swell * P.smoothstep(0.0, 0.3, np.abs(f.foam_noise) + 0.2)
     water = P.mix(water, P.hx(SURF), np.clip(swell * 0.22, 0, 1))
     shore_glow = (1.0 - P.smoothstep(0.0, 0.16, m)) * P.smoothstep(-0.01, 0.01, m)
-    water = P.mix(water, P.hx("#a6eaf6"), shore_glow * 0.30)
+    water = P.mix(water, P.hx("#9fd4d4"), shore_glow * 0.30)
 
     # beach strip on the land side, fading out inland (alpha), darker where the sea wets it
     strip = P.smoothstep(-0.40, -0.07, m + f.beach_edge * 0.10) * (1.0 - P.smoothstep(0.0, 0.03, m))
