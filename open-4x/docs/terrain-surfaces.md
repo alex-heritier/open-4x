@@ -111,8 +111,8 @@ From `open-4x/`:
 cargo run -p fourx-client -- --scenario terrain-study --focus 10,10 --zoom 1.6
 cargo run -p fourx-client -- --scenario terrain-study --focus 10,10 --zoom 1.6 \
   --smoke --screenshot /tmp/terrain-study.png
-cargo test --workspace --exclude fourx-client --profile quick
-cargo test -p fourx-client --lib --profile quick
+cargo test --workspace --exclude fourx-client
+cargo test -p fourx-client --lib
 ```
 
 The `terrain-study` scenario is a charted 20×20 map with two rival cities, bands of relief,
