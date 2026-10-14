@@ -2355,6 +2355,7 @@ dependencies = [
  "fourx-runtime",
  "fourx-sim",
  "serde_json",
+ "ttf-parser",
  "tungstenite",
  "wasm-bindgen",
  "web-sys",

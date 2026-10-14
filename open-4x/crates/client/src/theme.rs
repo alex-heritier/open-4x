@@ -808,6 +808,30 @@ pub(crate) fn map_text(
     ));
 }
 
+/// How wide `label` is when set at `size` in the semibold serif of [`map_text`], from the font's
+/// own advance widths, so a plate can be cut to fit its name.
+pub(crate) fn measure(label: &str, size: f32) -> f32 {
+    static FACE: std::sync::OnceLock<Option<ttf_parser::Face<'static>>> = std::sync::OnceLock::new();
+    let face = FACE.get_or_init(|| {
+        let mut face = ttf_parser::Face::parse(SERIF, 0).ok()?;
+        face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), 600.0);
+        Some(face)
+    });
+    let em = size * TYPE_SCALE;
+    let Some(face) = face else {
+        return text_width(label.chars().count(), size);
+    };
+    let units = f32::from(face.units_per_em());
+    label
+        .chars()
+        .map(|c| {
+            face.glyph_index(c)
+                .and_then(|g| face.glyph_hor_advance(g))
+                .map_or(em * 0.5, |advance| f32::from(advance) / units * em)
+        })
+        .sum()
+}
+
 /// How wide a label of `chars` characters is at `size`, near enough to size a pill around it.
 pub(crate) fn text_width(chars: usize, size: f32) -> f32 {
     chars as f32 * size * TYPE_SCALE * 0.42
@@ -816,6 +840,15 @@ pub(crate) fn text_width(chars: usize, size: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_are_measured_by_their_letters_not_their_count() {
+        // the same number of letters, but wide ones take more room
+        assert!(measure("Hamhung", 13.0) > measure("Iilitri", 13.0) * 1.5);
+        // and twice the size is twice the width
+        let (small, large) = (measure("Seoul", 10.0), measure("Seoul", 20.0));
+        assert!(small > 10.0 && (large / small - 2.0).abs() < 1e-3);
+    }
 
     #[test]
     fn pips_are_one_per_hit_point_with_the_wounds_unlit() {

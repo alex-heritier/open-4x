@@ -1112,38 +1112,43 @@ pub(super) fn refresh(params: Refresh) {
             }
             // The plate: the city's size in its nation's colour at one end, the days
             // until its current work is done at the other, its name between.
-            let width = text_width(city.name.chars().count(), 15.0) + 60.0;
-            let plate = Vec3::new(x, y - 26.0, z + 0.1);
-            label_plate(&mut commands, &shapes, plate, Vec2::new(width, 24.0));
+            // The plate is cut to the measured name, so the medallions never crowd it.
+            const NAME: f32 = 13.0;
+            const BADGE: f32 = 22.0; // medallion diameter
+            const INSET: f32 = 3.0; // how far a medallion's centre sits inside the plate's end
+            const GAP: f32 = 5.0; // the least room between the name and a medallion
+            let width = measure(&city.name, NAME) + 2.0 * (INSET + BADGE / 2.0 + GAP);
+            let plate = Vec3::new(x, y - 24.0, z + 0.1);
+            label_plate(&mut commands, &shapes, plate, Vec2::new(width, 18.0));
             let ours = city.owner == session.player;
-            let left = plate + Vec3::new(5.0 - width / 2.0, 0.0, 0.1);
+            let left = plate + Vec3::new(INSET - width / 2.0, 0.0, 0.1);
             medallion(
                 &mut commands,
                 &shapes,
                 left,
-                28.0,
+                BADGE,
                 nation_color(game, city.owner, 1.0),
             );
             map_text(
                 &mut commands,
                 city.population.to_string(),
-                13.0,
+                10.5,
                 ON_ACCENT,
                 left + Vec3::Z * 0.2,
             );
             map_text(
                 &mut commands,
                 &city.name,
-                15.0,
+                NAME,
                 BRONZE,
                 plate + Vec3::Z * 0.3,
             );
-            let right = plate + Vec3::new(width / 2.0 - 5.0, 0.0, 0.1);
+            let right = plate + Vec3::new(width / 2.0 - INSET, 0.0, 0.1);
             medallion(
                 &mut commands,
                 &shapes,
                 right,
-                28.0,
+                BADGE,
                 if ours {
                     Color::srgb(0.082, 0.157, 0.122)
                 } else {
@@ -1160,7 +1165,7 @@ pub(super) fn refresh(params: Refresh) {
                     city.progress,
                     city.shields(),
                 ),
-                13.0,
+                10.5,
                 ON_ACCENT,
                 right + Vec3::Z * 0.2,
             );

@@ -17,6 +17,8 @@ fourx-sim.workspace = true
 fourx-content.workspace = true
 fourx-runtime.workspace = true
 serde_json.workspace = true
+# measures map labels against the bundled serif; already in the tree through bevy_text
+ttf-parser = "0.25"
 bevy = { version = "0.18.1", default-features = false, features = [
   "std", "async_executor", "bevy_asset", "bevy_log", "bevy_window", "bevy_winit",
   "bevy_color", "bevy_camera", "bevy_image", "bevy_mesh", "bevy_shader",
