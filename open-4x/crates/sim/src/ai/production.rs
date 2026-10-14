@@ -31,6 +31,15 @@ impl Game {
             let Some(city) = self.cities.get(&id).filter(|c| c.owner == realm.id) else {
                 continue;
             };
+            if city.construction.is_some() {
+                continue;
+            }
+            if rules.economy.enabled
+                && self.budget_upkeep(realm.id, rules) + rules.economy.unit_upkeep
+                    > self.income(realm.id)
+            {
+                continue;
+            }
             let (building, progress) = (city.production.clone(), city.progress);
             let pick = match building {
                 None => self.next_build(realm, i, roster),
@@ -39,6 +48,16 @@ impl Game {
             let Some(def) = pick else {
                 continue;
             };
+            if rules.economy.enabled {
+                if let Some(g) = rules.economy.unit_good(def) {
+                    let missing = (rules.economy.unit_goods
+                        - self.factions[&realm.id].stockpile.get(g))
+                    .max(0);
+                    if missing > 0 {
+                        let _ = self.trade(realm.id, g, missing, rules);
+                    }
+                }
+            }
             let command = Command::Produce {
                 city: id,
                 unit: def.id.clone(),

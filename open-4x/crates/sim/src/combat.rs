@@ -194,7 +194,12 @@ impl Game {
 
     /// Before a duel, artillery with the defender may shoot the attacker once. Returns the shot
     /// for the record, or `None` when nobody fired.
-    fn defensive_bombard(&mut self, attacker: Id, defender: Id, rules: &Rules) -> Option<Support> {
+    pub(crate) fn defensive_bombard(
+        &mut self,
+        attacker: Id,
+        defender: Id,
+        rules: &Rules,
+    ) -> Option<Support> {
         let victim = &self.units[&attacker];
         let victim_def = rules.def(victim);
         if victim_def.defense <= 0 || victim.hp(victim_def) <= 1 {
@@ -251,7 +256,7 @@ impl Game {
         true
     }
 
-    fn check_target(
+    pub(crate) fn check_target(
         &self,
         player: Id,
         id: Id,
@@ -331,7 +336,14 @@ impl Game {
     }
 
     /// Nothing defends the square: its defenseless units change sides, and a city falls.
-    fn capture_tile(&mut self, player: Id, attacker: Id, target: Coord, holder: Id, rules: &Rules) {
+    pub(crate) fn capture_tile(
+        &mut self,
+        player: Id,
+        attacker: Id,
+        target: Coord,
+        holder: Id,
+        rules: &Rules,
+    ) {
         let victims: Vec<Id> = self
             .unit_ids_at(target)
             .into_iter()
@@ -452,11 +464,13 @@ impl Game {
         let mut promoted = false;
         let text = match outcome {
             Outcome::AttackerWon => {
+                self.war_loss(d_unit.owner, a_unit.owner, 2);
                 self.remove_unit(defender);
                 promoted = self.promote(attacker);
                 format!("{} defeated {}.", names.0, names.1)
             }
             Outcome::DefenderWon => {
+                self.war_loss(a_unit.owner, d_unit.owner, 2);
                 self.remove_unit(attacker);
                 promoted = self.promote(defender);
                 format!("{} was lost attacking {}.", names.0, names.1)

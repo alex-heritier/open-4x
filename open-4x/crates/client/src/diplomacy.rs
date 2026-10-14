@@ -274,18 +274,48 @@ pub(super) fn spawn(
                     })
                     .with_children(|p| {
                         if at_war {
-                            button(p, "Propose peace", Action::Idle, Tone::Dormant);
+                            button(p, "Propose peace", Action::Peace(them), Tone::Quiet);
                         } else {
                             button(p, "Declare war", Action::DeclareWar(them), Tone::Quiet);
                         }
+                        if let Some(demand) = game
+                            .diplomacy
+                            .demands
+                            .iter()
+                            .find(|d| d.from == them && d.to == me)
+                        {
+                            text(
+                                p,
+                                demand
+                                    .good
+                                    .map(|g| format!("Demand: 1 {}", g.name()))
+                                    .unwrap_or(format!("Demand: {} gold", demand.gold)),
+                                14.0,
+                                ON_PLATE,
+                            );
+                            button(
+                                p,
+                                "Accept demand",
+                                Action::AnswerDemand(them, true),
+                                Tone::Quiet,
+                            );
+                            button(
+                                p,
+                                "Refuse demand",
+                                Action::AnswerDemand(them, false),
+                                Tone::Quiet,
+                            );
+                        }
+                        button(p, "Send 25 gold", Action::Pay(them), Tone::Quiet);
                         button(p, "Farewell", Action::CloseTalk, Tone::Quiet);
                     });
+                    text(p,&session.message,11.5,MUTED);
                     text(
                         p,
                         if at_war {
-                            "Peace cannot be made yet; the war goes on."
+                            if game.peace_willing(me,them,&session.rules) {"They are willing to make peace; each side keeps its territory."} else {"They will accept when more weary, or after 20 weeks with no city changing hands."}
                         } else {
-                            "War is the only answer the game offers yet."
+                            "Demands, payments and war shape relations between nations."
                         },
                         11.5,
                         MUTED,

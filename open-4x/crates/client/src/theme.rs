@@ -649,8 +649,7 @@ fn selection_top_image(frame: usize) -> Image {
             let turn = frame as f32 * TAU / TOP_FRAMES as f32;
             let (sin, cos) = turn.sin_cos();
             let q = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - Vec2::splat(32.0);
-            let p = Vec2::new(cos * q.x + sin * q.y, -sin * q.x + cos * q.y)
-                + Vec2::splat(32.0);
+            let p = Vec2::new(cos * q.x + sin * q.y, -sin * q.x + cos * q.y) + Vec2::splat(32.0);
             let top = [(4.0, 25.0), (32.0, 5.0), (32.0, 29.0), (60.0, 25.0)];
             let bottom = (32.0, 62.0);
             let left = [(4.0, 25.0), (32.0, 29.0), bottom];

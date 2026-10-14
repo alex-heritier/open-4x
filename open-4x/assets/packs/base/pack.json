@@ -6,7 +6,28 @@
     "victory_industry": 2500,
     "research_cost": 60,
     "starting_gold": 120,
+    "economy": {
+      "enabled": true,
+      "resource_period": 4,
+      "factory_capacity": 2,
+      "factory_cost": 100,
+      "port_cost": 60,
+      "unit_upkeep": 4,
+      "building_upkeep": 8,
+      "loan_principal": 200,
+      "interest_percent": 2,
+      "max_loans": 3,
+      "prices": {"coal":40,"iron":40,"food":20,"cotton":30,"steel":160,"supplies":100},
+      "market_spread": 25,
+      "starting_stockpile": {"steel":8,"supplies":12},
+      "unit_goods": 1,
+      "sale_percent": 50,
+      "demand_cooldown": 12,
+      "peace_quiet_turns": 20,
+      "war_chance_per_thousand": 12
+    },
     "units": {
+      "crate": {"id":"crate","name":"Colonial Cargo","cost":1,"sprite":"sprites/crate.png","domain":"land","attack":0,"defense":0,"moves":2},
       "infantry": {"id":"infantry","name":"Line Infantry","cost":36,"sprite":"sprites/infantry.png","domain":"land","attack":4,"defense":4,"hp":1,"moves":2},
       "cavalry": {"id":"cavalry","name":"Dragoon Cavalry","cost":54,"sprite":"sprites/cavalry.png","domain":"land","attack":8,"defense":2,"blitz":true,"moves":3},
       "artillery": {"id":"artillery","name":"Field Artillery","cost":72,"sprite":"sprites/artillery.png","domain":"land","attack":0,"defense":0,"bombard":8,"range":1,"rate_of_fire":2,"moves":2},
@@ -203,6 +224,7 @@
       "styles": {"cavalry": "charge"}
     },
     "units": {
+      "crate": {"sprite":"sprites/crate.png","clips":{"frame":[160,160],"clips":{"idle":{"sheet":"units/crate/idle.png","frames":2,"ms":180},"run":{"sheet":"units/crate/run.png","frames":2,"ms":180},"attack":{"sheet":"units/crate/attack.png","frames":2,"ms":180},"victory":{"sheet":"units/crate/victory.png","frames":2,"ms":180},"death":{"sheet":"units/crate/death.png","frames":2,"ms":180}}}},
       "infantry": {
         "sprite": "sprites/infantry.png",
         "clips": {

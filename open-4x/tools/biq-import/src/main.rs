@@ -517,6 +517,7 @@ fn build_nations(
         let size = c.size.clamp(1, 100);
         palace.push(c.has_palace != 0);
         cities.push(CityStart {
+            home: true,
             nation: nations[owner].id.clone(),
             position,
             name: c.name.to_string(),

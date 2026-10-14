@@ -38,6 +38,9 @@ impl Game {
             .collect();
         guards.sort_by_key(|id| (Reverse(rules.def(&self.units[id]).defense), *id));
         for id in guards {
+            if realm.committed.contains(&id) {
+                continue;
+            }
             let Some(unit) = self.units.get(&id).filter(|u| u.owner == faction).cloned() else {
                 continue; // lost in an earlier fight today
             };
@@ -236,6 +239,23 @@ impl Game {
         };
         let command = if bombard {
             Command::Bombard {
+                unit: unit.id,
+                target,
+            }
+        } else if rules.economy.enabled
+            && self
+                .units_at(unit.position)
+                .iter()
+                .filter(|u| {
+                    u.owner == faction
+                        && rules.def(u).can_attack()
+                        && !u.attacked
+                        && u.carrier.is_none()
+                })
+                .count()
+                > 1
+        {
+            Command::AttackStack {
                 unit: unit.id,
                 target,
             }

@@ -119,6 +119,22 @@ impl Game {
                 "Passengers can be unloaded only in port; at sea they land by moving ashore",
             ));
         }
+        let cargo = if ship == id {
+            self.passengers(ship)
+                .iter()
+                .any(|id| self.units[id].cargo.is_some())
+        } else {
+            self.units[&id].cargo.is_some()
+        };
+        if rules.economy.enabled
+            && cargo
+            && !self.city_at(position).is_some_and(|c| {
+                self.cities[&c].owner == player
+                    && self.cities[&c].buildings.contains(&crate::Building::Port)
+            })
+        {
+            return Err(error("Cargo must unload at a built port"));
+        }
         if ship == id {
             self.release_passengers(ship);
         } else {

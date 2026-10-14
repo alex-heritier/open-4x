@@ -8,6 +8,9 @@ use fourx_sim::{Command, Id};
 /// The starter at peace, with the industrial victory out of reach so that the run goes on.
 fn dawn_at_peace(seed: u64) -> Host {
     let mut content = Content::base();
+    // These fixtures isolate legacy settlement and land-yield pacing. Industrial gameplay is
+    // covered separately by milestone.rs and simulation milestone tests.
+    content.pack.rules.economy.enabled = false;
     let scenario = content
         .scenarios
         .get_mut("russo-japanese-war")

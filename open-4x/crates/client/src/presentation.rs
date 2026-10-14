@@ -1492,6 +1492,26 @@ fn title(p: &mut ChildSpawnerCommands, color: Color, name: String, subtitle: Str
 
 /// Everything about a selected unit: its numbers, its orders, and what it can do from here.
 fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &Unit) {
+    if let Some((g, n)) = u.cargo {
+        text(
+            p,
+            format!("Cargo: {n} {} — deliver to a home city", g.name()),
+            14.0,
+            INK,
+        );
+    }
+    if session.rules.def(u).is_carrier() {
+        let passengers = game.passengers(u.id);
+        if !passengers.is_empty() {
+            text(
+                p,
+                format!("{} passengers aboard", passengers.len()),
+                14.0,
+                INK,
+            );
+        }
+    }
+
     let def = session.rules.def(u);
     let mine = u.owner == session.player;
     let owner = game
@@ -1984,7 +2004,12 @@ fn build_ui(
             if !narrow {
                 bold(p, faction.name.clone(), 19.0, ON_PLATE);
             }
-            let income = game.income(me);
+            let income = game.income(me)
+                - if session.rules.economy.enabled {
+                    game.budget_upkeep(me, &session.rules)
+                } else {
+                    0
+                };
             stat(
                 p,
                 assets,
@@ -1993,7 +2018,18 @@ fn build_ui(
                 faction.gold.to_string(),
                 Some((format!("{income:+}"), if income >= 0 { GAIN } else { LOSS })),
             );
-            if !narrow {
+            if session.rules.economy.enabled {
+                text(
+                    p,
+                    format!(
+                        "Steel {} · Supplies {}",
+                        faction.stockpile.get(fourx_sim::Good::Steel),
+                        faction.stockpile.get(fourx_sim::Good::Supplies)
+                    ),
+                    13.0,
+                    ON_PLATE,
+                );
+            } else if !narrow {
                 stat(
                     p,
                     assets,
@@ -2067,7 +2103,7 @@ fn build_ui(
                     if session.pending {
                         "Waiting..."
                     } else {
-                        "End Day"
+                        "End Week"
                     },
                     19.0,
                     ON_ACCENT,
@@ -2286,6 +2322,7 @@ fn build_ui(
     if let Some(nation) = session.diplomacy {
         crate::diplomacy::spawn(commands, assets, session, game, nation, narrow);
     }
+    crate::campaign::spawn(commands, assets, session, game, size);
     context_menu(commands, session, size);
     if let Some(city) = session.production {
         crate::production::spawn(commands, assets, session, game, city, narrow);
@@ -2452,6 +2489,14 @@ fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
                     _ => "Order this unit here".to_string(),
                 };
                 menu_button(p, label, Action::Strike(menu.tile), Tone::Primary);
+                if stack_order_for(session, id, menu.tile).is_some() {
+                    menu_button(
+                        p,
+                        "Order whole stack [X]".into(),
+                        Action::StackOrder(menu.tile),
+                        Tone::Quiet,
+                    );
+                }
             }
             if let Some(c) = city {
                 // The city's nation shows as its flag beside the name; it is not spelled out.

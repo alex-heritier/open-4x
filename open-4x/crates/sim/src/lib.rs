@@ -4,15 +4,20 @@ pub mod battle;
 pub mod borders;
 pub mod calendar;
 pub mod combat;
+pub mod diplomacy;
 pub mod economy;
 pub mod improvements;
+pub mod industry;
 pub mod movement;
 pub mod naval;
 pub mod resources;
 pub mod scenario;
+pub mod stacks;
 pub mod terrain;
 pub mod units;
 
+#[cfg(test)]
+mod milestone_tests;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -21,6 +26,7 @@ pub use calendar::Date;
 pub use combat::Estimate;
 pub use economy::Yield;
 pub use improvements::Job;
+pub use industry::{Building, EconomicRules, Good, Stockpile};
 pub use movement::March;
 pub use scenario::{
     CityStart, Flavor, NationStart, RegionStart, Rgb, RuleOverrides, SCENARIO_FORMAT, Scenario,
@@ -33,11 +39,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use terrain::{Coord, Explored, Map, Terrain};
 
 pub type Id = u32;
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 /// Tiles revealed around every city and unit (Chebyshev distance).
 pub const VISION_RADIUS: i32 = 5;
 /// Dispatches kept for the interface.
-const LOG_LIMIT: usize = 24;
+const LOG_LIMIT: usize = 256;
 
 /// Lookup tables from squares to the units and cities on them. They are derived from `units`
 /// and `cities`, never serialized, and rebuilt by [`Game::reindex`]. A game without them
@@ -62,6 +68,8 @@ pub struct Rules {
     pub victory_industry: i32,
     pub research_cost: i32,
     pub starting_gold: i32,
+    #[serde(default)]
+    pub economy: EconomicRules,
 }
 impl Rules {
     /// A unit's design. Content validation guarantees every unit kind exists.
@@ -102,6 +110,14 @@ pub struct Faction {
     pub technology: u32,
     pub industry: i32,
     pub explored: Explored,
+    #[serde(default)]
+    pub stockpile: Stockpile,
+    #[serde(default)]
+    pub debt: i32,
+    #[serde(default)]
+    pub income: i32,
+    #[serde(default)]
+    pub upkeep: i32,
 }
 impl Faction {
     /// What another player may learn about this nation: public facts only.
@@ -117,6 +133,10 @@ impl Faction {
             suzerain: self.suzerain,
             government: self.government.clone(),
             leader: self.leader.clone(),
+            stockpile: Stockpile::default(),
+            debt: 0,
+            income: 0,
+            upkeep: 0,
             gold: 0,
             research: 0,
             technology: self.technology,
@@ -143,11 +163,13 @@ pub struct City {
     pub population: i32,
     pub industry: i32,
     pub capital: bool,
+    #[serde(default)]
+    pub home_owner: Id,
     /// Cultural border level 1–6. Fixed for the life of the city.
     pub border: u8,
     pub production: Option<String>,
     pub progress: i32,
-    /// Food, shields, and gold the land of the city's border region yields each day. Derived
+    /// Food, shields, and gold the land of the city's border region yields each week. Derived
     /// from the map and recounted after every command; saved so that clients, which only see
     /// part of the map, can show it. See [`economy`].
     #[serde(default)]
@@ -155,6 +177,12 @@ pub struct City {
     /// Surplus food stored toward the next citizen. See [`economy`].
     #[serde(default)]
     pub granary: i32,
+    #[serde(default)]
+    pub buildings: BTreeSet<Building>,
+    #[serde(default)]
+    pub construction: Option<Building>,
+    #[serde(default)]
+    pub construction_progress: i32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -162,7 +190,7 @@ pub struct Game {
     pub seed: u64,
     pub rng: u64,
     pub revision: u64,
-    /// Turn 1 is the scenario's start date; each turn is one day.
+    /// Turn 1 is the scenario's start date; each turn is one week.
     pub turn: u32,
     pub start_date: Date,
     pub scenario: String,
@@ -181,6 +209,10 @@ pub struct Game {
     /// Pairs of nations at war, stored with the lower ID first.
     pub wars: BTreeSet<(Id, Id)>,
     pub log: Vec<String>,
+    #[serde(default)]
+    pub diplomacy: diplomacy::DiplomaticState,
+    #[serde(default)]
+    pub stack_battles: Vec<stacks::StackBattle>,
     /// The fights of the latest command, in order, for the interface to replay. Cleared by the
     /// next [`Game::apply`]. See [`battle`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -254,6 +286,35 @@ pub enum Command {
     /// nation at peace is refused until this order is given. See [`Game::at_war`].
     DeclareWar {
         nation: Id,
+    },
+    MoveStack {
+        unit: Id,
+        destination: Coord,
+    },
+    AttackStack {
+        unit: Id,
+        target: Coord,
+    },
+    Build {
+        city: Id,
+        building: Building,
+    },
+    Trade {
+        good: Good,
+        amount: i32,
+    },
+    Borrow,
+    Repay,
+    Pay {
+        nation: Id,
+        amount: i32,
+    },
+    Peace {
+        nation: Id,
+    },
+    AnswerDemand {
+        nation: Id,
+        accept: bool,
     },
     EndTurn,
 }
@@ -382,6 +443,14 @@ impl Game {
                     suzerain: n.suzerain.as_deref().map(nation).transpose()?,
                     government: n.government.clone(),
                     leader: n.leader.clone(),
+                    stockpile: if rules.economy.enabled {
+                        rules.economy.starting_stockpile.clone()
+                    } else {
+                        Stockpile::default()
+                    },
+                    debt: 0,
+                    income: 0,
+                    upkeep: 0,
                     gold: n.gold.unwrap_or(rules.starting_gold),
                     research: 0,
                     technology: n.technology,
@@ -407,6 +476,8 @@ impl Game {
             units: BTreeMap::new(),
             wars: BTreeSet::new(),
             log: Vec::new(),
+            diplomacy: diplomacy::DiplomaticState::default(),
+            stack_battles: Vec::new(),
             battles: Vec::new(),
             marches: Vec::new(),
             winner: None,
@@ -421,6 +492,7 @@ impl Game {
             city.granary = economy::starting_granary(start.population);
             city.industry = start.industry;
             city.capital = start.capital;
+            city.home_owner = if start.home { owner } else { 0 };
             city.border = start
                 .border
                 .unwrap_or_else(|| borders::default_level(start.population, start.capital));
@@ -471,7 +543,8 @@ impl Game {
 
     /// Calendar date of the current turn.
     pub fn date(&self) -> Date {
-        self.start_date.add_days(self.turn.saturating_sub(1))
+        self.start_date
+            .add_days(self.turn.saturating_sub(1).saturating_mul(7))
     }
     pub fn faction_by_tag(&self, tag: &str) -> Option<&Faction> {
         self.factions.values().find(|f| f.tag == tag)
@@ -500,6 +573,15 @@ impl Game {
     }
     fn declare_war(&mut self, a: Id, b: Id) {
         if a != b && a != 0 && b != 0 && self.wars.insert(war_key(a, b)) {
+            let (low, high) = war_key(a, b);
+            self.diplomacy.wars.push(diplomacy::WarPressure {
+                a: low,
+                b: high,
+                since: self.turn,
+                last_capture: self.turn,
+                a_weariness: 0,
+                b_weariness: 0,
+            });
             self.note(format!(
                 "{} and {} are at war.",
                 self.factions[&a].name, self.factions[&b].name
@@ -535,11 +617,15 @@ impl Game {
                 population: 3,
                 industry: 4,
                 capital: false,
+                home_owner: owner,
                 border: borders::default_level(3, false),
                 production: None,
                 progress: 0,
                 harvest: Yield::default(),
                 granary: economy::starting_granary(3),
+                buildings: BTreeSet::new(),
+                construction: None,
+                construction_progress: 0,
             },
         );
         self.index_city(id);
@@ -613,11 +699,13 @@ impl Game {
             return Err(error("Unknown player"));
         }
         self.battles.clear();
+        self.stack_battles.clear();
         self.marches.clear();
         self.execute(player, command, rules, tick)?;
         self.reveal();
         // A finished improvement, a new city, or a turn of computer play may all have changed
         // what a city's land yields; the interface shows the count straight away.
+        self.deliver_crates(rules);
         self.refresh_harvest();
         self.revision += 1;
         self.log.drain(..self.log.len().saturating_sub(LOG_LIMIT));
@@ -633,6 +721,21 @@ impl Game {
         tick: TickRules,
     ) -> Result<()> {
         match command {
+            Command::MoveStack { unit, destination } => {
+                self.move_stack(player, unit, destination, rules)?
+            }
+            Command::AttackStack { unit, target } => {
+                self.attack_stack(player, unit, target, rules)?
+            }
+            Command::Build { city, building } => self.build(player, city, building, rules)?,
+            Command::Trade { good, amount } => self.trade(player, good, amount, rules)?,
+            Command::Borrow => self.borrow(player, rules)?,
+            Command::Repay => self.repay(player, rules)?,
+            Command::Pay { nation, amount } => self.pay(player, nation, amount)?,
+            Command::Peace { nation } => self.propose_peace(player, nation, rules)?,
+            Command::AnswerDemand { nation, accept } => {
+                self.answer_demand(player, nation, accept)?
+            }
             Command::Move { unit, destination } => {
                 self.move_unit(player, unit, destination, rules, usize::MAX)?
             }
@@ -675,7 +778,16 @@ impl Game {
                 let pos = u.position;
                 self.can_found_city(player, pos).map_err(error)?;
                 self.remove_unit(unit);
+                let home = self.cities.values().any(|c| {
+                    c.owner == player
+                        && self.home_city(c.id)
+                        && self.map.distance(c.position, pos) <= 12
+                        && self
+                            .path(player, Domain::Land, c.position, pos, 10_000)
+                            .is_some()
+                });
                 let id = self.add_city(player, pos, name.trim().into());
+                self.cities.get_mut(&id).unwrap().home_owner = if home { player } else { 0 };
                 self.claim_for_new_city(id);
                 self.note(format!(
                     "{} founded a new port.",
@@ -695,7 +807,37 @@ impl Game {
                 if def.is_naval() && !self.coastal(c.position) {
                     return Err(error("Ships require a coastal city"));
                 }
+                if c.production.as_deref() == Some(unit.as_str()) {
+                    return Err(error("Already building this design"));
+                }
+                if unit == "crate" {
+                    return Err(error("Cargo is generated by colonial resources"));
+                }
+                if rules.economy.enabled {
+                    let refund = c
+                        .production
+                        .as_ref()
+                        .and_then(|k| rules.units.get(k))
+                        .and_then(|d| rules.economy.unit_good(d));
+                    if let Some(g) = rules.economy.unit_good(def) {
+                        let available = self.factions[&player].stockpile.get(g)
+                            + if refund == Some(g) {
+                                rules.economy.unit_goods
+                            } else {
+                                0
+                            };
+                        if available < rules.economy.unit_goods {
+                            return Err(error(
+                                "Insufficient goods: buy inputs at the market or run a factory",
+                            ));
+                        }
+                    }
+                    self.refund_production(city, rules);
+                    self.reserve_goods(player, def, rules)?;
+                }
                 let c = self.cities.get_mut(&city).unwrap();
+                c.construction = None;
+                c.construction_progress = 0;
                 c.production = Some(unit);
                 c.progress = 0;
             }
@@ -756,7 +898,9 @@ impl Game {
         }
         // The script scales a nation's whole income once, so small cities are not rounded away.
         for (owner, taken) in gold {
-            self.factions.get_mut(&owner).unwrap().gold += taken * tick.income_percent / 100;
+            let f = self.factions.get_mut(&owner).unwrap();
+            f.income = taken * tick.income_percent / 100;
+            f.gold += f.income;
         }
         for message in famines {
             self.note(message);
@@ -773,20 +917,27 @@ impl Game {
                 ));
             }
         }
-        for message in unlocked {
-            self.note(message);
+        if !rules.economy.enabled {
+            for message in unlocked {
+                self.note(message);
+            }
         }
         // A new ship floats out into its home port; `Produce` checked that the city is coastal.
         for (owner, pos, kind) in completed {
             self.add_unit(owner, &kind, pos);
         }
+        self.industry_turn(rules);
+        self.diplomacy_turn(rules);
         self.refresh_units(rules);
         self.continue_marches(rules);
         self.work_turn(rules);
+        self.ai_logistics(rules);
         self.ai(rules);
+        self.deliver_crates(rules);
         let winner = self.factions.values().find_map(|faction| {
             let other_has_city = self.cities.values().any(|c| c.owner != faction.id);
-            (faction.industry >= rules.victory_industry || !other_has_city)
+            ((!rules.economy.enabled && faction.industry >= rules.victory_industry)
+                || !other_has_city)
                 .then(|| (faction.id, faction.name.clone()))
         });
         if let Some((id, name)) = winner {
@@ -926,6 +1077,13 @@ impl Game {
             units,
             wars: self.wars.clone(),
             log: self.log.clone(),
+            diplomacy: self.diplomacy.view(player),
+            stack_battles: self
+                .stack_battles
+                .iter()
+                .filter(|b| b.owner == player || visible(b.target))
+                .cloned()
+                .collect(),
             battles: self
                 .battles
                 .iter()

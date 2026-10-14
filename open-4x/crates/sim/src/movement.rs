@@ -415,6 +415,17 @@ impl Game {
             // Landing from the sea uses up the rest of the turn.
             let landing =
                 domain == Domain::Land && self.map.get(unit.position).is_some_and(|t| !t.is_land());
+            if rules.economy.enabled
+                && unit.cargo.is_some()
+                && unit.carrier.is_some()
+                && self.map.get(next).is_some_and(|t| t.is_land())
+                && !self.city_at(next).is_some_and(|c| {
+                    self.cities[&c].owner == owner
+                        && self.cities[&c].buildings.contains(&crate::Building::Port)
+                })
+            {
+                return Err(error("Cargo must land at a built port"));
+            }
             let spend = if landing {
                 left
             } else {

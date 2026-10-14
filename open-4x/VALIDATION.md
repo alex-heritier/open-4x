@@ -1,5 +1,44 @@
 # Validation
 
+## Industrial milestone — 2026-10-14
+
+- `cargo test --workspace`: **367 tests passed** (162 simulation, 109 client, 36 content,
+  24 runtime unit tests, 11 runtime integration tests, 1 server, 5 asset-forge and
+  19 scenario-forge). `cargo build -p fourx-client -p fourx-server -p fourx-runtime
+  --bins --examples` passed. `git diff --check` passed.
+- New simulation coverage includes factories with limited inputs, construction and
+  capture, recruitment reservations/refunds, physical home/colony resource production,
+  delivery to the current owner, cargo-only port restrictions, transport ferrying,
+  fixed-price spread, loans/interest/credit limits, bankruptcy sale order, and AI
+  factory overbuilding prevention. Diplomacy coverage includes resource demands,
+  refusal pressure, stronger and weaker AI war declarations, peace weariness and
+  quiet-war acceptance. Saves continue deterministically with economic/diplomatic state.
+- Stack coverage verifies simultaneous lanes, fresh reserve replacement, one attack
+  per participating attacker, terrain width limits, one defensive artillery shot,
+  tile advancement, and **unchanged turn and date throughout the entire battle**.
+  The reproducible `milestone_probe battle` fixture resolves 10 attackers against 3
+  defenders in 12 combat rounds on turn 1 / 1 January 1895 (losses 1:3, stack advances).
+- `milestone_probe campaign`, seed 42: 30 Japan world-campaign weeks in **28.68 seconds
+  in the dev build**, with 2,076 units including 371 cargo carts, 26 factories, 255
+  ports and 28 wars. China declared war on Japan during this run. Japan's original
+  units remain under human control. This is a passive campaign/protocol check, not
+  proof that an hour-long Manchuria campaign is balanced or enjoyable.
+- Desktop visual checks ran on Linux/Xvfb/Vulkan llvmpipe at 1440×900: treasury and
+  simultaneous battle panels render without panics. A real button click bought one
+  Supplies for 100 gold (1,000 → 900 gold, 12 → 13 Supplies); F5 saved format 5 with
+  exactly those values. Captures are development artifacts under `/tmp`.
+- Final city/production UI changes passed **110 client tests** and a desktop shortage
+  capture: each military design shows its required good, unavailable designs show a
+  red missing-input label and have no clickable recruitment action. Tokyo also shows
+  its homeland status and Factory/Port construction controls.
+- Price/upkeep tuning is provisional. The compact starter can bankrupt an idle player
+  under the base economy; explicit legacy-rule test fixtures retain their earlier
+  settlement and industrial-victory behavior. Base industrial campaigns cannot be
+  won by accumulating generic industrial output. Protocol is 6, save format is 5;
+  earlier saves are rejected.
+
+The records below describe earlier builds and their rules.
+
 Tested on 2026-10-08 with Rust 1.98.1, Bevy 0.18.1, and OmniLua 0.7.1 in a Linux container.
 
 - `cargo test`: the headless crates pass (2026-10-09: 14 content, 27 runtime, 1 WebSocket integration, and the simulation's unit tests), plus 14 for `scenario-forge` (the Mercator crop, rasterization, climate-to-terrain table, river snapping onto tile edges, water depth classes, and the ETOPO5, Köppen–Geiger, and Natural Earth parsers), the sim's layered terrain tests (glyph and layer round trips, Civ3 move cost and defense, river edges shared by two tiles and four dual cells), and 2 client tests for overlay selection and tonal variants. Tests cover deterministic replay/save restoration, JSON snapshot round trips, ownership/revision checks, atomic script failures, runaway scripts, content traversal, malformed scenarios and units, scenario overrides, and settlement/production/victory. Rules tests cover Civ3's round odds and hit points by level, fortification and terrain/city defence, retreat, blitz (cavalry attacking more than once), bombardment that wounds but never kills, capture of defenceless artillery and workers, promotion, healing, and the odds estimate; eight-way movement in thirds with road and railroad costs; roads, railroads, mines, and farms with their prerequisites, work rates and lost progress; and fixed per-city borders (level reach and tile counts, the nearest city winning an overlap, a new city taking only unclaimed land, capture flipping a whole region, saves round-tripping). The network test starts a real listener and checks commander authority, spectator updates, duplicate sequences, and stale revisions.

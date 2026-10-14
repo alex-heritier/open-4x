@@ -224,10 +224,14 @@ impl Game {
 
     /// Hand a city, and the region it carries, to a new nation.
     pub(crate) fn transfer_city(&mut self, id: Id, to: Id) {
+        let old = self.cities[&id].owner;
+        self.war_capture(old, to);
         let city = self.cities.get_mut(&id).expect("city exists");
         city.owner = to;
         city.production = None;
         city.progress = 0;
+        city.construction = None;
+        city.construction_progress = 0;
         for tile in &mut self.map.tiles {
             if tile.claim == id {
                 tile.owner = to;

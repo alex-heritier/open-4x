@@ -103,6 +103,30 @@ pub(super) fn rows(game: &Game, rules: &Rules, unit: &Unit, player: Id) -> Vec<V
         });
     }
     let mut standing = Vec::new();
+    if unit.carrier.is_some() || (def.is_carrier() && !game.passengers(unit.id).is_empty()) {
+        standing.push(Entry {
+            action: Action::Unload,
+            icon: "tools",
+            key: None,
+            label: "Unload passengers in port".into(),
+            blocked: None,
+        });
+    }
+    if unit.carrier.is_none() && def.domain == Domain::Land {
+        for ship in game
+            .units_at(unit.position)
+            .into_iter()
+            .filter(|s| s.owner == player && rules.def(s).is_carrier())
+        {
+            standing.push(Entry {
+                action: Action::Load(ship.id),
+                icon: "tools",
+                key: None,
+                label: format!("Load aboard {}", rules.def(ship).name),
+                blocked: None,
+            });
+        }
+    }
     if def.domain == Domain::Land && def.defense > 0 {
         standing.push(Entry {
             action: Action::Fortify,

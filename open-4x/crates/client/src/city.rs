@@ -340,9 +340,9 @@ pub(crate) fn days(needed: i32, per_day: i32) -> Option<i32> {
 }
 fn in_days(n: i32) -> String {
     if n == 1 {
-        "1 day".into()
+        "1 week".into()
     } else {
-        format!("{n} days")
+        format!("{n} weeks")
     }
 }
 
@@ -779,7 +779,7 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
                 format!("{surplus:+}"),
                 if surplus < 0 { FAMINE } else { INK },
             ),
-            "Food a day",
+            "Food a week",
             Some(format!(
                 "{} grown, {} eaten",
                 c.harvest.food,
@@ -792,7 +792,7 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             "tools",
             iron,
             (c.shields().to_string(), INK),
-            "Shields a day",
+            "Shields a week",
             Some(format!(
                 "{} land + {} industry",
                 c.harvest.shields, c.industry
@@ -804,7 +804,7 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             "hud_gold",
             gold,
             (format!("{:+}", c.harvest.gold), INK),
-            "Gold a day",
+            "Gold a week",
             None,
         );
         readout(
@@ -905,6 +905,47 @@ fn production(
     mine: bool,
 ) {
     section(p, "Production");
+    if session.rules.economy.enabled {
+        serif(
+            p,
+            if game.home_city(c.id) {
+                "Home territory"
+            } else {
+                "Colony: goods must be shipped home"
+            },
+            14.0,
+            INK_SOFT,
+        );
+        for b in [fourx_sim::Building::Factory, fourx_sim::Building::Port] {
+            if c.buildings.contains(&b) {
+                serif(p, format!("{} operating", b.name()), 14.0, INK_SOFT);
+            } else if mine && (b != fourx_sim::Building::Port || game.coastal(c.position)) {
+                crate::theme::button(
+                    p,
+                    &format!(
+                        "Build {} · {} production",
+                        b.name(),
+                        session.rules.economy.building_cost(b)
+                    ),
+                    Action::Build(c.id, b),
+                    crate::theme::Tone::Quiet,
+                );
+            }
+        }
+        if let Some(b) = c.construction {
+            serif(
+                p,
+                format!(
+                    "{}: {}/{} production",
+                    b.name(),
+                    c.construction_progress,
+                    session.rules.economy.building_cost(b)
+                ),
+                14.0,
+                INK_SOFT,
+            );
+        }
+    }
     let building = c
         .production
         .as_ref()
@@ -1043,10 +1084,17 @@ fn production(
     })
     .with_children(|p| {
         let coastal = game.coastal(c.position);
-        for (i, def) in session.rules.units.values().enumerate() {
+        for (i, def) in session
+            .rules
+            .units
+            .values()
+            .filter(|d| d.id != "crate")
+            .enumerate()
+        {
             let chosen = c.production.as_deref() == Some(def.id.as_str());
             let wanted_coast = def.is_naval() && !coastal;
-            card(p, kit, def, i, chosen, wanted_coast);
+            let goods = crate::production::goods(game, &session.rules, c, def);
+            card(p, kit, def, i, chosen, wanted_coast, goods);
         }
     });
 }
@@ -1090,8 +1138,10 @@ fn card(
     index: usize,
     chosen: bool,
     needs_coast: bool,
+    goods: Option<(fourx_sim::Good, i32, bool)>,
 ) {
-    let paper = if needs_coast {
+    let missing = goods.is_some_and(|(_, _, ready)| !ready);
+    let paper = if needs_coast || missing {
         Paper::Faint
     } else if chosen {
         Paper::Chosen
@@ -1111,7 +1161,7 @@ fn card(
         BackgroundColor(paper.fill(Interaction::None)),
         BorderColor::all(if chosen { GILT } else { HAIR }),
     ));
-    if !needs_coast {
+    if !needs_coast && !missing && !chosen {
         card.insert(Action::Produce(def.id.clone()));
     }
     card.with_children(|p| {
@@ -1146,8 +1196,16 @@ fn card(
                     }
                 }
             });
+            if let Some((g, n, ready)) = goods {
+                serif(
+                    p,
+                    format!("{n} {}{}", g.name(), if ready { "" } else { " · missing" }),
+                    12.0,
+                    if ready { INK_SOFT } else { FAMINE },
+                );
+            }
         });
-        if let Some(key) = key_of(index).filter(|_| !needs_coast) {
+        if let Some(key) = key_of(index).filter(|_| !needs_coast && !missing) {
             p.spawn((
                 Node {
                     position_type: PositionType::Absolute,

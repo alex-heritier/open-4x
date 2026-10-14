@@ -61,6 +61,7 @@ pub(crate) fn rules() -> Rules {
     gunboat.lethal_land = false;
     gunboat.lethal_sea = false;
     Rules {
+        economy: EconomicRules::default(),
         units: [
             infantry,
             cavalry,

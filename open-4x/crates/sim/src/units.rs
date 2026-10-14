@@ -161,6 +161,8 @@ pub struct Unit {
     /// on its own, and goes wherever the ship goes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carrier: Option<Id>,
+    #[serde(default)]
+    pub cargo: Option<(crate::Good, i32)>,
 }
 fn is_zero(value: &u32) -> bool {
     *value == 0
@@ -183,6 +185,7 @@ impl Unit {
             goto: None,
             route: Vec::new(),
             carrier: None,
+            cargo: None,
         }
     }
     pub fn max_hp(&self, def: &UnitDef) -> i32 {

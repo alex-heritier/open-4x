@@ -2,7 +2,7 @@
 use fourx_content::{Content, Pack};
 use fourx_sim::{Command, Game, Id, PROTOCOL_VERSION, Request, Response, Rules, TickRules};
 
-pub const SAVE_FORMAT: u32 = 4;
+pub const SAVE_FORMAT: u32 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
@@ -70,20 +70,8 @@ impl Host {
     pub fn commander(&self) -> Id {
         self.game.commander
     }
-    /// The campaign's boom cycle: every twelfth turn pays 120% income, other turns 100%.
-    /// A pure function of the turn about to begin, so saves and replays need no VM state.
-    fn tick_rules(&self) -> TickRules {
-        let next = self.game.turn + 1;
-        TickRules {
-            income_percent: if next.is_multiple_of(12) { 120 } else { 100 },
-        }
-    }
     pub fn command(&mut self, player: Id, command: Command) -> Result<(), HostError> {
-        let tick = if matches!(command, Command::EndTurn) {
-            self.tick_rules()
-        } else {
-            TickRules::default()
-        };
+        let tick = TickRules::default();
         // Command errors never partially mutate the live campaign.
         let mut candidate = self.game.clone();
         candidate.apply(player, command, &self.rules, tick)?;
@@ -168,16 +156,9 @@ mod tests {
     fn starter(seed: u64) -> Host {
         Host::base_scenario("russo-japanese-war", seed).unwrap()
     }
-    /// A host whose next turn is a boom turn: the starter opens on turn 1 and the
-    /// twelfth turn pays out. The turn is set directly so the test does not depend
-    /// on the fixture surviving eleven turns of war.
-    fn starter_before_boom(seed: u64) -> Host {
-        let mut host = starter(seed);
-        host.game.turn = 11;
-        host
-    }
     fn starter_at_peace(seed: u64) -> Host {
         let mut content = Content::base();
+        content.pack.rules.economy.war_chance_per_thousand = 0;
         content
             .scenarios
             .get_mut("russo-japanese-war")
@@ -231,7 +212,7 @@ mod tests {
             h
         };
         let (a, b) = (play(7), play(7));
-        assert_eq!(a.game.date().iso(), "1895-01-31");
+        assert_eq!(a.game.date().iso(), "1895-07-30");
         assert_eq!(a.game, b.game);
         // The AI garrisons and recruits, so the world is visibly alive after a month.
         let start = Host::base(7).unwrap().game.units.len();
@@ -462,23 +443,15 @@ mod tests {
         }
     }
     #[test]
-    fn the_twelfth_turn_pays_the_boom() {
-        let host = starter(1);
-        assert_eq!(host.tick_rules().income_percent, 100);
-        let boom = starter_before_boom(1);
-        assert_eq!(boom.tick_rules().income_percent, 120);
-        let mut past = starter(1);
-        past.game.turn = 12;
-        assert_eq!(past.tick_rules().income_percent, 100);
-    }
-    #[test]
-    fn the_boom_turn_scales_income() {
-        let mut boom = starter_before_boom(1);
-        let before = boom.game.factions[&1].gold;
-        boom.command(1, Command::EndTurn).unwrap();
-        assert_eq!(boom.game.turn, 12);
-        // Computer nations never spend gold, so the scaled payout lands directly.
-        assert!(boom.game.factions[&1].gold > before);
+    fn the_twelfth_week_has_no_boom() {
+        let mut host = starter(1);
+        host.game.turn = 11;
+        let player = host.commander();
+        let before = host.game.factions[&player].gold;
+        let income = host.game.income(player);
+        let upkeep = host.game.budget_upkeep(player, &host.rules);
+        host.command(player, Command::EndTurn).unwrap();
+        assert_eq!(host.game.factions[&player].gold, before + income - upkeep);
     }
     #[test]
     fn hidden_enemies_not_in_player_snapshot() {
@@ -513,14 +486,14 @@ mod tests {
         assert_eq!(h.game.view(0).map, h.game.map);
     }
     #[test]
-    fn the_campaign_calendar_advances_one_day_per_turn() {
+    fn the_campaign_calendar_advances_one_week_per_turn() {
         let mut h = starter(3);
         assert_eq!(h.game.date().iso(), "1904-02-08");
         for _ in 0..3 {
             h.command(1, Command::EndTurn).unwrap();
         }
         assert_eq!(h.game.turn, 4);
-        assert_eq!(h.game.date().iso(), "1904-02-11");
+        assert_eq!(h.game.date().iso(), "1904-02-29");
         assert!(h.game.log.iter().any(|l| l.starts_with("8 Feb 1904 |")));
         assert_eq!(h.game.view(1).date(), h.game.date());
     }
@@ -556,6 +529,23 @@ mod tests {
     fn scenario_wars_drive_the_ai_and_peace_keeps_it_home() {
         // At war: Russia's cavalry rides on the Japanese capital. At peace: it stays home.
         let ride = |mut h: Host| {
+            // Economic construction can delay new defenders. Give this military-policy fixture
+            // a full garrison so its cavalry is genuinely spare in both cases.
+            let capital = h
+                .game
+                .cities
+                .values()
+                .find(|c| c.owner == 2 && c.capital)
+                .unwrap()
+                .position;
+            for _ in 0..4 {
+                let id = h.game.next_id;
+                h.game.next_id += 1;
+                h.game
+                    .units
+                    .insert(id, fourx_sim::Unit::new(id, 2, "infantry", capital));
+            }
+            h.game.reindex();
             let id = unit_of(&h, 2, "cavalry");
             let start = h.game.units[&id].position;
             for _ in 0..3 {
@@ -681,6 +671,8 @@ mod tests {
     #[test]
     fn settlement_production_and_victory() {
         let mut h = starter_at_peace(7);
+        // The legacy pack still supports industrial victory when physical goods are disabled.
+        h.rules.economy.enabled = false;
         let pioneer = unit_of(&h, 1, "pioneer");
         // Make a known fixture site three tiles away, then exercise real movement/settlement.
         let capital = h.game.cities[&1].position;

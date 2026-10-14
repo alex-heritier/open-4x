@@ -14,7 +14,7 @@
 //! does not repeat its wobble. The art is made by `art/forge/roads.py`; `docs/roads.md` has the
 //! whole contract.
 use super::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Cells per row of a road or railroad sheet.
 pub(super) const COLUMNS: u32 = 16;
@@ -124,19 +124,96 @@ fn track(game: &Game, cities: &HashSet<Coord>, known: &impl Fn(Coord) -> bool, p
     }
 }
 
-/// The neighbours a square joins by road and by rail, as sheet masks. Rail runs between two
-/// squares that both have it; any other pair of squares with track is joined by road, so a
-/// railway that meets a road leaves a road stub to it and the road reaches the railway.
-fn links(own: u8, around: [u8; 8]) -> (u8, u8) {
-    let (mut road, mut rail) = (0u8, 0u8);
-    for (i, &other) in around.iter().enumerate() {
-        if other == 2 && own == 2 {
-            rail |= 1 << i;
-        } else if other > 0 {
-            road |= 1 << i;
+/// The links drawn between squares with track, as sheet masks `(road, rail)` keyed by each
+/// square's canonical position.
+///
+/// Rail runs between two squares that both have it; any other pair of neighbouring squares with
+/// track is joined by road, so a railway that meets a road leaves a road stub to it. Joining every
+/// such pair would turn a patch of track into a mesh of crossings and loops, so only a spanning
+/// forest of the links is drawn: every square stays joined to the squares it can reach, by the
+/// fewest links. Rail links are taken before road links so the railways form the trunk lines; then
+/// links on thin lines before those inside a thick patch of track (counted by the squares with
+/// track that touch both ends); then a scatter of the position, so no grid direction is favoured
+/// and patches do not comb into parallel strokes. The forest is built over the whole map, so the
+/// picture of a square never changes as the camera moves.
+fn network(map: &Map, level: impl Fn(Coord) -> u8) -> HashMap<Coord, (u8, u8)> {
+    struct Link {
+        rank: (bool, u8, u32),
+        ends: (usize, usize),
+        squares: (Coord, Coord),
+        direction: usize,
+        rail: bool,
+    }
+    let mut links = Vec::new();
+    for p in map.positions() {
+        let own = level(p);
+        if own == 0 {
+            continue;
+        }
+        let Some(from) = map.index(p) else { continue };
+        for (direction, &(dx, dy)) in Coord::NEIGHBORS.iter().enumerate() {
+            let step = p.offset(dx, dy);
+            let Some(q) = map.normalize(step) else {
+                continue;
+            };
+            let other = level(q);
+            let Some(to) = map.index(q) else { continue };
+            if other == 0 || to <= from {
+                continue;
+            }
+            let crowd = Coord::NEIGHBORS
+                .iter()
+                .map(|&(ex, ey)| p.offset(ex, ey))
+                .filter(|&r| r != step && r.distance(step) == 1 && level(r) > 0)
+                .count() as u8;
+            let rail = own == 2 && other == 2;
+            links.push(Link {
+                rank: (!rail, crowd, scatter(from, to)),
+                ends: (from, to),
+                squares: (p, q),
+                direction,
+                rail,
+            });
         }
     }
-    (road, rail)
+    links.sort_by_key(|link| link.rank);
+    let mut parent: Vec<usize> = (0..map.tiles.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut masks: HashMap<Coord, (u8, u8)> = HashMap::new();
+    for link in links {
+        let (a, b) = (
+            root(&mut parent, link.ends.0),
+            root(&mut parent, link.ends.1),
+        );
+        if a == b {
+            continue;
+        }
+        parent[a] = b;
+        let (p, q) = link.squares;
+        for (square, bit) in [(p, link.direction), (q, (link.direction + 4) % 8)] {
+            let entry = masks.entry(square).or_default();
+            if link.rail {
+                entry.1 |= 1 << bit;
+            } else {
+                entry.0 |= 1 << bit;
+            }
+        }
+    }
+    masks
+}
+
+/// An even scatter of a pair of squares, for breaking ties between equal links.
+fn scatter(a: usize, b: usize) -> u32 {
+    let mut h = (a as u32).wrapping_mul(0x9E37_79B1) ^ (b as u32).wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^ (h >> 12)
 }
 
 /// A scatter of the position that breaks up repetition without touching any join, since every
@@ -152,8 +229,7 @@ fn pick(p: Coord) -> usize {
 /// What a square with track (`own` is 1 or 2) draws: the road cell and the railroad cell, if
 /// any. A railroad needs no road drawn under it, only the stubs to neighbours that have just a
 /// road; a city draws the stubs that reach it but no lone track on its own ground.
-fn cells(own: u8, city: bool, around: [u8; 8]) -> (Option<u8>, Option<u8>) {
-    let (road, rail) = links(own, around);
+fn cells(own: u8, city: bool, (road, rail): (u8, u8)) -> (Option<u8>, Option<u8>) {
     let road = (own == 1 || road != 0).then_some(road);
     let rail = (own == 2 && (rail != 0 || !city)).then_some(rail);
     (road, rail)
@@ -170,6 +246,7 @@ pub(super) fn draw(
     roads: &Sheet,
     rails: &Sheet,
 ) {
+    let network = network(&game.map, |p| track(game, cities, &known, p));
     let (x0, y0, x1, y1) = built.tile_bounds(game);
     for y in y0..=y1 {
         for x in x0..=x1 {
@@ -183,9 +260,12 @@ pub(super) fn draw(
                 .map
                 .get(here)
                 .is_some_and(|t| cities.contains(&t.position));
-            let around =
-                Coord::NEIGHBORS.map(|(dx, dy)| track(game, cities, &known, here.offset(dx, dy)));
-            let (road, rail) = cells(own, city, around);
+            let links = game
+                .map
+                .normalize(here)
+                .and_then(|p| network.get(&p).copied())
+                .unwrap_or_default();
+            let (road, rail) = cells(own, city, links);
             let pick = pick(here);
             for (mask, sheet, z) in [(road, roads, Z_ROAD), (rail, rails, Z_RAIL)] {
                 let (Some(mask), Some(image), true) =
@@ -210,10 +290,6 @@ pub(super) fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const NE: u8 = 1;
-    const E: u8 = 2;
-    const SW: u8 = 16;
 
     fn sheet(rows: u32) -> Sheet {
         let mut layouts = Assets::<TextureAtlasLayout>::default();
@@ -245,35 +321,78 @@ mod tests {
         }
     }
 
+    /// The forest over a 6 x 6 map with track only on the squares listed.
+    fn forest(track: &[((i32, i32), u8)]) -> HashMap<Coord, (u8, u8)> {
+        let map = Map::filled(6, 6, fourx_sim::terrain::Terrain::Grass);
+        let level: HashMap<Coord, u8> = track
+            .iter()
+            .map(|&((x, y), t)| (Coord::new(x, y), t))
+            .collect();
+        network(&map, |p| level.get(&p).copied().unwrap_or(0))
+    }
+
+    fn links(net: &HashMap<Coord, (u8, u8)>) -> u32 {
+        net.values()
+            .map(|&(road, rail)| road.count_ones() + rail.count_ones())
+            .sum::<u32>()
+            / 2
+    }
+
     #[test]
-    fn a_road_joins_every_neighbour_that_has_track() {
-        let mut around = [0u8; 8];
-        around[0] = 1;
-        around[4] = 1;
-        assert_eq!(links(1, around), (NE | SW, 0));
-        // railroads join railroads; a road beside a railway is joined by road
-        around[0] = 2;
-        assert_eq!(links(2, around), (SW, NE));
-        assert_eq!(links(1, around), (NE | SW, 0));
-        // and a city, which counts as a railroad, takes both
-        assert_eq!(links(2, [2, 1, 0, 0, 0, 0, 0, 0]), (E, NE));
+    fn railroads_join_railroads_and_roads_join_the_rest() {
+        let net = forest(&[((1, 1), 2), ((2, 1), 2), ((3, 1), 1)]);
+        // (1, 0) is neighbour 2, and the way back is neighbour 6
+        assert_eq!(net[&Coord::new(1, 1)], (0, 1 << 2));
+        assert_eq!(net[&Coord::new(2, 1)], (1 << 2, 1 << 6));
+        assert_eq!(net[&Coord::new(3, 1)], (1 << 6, 0));
+    }
+
+    #[test]
+    fn a_patch_of_track_is_drawn_as_a_tree() {
+        // a full 3 x 3 block has 20 neighbouring pairs; joining them all draws a mesh of rings
+        let block: Vec<_> = (0..3)
+            .flat_map(|x| (0..3).map(move |y| ((x, y), 2)))
+            .collect();
+        let net = forest(&block);
+        assert_eq!(links(&net), 8);
+        // and every square is still reached from the corner
+        let mut seen = HashSet::from([Coord::new(0, 0)]);
+        let mut todo = vec![Coord::new(0, 0)];
+        while let Some(p) = todo.pop() {
+            let (road, rail) = net[&p];
+            for (i, &(dx, dy)) in Coord::NEIGHBORS.iter().enumerate() {
+                if (road | rail) >> i & 1 == 1 && seen.insert(p.offset(dx, dy)) {
+                    todo.push(p.offset(dx, dy));
+                }
+            }
+        }
+        assert_eq!(seen.len(), 9);
+    }
+
+    #[test]
+    fn railways_are_the_trunk_and_lines_stay_whole() {
+        // a road square touching all three squares of a railway joins it once, and the railway
+        // keeps both of its links
+        let net = forest(&[((0, 0), 2), ((1, 0), 2), ((2, 0), 2), ((1, 1), 1)]);
+        assert_eq!(links(&net), 3);
+        assert_eq!(net[&Coord::new(1, 0)].1, 1 << 2 | 1 << 6);
+        assert_eq!(net[&Coord::new(1, 1)].0.count_ones(), 1);
+        // a thin diagonal line loses nothing
+        let line: Vec<_> = (0..5).map(|i| ((i, i), 2)).collect();
+        assert_eq!(links(&forest(&line)), 4);
     }
 
     #[test]
     fn squares_draw_what_they_carry() {
-        let none = [0u8; 8];
         // a lone road, and a lone railroad, are drawn as their short track
-        assert_eq!(cells(1, false, none), (Some(0), None));
-        assert_eq!(cells(2, false, none), (None, Some(0)));
+        assert_eq!(cells(1, false, (0, 0)), (Some(0), None));
+        assert_eq!(cells(2, false, (0, 0)), (None, Some(0)));
         // a city alone draws nothing on its own ground
-        assert_eq!(cells(2, true, none), (None, None));
+        assert_eq!(cells(2, true, (0, 0)), (None, None));
         // a railway end that meets only a road shows the road stub and its own short track
-        let mut around = none;
-        around[2] = 1;
-        assert_eq!(cells(2, false, around), (Some(4), Some(0)));
+        assert_eq!(cells(2, false, (4, 0)), (Some(4), Some(0)));
         // a city reached by a road and a railway draws both
-        around[6] = 2;
-        assert_eq!(cells(2, true, around), (Some(4), Some(64)));
+        assert_eq!(cells(2, true, (4, 64)), (Some(4), Some(64)));
     }
 
     #[test]

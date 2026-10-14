@@ -141,7 +141,10 @@ fn title(game: &Game) -> (String, String) {
         .next()
         .unwrap_or_default()
         .to_uppercase();
-    (name, format!("Anno Domini {}", roman(game.start_date.year())))
+    (
+        name,
+        format!("Anno Domini {}", roman(game.start_date.year())),
+    )
 }
 
 /// The positions `first + k * step` inside `lo..=hi`.
@@ -168,12 +171,13 @@ pub(crate) fn spawn<M: Component + Clone>(
     let image = |name: &str| -> Handle<Image> { assets.load(format!("{prefix}{folder}{name}")) };
     let (left, bottom, _, top) = game.map.screen_bounds();
     let (title, subtitle) = title(game);
-    let sprite = |commands: &mut Commands, handle: &Handle<Image>, size: Vec2, at: Vec3, flip: bool| {
-        let mut sprite = Sprite::from_image(handle.clone());
-        sprite.custom_size = Some(size);
-        sprite.flip_y = flip;
-        commands.spawn((sprite, Transform::from_translation(at), marker.clone()));
-    };
+    let sprite =
+        |commands: &mut Commands, handle: &Handle<Image>, size: Vec2, at: Vec3, flip: bool| {
+            let mut sprite = Sprite::from_image(handle.clone());
+            sprite.custom_size = Some(size);
+            sprite.flip_y = flip;
+            commands.spawn((sprite, Transform::from_translation(at), marker.clone()));
+        };
     let (band, paper, edge, desk, instruments) = (
         image("band.png"),
         // The margin is the same aged paper as the city view's sheet.
@@ -200,9 +204,20 @@ pub(crate) fn spawn<M: Component + Clone>(
         let anchor = left - 64.0;
         // The frame.
         let band_height = BAND + BAND_SHADOW;
-        for x in steps(anchor + BAND_WIDTH / 2.0, BAND_WIDTH, x0 - BAND_WIDTH, x1 + BAND_WIDTH) {
+        for x in steps(
+            anchor + BAND_WIDTH / 2.0,
+            BAND_WIDTH,
+            x0 - BAND_WIDTH,
+            x1 + BAND_WIDTH,
+        ) {
             let at = Vec3::new(x, y(BAND - band_height / 2.0), Z_BAND);
-            sprite(commands, &band, Vec2::new(BAND_WIDTH, band_height), at, flip);
+            sprite(
+                commands,
+                &band,
+                Vec2::new(BAND_WIDTH, band_height),
+                at,
+                flip,
+            );
         }
         if hi < BAND {
             continue;
@@ -214,7 +229,13 @@ pub(crate) fn spawn<M: Component + Clone>(
                 continue;
             }
             for x in steps(anchor + PAPER / 2.0, PAPER, x0 - PAPER, x1 + PAPER) {
-                sprite(commands, &paper, Vec2::splat(PAPER), Vec3::new(x, y(d), Z_PAPER), flip);
+                sprite(
+                    commands,
+                    &paper,
+                    Vec2::splat(PAPER),
+                    Vec3::new(x, y(d), Z_PAPER),
+                    flip,
+                );
             }
         }
         if hi > SHEET_END - EDGE.y {
@@ -229,7 +250,13 @@ pub(crate) fn spawn<M: Component + Clone>(
             while d - DESK / 2.0 < hi {
                 if d + DESK / 2.0 > lo {
                     for x in steps(anchor + DESK / 2.0, DESK, x0 - DESK, x1 + DESK) {
-                        sprite(commands, &desk, Vec2::splat(DESK), Vec3::new(x, y(d), Z_DESK), false);
+                        sprite(
+                            commands,
+                            &desk,
+                            Vec2::splat(DESK),
+                            Vec3::new(x, y(d), Z_DESK),
+                            false,
+                        );
                     }
                 }
                 d += DESK;

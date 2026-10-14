@@ -50,6 +50,11 @@ city, it spawns `WorldVisual` sprites at the tile centre, cut from the sheets by
 * Rail joins two tiles that both have rail (a city counts as rail, as it does for movement). Any other pair of tiles with
   track is joined by road, so a railway that meets a road leaves a road stub toward it. A railroad tile draws no road under
   its rails, only those stubs.
+* Only a spanning forest of those links is drawn, so a patch of track never becomes a mesh of crossings and rings: every
+  square stays joined to all it can reach, by the fewest links. Rail links are taken first (the railways are the trunk
+  lines), then links on thin lines before links inside a thick patch (counted by the squares with track that touch both
+  ends), then a scatter of the position. The forest is built over the whole map, so a square's picture does not change as
+  the camera moves.
 * Squares the player does not know are never linked, so fog does not reveal roads.
 * A city draws only the stubs that reach it, not a lone piece of track on its own ground.
 * Z: roads 3.0 (over farms, under relief), rails 3.05.

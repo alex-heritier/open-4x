@@ -1,6 +1,6 @@
 //! Proleptic Gregorian calendar using integer arithmetic only. No clock, locale, or timezone.
 //!
-//! Scenarios start on an explicit calendar date and one campaign turn is one day. The
+//! Scenarios start on an explicit calendar date and one campaign turn is one week. The
 //! civil-date conversions follow Howard Hinnant's public-domain `days_from_civil` algorithms.
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;

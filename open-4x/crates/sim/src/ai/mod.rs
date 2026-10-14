@@ -55,7 +55,7 @@ const THREAT_RADIUS: i32 = 8;
 ///
 /// Defense is counted in strength, not in heads: a city wants `goal * defense` strength
 /// standing in it, so a cavalryman with half an infantryman's defense is half a man.
-fn garrison_goal(city: &City, threatened: bool) -> i32 {
+pub(crate) fn garrison_goal(city: &City, threatened: bool) -> i32 {
     let mut goal = 1;
     goal += i32::from(city.capital);
     goal += i32::from(city.population > TOWN_MAX);
@@ -212,6 +212,19 @@ impl Game {
             let units = units_by_owner.get(&faction).cloned().unwrap_or_default();
             let cities = cities_by_owner.remove(&faction).unwrap_or_default();
             let mut realm = self.realm(faction, units, &cities, &units_by_owner, &roster, rules);
+            if rules.economy.enabled {
+                for u in self.units.values().filter(|u| u.owner == faction) {
+                    if u.cargo.is_some()
+                        || (u.goto.is_some()
+                            && self
+                                .units_at(u.position)
+                                .iter()
+                                .any(|c| c.owner == faction && c.cargo.is_some()))
+                    {
+                        realm.committed.insert(u.id);
+                    }
+                }
+            }
             self.ai_settlers(&mut realm, rules);
             self.ai_workers(&mut realm, rules);
             self.ai_garrison(&mut realm, rules);

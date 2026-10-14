@@ -121,7 +121,17 @@ pub(super) fn spawn(
                         Some(def) => {
                             format!("Building {} ({} of {})", def.name, city.progress, def.cost)
                         }
-                        None => "Nothing is being built.".to_string(),
+                        None => city
+                            .construction
+                            .map(|b| {
+                                format!(
+                                    "Building {} ({} of {})",
+                                    b.name(),
+                                    city.construction_progress,
+                                    session.rules.economy.building_cost(b)
+                                )
+                            })
+                            .unwrap_or("Nothing is being built.".to_string()),
                     },
                     13.0,
                     INK_SOFT,
@@ -143,18 +153,41 @@ pub(super) fn spawn(
                     ScrollPosition::default(),
                 ))
                 .with_children(|p| {
-                    for def in session.rules.units.values() {
+                    if session.rules.economy.enabled {
+                        for b in [fourx_sim::Building::Factory, fourx_sim::Building::Port] {
+                            if city.buildings.contains(&b)
+                                || (b == fourx_sim::Building::Port && !coastal)
+                            {
+                                continue;
+                            }
+                            crate::theme::button(
+                                p,
+                                &format!(
+                                    "{} · {} production",
+                                    b.name(),
+                                    session.rules.economy.building_cost(b)
+                                ),
+                                Action::Build(id, b),
+                                Tone::Quiet,
+                            );
+                        }
+                    }
+                    for def in session.rules.units.values().filter(|d| d.id != "crate") {
                         if def.is_naval() && !coastal {
                             continue;
                         }
                         let chosen = city.production.as_deref() == Some(def.id.as_str());
-                        let tone = if chosen { Tone::Primary } else { Tone::Quiet };
-                        p.spawn((
+                        let missing = goods(game, &session.rules, city, def)
+                            .is_some_and(|(_, _, ready)| !ready);
+                        let tone = if missing {
+                            Tone::Dormant
+                        } else if chosen {
+                            Tone::Primary
+                        } else {
+                            Tone::Quiet
+                        };
+                        let mut offer = p.spawn((
                             Button,
-                            Action::ProduceAt {
-                                city: id,
-                                unit: def.id.clone(),
-                            },
                             tone,
                             Node {
                                 width: percent(100),
@@ -167,8 +200,14 @@ pub(super) fn spawn(
                                 ..default()
                             },
                             BackgroundColor(tone.fill(Interaction::None)),
-                        ))
-                        .with_children(|p| {
+                        ));
+                        if !missing && !chosen {
+                            offer.insert(Action::ProduceAt {
+                                city: id,
+                                unit: def.id.clone(),
+                            });
+                        }
+                        offer.with_children(|p| {
                             p.spawn(Node {
                                 width: px(42),
                                 height: px(34),
@@ -197,7 +236,20 @@ pub(super) fn spawn(
                                 if chosen {
                                     format!("{} · building", def.cost)
                                 } else {
-                                    def.cost.to_string()
+                                    session
+                                        .rules
+                                        .economy
+                                        .unit_good(def)
+                                        .filter(|_| session.rules.economy.enabled)
+                                        .map(|g| {
+                                            format!(
+                                                "{} + {} {}",
+                                                def.cost,
+                                                session.rules.economy.unit_goods,
+                                                g.name()
+                                            )
+                                        })
+                                        .unwrap_or(def.cost.to_string())
                                 },
                                 13.0,
                                 tone.ink(),
@@ -216,4 +268,30 @@ pub(super) fn spawn(
                 });
             });
         });
+}
+
+/// Goods paid at project start, including a refund when replacing the current project.
+pub(super) fn goods(
+    game: &Game,
+    rules: &Rules,
+    city: &fourx_sim::City,
+    def: &fourx_sim::UnitDef,
+) -> Option<(fourx_sim::Good, i32, bool)> {
+    if !rules.economy.enabled {
+        return None;
+    }
+    let good = rules.economy.unit_good(def)?;
+    let refund = city
+        .production
+        .as_ref()
+        .and_then(|k| rules.units.get(k))
+        .and_then(|d| rules.economy.unit_good(d))
+        == Some(good);
+    let available = game.factions[&city.owner].stockpile.get(good)
+        + if refund { rules.economy.unit_goods } else { 0 };
+    Some((
+        good,
+        rules.economy.unit_goods,
+        available >= rules.economy.unit_goods,
+    ))
 }

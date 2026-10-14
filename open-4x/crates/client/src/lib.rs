@@ -1,4 +1,5 @@
 mod bar;
+mod campaign;
 mod chrome;
 mod city;
 mod connection;
@@ -67,6 +68,9 @@ struct Session {
     production: Option<Id>,
     /// The right-click menu over the map, if one is open.
     menu: Option<ContextMenu>,
+    bureau: Option<campaign::Panel>,
+    stack_replay: Option<(fourx_sim::stacks::StackBattle, f32)>,
+    stack_queue: std::collections::VecDeque<fourx_sim::stacks::StackBattle>,
 }
 
 /// A right-click menu over the map: where the pointer was, what tile it names, and the city
@@ -399,9 +403,20 @@ enum Action {
     Talk(Id),
     /// Declare war on a nation from the diplomacy window.
     DeclareWar(Id),
+    Peace(Id),
+    AnswerDemand(Id, bool),
+    Pay(Id),
+    OpenBureau(campaign::Panel),
+    CloseBureau,
+    CloseBattle,
+    Trade(fourx_sim::Good, i32),
+    Borrow,
+    Repay,
+    Build(Id, fourx_sim::Building),
+    StackOrder(Coord),
+    Load(Id),
+    Unload,
     CloseTalk,
-    /// A control that is drawn but does nothing yet.
-    Idle,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -637,6 +652,13 @@ pub fn run() {
             previous_pinch: None,
             menu: None,
             staging: false,
+            bureau: match option("--panel").as_deref() {
+                Some("treasury") => Some(campaign::Panel::Treasury),
+                Some("dispatches") => Some(campaign::Panel::Dispatches),
+                _ => None,
+            },
+            stack_replay: None,
+            stack_queue: std::collections::VecDeque::new(),
             diplomacy: option("--talk").and_then(|id| id.parse().ok()),
             production: None,
         })
@@ -669,9 +691,7 @@ pub fn run() {
             Update,
             (
                 (receive, buttons).chain(),
-                theme::paint,
-                city::paint,
-                bar::update,
+                (theme::paint, city::paint, bar::update).chain(),
                 city::scroll,
                 diplomacy::music,
                 scroll_inspector,
@@ -684,6 +704,7 @@ pub fn run() {
                 // After the input, so a Space that skips a fight is not also an order; before
                 // `refresh`, so the real units are hidden in the frame a fight begins.
                 stage::drive,
+                (campaign::animate, campaign::scroll, campaign::budget_hint).chain(),
                 stage::fx,
                 presentation::fit_terrain_atlas,
                 (presentation::refresh, presentation::animate_selection_top).chain(),
@@ -856,13 +877,40 @@ fn receive(
                     }
                     // A newer state brings the fights of the command that made it. The first
                     // snapshot is only the starting point, so whatever a save held is not replayed.
-                    if newer && session.game.is_some() && !game.battles.is_empty() {
+                    if newer
+                        && (session.game.is_some() || flag("--replay-battle"))
+                        && !game.stack_battles.is_empty()
+                    {
+                        session.stack_queue.extend(
+                            game.stack_battles
+                                .iter()
+                                .filter(|b| b.owner == player || b.enemy == player)
+                                .cloned(),
+                        );
+                        if session.stack_replay.is_none() {
+                            session.stack_replay =
+                                session.stack_queue.pop_front().map(|b| (b, 0.0));
+                        }
+                    }
+                    if newer
+                        && session.game.is_some()
+                        && game.stack_battles.is_empty()
+                        && !game.battles.is_empty()
+                    {
                         stage.enqueue(&game.battles);
                         session.staging = true;
                     }
                     // Likewise its walks, which play before its fights.
                     if newer && session.game.is_some() && !game.marches.is_empty() {
                         walks.enqueue(&game.marches);
+                    }
+                    if newer && session.diplomacy.is_none() {
+                        session.diplomacy = game
+                            .diplomacy
+                            .demands
+                            .iter()
+                            .find(|d| d.to == player)
+                            .map(|d| d.from);
                     }
                     session.player = player;
                     session.game = Some(game);
@@ -875,7 +923,7 @@ fn receive(
                         session.message = if player == 0 {
                             "Spectator | another client commands this campaign".into()
                         } else {
-                            "Select a unit; right-click a square to move, an enemy to attack. Space advances one day."
+                            "Select a unit; right-click a square to move, an enemy to attack. Space advances one week. X + right-click orders the stack."
                             .into()
                         };
                     }
@@ -1005,6 +1053,14 @@ fn next_city(session: &Session) -> Option<Id> {
     ids.get(next).copied()
 }
 
+fn stack_order_for(session: &Session, unit: Id, target: Coord) -> Option<Command> {
+    match order_for(session, unit, target)? {
+        Command::Move { destination, .. } => Some(Command::MoveStack { unit, destination }),
+        Command::Attack { target, .. } => Some(Command::AttackStack { unit, target }),
+        _ => None,
+    }
+}
+
 fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
     // Every control dismisses the right-click menu, including the menu's own: its choice is
     // carried out below, and anything else replaces it.
@@ -1013,6 +1069,49 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
     }
     let unit = selected_unit(session).map(|u| u.id);
     let command = match action {
+        Action::OpenBureau(panel) => {
+            session.bureau = Some(*panel);
+            session.dirty = true;
+            None
+        }
+        Action::CloseBureau => {
+            session.bureau = None;
+            session.dirty = true;
+            None
+        }
+        Action::CloseBattle => {
+            session.stack_replay = session.stack_queue.pop_front().map(|b| (b, 0.0));
+            session.dirty = true;
+            None
+        }
+        Action::Trade(g, n) => Some(Command::Trade {
+            good: *g,
+            amount: *n,
+        }),
+        Action::Load(carrier) => unit.map(|unit| Command::Load {
+            unit,
+            carrier: *carrier,
+        }),
+        Action::Unload => unit.map(|unit| Command::Unload { unit }),
+        Action::Borrow => Some(Command::Borrow),
+        Action::Repay => Some(Command::Repay),
+        Action::Build(city, b) => {
+            session.production = None;
+            Some(Command::Build {
+                city: *city,
+                building: *b,
+            })
+        }
+        Action::Peace(nation) => Some(Command::Peace { nation: *nation }),
+        Action::AnswerDemand(nation, accept) => Some(Command::AnswerDemand {
+            nation: *nation,
+            accept: *accept,
+        }),
+        Action::Pay(nation) => Some(Command::Pay {
+            nation: *nation,
+            amount: 25,
+        }),
+        Action::StackOrder(target) => unit.and_then(|unit| stack_order_for(session, unit, *target)),
         Action::EndTurn => Some(Command::EndTurn),
         Action::Found => unit.map(|unit| Command::FoundCity {
             unit,
@@ -1098,7 +1197,7 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             session.dirty = true;
             None
         }
-        Action::Idle => None,
+
         Action::CloseCity => {
             if matches!(session.selection, Selection::City(_)) {
                 session.selection = Selection::None;
@@ -1358,6 +1457,14 @@ fn controls(params: Controls) {
     } else {
         session.previous_pinch = None;
     }
+    if session.bureau.is_some() || session.stack_replay.is_some() {
+        if keys.just_pressed(KeyCode::Escape) {
+            session.bureau = None;
+            session.stack_replay = session.stack_queue.pop_front().map(|b| (b, 0.0));
+            session.dirty = true;
+        }
+        return;
+    }
     // The production window is a modal too, and sits over the others.
     if session.production.is_some() {
         if keys.just_pressed(KeyCode::Escape) {
@@ -1467,7 +1574,13 @@ fn controls(params: Controls) {
     .enumerate()
     {
         if keys.just_pressed(key)
-            && let Some(unit) = session.rules.units.keys().nth(index).cloned()
+            && let Some(unit) = session
+                .rules
+                .units
+                .keys()
+                .filter(|k| k.as_str() != "crate")
+                .nth(index)
+                .cloned()
         {
             act(&Action::Produce(unit), &mut session, &mut connection);
         }
@@ -1513,9 +1626,13 @@ fn controls(params: Controls) {
         .copied()
         .collect();
     // Only a city of the player's own can be opened; a foreign one is reached from the menu.
-    let own_city = city.filter(|id| game.cities.get(id).is_some_and(|c| c.owner == session.player));
+    let own_city = city.filter(|id| {
+        game.cities
+            .get(id)
+            .is_some_and(|c| c.owner == session.player)
+    });
     if mouse.just_pressed(MouseButton::Right) {
-        if should_open_menu(city, &present) {
+        if should_open_menu(city, &present) && !keys.pressed(KeyCode::KeyX) {
             // A city or a stack of units: offer what fits, rather than marching into it.
             // The menu carries the order along when one applies, so an enemy in reach can
             // still be struck from it.
@@ -1532,7 +1649,11 @@ fn controls(params: Controls) {
             session.dirty = true;
         }
         if let Selection::Unit(unit) = session.selection
-            && let Some(command) = order_for(&session, unit, position)
+            && let Some(command) = if keys.pressed(KeyCode::KeyX) {
+                stack_order_for(&session, unit, position)
+            } else {
+                order_for(&session, unit, position)
+            }
         {
             issue(&mut session, &mut connection, command);
         }
@@ -1567,7 +1688,11 @@ fn controls(params: Controls) {
     {
         // Left-clicking only selects; orders go with the right button. A tap has no right
         // button, so on a touch screen it is the order.
-        if let Some(command) = order_for(&session, unit, position) {
+        if let Some(command) = if keys.pressed(KeyCode::KeyX) {
+            stack_order_for(&session, unit, position)
+        } else {
+            order_for(&session, unit, position)
+        } {
             issue(&mut session, &mut connection, command);
         }
     } else if city.is_some() {

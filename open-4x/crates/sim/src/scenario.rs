@@ -155,7 +155,7 @@ pub struct Scenario {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    /// Calendar date of turn 1. One turn is one day.
+    /// Calendar date of turn 1. One turn is one week.
     pub start_date: Date,
     /// Nation ID commanded by the player unless the host chooses another.
     pub commander: String,
@@ -233,6 +233,9 @@ pub struct RegionStart {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CityStart {
+    /// Whether this is part of its starting nation's homeland. Colonies generate physical cargo.
+    #[serde(default = "home_default")]
+    pub home: bool,
     pub nation: String,
     pub position: Coord,
     pub name: String,
@@ -295,4 +298,8 @@ mod tests {
         }
         assert_eq!(serde_json::to_string(&c).unwrap(), "\"#c8102e\"");
     }
+}
+
+fn home_default() -> bool {
+    true
 }

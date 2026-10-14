@@ -288,6 +288,24 @@ impl Pack {
         {
             return Err(invalid("Rules values out of range"));
         }
+        self.rules
+            .economy
+            .validate()
+            .map_err(ContentError::Invalid)?;
+        if self.rules.economy.enabled
+            && self.rules.units.get("crate").is_none_or(|d| {
+                d.domain != Domain::Land
+                    || d.attack != 0
+                    || d.defense != 0
+                    || d.work != 0
+                    || d.settler
+                    || d.capacity != 0
+            })
+        {
+            return Err(invalid(
+                "Industrial economy requires a defenseless land crate design",
+            ));
+        }
         let land = |u: &&UnitDef| u.domain == Domain::Land;
         if !self.rules.units.values().filter(land).any(|u| u.settler)
             || !self

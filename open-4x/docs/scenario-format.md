@@ -35,7 +35,7 @@ is the small fixture the tests use.
 | `id` | string | Scenario ID, e.g. `russo-japanese-war`. |
 | `name` | string | Shown in the title bar. 1–96 characters. |
 | `description` | string | Up to 4000 characters. Not used by the simulation. |
-| `start_date` | date | Calendar date of turn 1. **One turn is one day.** |
+| `start_date` | date | Calendar date of turn 1. **One turn is one week.** |
 | `commander` | nation ID | The nation played unless the host picks another (`--nation`). |
 | `intro` | string | First dispatch. Up to 600 characters. |
 | `charted` | boolean | Optional, default `false`. When `true`, every nation starts with the whole map known: all terrain, borders, and cities. Enemy units are still only seen within sight of a friendly unit or city. |
@@ -250,7 +250,7 @@ cargo run -p fourx-server -- --scenario russo-japanese-war --nation russia --sim
 
 Paths are relative to the pack directory and may not leave it. A save embeds the pack, rules,
 and the full game state, so it resumes independently of later edits to the files. Saves
-and packs from earlier versions (pack format 1, save formats before 4) are refused with a clear message.
+and packs from earlier versions (pack format 1, save formats before 5) are refused with a clear message.
 
 ## Building a world scenario
 
@@ -312,3 +312,5 @@ not paper claims. Where 1876 history is contested, the tables record what the fo
 judged most defensible; correcting an entry means editing a table and rebuilding.
 
 Upright `lattice` maps wrap horizontally: native columns repeat every `2 * columns`, while north and south remain bounded. Unit and city positions use canonical tiles inside the lattice. Movement, combat, sight, terrain blending, and borders cross the east/west seam. Plain diamond maps remain bounded.
+
+City entries may set `"home": false` to identify colonial holdings; the default is true. Homeland ownership stays tied to the original nation through conquest and liberation. See [industrial gameplay](industrial-milestone.md) for goods, shipping, construction and pack rules.

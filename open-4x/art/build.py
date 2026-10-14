@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from PIL import Image
 
-from forge import chrome, cities, emblems, fleet, icons, improvements, margin, nature, overlay, parchment, relief, resources, rivers, roads, scenes, terrain, troops
+from forge import cargo, chrome, cities, emblems, fleet, icons, improvements, margin, nature, overlay, parchment, relief, resources, rivers, roads, scenes, terrain, troops
 from forge.paint import paint, render_sprite
 from forge.util import PACK, downsample, indexed, save_png, write_svg
 
@@ -257,6 +257,7 @@ GROUPS = {
     "sprites": build_sprites,
     "farms": build_farms,
     "cities": build_cities,
+    "cargo": cargo.build,
     "units": build_units,
     "flavor": build_flavor_units,
     "ships": build_ships,

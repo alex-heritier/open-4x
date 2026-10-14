@@ -409,6 +409,7 @@ pub fn build(
         let pop = (1.0 + (f64::from(city.pop).sqrt() / 6.0).round()).clamp(1.0, 100.0) as i32;
         let industry = (1 + city.dev as i32 / 2 + i32::from(city.capital)).clamp(1, 100);
         cities.push(CityStart {
+            home: true,
             nation: src.nations[city.nation].id.clone(),
             position: Coord::new(city.x, city.y),
             name: city.name.clone(),

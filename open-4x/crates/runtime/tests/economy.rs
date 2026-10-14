@@ -5,6 +5,9 @@ use fourx_sim::Command;
 
 fn starter_content_at_peace() -> Content {
     let mut content = Content::base();
+    // These fixtures isolate legacy settlement and land-yield pacing. Industrial gameplay is
+    // covered separately by milestone.rs and simulation milestone tests.
+    content.pack.rules.economy.enabled = false;
     content
         .scenarios
         .get_mut("russo-japanese-war")
