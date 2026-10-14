@@ -984,9 +984,8 @@ pub(super) fn refresh(params: Refresh) {
     }
     // Culture borders: a bold dashed line in the owner's colour just inside the edge of each
     // owned tile that faces another nation's tile or nobody's, never an overlay on the whole
-    // territory. Each dash carries a black outline in its texture (see `border_masks`) plus a
-    // dark halo spawned beneath it, so it reads on any ground like the reference's frontiers.
-    // Edges that face the unknown or the edge of the world get none.
+    // territory. Each dash is a clean owner-tinted core with no dark outline or halo sprite
+    // beneath it. Edges that face the unknown or the edge of the world get none.
     let mut inks: HashMap<Id, Color> = HashMap::new();
     let mut contour_images: HashMap<&str, Handle<Image>> = HashMap::new();
     for y in y0..=y1 {
@@ -1044,16 +1043,8 @@ pub(super) fn refresh(params: Refresh) {
                     (sprite, 0.0, size)
                 };
                 dashes.color = ink;
-                // A dark halo beneath the coloured dash: the same beads slightly enlarged,
-                // so the frontier keeps its edge on pale ground.
-                let mut halo = dashes.clone();
-                halo.color = Color::srgba(0.02, 0.02, 0.02, 0.9);
-                halo.custom_size = Some(size * 1.12);
-                commands.spawn((
-                    halo,
-                    Transform::from_xyz(sx, sy + lift, Z_BORDER + depth(sy) - 0.001),
-                    WorldVisual,
-                ));
+                // The coloured dash alone carries the frontier, slightly enlarged.
+                dashes.custom_size = Some(size * 1.12);
                 commands.spawn((
                     dashes,
                     Transform::from_xyz(sx, sy + lift, Z_BORDER + depth(sy)),

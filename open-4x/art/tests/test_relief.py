@@ -12,6 +12,16 @@ from forge.util import PACK
 
 
 class ReliefTests(unittest.TestCase):
+    def test_border_sheets_have_coloured_cores_without_dark_outlines(self):
+        visuals = json.loads((PACK / 'pack.json').read_text())['visuals']
+        paths = [visuals['borders'], *visuals['relief_borders'].values()]
+        for path in paths:
+            with self.subTest(path=path):
+                rgba = np.asarray(Image.open(PACK / path).convert('RGBA'))
+                visible = rgba[..., 3] > 16
+                self.assertTrue(visible.any())
+                self.assertGreaterEqual(int(rgba[..., :3][visible].min()), 240)
+
     def test_all_contexts_have_tall_art_and_matching_four_edge_sheets(self):
         visuals = json.loads((PACK / 'pack.json').read_text())['visuals']
         self.assertEqual(len(visuals['relief_borders']), 18)

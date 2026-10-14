@@ -103,6 +103,41 @@ def lump(rng: random.Random, cx, cy, rx, ry, n=7, rough=0.22, squash=1.0):
     return pts
 
 
+def smooth_path(pts) -> str:
+    """A closed outline through the midpoints of `pts`, rounding every corner."""
+    mids = [((p[0] + q[0]) / 2, (p[1] + q[1]) / 2) for p, q in zip(pts, pts[1:] + pts[:1])]
+    d = f"M{mids[-1][0]:.1f},{mids[-1][1]:.1f}"
+    for p, m in zip(pts, mids):
+        d += f" Q{p[0]:.1f},{p[1]:.1f} {m[0]:.1f},{m[1]:.1f}"
+    return d + " Z"
+
+
+def boulder(svg: Svg, rng: random.Random, pts, col: str, lo=0.42, hi=1.42, gloss=0.35):
+    """A rounded stone: soft light on its upper left, shade pooling under it, a highlight and a
+    crack or two.  Painted volume rather than cut facets."""
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    rx, ry = (max(xs) - min(xs)) / 2, (max(ys) - min(ys)) / 2
+    d = smooth_path(pts)
+    svg.path(d, svg.rad([(0, shade(col, hi)), (0.45, col), (1, shade(col, lo))], 0.34, 0.28, 0.82))
+    svg.ellipse(cx + rx * 0.15, cy + ry * 0.55, rx * 0.85, ry * 0.4, shade(col, lo * 0.8), op=0.35, blur=svg.blur(1.4))
+    svg.ellipse(cx - rx * 0.35, cy - ry * 0.4, rx * 0.32, ry * 0.18, "#ffffff", op=gloss * 0.6, rot=-25, blur=svg.blur(0.8))
+    for _ in range(rng.randint(1, 2)):
+        x0, y0 = cx + rng.uniform(-rx * 0.4, rx * 0.3), cy + rng.uniform(-ry * 0.3, ry * 0.3)
+        svg.path(f"M{x0:.1f},{y0:.1f} q{rng.uniform(2, 5):.1f},{rng.uniform(-1, 2):.1f} {rng.uniform(4, 8):.1f},{rng.uniform(1, 4):.1f}", "none", shade(col, lo), 0.8, 0.55)
+
+
+def tufts(svg: Svg, rng: random.Random, cx=BASE[0], cy=BASE[1], half=34, n=6, col="#56702a"):
+    """Grass blades round the foot of a resource, so it stands in the ground instead of on it."""
+    for _ in range(n):
+        x = cx + rng.uniform(-half, half)
+        y = cy + rng.uniform(-3, 3)
+        for k in range(3):
+            h = rng.uniform(4, 8)
+            lean = (k - 1) * 2.2 + rng.uniform(-1, 1)
+            svg.path(f"M{x + k * 1.4 - 1.4:.1f},{y:.1f} Q{x + lean * 0.4:.1f},{y - h * 0.6:.1f} {x + lean:.1f},{y - h:.1f}", "none", shade(col, rng.uniform(0.7, 1.2)), 1.0, 0.75)
+
+
 def sparkle(svg: Svg, x, y, r=4.0, col="#ffffff", op=0.9):
     svg.path(
         f"M{x},{y - r} L{x + r * 0.22},{y - r * 0.22} L{x + r},{y} L{x + r * 0.22},{y + r * 0.22} "
@@ -118,13 +153,22 @@ def ground_patch(svg: Svg, cx, cy, rx, ry, col="#6b5a3a", op=0.55):
 
 
 # --- ore ------------------------------------------------------------------------------------------------
-def ore(svg: Svg, rock: str, nugget: str | None = None, glint=False, seed=1, gems: str | None = None, streak: str | None = None):
+def ore(svg: Svg, rock: str, nugget: str | None = None, glint=False, seed=1, gems: str | None = None, streak: str | None = None, heap=False):
     """A heap of rock with the ore showing in it."""
     rng = random.Random(seed)
     shadow(svg, rx=36, ry=9)
     spec = [(40, 90, 17, 12), (78, 92, 19, 13), (58, 74, 20, 15), (30, 99, 11, 7), (92, 100, 10, 6)]
-    for cx, cy, rx, ry in spec:
-        facets(svg, lump(rng, cx, cy, rx, ry, 7), rock)
+    ground_patch(svg, 62, 100, 40, 8, "#5b4a2e", 0.45)
+    for cx, cy, rx, ry in sorted(spec, key=lambda s: s[1]):  # back to front
+        if heap:  # a mound packed with small lumps (coal) instead of a few stones
+            svg.path(smooth_path(lump(rng, cx, cy + 1, rx * 1.05, ry, 9, 0.1)), svg.rad([(0, shade(rock, 1.6)), (1, shade(rock, 0.4))], 0.35, 0.3, 0.8))
+            for _ in range(int(rx * ry / 10)):
+                a_, d_ = rng.uniform(0, math.tau), rng.random() ** 0.6
+                x, y = cx + math.cos(a_) * d_ * rx * 0.85, cy + math.sin(a_) * d_ * ry * 0.8
+                r = rng.uniform(3.6, 6.0)
+                boulder(svg, rng, lump(rng, x, y, r, r * 0.75, 6, 0.3), rock, lo=0.35, hi=2.2, gloss=0.25)
+        else:
+            boulder(svg, rng, lump(rng, cx, cy, rx, ry, 8, 0.16), rock)
     if streak:
         for cx, cy, rx, ry in spec[:3]:
             for _ in range(2):
@@ -133,14 +177,15 @@ def ore(svg: Svg, rock: str, nugget: str | None = None, glint=False, seed=1, gem
                 svg.path(f"M{x - 5:.1f},{y + 2:.1f} L{x:.1f},{y - 2:.1f} L{x + 6:.1f},{y + 1:.1f} L{x + 1:.1f},{y + 3:.1f} Z", streak, op=0.85)
     if nugget:
         for cx, cy, r in ((44, 82, 9), (70, 66, 10.5), (86, 86, 8.5), (56, 95, 7), (34, 95, 5.5), (62, 82, 6.5)):
-            facets(svg, lump(rng, cx, cy, r, r * 0.8, 6, 0.18), nugget, lo=0.45, hi=1.55)
-            svg.line((cx - r * 0.6, cy - r * 0.45), (cx - r * 0.05, cy - r * 0.7), "#ffffff", 1.1, 0.8)
+            r *= 0.8
+            boulder(svg, rng, lump(rng, cx, cy, r, r * 0.7, 6, 0.32), nugget, lo=0.45, hi=1.5, gloss=0.6)
     if gems:
         for cx, cy, s, rot in ((60, 70, 13, -8), (42, 84, 9, 14), (80, 84, 10, 8)):
             gem(svg, cx, cy, s, gems, rot)
     if glint:
         for x, y, r in ((46, 78, 4.5), (72, 62, 5.5), (88, 82, 4)):
             sparkle(svg, x, y, r)
+    tufts(svg, rng, cy=BASE[1] - 1, half=38, n=5)
 
 
 def gem(svg: Svg, cx, cy, s, col: str, rot=0):
@@ -343,6 +388,7 @@ def timber(svg: Svg):
         svg.circle(cx - 8, cy, 1.4, shade(wood, 0.6))
     for cx, cy in spec[:3]:
         svg.line((cx + 5, cy - 6), (cx + 30, cy - 6), shade(bark, 1.5), 1.1, 0.5)
+    tufts(svg, random.Random(9), cy=BASE[1] + 1, half=40, n=6)
 
 
 def coconuts(svg: Svg):
@@ -417,10 +463,20 @@ def beast(svg: Svg, body: str, belly: str, *, kind: str, patch: str | None = Non
     far, near = shade(body, 0.62), body
 
     def leg(x, top, col, w=7.0, fold=0.0, hoof="#2a2018"):
-        d = f"M{x},{top} C{x + fold},{top + 14} {x - fold * 0.4},{top + 22} {x + fold * 0.2},{BASE[1] - 2}"
-        stroke(svg, d, shade(col, 0.55), w + 1.2)
-        stroke(svg, d, col, w)
-        svg.line((x + fold * 0.2 - 3, BASE[1] - 1), (x + fold * 0.2 + 3, BASE[1] - 1), hoof, 3.0)
+        """A tapering leg: a full thigh under the body, a knee, a slim shank and a dark hoof."""
+        foot = BASE[1] - 2
+        knee_y = top + (foot - top) * 0.55
+        kx = x + fold * 1.4
+        fx = x + fold * 0.2
+        t, k, f = w * 0.62, w * 0.34, w * 0.26  # half widths at the top, knee and fetlock
+        d = (
+            f"M{x - t:.1f},{top - 4:.1f} C{x - t:.1f},{knee_y - 6:.1f} {kx - k - 1:.1f},{knee_y - 3:.1f} {kx - k:.1f},{knee_y:.1f}"
+            f" L{fx - f:.1f},{foot - 2:.1f} L{fx + f:.1f},{foot - 2:.1f} L{kx + k:.1f},{knee_y:.1f}"
+            f" C{kx + k + 1:.1f},{knee_y - 3:.1f} {x + t:.1f},{knee_y - 8:.1f} {x + t:.1f},{top - 4:.1f} Z"
+        )
+        svg.path(d, svg.lin([(0, shade(col, 1.25)), (0.6, col), (1, shade(col, 0.5))], 0, 0, 1, 0))
+        svg.ellipse(kx, knee_y, k + 0.6, 1.6, shade(col, 0.7), op=0.6)
+        svg.path(f"M{fx - f - 1.2:.1f},{foot - 2:.1f} L{fx + f + 1.4:.1f},{foot - 2:.1f} L{fx + f + 2:.1f},{foot + 1:.1f} L{fx - f - 1.8:.1f},{foot + 1:.1f} Z", hoof)
 
     if kind == "cow":
         bx, by, bw, bh, legw, legtop = 68, 64, 31, 18, 8.0, 72
@@ -491,6 +547,7 @@ def beast(svg: Svg, body: str, belly: str, *, kind: str, patch: str | None = Non
     # camel heads sit high on a long neck; draw the mane tuft
     if kind == "camel":
         stroke(svg, f"M{hx + 8},{hy + 2} C{hx + 16},{hy + 6} {hx + 20},{hy + 20} {hx + 20},{hy + 30}", shade(body, 0.7), 2.0)
+    tufts(svg, rng, cx=68, cy=BASE[1], half=36, n=5)
 
 
 # --- water creatures ------------------------------------------------------------------------------------
@@ -559,11 +616,17 @@ def pearls(svg: Svg):
 
 # --- big things -----------------------------------------------------------------------------------------
 def oil(svg: Svg):
-    svg.ellipse(66, 100, 40, 11, "#0a0908", op=0.55, blur=svg.blur(2.4))
-    svg.ellipse(64, 98, 36, 10, svg.lin([(0, "#2a2a30"), (1, "#050506")], 0, 0, 0.3, 1))
-    svg.path("M36,96 C46,92 58,96 70,93", "none", "#7a86a8", 1.6, 0.6)
-    svg.path("M62,100 C74,97 84,100 92,97", "none", "#b07ac0", 1.0, 0.4)
-    svg.ellipse(48, 95, 9, 1.8, "#9aa8d0", op=0.45)
+    rng = random.Random(21)
+    shadow(svg, rx=38, ry=8)
+    ground_patch(svg, 64, 99, 40, 10, "#6b5536", 0.75)
+    slick = smooth_path(lump(rng, 70, 99, 26, 6.5, 11, 0.28))
+    svg.path(slick, svg.lin([(0, "#3a3640"), (0.5, "#141216"), (1, "#060506")], 0, 0, 0.4, 1))
+    svg.path("M52,97 C60,94 70,96 80,94", "none", "#8a96b8", 1.4, 0.55)
+    svg.path("M66,101 C74,99 82,101 90,99", "none", "#b07ac0", 0.9, 0.35)
+    svg.ellipse(58, 96, 6, 1.4, "#c8d2ea", op=0.5)
+    # the derrick's timber platform
+    svg.poly([(40, 96), (88, 96), (84, 92), (44, 92)], svg.lin([(0, "#a07a4a"), (1, "#5e4226")], 0, 0, 0, 1))
+    svg.line((44, 92.6), (84, 92.6), "#c79c62", 0.9, 0.7)
     # derrick: a lattice tower with a crown and a pipe down the middle
     top = (64, 18)
     for sx in (-1, 1):
@@ -581,8 +644,7 @@ def oil(svg: Svg):
     svg.poly([(60, 22), (68, 22), (66, top[1]), (62, top[1])], "#7a6a4c")
     svg.circle(64, top[1] - 2, 3.0, "#c9b88a")
     stroke(svg, "M64,26 L64,92", "#1a1a1e", 2.4, 0.8)
-    # a splash of black
-    svg.ellipse(64, 95, 8, 3, "#0a0908")
+    tufts(svg, rng, cy=BASE[1] - 1, half=40, n=6)
 
 
 def rubber(svg: Svg):
@@ -664,7 +726,7 @@ def cornucopia(svg: Svg):
 # id -> (class, picture). The class is what the game says in its tile panel; the picture does not show it.
 RESOURCES = {
     "iron": ("strategic", lambda s: ore(s, "#7c7468", "#a85a34", seed=11, streak="#b0572e")),
-    "coal": ("strategic", lambda s: ore(s, "#26262c", None, seed=12, streak="#8a93a8")),
+    "coal": ("strategic", lambda s: ore(s, "#2a2a30", None, seed=12, heap=True)),
     "oil": ("strategic", lambda s: oil(s)),
     "rubber": ("luxury", lambda s: rubber(s)),
     "wines": ("luxury", lambda s: vine(s)),

@@ -11,9 +11,8 @@ Both are sheets of 2:1 tile diamonds (256 x 128 at 2x, drawn 128 x 64), like the
   diamonds partition the plane exactly: no overlap, no gaps, and nearest-neighbour sampling never
   shows a seam.
 * `border_sheet`: four diamonds side by side, each carrying a bold dashed line along one edge
-  just inside it, in the order up-right, down-right, down-left, up-left. Each dash is a white core
-  ringed by a black outline so the client can tint it with the owner's colour (white becomes the
-  nation colour, black stays black) and it stays legible on any ground.
+  just inside it, in the order up-right, down-right, down-left, up-left. Each dash is a clean
+  white core so the client can tint it with the owner's colour; the texture has no dark outline.
 """
 
 import numpy as np

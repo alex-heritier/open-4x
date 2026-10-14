@@ -303,56 +303,86 @@ def _stook(svg, iso, x, y):
 
 
 def build_mine() -> Svg:
-    """A timbered adit in the hillside with rails, an ore cart, and a spoil heap."""
+    """A timbered adit dug into a grassy knoll: a lamp glowing down the tunnel, rails running out to
+    an ore cart, a spoil heap beside it.  Painted in soft light and shade with no ink outlines, so it
+    sits in the terrain like the relief does."""
     svg = Svg(W, H)
-    # spoil heap to the right, and a smaller one to the left
-    for cx, cy, rx, ry, col in ((172, 98, 34, 15, "#7a6a58"), (86, 100, 22, 9, "#6e6050")):
-        svg.ellipse(cx + 3, cy + 5, rx, ry * 0.55, "#0e0b07", op=0.45, blur=svg.blur(2.4))
-        svg.poly(
-            [(cx - rx, cy + ry * 0.5), (cx - rx * 0.5, cy - ry), (cx + rx * 0.2, cy - ry * 1.15), (cx + rx, cy + ry * 0.5)],
-            svg.lin([(0, shade(col, 1.35)), (1, shade(col, 0.6))], 0, 0, 1, 0.8),
-            INK,
-            0.8,
-        )
-        for d in range(7):  # loose stones
-            svg.ellipse(cx - rx * 0.6 + d * rx * 0.2, cy + ry * 0.1 - (d % 3) * 3, 2.6, 1.6, shade(col, 0.6 + 0.1 * (d % 3)), op=0.9)
-    # the opening: dark interior, depth gradient
-    opening = [(106, 92), (106, 56), (116, 46), (140, 46), (150, 56), (150, 92)]
-    svg.poly(opening, svg.lin([(0, "#0b0907"), (1, "#2a2118")], 0, 0, 0.3, 1), INK, 1.2)
-    svg.poly([(112, 92), (112, 58), (120, 52), (136, 52), (144, 58), (144, 92)], "#050403", op=0.8)
-    # timber frame: posts, lintel, and two angled braces
-    wood = "#8a5c2e"
-    for x in (100, 150):
-        svg.poly([(x, 94), (x + 8, 94), (x + 8, 50), (x, 50)], svg.lin([(0, shade(wood, 1.3)), (1, shade(wood, 0.6))], 0, 0, 1, 0), INK, 1.0)
-    svg.poly([(94, 54), (164, 54), (164, 44), (94, 44)], svg.lin([(0, shade(wood, 1.35)), (1, shade(wood, 0.65))], 0, 0, 0, 1), INK, 1.0)
-    svg.poly([(104, 58), (112, 54), (112, 62)], shade(wood, 0.9), INK, 0.7)
-    svg.poly([(150, 58), (142, 54), (142, 62)], shade(wood, 0.8), INK, 0.7)
-    # rails curling out toward the lower left, with sleepers
-    left, right = [(116, 92), (80, 118)], [(140, 92), (110, 122)]
-    for i in range(1, 7):
-        t = i / 7
+    rng = random.Random(7)
+    lit = lambda col, hi=1.3, lo=0.55, x2=0.9, y2=1.0: svg.lin([(0, shade(col, hi)), (1, shade(col, lo))], 0, 0, x2, y2)  # noqa: E731
+
+    # the cut bank the adit is driven into: earth and stone with soft edges, so it melts into
+    # whatever ground or relief the tile already shows
+    svg.ellipse(136, 98, 58, 11, "#0e0b07", op=0.30, blur=svg.blur(4.0))
+    bank = "M78,100 C80,84 90,66 104,56 C116,46 140,44 154,52 C170,60 180,80 184,100 Z"
+    earth = svg.rad([(0, "#a08a62"), (0.5, "#6e5a3e"), (1, "#3a2e20")], 0.30, 0.22, 0.9)
+    svg.path(bank, earth, extra=f'filter="{svg.blur(3.2)}"')
+    turf = "M82,90 C86,74 96,62 108,54 C120,46 140,44 154,50 C166,56 174,66 178,76 C164,64 150,58 134,58 C116,58 98,70 82,90 Z"
+    svg.path(turf, svg.lin([(0, "#94a844"), (1, "#4c6424")], 0, 0, 1, 1), op=0.9, extra=f'filter="{svg.blur(1.6)}"')
+    for _ in range(40):  # grass blades hanging over the lip of the cut
+        x = rng.uniform(86, 176)
+        y = 48 + 0.006 * (x - 130) ** 2 + rng.uniform(0, 8)
+        h = rng.uniform(3, 7)
+        svg.line((x, y + h * 0.4), (x + rng.uniform(-2.5, 2.5), y - h * 0.6), shade("#7d9a3a", rng.uniform(0.6, 1.4)), 1.1, 0.8)
+    # bare rock face round the portal
+    svg.path("M92,99 C94,80 100,64 112,60 L146,60 C158,64 166,80 168,99 Z", lit("#857563", 1.25, 0.5, 1.0, 0.6), extra=f'filter="{svg.blur(1.0)}"')
+    for _ in range(14):
+        x, y = rng.uniform(96, 164), rng.uniform(62, 94)
+        svg.ellipse(x, y, rng.uniform(2.5, 5.5), rng.uniform(1.6, 3.2), shade("#857563", rng.uniform(0.6, 1.3)), op=0.7)
+
+    # the opening, deepening to black, with the lamp's warm light falling down the tunnel
+    svg.path("M108,98 L108,66 Q128,58 148,66 L148,98 Z", svg.lin([(0, "#1a120a"), (1, "#060403")], 0, 0, 0, 1))
+    svg.ellipse(128, 80, 15, 14, svg.rad([(0, "#ffd77a", 0.85), (0.35, "#e0902e", 0.55), (1, "#5a2a08", 0.0)]), blur=svg.blur(1.2))
+    svg.circle(128, 78, 3.6, svg.rad([(0, "#fff6d0"), (0.6, "#ffd26a"), (1, "#e8952e")]))
+    svg.line((128, 66), (128, 74), "#2a1d12", 1.1)
+    svg.path("M112,98 L118,86 L138,86 L144,98 Z", "#ffb24a", op=0.12)  # lamplight on the floor
+
+    # timber frame: two heavy posts and a lintel with its end grain showing
+    wood = "#8c5f32"
+    for x in (100, 148):
+        svg.path(f"M{x},99 L{x},64 Q{x + 4},62 {x + 8},64 L{x + 8},99 Z", lit(wood, 1.35, 0.5, 1.0, 0.0))
+        svg.line((x + 1.5, 66), (x + 1.5, 97), shade(wood, 1.55), 1.0, 0.5)
+    svg.path("M94,66 L96,56 L162,56 L164,66 Z", lit(wood, 1.4, 0.55, 0.0, 1.0))
+    svg.line((97, 57.5), (161, 57.5), shade(wood, 1.6), 1.0, 0.55)
+    for x in (94.5, 163.5):
+        svg.ellipse(x, 61, 3.2, 5.0, svg.rad([(0, "#d7a868"), (0.6, "#a8763e"), (1, "#5e3a1a")]))
+        svg.ellipse(x, 61, 1.4, 2.2, "#7a5028", op=0.7)
+    for x0, x1 in ((108, 116), (148, 140)):  # corner braces
+        svg.path(f"M{x0},66 L{x1},66 L{x0},74 Z", shade(wood, 0.8))
+
+    # spoil heap to the right, loose rubble at its foot
+    svg.ellipse(186, 106, 26, 6, "#0e0b07", op=0.35, blur=svg.blur(2.4))
+    svg.path("M160,106 C166,92 178,84 188,86 C198,88 206,98 210,106 Z", lit("#7a6e62", 1.3, 0.5, 1.0, 0.7))
+    for _ in range(16):
+        x, y = rng.uniform(166, 206), rng.uniform(92, 106)
+        svg.ellipse(x, y, rng.uniform(1.8, 3.6), rng.uniform(1.2, 2.4), shade("#6c645c", rng.uniform(0.55, 1.45)), op=0.9)
+
+    # rails curling out of the adit toward the lower left, on timber sleepers
+    left, right = [(118, 98), (82, 122)], [(140, 98), (110, 126)]
+    for i in range(0, 7):
+        t = (i + 0.5) / 7
         a, b = lerp(left[0], left[1], t), lerp(right[0], right[1], t)
-        svg.line((a[0] - 4, a[1] - 0.5), (b[0] + 4, b[1] + 0.5), "#4a3220", 3.0)
-    svg.line(*left, "#aeb4b8", 2.2)
-    svg.line(*right, "#aeb4b8", 2.2)
-    svg.line((left[0][0] - 1, left[0][1] - 1), (left[1][0] - 1, left[1][1] - 1), "#eef0f0", 0.8, 0.7)
-    # ore cart on the rails
-    x, y = 97, 112
-    svg.ellipse(x + 2, y + 6, 17, 5, "#0e0b07", op=0.4, blur=svg.blur(1.6))
-    svg.poly([(x - 16, y - 12), (x + 14, y - 12), (x + 10, y + 2), (x - 12, y + 2)], svg.lin([(0, "#7a828a"), (1, "#3a4046")], 0, 0, 1, 1), INK, 1.0)
-    svg.poly([(x - 16, y - 12), (x + 14, y - 12), (x + 11, y - 8), (x - 13, y - 8)], "#a8b0b6", INK, 0.7)
-    for d in range(6):  # heaped ore
-        svg.ellipse(x - 12 + d * 5, y - 14 - (d % 2) * 2, 3.8, 2.6, ("#2c2a2a", "#5a4a3a", "#3a3434")[d % 3], INK, 0.5)
-    for wx in (-9, 8):
-        svg.circle(x + wx, y + 3, 4.2, "#22201f", stroke=INK, sw=0.8)
-        svg.circle(x + wx, y + 3, 1.4, "#a8a095")
-    # a hanging lantern at the lintel
-    svg.line((122, 54), (122, 62), INK, 1.0)
-    svg.circle(122, 65, 3.2, "#f2c25a", stroke=INK, sw=0.8)
-    svg.circle(122, 65, 7.5, "#f6d27a", op=0.28, blur=svg.blur(2.4))
-    # a pick leaning on the post
-    svg.line((172, 100), (160, 62), "#6a4a2c", 2.6)
-    svg.path("M153,60 Q160,54 168,60 L167,62 Q160,58 155,63 Z", "#8c949a", INK, 0.7)
+        svg.line((a[0] - 4, a[1] - 0.5), (b[0] + 4, b[1] + 0.5), "#3e2a18", 3.2)
+        svg.line((a[0] - 4, a[1] - 1.2), (b[0] + 4, b[1] - 0.2), "#7a5634", 1.0, 0.6)
+    for rail in (left, right):
+        svg.line(*rail, "#4a4e52", 2.6)
+        svg.line((rail[0][0] - 0.6, rail[0][1] - 0.8), (rail[1][0] - 0.6, rail[1][1] - 0.8), "#c9cdd0", 1.0, 0.8)
+
+    # the ore cart, heaped with coal
+    x, y = 96, 112
+    svg.ellipse(x + 3, y + 7, 17, 4.5, "#0e0b07", op=0.4, blur=svg.blur(1.6))
+    svg.path(f"M{x - 15},{y - 10} L{x + 14},{y - 10} L{x + 10},{y + 3} L{x - 11},{y + 3} Z", lit("#6a7076", 1.35, 0.5, 1.0, 1.0))
+    svg.line((x - 14, y - 9.4), (x + 13.5, y - 9.4), "#b8bec2", 1.0, 0.7)
+    for d in range(7):
+        sphere_x = x - 12 + d * 4
+        svg.ellipse(sphere_x, y - 12 - (d % 2) * 1.8, 3.4, 2.6, svg.rad([(0, "#6a6662"), (0.5, "#2c2a2a"), (1, "#121010")], 0.35, 0.3, 0.8))
+    for wx in (-8, 7):
+        svg.circle(x + wx, y + 3.5, 3.8, svg.rad([(0, "#5a5652"), (1, "#141210")], 0.35, 0.3, 0.8))
+        svg.circle(x + wx, y + 3.5, 1.2, "#a8a095")
+
+    # a pick leaning on the right post
+    svg.line((166, 100), (158, 72), "#5e4026", 2.6)
+    svg.line((165.2, 99.6), (157.4, 72.2), "#a07448", 0.9, 0.6)
+    svg.path("M150,72 Q158,64 168,70 L166,72.5 Q158,68 152,74 Z", lit("#9aa2a8", 1.3, 0.55))
     return svg
 
 

@@ -48,15 +48,19 @@ def _cone(u, v, cu, cv, radius, amp, power):
 
 
 def mountain_height(seed=3):
-    """Height in 2x-sprite pixels over the (u, v) grid; Fuji-like main cone + two rocky shoulders."""
+    """Height in 2x-sprite pixels over the (u, v) grid: a slender main peak with three lesser
+    peaks round it, rising out of a low foothill skirt that fills the rest of the footprint."""
     u, v = np.meshgrid(np.linspace(0, 1, GRID, dtype=np.float32), np.linspace(0, 1, GRID, dtype=np.float32), indexing="ij")
-    h = (
-        _cone(u, v, 0.50, 0.50, 0.50, 132.0, 1.5)
-        + _cone(u, v, 0.30, 0.66, 0.27, 52.0, 1.25)
-        + _cone(u, v, 0.72, 0.30, 0.30, 60.0, 1.25)
-    )
+    peaks = np.maximum.reduce([
+        _cone(u, v, 0.50, 0.48, 0.42, 128.0, 1.35),
+        _cone(u, v, 0.30, 0.66, 0.24, 58.0, 1.3),
+        _cone(u, v, 0.70, 0.30, 0.25, 68.0, 1.3),
+        _cone(u, v, 0.68, 0.66, 0.19, 34.0, 1.3),
+    ])
+    skirt = 12.0 * np.clip(1.0 - np.hypot(u - 0.5, v - 0.5) / 0.5, 0.0, 1.0) ** 0.8
+    h = np.maximum(peaks, skirt) + 0.25 * np.minimum(peaks, skirt)
     a, b = u * 0.97, v * 0.97
-    ridged = 1.0 - np.abs(fbm(a, b, 5, 4, seed=seed, warp=0.12) * 2.4)
+    ridged = 1.0 - np.abs(fbm(a, b, 7, 4, seed=seed, warp=0.12) * 2.4)
     radial = 1.0 - np.abs(
         fbm(np.arctan2(v - 0.5, u - 0.5) / (2 * np.pi) % 1.0, np.hypot(u - 0.5, v - 0.5) * 0.9, 9, 3, seed=seed + 9, aniso=1.0) * 2.8
     )
@@ -96,7 +100,7 @@ def shade_height(h, u, v, seed=3, style="temperate"):
     col = P.mix(rock, scrub, low * (1.0 - smoothstep(0.1, 0.45, steep)))
 
     snow_line = st["snow"] + 0.09 * n1 + 0.05 * n2
-    snow = smoothstep(snow_line - 0.04, snow_line + 0.05, hn) * (1.0 - smoothstep(0.24, 0.46, steep + 0.03 * n2))
+    snow = smoothstep(snow_line - 0.04, snow_line + 0.05, hn) * (1.0 - smoothstep(0.34, 0.58, steep + 0.03 * n2))
     lit = 0.62 + 0.52 * lam
     snow_col = P.mix(P.hx("#a9b6c6"), P.hx("#e6e8e2"), np.clip(lam * 1.15, 0, 1))
     col = P.mix(col, snow_col / np.maximum(lit[..., None], 0.35) * 0.95, snow)
@@ -155,10 +159,17 @@ def hills_height(seed=21):
 
     rng = np.random.default_rng(seed)
     j = rng.uniform(-0.04, 0.04, 6)
-    h = dome(0.50 + j[0], 0.50 + j[1], 0.52, 30.0) + dome(0.28 + j[2], 0.66 + j[3], 0.30, 12.0) + dome(0.73 + j[4], 0.33 + j[5], 0.32, 14.0)
+    h = dome(0.50 + j[0], 0.50 + j[1], 0.50, 34.0) + dome(0.28 + j[2], 0.66 + j[3], 0.28, 14.0) + dome(0.73 + j[4], 0.33 + j[5], 0.30, 16.0)
     a, b = u * 0.97, v * 0.97
     env = np.clip(h / 12.0, 0.0, 1.0)
-    h = h + env * (fbm(a, b, 4, 3, seed=seed, warp=0.15) * 3.2 + fbm(a, b, 18, 2, seed=seed + 3) * 1.0)
+    # knobbly ground: gullies and spurs running down the flanks, small lumps the light picks out
+    ridged = 1.0 - np.abs(fbm(a, b, 7, 3, seed=seed + 6, warp=0.15) * 2.4)
+    h = h + env * (
+        fbm(a, b, 4, 3, seed=seed, warp=0.15) * 3.2
+        + ridged * 4.5
+        + fbm(a, b, 18, 2, seed=seed + 3) * 1.6
+        + fbm(a, b, 48, 2, seed=seed + 7) * 0.7
+    )
     return np.maximum(h, 0.0).astype(np.float32), u, v
 
 
@@ -166,22 +177,55 @@ HILL_STYLES = {
     "temperate": dict(
         cover=[(0, "#3c5420"), (0.5, "#5e7a2a"), (1.0, "#93a03e")],
         dry=[(0, "#76703a"), (1.0, "#b0a456")],
-        rock=[(0, "#5a4430"), (1.0, "#9a7c56")],
+        rock=[(0, "#5a5048"), (1.0, "#a49a8a")],
+        bush=[(0, "#1e3214"), (0.5, "#3a5a1e"), (1.0, "#7a9634")],
         snow=2.0,
     ),
     "arid": dict(
         cover=[(0, "#9a8e6c"), (0.5, "#b4a986"), (1.0, "#cdc4a2")],
         dry=[(0, "#a6976e"), (1.0, "#cec29e")],
         rock=[(0, "#7a5e44"), (1.0, "#b8996e")],
+        bush=[(0, "#3e3a20"), (0.5, "#5e5a30"), (1.0, "#8c8648")],
         snow=2.0,
     ),
     "arctic": dict(
         cover=[(0, "#7e8274"), (0.5, "#9a9c8c"), (1.0, "#b6b8a9")],
         dry=[(0, "#8a8a7a"), (1.0, "#b2b2a2")],
         rock=[(0, "#585e66"), (1.0, "#a0a8b0")],
+        bush=[(0, "#26342a"), (0.5, "#3c4e40"), (1.0, "#6c7e6c")],
         snow=0.45,
     ),
 }
+
+
+def _scatter(col, u, v, h, seed, st):
+    """Bushes and stones dotted over the slopes: dark clumps with a lit upper-left side."""
+    rng = np.random.default_rng(seed + 401)
+    g = col.shape[0]
+    out = col.copy()
+    for k in range(60):
+        cu, cv = rng.uniform(0.12, 0.88, 2)
+        i, j = int(cu * (g - 1)), int(cv * (g - 1))
+        if h[i, j] < 4:
+            continue
+        stone = k % 6 == 0
+        radius = rng.uniform(0.013, 0.020) if stone else rng.uniform(0.016, 0.030)
+        n = int(radius * g * 1.6) + 2
+        i0, i1, j0, j1 = max(i - n, 0), min(i + n, g), max(j - n, 0), min(j + n, g)
+        du, dv = (u[i0:i1, j0:j1] - cu) / radius, (v[i0:i1, j0:j1] - cv) / radius
+        r = np.hypot(du, dv)
+        body = 1.0 - smoothstep(0.75, 1.0, r)
+        side = np.clip(0.5 - 0.45 * (du + dv), 0.0, 1.0)  # upper left (small u, v) is lit
+        if stone:
+            ramp = st["rock"]
+            paint = P.ramp(np.clip(0.25 + 0.75 * side, 0, 1), ramp)
+        else:
+            paint = P.ramp(np.clip(0.05 + 0.55 * side, 0, 1), st["bush"])
+        shadow = (1.0 - smoothstep(0.9, 1.5, np.hypot(du - 0.45, dv - 0.45))) * (1.0 - body)
+        patch = out[i0:i1, j0:j1]
+        patch = patch * (1.0 - 0.30 * shadow)[..., None]
+        out[i0:i1, j0:j1] = P.mix(patch, paint, body * 0.95)
+    return out
 
 
 def shade_hills(h, u, v, seed=21, style="temperate"):
@@ -219,10 +263,15 @@ def shade_hills(h, u, v, seed=21, style="temperate"):
     rock_col = rock_col * (0.90 + 0.18 * strata)[..., None]
     col = P.mix(col, rock_col, outcrop * 0.85)
     snow = P.smoothstep(st["snow"] - 0.08, st["snow"] + 0.06, hn + 0.12 * n1) * (1.0 - outcrop * 0.8)
-    lit = 0.72 + 0.36 * lam
+    # grass laid in short strokes, and a warm light catching the crests
+    strokes = fbm(a, b, 64, 2, seed=seed + 9, aniso=3.0)
+    col = col * (1.0 + 0.22 * strokes)[..., None]
+    col = P.mix(col, P.ramp(np.ones_like(hn), st["cover"]) * 1.12, P.smoothstep(0.80, 0.98, lam) * 0.35 * (1.0 - outcrop))
+    col = _scatter(col, u, v, h, seed, st)
+    lit = 0.56 + 0.60 * lam
     snow_col = P.mix(P.hx("#a9b6c6"), P.hx("#e6e8e2"), np.clip(lam * 1.15, 0, 1))
     col = P.mix(col, snow_col / np.maximum(lit[..., None], 0.35) * 0.95, snow)
-    col = col * (lit * (1.0 - 0.18 * ao))[..., None] * 1.05
+    col = col * (lit * (1.0 - 0.26 * ao))[..., None] * 1.08
     # a long feathered skirt: the lower slopes thin out so the ground's own texture shows through
     alpha = smoothstep(0.5, 9.0, h + 2.0 * n2)
     return np.clip(col, 0, 1), alpha
@@ -234,6 +283,13 @@ def _finish(img) -> Image.Image:
     pil = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), "RGBA")
     pil.putalpha(pil.getchannel("A").filter(ImageFilter.GaussianBlur(1.2)))
     return pil
+
+
+def _finish_border(img) -> Image.Image:
+    """Blur only the ribbon's coverage; its colour is the client's flat tint."""
+    img = img.copy()
+    img[..., :3] = 1.0
+    return _finish(img)
 
 
 def build_hills_layer(seed=21, style="temperate") -> Image.Image:
@@ -305,17 +361,14 @@ def border_layers(h, u, v):
     samples still occlude hidden parts of a rear ribbon in `project`.
     """
     for col, alpha in border_masks(u, v, bow=0.12):
-        yield _finish(project(h, col, alpha))
+        yield _finish_border(project(h, col, alpha))
 
 
 def border_masks(u, v, bow=0.0):
     """Shared bead/thread paint for flat and lifted borders; eight periods per edge.
 
-    Bold Civ3-style dashes: a thick white core (tinted to the nation's colour by
-    the client) ringed by a black outline that survives the tint, so the border
-    reads on any ground. The outline works because the client multiplies the
-    texture by the nation colour: white becomes the nation colour, black stays
-    black.
+    Bold Civ3-style dashes: a thick white core tinted to the nation's colour by
+    the client, with transparent space around it and no baked outline.
     """
     # Orient parameters clockwise N->E->S->W->N, matching the client's edge neighbours.
     for t, distance in ((u, v), (v, 1-u), (1-u, 1-v), (1-v, u)):
@@ -323,11 +376,11 @@ def border_masks(u, v, bow=0.0):
         delta = np.abs(distance - inset) * 143.1  # source pixels normal to an edge
         phase = (t * 143.1) % 18.0
         bead = (phase >= 4) & (phase < 17)
-        rim = 1 - smoothstep(3.4, 4.8, delta)
-        core = 1 - smoothstep(1.6, 3.0, delta)
-        alpha = np.where(bead, rim, (1 - smoothstep(0.5, 1.1, delta)) * 0.75)
+        core = 1 - smoothstep(2.2, 3.6, delta)
+        thread = 1 - smoothstep(0.5, 1.1, delta)
+        alpha = np.where(bead, core, thread * 0.75)
         alpha *= smoothstep(0.025, 0.05, t) * (1-smoothstep(0.95, 0.975, t))
-        col = np.ones((*u.shape, 3), dtype=np.float32) * core[..., None]
+        col = np.ones((*u.shape, 3), dtype=np.float32)
         yield col, alpha
 
 

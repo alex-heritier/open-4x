@@ -21,7 +21,7 @@ Output goes to `assets/packs/base/`; the vector sources of the sprites are writt
 
 ## Terrain look
 
-The terrain follows the look of a hand-painted strategy map: sunlit meadow-green and straw-khaki land with broad light and shadow rolling across it (`terrain.Fields.rolling`, plus a different set of knolls in each tonal variant), dense green woods whose crowns catch a warm yellow light (`nature.py` ramps run to near-black in the crown shade), grassy green hills, grey rocky mountains under a broad cap of snow with green scrub at their feet (`relief.STYLES`, `HILL_STYLES`), and one teal sea that deepens away from shore: pale turquoise shelf (coast), steel-teal sea, slate-blue ocean (`terrain.COAST_STOPS`, `SEA_STOPS`, `OCEAN_STOPS`). The depths fade into each other over a wide, ragged band (`terrain.BAND_SOFT`), with pale wave strokes and a slow swell across all of them.
+The terrain follows the look of a hand-painted strategy map: sunlit meadow-green and straw-khaki land with broad light and shadow rolling across it (`terrain.Fields.rolling`, plus a different set of knolls in each tonal variant), dense green woods whose crowns catch a warm yellow light (`nature.py` ramps run to near-black in the crown shade), grassy green hills cut by gullies and spurs, with bushes and stones dotted over them (`relief._scatter`), slender grey mountains (a main peak and three lesser ones on a low foothill skirt) with snow on their upper slopes and green scrub at their feet (`relief.STYLES`, `HILL_STYLES`), and one teal sea that deepens away from shore: pale turquoise shelf (coast), steel-teal sea, slate-blue ocean (`terrain.COAST_STOPS`, `SEA_STOPS`, `OCEAN_STOPS`). The depths fade into each other over a wide, ragged band (`terrain.BAND_SOFT`), with pale wave strokes and a slow swell across all of them.
 
 The band isoline wanders (`terrain.ZONE_JITTER`) with periodic noise, so a border pixel still depends only on the two vertex digits of its edge and sheets keep tiling. Land is still pulled slightly toward its mean colour (`terrain._calm`) and cover uses `build.COVER_GRADE`. When adding terrain art, check it with a city and a unit on top (`cargo run -p fourx-client -- --scenario age-of-imperialism --focus 112,34 --zoom 1`): the sprite should still win against the ground.
 
@@ -74,7 +74,7 @@ Map overlays (`terrain/fog.png`, `terrain/borders.png`, built by `forge/overlay.
   see is a soft gradient. Neighbouring tiles share their common vertices and therefore agree along the shared edge. The diamond masks are half-open, so the cells partition the plane exactly;
   the client must sample the sheet with nearest-neighbour filtering or seams appear.
 * **Borders** (1024x128, 4 cells): a dashed line along one edge just inside it, in the order up-right, down-right, down-left, up-left. The dashes are white so the client tints them with
-  the owner's colour; a darker rim keeps them legible on any ground.
+  the owner's colour. They are slightly thick and carry no dark rim or outline.
 
 Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`, `hills_cold`, `mountain`, `mountain_dry`, `mountain_cold`; `python build.py overlays` rebuilds them.
 
@@ -99,7 +99,7 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 | `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, planked deck) with casemates, oval funnels and their trailing plumes, turrets that train round to the starboard beam, sponsons, tripod masts, ensign, bow and stern foam, and their five clips; `muzzle_table(design)` reports where the guns are when a broadside fires, for `pack.json`'s `muzzles` |
 | `chrome.py`, `emblems.py`, `scenes.py` | window chrome: parchment/slate/felt surfaces, gilt frames with boss and scroll corners, cartouches, compass; yield emblems; terrain vignettes (`build.py chrome`) |
 | `icons.py` | flat white glyph icons (`icon_*`, `hud_*`) |
-| `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (ore heaps, crops, animals, a derrick, flags for the colonial markers; no frame or outline, only a contact shadow), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
+| `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (heaps of rounded, softly lit stones or packed coal lumps, crops, animals on tapered legs, a derrick over an oil slick, flags for the colonial markers; no frame or outline, only a contact shadow and a few grass blades at the foot), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
 
 ## Unit animation (`units/`)
 
@@ -136,8 +136,8 @@ cavalry_steppe infantry` re-renders just the named designs.
 Each kit stays in the muted, hand-painted range, because the client tints a figure with its nation's
 colour and a busy coat would fight it. The accent is the collar, cap band or headband, and the
 headgear carries the strongest read at the drawn size: a white tunic under a dark kepi for Latin
-America, a shako for the Orthodox world, a turban for the Islamic one, a straw hat for East and
-South-East Asia, a cloth cap for the subcontinent, a red headband over an ochre tunic for Africa,
+America, a shako for the Orthodox world, a turban for the Islamic one, a dark blue coat under a red-banded
+kepi for East Asia (the Meiji army's uniform), a steep conical straw hat for South-East Asia, a cloth cap for the subcontinent, a red headband over an ochre tunic for Africa,
 long hair under a band for the steppe, buckskin and a feather for the indigenous Americas, and a
 bare head over a red-brown tunic and pale wrap for the Pacific. The horse's coat follows the culture
 too, so a steppe pony, an Arab and a European charger read apart.

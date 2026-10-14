@@ -222,12 +222,11 @@ def headgear(sc, W, kit, hc, hu, hf, hl, seen, layer):
         knot = add(add(base, mul(hu, 1.0)), mul(hf, 6.2))
         sc.ball(W(knot), 2.4, shade(kit.hat, 0.86), squash=0.7, layer=layer, bias=-0.5)
     elif style == "conical":
-        # a woven straw hat: a broad brim and a low cone, a cord under the chin
-        brim = add(hc, mul(hu, 4.0))
-        sc.disk(W(brim), W.vec(hu), 13.5, kit.hat, sides=22, layer=layer, bias=-0.3)
-        tip = add(brim, add(mul(hu, 10.0), mul(hf, 0.6)))
-        sc.tube(W(add(brim, mul(hu, 0.5))), W(tip), 7.4, 1.0, shade(kit.hat, 1.03), side=W.vec(hl), sides=16, layer=layer, bias=-0.4, caps=False)
-        sc.tube(W(add(brim, mul(hu, 0.2))), W(add(brim, mul(hu, 2.0))), 7.6, 7.5, kit.band, side=W.vec(hl), sides=16, layer=layer, bias=-0.45, caps=False)
+        # a woven conical hat: one steep cone from the brow to a point, no flat brim.  The flank of the cone is the brim, so it never reads as a sombrero.
+        rim = add(hc, add(mul(hu, 3.4), mul(hf, 0.4)))
+        tip = add(rim, add(mul(hu, 8.6), mul(hf, 0.3)))
+        sc.tube(W(rim), W(tip), 10.0, 0.6, kit.hat, side=W.vec(hl), sides=20, layer=layer, bias=-0.4, caps=True)
+        sc.tube(W(add(rim, mul(hu, 2.4))), W(add(rim, mul(hu, 2.9))), 7.4, 7.0, shade(kit.hat, 0.78), side=W.vec(hl), sides=20, layer=layer, bias=-0.45, caps=False)
     elif style == "fez":
         k0 = add(hc, mul(hu, 3.2))
         k1 = add(k0, mul(hu, 6.0))
@@ -849,7 +848,7 @@ FLAVOR_KITS = {
     "latin": _kit("#e4ddc8", "#3a4a6a", "#b0302a", "kepi", cap="#2f3f5f"),
     "orthodox": _kit("#274a3a", "#3f4a40", "#9c2f24", "shako"),
     "arab": _kit("#e6dcc2", "#7a6a52", "#2f6a6a", "turban", head="#efe7cf"),
-    "east_asian": _kit("#5a7ba6", "#2f3a4a", "#c0392b", "conical", head="#d9c98a"),
+    "east_asian": _kit("#2e3a54", "#262c38", "#c0392b", "kepi", cap="#262f45"),  # the Meiji army's dark blue and red-banded cap
     "south_asian": _kit("#b2622a", "#5a4a34", "#e0a83a", "wrap", head="#b2622a"),
     "southeast_asian": _kit("#3f6a4f", "#4a4034", "#c98a3a", "conical", head="#d9b877"),
     "african": _kit("#a8783a", "#3a2a1e", "#b8302a", "headband"),

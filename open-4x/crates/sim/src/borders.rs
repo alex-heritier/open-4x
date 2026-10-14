@@ -7,7 +7,13 @@
 //!
 //! Level `L` reaches every tile within squared distance [`REACH_SQUARED`]`[L - 1]` on the
 //! logical grid, which is Civ3's border shape: 9, 21, 37, 61, 89, and 137 tiles.
-use crate::{City, Game, Id, terrain::Coord};
+//!
+//! A tile no city reaches can still end up owned: Civ3's orphan resolution fills a one-tile
+//! hole its claimed neighbours surround (see [`Game::fill_border_gaps`]).
+use crate::{
+    City, Game, Id,
+    terrain::{Coord, Terrain},
+};
 
 pub const MIN_LEVEL: u8 = 1;
 pub const MAX_LEVEL: u8 = 6;
@@ -55,6 +61,7 @@ impl Game {
 
     /// Lay out every city's region at once. Each tile goes to the nearest city that reaches
     /// it; a tie goes to the higher border level, then the larger city, then the older one.
+    /// One-tile holes the surround agrees on are filled after, like Civ3's orphans.
     pub(crate) fn assign_start_territory(&mut self) {
         for tile in &mut self.map.tiles {
             tile.claim = 0;
@@ -93,7 +100,7 @@ impl Game {
                 .expect("city is on the map")
                 .claim = id;
         }
-        self.sync_territory_owners();
+        self.fill_border_gaps();
     }
 
     /// Fill named historical regions left outside normal cultural borders. Each remaining
@@ -145,7 +152,7 @@ impl Game {
                 self.map.tiles[i].owner = nation;
             }
         }
-        self.sync_territory_owners();
+        self.fill_border_gaps();
     }
 
     /// A new city claims only land nobody holds yet, plus the square it stands on.
@@ -157,6 +164,61 @@ impl Game {
                 tile.claim = id;
                 tile.owner = city.owner;
             }
+        }
+        self.fill_border_gaps();
+    }
+
+    /// Fill one-tile holes Civ3's orphan resolution (`0x5D4370`) would settle: an unclaimed
+    /// tile that is not open ocean takes the nation the claimed tiles across it agree on.
+    /// The west/east pair wins over the north/south pair; open-4x cities carry no
+    /// empire-culture rating, so a tile both pairs claim for different nations goes to the
+    /// west/east pair the way Civ3's tied-rating case does. The tile's claim goes to the
+    /// agreeing neighbour's city (west, else north), so `claim` and `owner` stay consistent
+    /// through [`sync_territory_owners`]. Runs to a fixpoint: each filled tile can complete
+    /// the surround of the next, and off-map and void neighbours count as nobody.
+    pub(crate) fn fill_border_gaps(&mut self) {
+        loop {
+            let mut filled = Vec::new();
+            for i in 0..self.map.tiles.len() {
+                let position = self.map.tiles[i].position;
+                if let Some(city) = self.orphan_claim(position) {
+                    filled.push((position, city));
+                }
+            }
+            if filled.is_empty() {
+                break;
+            }
+            for (position, city) in filled {
+                self.map.get_mut(position).expect("tile exists").claim = city;
+            }
+        }
+        self.sync_territory_owners();
+    }
+
+    /// The city an unclaimed tile's surround names, or `None` when it names none.
+    fn orphan_claim(&self, position: Coord) -> Option<Id> {
+        let tile = self.map.get(position)?;
+        if tile.claim != 0 || tile.terrain == Terrain::Ocean {
+            return None;
+        }
+        let neighbour = |dx: i32, dy: i32| {
+            let neighbour = self.map.get(position.offset(dx, dy))?;
+            if neighbour.claim == 0 {
+                return None;
+            }
+            let nation = self.cities.get(&neighbour.claim)?.owner;
+            Some((nation, neighbour.claim))
+        };
+        let pair = |a: Option<(Id, Id)>, b: Option<(Id, Id)>| match (a, b) {
+            (Some((nation, _)), Some((other, _))) if nation == other => a,
+            _ => None,
+        };
+        let across_x = pair(neighbour(-1, 0), neighbour(1, 0));
+        let across_y = pair(neighbour(0, -1), neighbour(0, 1));
+        match (across_x, across_y) {
+            (Some((_, city)), _) => Some(city),
+            (None, Some((_, city))) => Some(city),
+            (None, None) => None,
         }
     }
 
@@ -221,15 +283,73 @@ mod tests {
         assert_eq!(default_level(12, true), 5);
     }
 
+    /// Two level-1 cities of one nation four steps apart, leaving a gap column neither
+    /// reaches. `arena`'s capitals are far away and never interfere.
+    fn gap_column() -> Game {
+        let mut game = arena(24, 12);
+        let west = game.add_city(1, Coord::new(10, 6), "West".into());
+        let east = game.add_city(1, Coord::new(14, 6), "East".into());
+        for id in [west, east] {
+            game.cities.get_mut(&id).unwrap().border = 1;
+        }
+        game
+    }
+
+    #[test]
+    fn surrounded_gap_tiles_take_the_surrounding_nation() {
+        let mut game = gap_column();
+        game.assign_start_territory();
+        // The column between the two 3x3 regions is reached by neither city, but the tiles
+        // across agree, so orphan resolution fills it like Civ3's `0x5D4370`.
+        for y in 5..=7 {
+            let tile = game.map.get(Coord::new(12, y)).unwrap();
+            assert_ne!(tile.claim, 0, "gap tile (12, {y}) stays unclaimed");
+            assert_eq!(tile.owner, 1);
+        }
+        // Rows outside the two claims stay open: only one side is owned.
+        let open = game.map.get(Coord::new(12, 8)).unwrap();
+        assert_eq!((open.claim, open.owner), (0, 0));
+    }
+
+    #[test]
+    fn open_ocean_gaps_stay_unclaimed() {
+        let mut game = gap_column();
+        game.map.get_mut(Coord::new(12, 6)).unwrap().terrain = Terrain::Ocean;
+        game.assign_start_territory();
+        // Open ocean is never settled by adjacency; the land gaps around it still fill.
+        let sea = game.map.get(Coord::new(12, 6)).unwrap();
+        assert_eq!((sea.claim, sea.owner), (0, 0));
+        assert_eq!(game.map.get(Coord::new(12, 5)).unwrap().owner, 1);
+        assert_eq!(game.map.get(Coord::new(12, 7)).unwrap().owner, 1);
+    }
+
+    #[test]
+    fn contested_gaps_go_to_the_west_east_pair() {
+        let mut game = gap_column();
+        let north = game.add_city(2, Coord::new(12, 4), "North".into());
+        let south = game.add_city(2, Coord::new(12, 8), "South".into());
+        for id in [north, south] {
+            game.cities.get_mut(&id).unwrap().border = 1;
+        }
+        game.assign_start_territory();
+        // West/east say nation 1, north/south say nation 2: the west/east pair wins, the way
+        // Civ3's tied-rating case falls through to it.
+        assert_eq!(game.map.get(Coord::new(12, 6)).unwrap().owner, 1);
+    }
+
     #[test]
     fn regional_fill_puts_remote_named_land_with_the_nearest_matching_city() {
         let mut game = arena(24, 12);
         let capital = game.city_at(Coord::new(1, 1)).unwrap();
-        let fringe = Coord::new(22, 0);
+        // Two unnamed tiles: a lone one would be a one-tile hole once its neighbours fill,
+        // which gap filling claims on purpose, so the fringe needs a neighbour of its own.
+        let fringe = [Coord::new(22, 0), Coord::new(23, 0)];
         for tile in &mut game.map.tiles {
             tile.region = 1;
         }
-        game.map.get_mut(fringe).unwrap().region = 0;
+        for p in fringe {
+            game.map.get_mut(p).unwrap().region = 0;
+        }
         game.regions = vec![Region {
             id: "red-land".to_string(),
             name: "Red Land".to_string(),
@@ -243,7 +363,9 @@ mod tests {
 
         assert_eq!(game.map.get(remote).unwrap().claim, capital);
         assert_eq!(game.map.get(remote).unwrap().owner, 1);
-        assert_eq!(game.map.get(fringe).unwrap().claim, 0);
-        assert_eq!(game.map.get(fringe).unwrap().owner, 0);
+        for p in fringe {
+            let tile = game.map.get(p).unwrap();
+            assert_eq!((tile.claim, tile.owner), (0, 0), "unnamed fringe {p:?}");
+        }
     }
 }
