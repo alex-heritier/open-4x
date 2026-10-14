@@ -11,7 +11,7 @@ mod motion;
 mod script;
 
 use super::march::Walks;
-use super::presentation::{tint, unit_size};
+use super::presentation::{UNIT_LIFT as LIFT, tint, unit_size};
 use super::puppet::{ClipSet, Puppetry};
 use super::{Session, WorldRect, camera_rect, option};
 use bevy::{
@@ -33,8 +33,6 @@ use crate::theme::{
 /// Sprites on stage stand above the map's own units (drawn at about 30).
 const STAGE_Z: f32 = 40.0;
 const FX_Z: f32 = 60.0;
-/// How far a unit's sprite is drawn above its square's anchor, as on the map.
-const LIFT: f32 = 12.0;
 const BAR_WIDTH: f32 = 46.0;
 /// The most a frame may advance the clock, so a stalled frame does not skip a fight.
 const LONGEST_FRAME: f32 = 0.1;

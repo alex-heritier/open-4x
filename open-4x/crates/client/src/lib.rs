@@ -707,7 +707,12 @@ pub fn run() {
                 (campaign::animate, campaign::scroll, campaign::budget_hint).chain(),
                 stage::fx,
                 presentation::fit_terrain_atlas,
-                (presentation::refresh, presentation::animate_selection_top).chain(),
+                (
+                    presentation::refresh,
+                    presentation::animate_selection_top,
+                    presentation::place_selected_square,
+                )
+                    .chain(),
                 presentation::update_minimap,
                 presentation::minimap_viewport,
                 presentation::draw_overlays,
@@ -757,6 +762,12 @@ fn setup(
         }),
     ));
     let shapes = theme::Shapes::new(&mut images);
+    commands.spawn((
+        shapes.selected_square(),
+        Transform::default(),
+        Visibility::Hidden,
+        presentation::SelectedSquare,
+    ));
     commands.spawn((
         shapes.selection_top(),
         Transform::default(),

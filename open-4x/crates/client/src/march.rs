@@ -5,7 +5,7 @@
 //! its run clip, turned toward each step, then hands back to the real unit facing the way it
 //! last walked. The walks of one snapshot play together, and fights wait for them. They never
 //! hold back orders: a newer snapshot cuts them short and starts its own.
-use super::presentation::{Z_UNIT, depth, tint, unit_size};
+use super::presentation::{UNIT_LIFT as LIFT, Z_UNIT, depth, tint, unit_size};
 use super::puppet::{ClipArt, Puppetry};
 use super::{Session, camera_rect};
 use bevy::{prelude::*, window::PrimaryWindow};
@@ -17,8 +17,6 @@ use std::collections::HashSet;
 pub const STEP_SECS: f32 = 0.4;
 /// The longest a walk may take: a long railway journey speeds up to fit.
 pub const LONGEST_WALK: f32 = 2.4;
-/// How far a unit's sprite is drawn above its square.
-const LIFT: f32 = 12.0;
 /// A walk is shown when it passes within this much of the camera's view (about a tile).
 const VIEW_MARGIN: f32 = 128.0;
 

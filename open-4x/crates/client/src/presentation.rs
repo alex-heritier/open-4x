@@ -202,6 +202,10 @@ const Z_FOG: f32 = 15.0;
 const Z_BORDER: f32 = Z_RELIEF + 3.0 * Z_STEP;
 const Z_CITY: f32 = 20.0;
 pub(super) const Z_UNIT: f32 = 30.0;
+/// The outline of the chosen square: over the terrain and its fog, under cities, units and labels.
+const Z_SELECTED: f32 = Z_FOG + 1.0;
+/// How far a unit's sprite stands above its square's centre (the walk and the stage use it too).
+pub(super) const UNIT_LIFT: f32 = 18.0;
 /// Corner offsets, from a tile, of the dual cells that have it as their north, east, south and
 /// west vertex.
 const FARM_CELLS: [(i32, i32); 4] = [(0, 0), (-1, 0), (-1, -1), (0, -1)];
@@ -1224,7 +1228,7 @@ pub(super) fn refresh(params: Refresh) {
         } else {
             tint(game, unit.owner)
         };
-        let at = Vec3::new(x, y + 12.0, z);
+        let at = Vec3::new(x, y + UNIT_LIFT, z);
         let mut clip = |kind: &str, which: Clip| {
             puppetry.art.clip(
                 &session,
@@ -1265,7 +1269,8 @@ pub(super) fn refresh(params: Refresh) {
             unit,
             def,
             ids.len(),
-            Vec3::new(x, y, z),
+            // the badges are laid out for a piece lifted 12 px; they rise with it
+            Vec3::new(x, y + UNIT_LIFT - 12.0, z),
         );
     }
     // Past the top and bottom of an upright world: the chart's frame and margin.
@@ -2771,8 +2776,8 @@ pub(super) fn animate_selection_top(
     shapes: Res<Shapes>,
     mut markers: Query<(&mut Transform, &mut Visibility, &mut Sprite), With<SelectionMarker>>,
 ) {
-    let turn = session.frames as f32 * TAU / 80.0;
-    let frame = (session.frames / 5) as usize;
+    let frame = (session.frames / 4) as usize;
+    let bob = (session.frames as f32 * TAU / 90.0).sin() * 2.0;
     let selected = match session.selection {
         Selection::Unit(id) => Some(id),
         _ => None,
@@ -2792,14 +2797,49 @@ pub(super) fn animate_selection_top(
         };
         let (x, y) = unit.position.screen();
         transform.translation = Vec3::new(
-            x + 18.0,
-            y + 12.0 + unit_size(def).y / 2.0 + 22.0,
+            x,
+            y + UNIT_LIFT + unit_size(def).y / 2.0 + 10.0 + bob,
             Z_UNIT + 10.0,
         );
         transform.rotation = Quat::IDENTITY;
-        transform.scale = Vec3::new(0.2 + 0.8 * turn.cos().abs(), 1.0, 1.0);
+        transform.scale = Vec3::ONE;
         sprite.image = shapes.selection_top_frame(frame).clone();
         *visibility = Visibility::Visible;
+    }
+}
+
+/// The outline of the chosen square, drawn as a sprite under cities, units and labels.
+#[derive(Component)]
+pub(super) struct SelectedSquare;
+
+/// Put the chosen square's outline on the square, or hide it when nothing is chosen.
+pub(super) fn place_selected_square(
+    session: Res<Session>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Transform, &Projection), (With<Camera2d>, Without<SelectedSquare>)>,
+    mut outline: Query<(&mut Transform, &mut Visibility), With<SelectedSquare>>,
+) {
+    let place = (|| {
+        let game = session.game.as_ref()?;
+        let pos = match session.selection {
+            Selection::Unit(id) => game.units.get(&id).map(|u| u.position),
+            Selection::City(id) => game.cities.get(&id).map(|c| c.position),
+            Selection::Tile(pos) => Some(pos),
+            Selection::None => None,
+        }?;
+        let (window, (transform, projection)) = (windows.single().ok()?, camera.single().ok()?);
+        let view = camera_rect(transform, projection, window).grow(96.0);
+        let (x, y) = view.copies(&game.map, pos).into_iter().next()?.screen();
+        Some(Vec3::new(x, y, Z_SELECTED))
+    })();
+    for (mut transform, mut visibility) in &mut outline {
+        match place {
+            Some(at) => {
+                transform.translation = at;
+                *visibility = Visibility::Visible;
+            }
+            None => *visibility = Visibility::Hidden,
+        }
     }
 }
 
@@ -2846,21 +2886,11 @@ pub(super) fn draw_overlays(
             }
         }
     }
-    // The chosen square and the road it takes are white; what a blow would land on is red.
+    // The road the chosen unit takes is white; what a blow would land on is red.
     let mark = SELECT;
     let strike = Color::srgb(0.93, 0.31, 0.27);
-    let pos = match session.selection {
-        Selection::Unit(id) => game.units.get(&id).map(|u| u.position),
-        Selection::City(id) => game.cities.get(&id).map(|c| c.position),
-        Selection::Tile(pos) => Some(pos),
-        Selection::None => None,
-    };
-    if let Some(pos) = pos {
-        for p in view.copies(&game.map, pos) {
-            let (x, y) = p.screen();
-            gizmos.linestrip_2d(diamond(Vec2::new(x, y)), mark);
-        }
-    }
+    // The chosen square's outline is the `SelectedSquare` sprite (see `place_selected_square`),
+    // so units and labels stand over it; gizmos would draw over everything.
     // A selected unit shows where it is heading and what it could strike from here.
     if let Selection::Unit(id) = session.selection
         && let Some(unit) = game.units.get(&id).filter(|u| u.owner == session.player)

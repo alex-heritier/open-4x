@@ -624,13 +624,14 @@ pub(crate) fn button(
 pub(crate) struct Shapes {
     disc: Handle<Image>,
     selection_tops: Vec<Handle<Image>>,
+    selected_square: Handle<Image>,
 }
 
 /// Side of the disc picture, in pixels.
 const DISC: u32 = 64;
-/// Side of the selected unit's fake-3D top picture, in pixels.
+/// Side of the selected unit's marker picture, in pixels.
 const TOP_ART: u32 = 64;
-const TOP_FRAMES: usize = 8;
+const TOP_FRAMES: usize = 16;
 
 fn inside_triangle(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
     let side = |a: Vec2, b: Vec2| (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
@@ -638,42 +639,111 @@ fn inside_triangle(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
     (ab >= 0.0 && bc >= 0.0 && ca >= 0.0) || (ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
 }
 
-/// A small, filled upside-down pyramid: tan top, warm orange left, bright yellow right.
+/// One frame of the selected unit's marker: an upside-down square pyramid turning about its
+/// upright axis, seen from the map's camera (30 degrees above the ground) and lit from the upper
+/// left. A square repeats every quarter turn, so `TOP_FRAMES` frames span 90 degrees and loop.
 fn selection_top_image(frame: usize) -> Image {
-    const TAN: [u8; 4] = [214, 173, 102, 255];
-    const ORANGE: [u8; 4] = [224, 103, 38, 255];
-    const YELLOW: [u8; 4] = [248, 194, 55, 255];
-    let mut data = vec![0; (TOP_ART * TOP_ART * 4) as usize];
+    const SUPER: u32 = 4; // samples per pixel side
+    const RIM: [f32; 3] = [0.30, 0.16, 0.05];
+    const TOP: [f32; 3] = [0.84, 0.68, 0.40];
+    const SHADE: [f32; 3] = [0.80, 0.33, 0.10];
+    const LIT: [f32; 3] = [0.99, 0.80, 0.24];
+    let turn = frame as f32 / TOP_FRAMES as f32 * TAU / 4.0;
+    let (sin_e, cos_e) = (30f32.to_radians().sin(), 30f32.to_radians().cos());
+    // The square top at height 0 and the apex below it, in world units (y up, z toward viewer).
+    let corner = |k: usize| {
+        let a = turn + k as f32 * TAU / 4.0 + TAU / 8.0;
+        Vec3::new(a.cos() * 1.0, 0.0, a.sin() * 1.0)
+    };
+    let apex = Vec3::new(0.0, -2.0, 0.0);
+    let scale = 23.0;
+    let project = |p: Vec3| Vec2::new(32.0 + p.x * scale, 18.0 + (-p.y * cos_e + p.z * sin_e) * scale);
+    let view = Vec3::new(0.0, sin_e, cos_e);
+    let light = Vec3::new(-0.6, 0.55, 0.6).normalize();
+    // Faces back to front: the sides that face the camera, then the top over them.
+    let mut faces: Vec<([Vec2; 3], [f32; 3])> = Vec::new();
+    for k in 0..4 {
+        let (a, b) = (corner(k), corner((k + 1) % 4));
+        let mut normal = (a - apex).cross(b - apex).normalize();
+        if normal.dot((a + b) / 2.0 - Vec3::new(0.0, -1.0, 0.0)) < 0.0 {
+            normal = -normal;
+        }
+        if normal.dot(view) <= 0.0 {
+            continue;
+        }
+        let t = normal.dot(light).clamp(0.0, 1.0);
+        let colour = std::array::from_fn(|i| SHADE[i] + (LIT[i] - SHADE[i]) * t);
+        faces.push(([project(a), project(b), project(apex)], colour));
+    }
+    let top: Vec<Vec2> = (0..4).map(|k| project(corner(k))).collect();
+    faces.push(([top[0], top[1], top[2]], TOP));
+    faces.push(([top[0], top[2], top[3]], TOP));
+    // The silhouette, grown a little from its centre, makes a dark rim round the whole marker.
+    let centre = Vec2::new(32.0, 18.0 + scale * 0.6);
+    let grow = |p: Vec2| centre + (p - centre) * 1.0 + (p - centre).normalize_or_zero() * 1.6;
+    let mut data = vec![0u8; (TOP_ART * TOP_ART * 4) as usize];
     for y in 0..TOP_ART {
         for x in 0..TOP_ART {
-            let turn = frame as f32 * TAU / TOP_FRAMES as f32;
-            let (sin, cos) = turn.sin_cos();
-            let q = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - Vec2::splat(32.0);
-            let p = Vec2::new(cos * q.x + sin * q.y, -sin * q.x + cos * q.y) + Vec2::splat(32.0);
-            let top = [(4.0, 25.0), (32.0, 5.0), (32.0, 29.0), (60.0, 25.0)];
-            let bottom = (32.0, 62.0);
-            let left = [(4.0, 25.0), (32.0, 29.0), bottom];
-            let right = [(60.0, 25.0), (32.0, 29.0), bottom];
-            let v = |(x, y)| Vec2::new(x, y);
-            let colour = if inside_triangle(p, v(top[0]), v(top[1]), v(top[2]))
-                || inside_triangle(p, v(top[0]), v(top[2]), v(top[3]))
-            {
-                TAN
-            } else if inside_triangle(p, v(left[0]), v(left[1]), v(left[2])) {
-                ORANGE
-            } else if inside_triangle(p, v(right[0]), v(right[1]), v(right[2])) {
-                YELLOW
-            } else {
-                [0; 4]
-            };
-            let at = ((y * TOP_ART + x) * 4) as usize;
-            data[at..at + 4].copy_from_slice(&colour);
+            let (mut rgb, mut cover) = ([0.0f32; 3], 0.0f32);
+            for sy in 0..SUPER {
+                for sx in 0..SUPER {
+                    let p = Vec2::new(
+                        x as f32 + (sx as f32 + 0.5) / SUPER as f32,
+                        y as f32 + (sy as f32 + 0.5) / SUPER as f32,
+                    );
+                    let mut hit = faces
+                        .iter()
+                        .rev()
+                        .find(|(t, _)| inside_triangle(p, t[0], t[1], t[2]))
+                        .map(|(_, c)| *c);
+                    if hit.is_none()
+                        && faces.iter().any(|(t, _)| inside_triangle(p, grow(t[0]), grow(t[1]), grow(t[2])))
+                    {
+                        hit = Some(RIM);
+                    }
+                    if let Some(c) = hit {
+                        for i in 0..3 {
+                            rgb[i] += c[i];
+                        }
+                        cover += 1.0;
+                    }
+                }
+            }
+            if cover > 0.0 {
+                let at = ((y * TOP_ART + x) * 4) as usize;
+                for i in 0..3 {
+                    data[at + i] = (rgb[i] / cover * 255.0).round() as u8;
+                }
+                data[at + 3] = (cover / (SUPER * SUPER) as f32 * 255.0).round() as u8;
+            }
         }
     }
+    rgba_image(TOP_ART, TOP_ART, data)
+}
+
+/// The outline of the chosen square: a white diamond the size of a tile, 2x for crispness.
+fn selected_square_image() -> Image {
+    const W: u32 = 256;
+    const H: u32 = 128;
+    let mut data = vec![0u8; (W * H * 4) as usize];
+    for y in 0..H {
+        for x in 0..W {
+            // distance, in image pixels, to the diamond |dx|/128 + |dy|/64 = 1, drawn just inside it
+            let (dx, dy) = ((x as f32 + 0.5 - 128.0).abs(), (y as f32 + 0.5 - 64.0).abs());
+            let d = ((dx / 128.0 + dy / 64.0) - 1.0) * (128.0 * 64.0) / (64.0f32.hypot(128.0));
+            let cover = (2.6 - (d + 3.2).abs()).clamp(0.0, 1.0);
+            let at = ((y * W + x) * 4) as usize;
+            data[at..at + 4].copy_from_slice(&[255, 255, 255, (cover * 255.0).round() as u8]);
+        }
+    }
+    rgba_image(W, H, data)
+}
+
+fn rgba_image(width: u32, height: u32, data: Vec<u8>) -> Image {
     Image::new(
         bevy::render::render_resource::Extent3d {
-            width: TOP_ART,
-            height: TOP_ART,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         bevy::render::render_resource::TextureDimension::D2,
@@ -709,6 +779,7 @@ impl Shapes {
         );
         Self {
             disc: images.add(image),
+            selected_square: images.add(selected_square_image()),
             selection_tops: (0..TOP_FRAMES)
                 .map(|frame| images.add(selection_top_image(frame)))
                 .collect(),
@@ -720,10 +791,18 @@ impl Shapes {
         self.sprite(size, color, true)
     }
 
-    /// The compact fake-3D top drawn above a selected unit.
+    /// The turning pyramid drawn above a selected unit.
     pub(crate) fn selection_top(&self) -> Sprite {
         let mut sprite = Sprite::from_image(self.selection_top_frame(0).clone());
-        sprite.custom_size = Some(Vec2::new(36.0, 50.0));
+        sprite.custom_size = Some(Vec2::splat(28.0));
+        sprite
+    }
+
+    /// The outline of the chosen square, one tile in size.
+    pub(crate) fn selected_square(&self) -> Sprite {
+        let mut sprite = Sprite::from_image(self.selected_square.clone());
+        sprite.custom_size = Some(Vec2::new(128.0, 64.0));
+        sprite.color = SELECT;
         sprite
     }
 

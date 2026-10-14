@@ -405,7 +405,10 @@ fn a_real_march_is_walked_square_by_square() {
         .single(app.world())
         .unwrap()
         .translation;
-    assert_eq!(translation.truncate(), Vec2::new(x, y + 12.0));
+    assert_eq!(
+        translation.truncate(),
+        Vec2::new(x, y + crate::presentation::UNIT_LIFT)
+    );
     assert!(!session_of(&app).staging, "a walk never holds back orders");
     let mut frames = 0;
     while walks_of(&app).busy() {
