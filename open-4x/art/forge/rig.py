@@ -150,13 +150,73 @@ def two_bone(a, target, l1, l2, pole):
 
 
 # ---- scene --------------------------------------------------------------------------------------
+ACCENT_BASE = "#908e88"
+ACCENT_MASK = "#dfddd6"
+OCCLUDE = "#ff0000"
+
+
+def _mask_col(shaded_hex: str) -> str:
+    """Encode 3D-shaded brightness in green channel and full accent mask in blue (#00GGff)."""
+    return f"#00{shaded_hex[3:5]}ff"
+
+
+class _AccentScope:
+    def __init__(self, sc, enabled: bool):
+        self.sc = sc
+        self.enabled = enabled
+        self.prev = sc.in_accent
+
+    def __enter__(self):
+        self.sc.in_accent = self.enabled
+        return self.sc
+
+    def __exit__(self, *exc):
+        self.sc.in_accent = self.prev
+
+
+class _MaskSvg:
+    """Proxy Svg that turns free-hand draws into #ff0000 depth occluders (or #00GGff accents)."""
+
+    def __init__(self, svg: Svg, col: str = OCCLUDE):
+        self.svg = svg
+        self.col = col
+
+    def blur(self, sd):
+        return self.svg.blur(sd)
+
+    def poly(self, pts, fill, stroke=None, sw=1.0, op=1.0, extra=""):
+        self.svg.poly(pts, self.col, OCCLUDE if stroke else None, sw, op, extra)
+
+    def path(self, d, fill="none", stroke=None, sw=1.0, op=1.0, extra=""):
+        self.svg.path(d, self.col if fill != "none" else "none", OCCLUDE if stroke else None, sw, op, extra)
+
+    def line(self, a, b, stroke, sw=1.0, op=1.0, cap="round"):
+        self.svg.line(a, b, self.col, sw, op, cap)
+
+    def ellipse(self, cx, cy, rx, ry, fill, op=1.0, blur=None, stroke=None, sw=1.0, rot=0):
+        self.svg.ellipse(cx, cy, rx, ry, self.col, op, blur, OCCLUDE if stroke else None, sw, rot)
+
+    def circle(self, cx, cy, r, fill, op=1.0, stroke=None, sw=1.0, blur=None):
+        self.svg.circle(cx, cy, r, self.col, op, OCCLUDE if stroke else None, sw, blur)
+
+    def rect(self, x, y, w, h, fill, rx=0, stroke=None, sw=1.0, op=1.0, blur=None):
+        self.svg.rect(x, y, w, h, self.col, rx, OCCLUDE if stroke else None, sw, op, blur)
+
+
 class Scene:
-    def __init__(self, w, h, origin, s=1.0):
+    def __init__(self, w, h, origin, s=1.0, default_accent="#33465f"):
         self.svg = Svg(w, h)
+        self.accent_svg = Svg(w, h, _n=100000)
         self.ox, self.oy = origin
         self.s = s
+        self.default_accent = default_accent
+        self.in_accent = False
         self.items = []
         self.clip_z = None  # when set, polygons are cut at this height (ships going under)
+
+    def accent(self, enabled: bool = True) -> _AccentScope:
+        """Context manager marking enclosed 3D primitives as nation-colored accent surfaces."""
+        return _AccentScope(self, enabled)
 
     # projection
     def P(self, p):
@@ -166,13 +226,17 @@ class Scene:
     def depth(p):
         return p[1] - 0.5 * p[2]
 
-    def add(self, depth, draw, layer=0):
-        self.items.append((layer, -depth, len(self.items), draw))
+    def add(self, depth, draw, layer=0, draw_mask=None):
+        self.items.append((layer, -depth, len(self.items), draw, draw_mask))
 
     def render(self):
-        for _, _, _, draw in sorted(self.items, key=lambda it: (it[0], it[1], it[2])):
+        for _, _, _, draw, draw_mask in sorted(self.items, key=lambda it: (it[0], it[1], it[2])):
             draw(self.svg)
+            if draw_mask is not None:
+                draw_mask(self.accent_svg)
         self.items = []
+        self.svg.accent_svg = self.accent_svg
+        self.svg.default_accent = self.default_accent
         return self.svg
 
     # lighting
@@ -182,9 +246,9 @@ class Scene:
         back = max(0.0, -dot(n, LIGHT)) * 0.08
         return lo + (hi - lo) * k - back
 
-    def userlin(self, stops, a, b):
+    def userlin(self, stops, a, b, svg=None):
         """A linear gradient between two screen points."""
-        svg = self.svg
+        svg = svg or self.svg
         i = svg.uid("ul")
         st = "".join(f'<stop offset="{o}" stop-color="{c}"/>' for o, c in stops)
         svg.defs.append(
@@ -208,7 +272,7 @@ class Scene:
                 out.append(mix(p, q, t))
         return out
 
-    def poly(self, pts, col, ink=INK, sw=0.8, two=False, op=1.0, layer=0, bias=0.0, flat=None, lit=True):
+    def poly(self, pts, col, ink=INK, sw=0.8, two=False, op=1.0, layer=0, bias=0.0, flat=None, lit=True, accent=None):
         """A planar polygon, Lambert-shaded and culled when it faces away (unless `two`)."""
         pts = self._clip(list(pts))
         if len(pts) < 3:
@@ -224,13 +288,27 @@ class Scene:
             if not two:
                 return
             n = mul(n, -1)
-        fill = flat if flat else (shade(col, self.lit(n)) if lit else col)
+        is_acc = self.in_accent if accent is None else accent
+        bcol = ACCENT_BASE if is_acc else col
+        bflat = (ACCENT_BASE if is_acc else flat) if flat else None
+        fill = bflat if bflat else (shade(bcol, self.lit(n)) if lit else bcol)
         scr = [self.P(p) for p in pts]
         d = sum(self.depth(p) for p in pts) / len(pts) + bias
-        self.add(d, lambda svg: svg.poly(scr, fill, ink, sw, op), layer)
+        if layer < 0:
+            draw_mask = None
+        elif is_acc:
+            mfill = _mask_col(shade(ACCENT_MASK, self.lit(n)) if lit else ACCENT_MASK)
+            mink = OCCLUDE if ink else None
+            draw_mask = lambda msvg: msvg.poly(scr, mfill, mink, sw, op)
+        else:
+            mink = OCCLUDE if ink else None
+            draw_mask = lambda msvg: msvg.poly(scr, OCCLUDE, mink, sw, op)
+        self.add(d, lambda svg: svg.poly(scr, fill, ink, sw, op), layer, draw_mask)
 
-    def strip(self, ring_a, ring_b, col, ink=INK, sw=0.7, layer=0, bias=0.0, closed=True, outline=True):
+    def strip(self, ring_a, ring_b, col, ink=INK, sw=0.7, layer=0, bias=0.0, closed=True, outline=True, accent=None):
         """Quads between two rings of points, smoothly shaded across each quad (a tube or a hull side)."""
+        is_acc = self.in_accent if accent is None else accent
+        bcol = ACCENT_BASE if is_acc else col
         n = len(ring_a)
         rng = range(n) if closed else range(n - 1)
         for i in rng:
@@ -259,12 +337,12 @@ class Scene:
                 ni = mul(ni, -1)
             if dot(nj, nrm) < 0:
                 nj = mul(nj, -1)
-            ci, cj = shade(col, self.lit(ni)), shade(col, self.lit(nj))
+            ci, cj = shade(bcol, self.lit(ni)), shade(bcol, self.lit(nj))
             scr = [self.P(p) for p in quad]
             a = self.P(mix(ring_a[i], ring_b[i], 0.5))
             b = self.P(mix(ring_a[j], ring_b[j], 0.5))
             if math.hypot(b[0] - a[0], b[1] - a[1]) < 0.3:
-                fill_args = ("flat", shade(col, self.lit(nrm)))
+                fill_args = ("flat", shade(bcol, self.lit(nrm)))
             else:
                 fill_args = ("grad", ci, cj, a, b)
             d = sum(self.depth(p) for p in quad) / len(quad) + bias
@@ -274,11 +352,32 @@ class Scene:
                     fill = fill_args[1]
                 else:
                     _, c0, c1, a, b = fill_args
-                    fill = self.userlin([(0, c0), (1, c1)], a, b)
+                    fill = self.userlin([(0, c0), (1, c1)], a, b, svg=svg)
                 # a hairline in the fill colour hides the seams between neighbouring quads
                 svg.poly(scr, fill, None)
                 svg.poly(scr, "none", fill if fill_args[0] == "flat" else fill_args[1], 0.35)
-            self.add(d, draw, layer)
+
+            if layer < 0:
+                draw_mask = None
+            elif is_acc:
+                mci = _mask_col(shade(ACCENT_MASK, self.lit(ni)))
+                mcj = _mask_col(shade(ACCENT_MASK, self.lit(nj)))
+                mflat = _mask_col(shade(ACCENT_MASK, self.lit(nrm)))
+                margs = ("flat", mflat) if fill_args[0] == "flat" else ("grad", mci, mcj, a, b)
+
+                def draw_mask(msvg, scr=scr, margs=margs):
+                    if margs[0] == "flat":
+                        mfill = margs[1]
+                    else:
+                        _, c0, c1, a, b = margs
+                        mfill = self.userlin([(0, c0), (1, c1)], a, b, svg=msvg)
+                    msvg.poly(scr, mfill, None)
+                    msvg.poly(scr, "none", mfill if margs[0] == "flat" else margs[1], 0.35)
+            else:
+                def draw_mask(msvg, scr=scr):
+                    msvg.poly(scr, OCCLUDE, OCCLUDE, 0.35)
+
+            self.add(d, draw, layer, draw_mask)
         if outline and ink:
             # silhouette edges: where a visible quad meets one facing away, an ink line
             self._silhouette(ring_a, ring_b, ink, sw, layer, bias, closed)
@@ -316,9 +415,14 @@ class Scene:
                 p, q = mix(lo, hi, t), hi
             a, b = self.P(p), self.P(q)
             d = self.depth(mix(p, q, 0.5)) + bias - 0.01
-            self.add(d, lambda svg, a=a, b=b: svg.line(a, b, ink, sw), layer)
+            self.add(
+                d,
+                lambda svg, a=a, b=b: svg.line(a, b, ink, sw),
+                layer,
+                None if layer < 0 else lambda msvg, a=a, b=b: msvg.line(a, b, OCCLUDE, sw),
+            )
 
-    def tube(self, a, b, ra, rb, col, side=None, squash=1.0, sides=12, caps=True, ink=INK, sw=0.7, layer=0, bias=0.0):
+    def tube(self, a, b, ra, rb, col, side=None, squash=1.0, sides=12, caps=True, ink=INK, sw=0.7, layer=0, bias=0.0, accent=None):
         """A tapered tube from a to b with an elliptical section: radius r across `side`, r * squash across the other axis."""
         axis = unit(sub(b, a))
         if side is None:
@@ -327,12 +431,12 @@ class Scene:
         w = cross(axis, u)
         ring = lambda c, r: [add(c, add(mul(u, r * math.cos(t)), mul(w, r * squash * math.sin(t)))) for t in (i / sides * math.tau for i in range(sides))]
         A, B = ring(a, ra), ring(b, rb)
-        self.strip(A, B, col, ink, sw, layer, bias)
+        self.strip(A, B, col, ink, sw, layer, bias, accent=accent)
         if caps:
-            self.poly(A[::-1], shade(col, 1.0), ink, sw * 0.8, layer=layer, bias=bias)
-            self.poly(B, shade(col, 1.0), ink, sw * 0.8, layer=layer, bias=bias)
+            self.poly(A[::-1], shade(col, 1.0), ink, sw * 0.8, layer=layer, bias=bias, accent=accent)
+            self.poly(B, shade(col, 1.0), ink, sw * 0.8, layer=layer, bias=bias, accent=accent)
 
-    def box(self, xf, x0, x1, y0, y1, z0, z1, col, ink=INK, sw=0.8, layer=0, bias=0.0, top=None):
+    def box(self, xf, x0, x1, y0, y1, z0, z1, col, ink=INK, sw=0.8, layer=0, bias=0.0, top=None, accent=None):
         c = [xf((x, y, z)) for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)]
         faces = [
             ((0, 2, 3, 1), col),  # bottom
@@ -343,12 +447,14 @@ class Scene:
             ((1, 3, 7, 5), col),  # +x end
         ]
         for idx, fc in faces:
-            self.poly([c[i] for i in idx], fc, ink, sw, layer=layer, bias=bias)
+            self.poly([c[i] for i in idx], fc, ink, sw, layer=layer, bias=bias, accent=accent)
 
-    def limb(self, a, b, ra, rb, col, ink=INK, sw=0.8, layer=0, bias=0.0, hi=1.22, lo=0.66):
+    def limb(self, a, b, ra, rb, col, ink=INK, sw=0.8, layer=0, bias=0.0, hi=1.22, lo=0.66, accent=None):
         """A tapered, round-ended limb lit from the upper left (what the 2D figures used, now in 3D)."""
         if self.clip_z is not None and min(a[2], b[2]) < self.clip_z:
             return
+        is_acc = self.in_accent if accent is None else accent
+        bcol = ACCENT_BASE if is_acc else col
         A, B = self.P(a), self.P(b)
         wa, wb = ra * 2 * self.s, rb * 2 * self.s
         dx, dy = B[0] - A[0], B[1] - A[1]
@@ -368,7 +474,7 @@ class Scene:
         d = (self.depth(a) + self.depth(b)) / 2 + bias
 
         def draw(svg):
-            g = self.userlin([(0, shade(col, hi)), (0.55, col), (1, shade(col, lo))], g0, g1)
+            g = self.userlin([(0, shade(bcol, hi)), (0.55, bcol), (1, shade(bcol, lo))], g0, g1, svg=svg)
             if ink:
                 svg.circle(A[0], A[1], wa / 2, g, stroke=ink, sw=sw)
                 svg.circle(B[0], B[1], wb / 2, g, stroke=ink, sw=sw)
@@ -379,38 +485,97 @@ class Scene:
             if ink:
                 svg.line(pts[0], pts[1], ink, sw)
                 svg.line(pts[3], pts[2], ink, sw)
-        self.add(d, draw, layer)
 
-    def ball(self, c, r, col, ink=INK, sw=0.8, squash=1.0, layer=0, bias=0.0, op=1.0):
+        if layer < 0:
+            draw_mask = None
+        elif is_acc:
+            mstops = [(0, _mask_col(shade(ACCENT_MASK, hi))), (0.55, _mask_col(ACCENT_MASK)), (1, _mask_col(shade(ACCENT_MASK, lo)))]
+
+            def draw_mask(msvg):
+                mg = self.userlin(mstops, g0, g1, svg=msvg)
+                if ink:
+                    msvg.circle(A[0], A[1], wa / 2, mg, stroke=OCCLUDE, sw=sw)
+                    msvg.circle(B[0], B[1], wb / 2, mg, stroke=OCCLUDE, sw=sw)
+                else:
+                    msvg.circle(A[0], A[1], wa / 2, mg)
+                    msvg.circle(B[0], B[1], wb / 2, mg)
+                msvg.poly(pts, mg, None)
+                if ink:
+                    msvg.line(pts[0], pts[1], OCCLUDE, sw)
+                    msvg.line(pts[3], pts[2], OCCLUDE, sw)
+        else:
+            def draw_mask(msvg):
+                msvg.circle(A[0], A[1], wa / 2, OCCLUDE, stroke=OCCLUDE if ink else None, sw=sw)
+                msvg.circle(B[0], B[1], wb / 2, OCCLUDE, stroke=OCCLUDE if ink else None, sw=sw)
+                msvg.poly(pts, OCCLUDE, None)
+                if ink:
+                    msvg.line(pts[0], pts[1], OCCLUDE, sw)
+                    msvg.line(pts[3], pts[2], OCCLUDE, sw)
+
+        self.add(d, draw, layer, draw_mask)
+
+    def ball(self, c, r, col, ink=INK, sw=0.8, squash=1.0, layer=0, bias=0.0, op=1.0, accent=None):
         if self.clip_z is not None and c[2] < self.clip_z:
             return
+        is_acc = self.in_accent if accent is None else accent
+        bcol = ACCENT_BASE if is_acc else col
         x, y = self.P(c)
         rx, ry = r * self.s, r * self.s * squash
         d = self.depth(c) + bias
 
         def draw(svg):
-            g = svg.rad([(0, shade(col, 1.3)), (0.6, col), (1, shade(col, 0.6))], 0.36, 0.32, 0.75)
+            g = svg.rad([(0, shade(bcol, 1.3)), (0.6, bcol), (1, shade(bcol, 0.6))], 0.36, 0.32, 0.75)
             svg.ellipse(x, y, rx, ry, g, op=op, stroke=ink, sw=sw)
-        self.add(d, draw, layer)
 
-    def line(self, a, b, col, w=1.0, op=1.0, layer=0, bias=0.0):
+        if layer < 0:
+            draw_mask = None
+        elif is_acc:
+            mstops = [(0, _mask_col(shade(ACCENT_MASK, 1.3))), (0.6, _mask_col(ACCENT_MASK)), (1, _mask_col(shade(ACCENT_MASK, 0.6)))]
+
+            def draw_mask(msvg):
+                mg = msvg.rad(mstops, 0.36, 0.32, 0.75)
+                msvg.ellipse(x, y, rx, ry, mg, op=op, stroke=OCCLUDE if ink else None, sw=sw)
+        else:
+            def draw_mask(msvg):
+                msvg.ellipse(x, y, rx, ry, OCCLUDE, op=op, stroke=OCCLUDE if ink else None, sw=sw)
+
+        self.add(d, draw, layer, draw_mask)
+
+    def line(self, a, b, col, w=1.0, op=1.0, layer=0, bias=0.0, accent=None):
         if self.clip_z is not None and min(a[2], b[2]) < self.clip_z:
             return
+        is_acc = self.in_accent if accent is None else accent
+        bcol = ACCENT_BASE if is_acc else col
         A, B = self.P(a), self.P(b)
         d = (self.depth(a) + self.depth(b)) / 2 + bias
-        self.add(d, lambda svg: svg.line(A, B, col, w * self.s, op), layer)
+        if layer < 0:
+            draw_mask = None
+        elif is_acc:
+            mcol = _mask_col(ACCENT_MASK)
+            draw_mask = lambda msvg: msvg.line(A, B, mcol, w * self.s, op)
+        else:
+            draw_mask = lambda msvg: msvg.line(A, B, OCCLUDE, w * self.s, op)
+        self.add(d, lambda svg: svg.line(A, B, bcol, w * self.s, op), layer, draw_mask)
 
-    def disk(self, c, n, r, col, ink=INK, sw=0.8, sides=20, layer=0, bias=0.0, two=True):
+    def disk(self, c, n, r, col, ink=INK, sw=0.8, sides=20, layer=0, bias=0.0, two=True, accent=None):
         n = unit(n)
         u = unit(cross(n, (0, 0, 1))) if abs(n[2]) < 0.95 else (1.0, 0.0, 0.0)
         w = cross(n, u)
         pts = [add(c, add(mul(u, r * math.cos(t)), mul(w, r * math.sin(t)))) for t in (i / sides * math.tau for i in range(sides))]
-        self.poly(pts, col, ink, sw, two=two, layer=layer, bias=bias)
+        self.poly(pts, col, ink, sw, two=two, layer=layer, bias=bias, accent=accent)
 
-    def draw(self, p, fn, layer=0, bias=0.0):
+    def draw(self, p, fn, layer=0, bias=0.0, accent=None):
         """Free-hand screen drawing at a 3D point: fn(svg, x, y) with (x, y) its projection."""
+        is_acc = self.in_accent if accent is None else accent
         x, y = self.P(p)
-        self.add(self.depth(p) + bias, lambda svg: fn(svg, x, y), layer)
+        if layer < 0:
+            draw_mask = None
+        elif is_acc:
+            mcol = _mask_col(ACCENT_MASK)
+            draw_mask = lambda msvg: fn(_MaskSvg(msvg, mcol), x, y)
+        else:
+            draw_mask = lambda msvg: fn(_MaskSvg(msvg, OCCLUDE), x, y)
+        self.add(self.depth(p) + bias, lambda svg: fn(svg, x, y), layer, draw_mask)
 
 
 def facing_frame(k, at=(0.0, 0.0, 0.0)):

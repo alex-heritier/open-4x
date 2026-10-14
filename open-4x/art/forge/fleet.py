@@ -75,8 +75,8 @@ class Motion:
         a = math.tau * t
         self.speed = 1.0 if clip == "run" else 0.0
         self.bob = 0.8 * math.sin(a) if loop else 0.0
-        self.roll = 1.4 * math.sin(a) if loop else 0.0
-        self.pitch = 0.8 * math.cos(a) if loop else 0.0
+        self.roll = 0.85 * math.sin(a) if loop else 0.0
+        self.pitch = 0.5 * math.cos(a) if loop else 0.0
         self.fire = None  # age of the broadside's smoke, 0..1
         self.train = self.recoil = self.glare = 0.0
         self.flames = 0.0
@@ -368,7 +368,7 @@ class Ship:
         self.sc.limb(p, q, r, r * 0.55, col, sw=0.5, layer=1)
 
     def ensign(self, a=3, w=30, h=20, pole_h=30, wave=1.0):
-        """A staff at the stern with the rising-sun ensign streaming aft."""
+        """A staff at the stern with national cloth streaming aft."""
         sc = self.sc
         if getattr(self.m, "sink_depth", 0.0) > 0.4:
             return  # the stern is under: the staff goes with it
@@ -385,11 +385,14 @@ class Ship:
             p = add(add(top, mul(aft, w * u)), mul(sidev, ripple))
             pts_top.append(p)
             pts_bot.append(add(p, (0.0, 0.0, -h)))
-        cloth = pts_top + pts_bot[::-1]
-        sc.poly(cloth, "#f3e8cf", shade("#f3e8cf", 0.45), 0.7, two=True, layer=1, bias=-1.2)
+        # Individual folds retain their light and shade when the national cloth is recolored.
+        for i in range(8):
+            cloth = [pts_top[i], pts_top[i+1], pts_bot[i+1], pts_bot[i]]
+            sc.poly(cloth, "#f3e8cf", None, two=True, layer=1, bias=-1.2, accent=True)
+        sc.line(pts_top[0], pts_bot[0], "#594735", 0.6, layer=1, bias=-1.3)
         mid = mix(pts_top[4], pts_bot[4], 0.5)
         n = unit(self.xf.vec((0.0, 1.0, 0.0)))
-        sc.disk(mid, n, h * 0.3, "#b3261e", ink=None, sides=14, layer=1, bias=-4.0)
+        sc.disk(mid, n, h * 0.3, "#e8dcc0", ink=None, sides=14, layer=1, bias=-4.0)
 
     def figures(self, at, n=6):
         """A company of troops on deck."""

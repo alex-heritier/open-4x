@@ -18,7 +18,7 @@ from concurrent.futures import ProcessPoolExecutor
 from PIL import Image
 
 from forge import cargo, chrome, cities, emblems, fleet, icons, improvements, margin, nature, overlay, parchment, relief, resources, rivers, roads, scenes, terrain, troops
-from forge.paint import paint, render_sprite
+from forge.paint import paint, render_sprite, render_unit_pair, tint_accent
 from forge.util import PACK, downsample, indexed, save_png, write_svg
 
 # Authoring is at 2x the sizes the game draws: sprites 256x224 (shown 128x112), land units 160x160
@@ -135,7 +135,7 @@ def build_cities():
 # Every unit design has five clips (idle, run, attack, victory, death).  A clip is one sheet: a row per facing in
 # the Civ3 strip order (SW, S, SE, E, NE, N, NW, W) and a column per frame.  Land units are 160x160 cells, ships
 # 256x192.  The design's static sprite is the first idle frame facing south-west.
-UNIT_BUILDERS = {**troops.BUILDERS, **fleet.BUILDERS}
+UNIT_BUILDERS = {**troops.BUILDERS, **fleet.BUILDERS, **cargo.BUILDERS}
 UNIT_SS = 3  # supersampling for the frames; 4 doubles the build time for no visible gain at the drawn size
 
 
@@ -161,8 +161,8 @@ def _unit_frame(job):
     frames, _, loops = clips[clip]
     # loops sample a whole cycle without repeating its first frame; one-shots run from the first pose to the last
     t = i / frames if loops else i / max(1, frames - 1)
-    svg = UNIT_BUILDERS[name](k, clip, t).render()
-    return render_sprite(svg, w, h, ss=UNIT_SS, seed=2, radius=1, rim=0.6)
+    svg = UNIT_BUILDERS[name](k, clip, t)
+    return render_unit_pair(svg, w, h, ss=UNIT_SS, seed=2, radius=1, rim=0.45)
 
 
 def build_units(names=None):
@@ -170,22 +170,25 @@ def build_units(names=None):
     unknown = [name for name in names if name not in UNIT_BUILDERS]
     if unknown:
         sys.exit(f"unknown unit design {unknown[0]!r}; choose from {', '.join(UNIT_BUILDERS)}")
-    jobs = []
     for name in names:
         _, clips = unit_spec(name)
-        for clip, (frames, _, _) in clips.items():
-            jobs += [(name, clip, k, i) for k in range(8) for i in range(frames)]
-    images = dict(zip(jobs, render_jobs(jobs, _unit_frame, 4)))
-    for name in names:
+        jobs = [(name, clip, k, i) for clip, (frames, _, _) in clips.items()
+                for k in range(8) for i in range(frames)]
+        images = dict(zip(jobs, render_jobs(jobs, _unit_frame, 4, workers=min(8, os.cpu_count() or 4))))
         (w, h), clips = unit_spec(name)
         for clip, (frames, _, _) in clips.items():
             sheet = Image.new("RGBA", (w * frames, h * 8), (0, 0, 0, 0))
+            accent = Image.new("RGBA", sheet.size)
             for k in range(8):
                 for i in range(frames):
-                    sheet.paste(images[(name, clip, k, i)], (i * w, k * h))
+                    base_frame, accent_frame = images[(name, clip, k, i)]
+                    sheet.paste(base_frame, (i * w, k * h))
+                    accent.paste(accent_frame, (i * w, k * h))
             # a palette per sheet: indistinguishable at the drawn size and about five times smaller
             save_png(indexed(sheet), f"units/{name}/{clip}.png")
-        save_png(images[(name, "idle", 0, 0)], f"sprites/{name}.png")
+            save_png(accent, f"units/{name}/{clip}_accent.png")
+        base, accent = images[(name, "idle", 0, 0)]
+        save_png(tint_accent(base, accent, "#8b3930"), f"sprites/{name}.png")
         print(f"  {name}", flush=True)
 
 

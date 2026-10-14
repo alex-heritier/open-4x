@@ -98,6 +98,7 @@ pub(super) struct UnitArt {
     layouts: HashMap<(String, Clip), Handle<TextureAtlasLayout>>,
     /// Standing and walking sheets, kept once fetched.
     resident: HashMap<(String, Clip), Handle<Image>>,
+    accents: HashMap<AssetId<Image>, String>,
 }
 
 impl UnitArt {
@@ -147,6 +148,10 @@ impl UnitArt {
             // sheet is let go.
             assets.load(path)
         };
+        if let Some(accent) = &sheet.accent {
+            self.accents
+                .insert(image.id(), format!("{}{}", session.asset_prefix, accent));
+        }
         Some((
             design,
             ClipArt {
@@ -222,6 +227,82 @@ impl Puppet {
     }
 }
 
+/// National paint is separate from the sprite's brightness, flashes and fades.
+#[derive(Component)]
+pub(super) struct NationAccent {
+    pub color: Color,
+    layer: Option<Entity>,
+}
+
+impl NationAccent {
+    pub fn new(color: Color) -> Self {
+        Self { color, layer: None }
+    }
+}
+
+#[derive(Component)]
+pub(super) struct AccentLayer {
+    base: AssetId<Image>,
+}
+
+/// Follow the parent's exact atlas frame, flips and opacity during every animation.
+pub(super) fn accents(
+    mut commands: Commands,
+    art: Res<UnitArt>,
+    assets: Res<AssetServer>,
+    mut units: Query<
+        (Entity, &Sprite, &mut NationAccent),
+        (
+            Without<AccentLayer>,
+            Or<(Changed<Sprite>, Changed<NationAccent>)>,
+        ),
+    >,
+    mut layers: Query<(&mut Sprite, &mut AccentLayer)>,
+) {
+    for (entity, sprite, mut accent) in &mut units {
+        let Some(path) = art.accents.get(&sprite.image.id()) else {
+            if let Some(layer) = accent.layer.take() {
+                commands.entity(layer).despawn();
+            }
+            continue;
+        };
+        let mut overlay = sprite.clone();
+        let base = sprite.color.to_srgba();
+        let nation = accent.color.to_srgba();
+        overlay.color = Color::srgba(
+            base.red * nation.red,
+            base.green * nation.green,
+            base.blue * nation.blue,
+            base.alpha * nation.alpha,
+        );
+        if let Some(layer) = accent.layer {
+            if let Ok((mut current, mut source)) = layers.get_mut(layer) {
+                overlay.image = if source.base == sprite.image.id() {
+                    current.image.clone()
+                } else {
+                    source.base = sprite.image.id();
+                    assets.load(path.clone())
+                };
+                *current = overlay;
+            }
+        } else {
+            overlay.image = assets.load(path.clone());
+            accent.layer = Some(
+                commands
+                    .spawn((
+                        overlay,
+                        Transform::from_xyz(0.0, 0.0, 0.001),
+                        AccentLayer {
+                            base: sprite.image.id(),
+                        },
+                        ChildOf(entity),
+                    ))
+                    .id(),
+            );
+        }
+    }
+}
+
 /// Advances the idle loop of every unit on the map.
 pub(super) fn animate(time: Res<Time>, mut puppets: Query<(&Puppet, &mut Sprite)>) {
     let now = time.elapsed_secs();
@@ -250,6 +331,76 @@ mod tests {
             frames,
             ms,
         }
+    }
+
+    #[test]
+    fn nation_layer_tracks_frames_and_fades_without_recoloring_the_base() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_resource::<UnitArt>()
+            .add_systems(Update, accents);
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        app.world_mut()
+            .resource_mut::<UnitArt>()
+            .accents
+            .insert(image.id(), "accent.png".into());
+        let sprite = Sprite {
+            image,
+            texture_atlas: Some(TextureAtlas {
+                layout: Handle::default(),
+                index: 17,
+            }),
+            custom_size: Some(Vec2::splat(70.0)),
+            color: Color::srgba(0.7, 0.7, 0.7, 0.4),
+            flip_x: true,
+            ..default()
+        };
+        let base_color = sprite.color;
+        let entity = app
+            .world_mut()
+            .spawn((sprite, NationAccent::new(Color::srgb(1.0, 0.0, 0.0))))
+            .id();
+        app.update();
+        let layer = app
+            .world()
+            .get::<NationAccent>(entity)
+            .unwrap()
+            .layer
+            .unwrap();
+        let overlay = app.world().get::<Sprite>(layer).unwrap();
+        assert_eq!(overlay.texture_atlas.as_ref().unwrap().index, 17);
+        assert_ne!(
+            overlay.image,
+            app.world().get::<Sprite>(entity).unwrap().image
+        );
+        assert!(overlay.flip_x);
+        assert_eq!(overlay.custom_size, Some(Vec2::splat(70.0)));
+        assert_eq!(overlay.color, Color::srgba(0.7, 0.0, 0.0, 0.4));
+        assert_eq!(app.world().get::<Sprite>(entity).unwrap().color, base_color);
+        app.world_mut()
+            .get_mut::<Sprite>(entity)
+            .unwrap()
+            .texture_atlas
+            .as_mut()
+            .unwrap()
+            .index = 23;
+        app.world_mut()
+            .get_mut::<NationAccent>(entity)
+            .unwrap()
+            .color = Color::srgb(0.0, 0.0, 1.0);
+        app.update();
+        let overlay = app.world().get::<Sprite>(layer).unwrap();
+        assert_eq!(overlay.texture_atlas.as_ref().unwrap().index, 23);
+        assert_eq!(overlay.color, Color::srgba(0.0, 0.0, 0.7, 0.4));
+        app.world_mut().despawn(entity);
+        assert!(
+            app.world().get_entity(layer).is_err(),
+            "nation cloth leaves with its unit"
+        );
     }
 
     #[test]

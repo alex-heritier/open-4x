@@ -120,18 +120,6 @@ pub(crate) fn nation_color(game: &Game, owner: Id, alpha: f32) -> Color {
         alpha,
     )
 }
-/// A sprite tint that leans toward a nation's colour without hiding the art.
-pub(super) fn tint(game: &Game, owner: Id) -> Color {
-    let [r, g, b] = nation_rgb(game, owner);
-    Color::srgb(lean_channel(r), lean_channel(g), lean_channel(b))
-}
-/// One channel of [`tint`]: a nation colour washed most of the way to white, so multiplying a
-/// sprite by it keeps the paint's shading but turns its hue to the nation's.
-fn lean_channel(c: u8) -> f32 {
-    let base = f32::from(c) / 255.0;
-    // A muted colour (a grey, a uniform) still ends up clearly the nation's hue.
-    1.0 - 0.62 * (1.0 - base)
-}
 /// How bright a city looks when it is remembered rather than in sight.
 const REMEMBERED_LIGHT: f32 = 0.6;
 fn dimmed(color: Color, light: f32) -> Color {
@@ -1220,12 +1208,11 @@ pub(super) fn refresh(params: Refresh) {
         let (x, y) = Coord::new(px, py).screen();
         let z = Z_UNIT + depth(y);
         let spent = unit.owner == session.player && unit.moves_left(def) == 0;
-        // Every nation's coat, cap and horse blanket lean their colour, as in Civ3; a unit with
-        // its movement spent is greyed so the player can still spot it.
+        // Movement spent dims the paint; national identity lives only on the accent layer.
         let color = if spent {
             Color::srgb(0.66, 0.66, 0.70)
         } else {
-            tint(game, unit.owner)
+            Color::WHITE
         };
         let at = Vec3::new(x, y + UNIT_LIFT, z);
         let mut clip = |kind: &str, which: Clip| {
@@ -1248,6 +1235,7 @@ pub(super) fn refresh(params: Refresh) {
                     idle.sprite(facing, 0, unit_size(def), color),
                     Transform::from_translation(at),
                     puppet,
+                    crate::puppet::NationAccent::new(nation_color(game, unit.owner, 1.0)),
                     WorldVisual,
                 ));
             }
@@ -2842,6 +2830,15 @@ pub(super) fn place_selected_square(
     }
 }
 
+/// A unit on a city shows that city's actual claims, including shared national borders.
+fn outlined_city(game: &Game, selection: Selection) -> Option<Id> {
+    match selection {
+        Selection::City(id) => game.cities.contains_key(&id).then_some(id),
+        Selection::Unit(id) => game.city_at(game.units.get(&id)?.position),
+        _ => None,
+    }
+}
+
 /// The selection's marks: the chosen city's own region outlined, the chosen square, and what a
 /// selected unit is heading for and could strike. A nation's borders are part of the map (see
 /// `refresh`); only the tiles near the camera are visited here.
@@ -2860,7 +2857,7 @@ pub(super) fn draw_overlays(
     };
     let view = camera_rect(transform, projection, window).grow(96.0);
     let (x0, y0, x1, y1) = view.tile_bounds(game);
-    if let Selection::City(city) = session.selection {
+    if let Some(city) = outlined_city(game, session.selection) {
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let Some(_) = game.map.get(Coord::new(x, y)).filter(|t| t.claim == city) else {
@@ -2875,11 +2872,7 @@ pub(super) fn draw_overlays(
                 for (i, (dx, dy)) in EDGE_NEIGHBORS.iter().enumerate() {
                     let beyond = game.map.get(Coord::new(x + dx, y + dy));
                     if beyond.is_none_or(|other| other.claim != city) {
-                        gizmos.line_2d(
-                            points[i].lerp(centre, 0.14),
-                            points[i + 1].lerp(centre, 0.14),
-                            SELECT,
-                        );
+                        route_gizmos.line_2d(points[i], points[i + 1], SELECT);
                     }
                 }
             }
@@ -2924,6 +2917,35 @@ mod tests {
         fourx_runtime::Host::base_scenario("russo-japanese-war", 42)
             .expect("the starter scenario starts")
             .game
+    }
+
+    #[test]
+    fn city_region_follows_city_views_and_units_on_city_centres() {
+        let mut game = starter();
+        let city = game.cities.values().next().unwrap().clone();
+        let id = *game.units.keys().next().unwrap();
+        game.units.get_mut(&id).unwrap().position = city.position;
+        assert_eq!(
+            outlined_city(&game, Selection::City(city.id)),
+            Some(city.id)
+        );
+        assert_eq!(outlined_city(&game, Selection::Unit(id)), Some(city.id));
+        let countryside = game
+            .map
+            .tiles
+            .iter()
+            .find(|tile| {
+                tile.claim == city.id
+                    && tile.position != city.position
+                    && !game.cities.values().any(|c| c.position == tile.position)
+            })
+            .unwrap()
+            .position;
+        game.units.get_mut(&id).unwrap().position = countryside;
+        assert_eq!(outlined_city(&game, Selection::Unit(id)), None);
+        assert_eq!(outlined_city(&game, Selection::Tile(city.position)), None);
+        game.units.remove(&id);
+        assert_eq!(outlined_city(&game, Selection::Unit(id)), None);
     }
 
     #[test]

@@ -224,17 +224,17 @@
       "styles": {"cavalry": "charge"}
     },
     "units": {
-      "crate": {"sprite":"sprites/crate.png","clips":{"frame":[160,160],"clips":{"idle":{"sheet":"units/crate/idle.png","frames":2,"ms":180},"run":{"sheet":"units/crate/run.png","frames":2,"ms":180},"attack":{"sheet":"units/crate/attack.png","frames":2,"ms":180},"victory":{"sheet":"units/crate/victory.png","frames":2,"ms":180},"death":{"sheet":"units/crate/death.png","frames":2,"ms":180}}}},
+      "crate": {"sprite":"sprites/crate.png","clips":{"frame":[160,160],"clips":{"idle":{"sheet":"units/crate/idle.png","accent":"units/crate/idle_accent.png","frames":8,"ms":160},"run":{"sheet":"units/crate/run.png","accent":"units/crate/run_accent.png","frames":8,"ms":60},"attack":{"sheet":"units/crate/attack.png","accent":"units/crate/attack_accent.png","frames":10,"ms":80},"victory":{"sheet":"units/crate/victory.png","accent":"units/crate/victory_accent.png","frames":8,"ms":90},"death":{"sheet":"units/crate/death.png","accent":"units/crate/death_accent.png","frames":10,"ms":90}}}},
       "infantry": {
         "sprite": "sprites/infantry.png",
         "clips": {
           "frame": [160, 160],
           "clips": {
-            "idle": {"sheet": "units/infantry/idle.png", "frames": 8, "ms": 160},
-            "run": {"sheet": "units/infantry/run.png", "frames": 8, "ms": 60},
-            "attack": {"sheet": "units/infantry/attack.png", "frames": 10, "ms": 80},
-            "victory": {"sheet": "units/infantry/victory.png", "frames": 8, "ms": 90},
-            "death": {"sheet": "units/infantry/death.png", "frames": 10, "ms": 90}
+            "idle": {"sheet": "units/infantry/idle.png", "accent": "units/infantry/idle_accent.png", "frames": 8, "ms": 160},
+            "run": {"sheet": "units/infantry/run.png", "accent": "units/infantry/run_accent.png", "frames": 8, "ms": 60},
+            "attack": {"sheet": "units/infantry/attack.png", "accent": "units/infantry/attack_accent.png", "frames": 10, "ms": 80},
+            "victory": {"sheet": "units/infantry/victory.png", "accent": "units/infantry/victory_accent.png", "frames": 8, "ms": 90},
+            "death": {"sheet": "units/infantry/death.png", "accent": "units/infantry/death_accent.png", "frames": 10, "ms": 90}
           }
         },
         "flavor_sprites": {
@@ -253,101 +253,101 @@
           "latin": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_latin/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_latin/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_latin/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_latin/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_latin/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_latin/idle.png", "accent": "units/infantry_latin/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_latin/run.png", "accent": "units/infantry_latin/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_latin/attack.png", "accent": "units/infantry_latin/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_latin/victory.png", "accent": "units/infantry_latin/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_latin/death.png", "accent": "units/infantry_latin/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "orthodox": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_orthodox/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_orthodox/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_orthodox/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_orthodox/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_orthodox/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_orthodox/idle.png", "accent": "units/infantry_orthodox/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_orthodox/run.png", "accent": "units/infantry_orthodox/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_orthodox/attack.png", "accent": "units/infantry_orthodox/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_orthodox/victory.png", "accent": "units/infantry_orthodox/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_orthodox/death.png", "accent": "units/infantry_orthodox/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "arab": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_arab/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_arab/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_arab/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_arab/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_arab/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_arab/idle.png", "accent": "units/infantry_arab/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_arab/run.png", "accent": "units/infantry_arab/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_arab/attack.png", "accent": "units/infantry_arab/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_arab/victory.png", "accent": "units/infantry_arab/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_arab/death.png", "accent": "units/infantry_arab/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "east_asian": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_east_asian/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_east_asian/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_east_asian/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_east_asian/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_east_asian/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_east_asian/idle.png", "accent": "units/infantry_east_asian/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_east_asian/run.png", "accent": "units/infantry_east_asian/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_east_asian/attack.png", "accent": "units/infantry_east_asian/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_east_asian/victory.png", "accent": "units/infantry_east_asian/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_east_asian/death.png", "accent": "units/infantry_east_asian/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "south_asian": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_south_asian/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_south_asian/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_south_asian/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_south_asian/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_south_asian/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_south_asian/idle.png", "accent": "units/infantry_south_asian/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_south_asian/run.png", "accent": "units/infantry_south_asian/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_south_asian/attack.png", "accent": "units/infantry_south_asian/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_south_asian/victory.png", "accent": "units/infantry_south_asian/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_south_asian/death.png", "accent": "units/infantry_south_asian/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "southeast_asian": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_southeast_asian/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_southeast_asian/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_southeast_asian/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_southeast_asian/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_southeast_asian/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_southeast_asian/idle.png", "accent": "units/infantry_southeast_asian/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_southeast_asian/run.png", "accent": "units/infantry_southeast_asian/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_southeast_asian/attack.png", "accent": "units/infantry_southeast_asian/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_southeast_asian/victory.png", "accent": "units/infantry_southeast_asian/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_southeast_asian/death.png", "accent": "units/infantry_southeast_asian/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "african": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_african/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_african/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_african/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_african/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_african/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_african/idle.png", "accent": "units/infantry_african/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_african/run.png", "accent": "units/infantry_african/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_african/attack.png", "accent": "units/infantry_african/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_african/victory.png", "accent": "units/infantry_african/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_african/death.png", "accent": "units/infantry_african/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "steppe": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_steppe/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_steppe/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_steppe/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_steppe/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_steppe/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_steppe/idle.png", "accent": "units/infantry_steppe/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_steppe/run.png", "accent": "units/infantry_steppe/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_steppe/attack.png", "accent": "units/infantry_steppe/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_steppe/victory.png", "accent": "units/infantry_steppe/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_steppe/death.png", "accent": "units/infantry_steppe/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "native": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_native/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_native/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_native/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_native/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_native/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_native/idle.png", "accent": "units/infantry_native/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_native/run.png", "accent": "units/infantry_native/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_native/attack.png", "accent": "units/infantry_native/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_native/victory.png", "accent": "units/infantry_native/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_native/death.png", "accent": "units/infantry_native/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "oceanic": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/infantry_oceanic/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/infantry_oceanic/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/infantry_oceanic/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/infantry_oceanic/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/infantry_oceanic/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/infantry_oceanic/idle.png", "accent": "units/infantry_oceanic/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/infantry_oceanic/run.png", "accent": "units/infantry_oceanic/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/infantry_oceanic/attack.png", "accent": "units/infantry_oceanic/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/infantry_oceanic/victory.png", "accent": "units/infantry_oceanic/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/infantry_oceanic/death.png", "accent": "units/infantry_oceanic/death_accent.png", "frames": 10, "ms": 90}
             }
           }
         }
@@ -357,11 +357,11 @@
         "clips": {
           "frame": [160, 160],
           "clips": {
-            "idle": {"sheet": "units/cavalry/idle.png", "frames": 8, "ms": 160},
-            "run": {"sheet": "units/cavalry/run.png", "frames": 8, "ms": 60},
-            "attack": {"sheet": "units/cavalry/attack.png", "frames": 10, "ms": 80},
-            "victory": {"sheet": "units/cavalry/victory.png", "frames": 8, "ms": 90},
-            "death": {"sheet": "units/cavalry/death.png", "frames": 10, "ms": 90}
+            "idle": {"sheet": "units/cavalry/idle.png", "accent": "units/cavalry/idle_accent.png", "frames": 8, "ms": 160},
+            "run": {"sheet": "units/cavalry/run.png", "accent": "units/cavalry/run_accent.png", "frames": 8, "ms": 60},
+            "attack": {"sheet": "units/cavalry/attack.png", "accent": "units/cavalry/attack_accent.png", "frames": 10, "ms": 80},
+            "victory": {"sheet": "units/cavalry/victory.png", "accent": "units/cavalry/victory_accent.png", "frames": 8, "ms": 90},
+            "death": {"sheet": "units/cavalry/death.png", "accent": "units/cavalry/death_accent.png", "frames": 10, "ms": 90}
           }
         },
         "flavor_sprites": {
@@ -380,101 +380,101 @@
           "latin": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_latin/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_latin/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_latin/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_latin/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_latin/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_latin/idle.png", "accent": "units/cavalry_latin/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_latin/run.png", "accent": "units/cavalry_latin/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_latin/attack.png", "accent": "units/cavalry_latin/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_latin/victory.png", "accent": "units/cavalry_latin/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_latin/death.png", "accent": "units/cavalry_latin/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "orthodox": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_orthodox/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_orthodox/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_orthodox/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_orthodox/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_orthodox/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_orthodox/idle.png", "accent": "units/cavalry_orthodox/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_orthodox/run.png", "accent": "units/cavalry_orthodox/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_orthodox/attack.png", "accent": "units/cavalry_orthodox/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_orthodox/victory.png", "accent": "units/cavalry_orthodox/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_orthodox/death.png", "accent": "units/cavalry_orthodox/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "arab": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_arab/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_arab/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_arab/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_arab/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_arab/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_arab/idle.png", "accent": "units/cavalry_arab/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_arab/run.png", "accent": "units/cavalry_arab/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_arab/attack.png", "accent": "units/cavalry_arab/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_arab/victory.png", "accent": "units/cavalry_arab/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_arab/death.png", "accent": "units/cavalry_arab/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "east_asian": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_east_asian/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_east_asian/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_east_asian/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_east_asian/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_east_asian/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_east_asian/idle.png", "accent": "units/cavalry_east_asian/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_east_asian/run.png", "accent": "units/cavalry_east_asian/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_east_asian/attack.png", "accent": "units/cavalry_east_asian/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_east_asian/victory.png", "accent": "units/cavalry_east_asian/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_east_asian/death.png", "accent": "units/cavalry_east_asian/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "south_asian": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_south_asian/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_south_asian/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_south_asian/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_south_asian/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_south_asian/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_south_asian/idle.png", "accent": "units/cavalry_south_asian/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_south_asian/run.png", "accent": "units/cavalry_south_asian/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_south_asian/attack.png", "accent": "units/cavalry_south_asian/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_south_asian/victory.png", "accent": "units/cavalry_south_asian/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_south_asian/death.png", "accent": "units/cavalry_south_asian/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "southeast_asian": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_southeast_asian/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_southeast_asian/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_southeast_asian/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_southeast_asian/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_southeast_asian/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_southeast_asian/idle.png", "accent": "units/cavalry_southeast_asian/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_southeast_asian/run.png", "accent": "units/cavalry_southeast_asian/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_southeast_asian/attack.png", "accent": "units/cavalry_southeast_asian/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_southeast_asian/victory.png", "accent": "units/cavalry_southeast_asian/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_southeast_asian/death.png", "accent": "units/cavalry_southeast_asian/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "african": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_african/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_african/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_african/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_african/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_african/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_african/idle.png", "accent": "units/cavalry_african/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_african/run.png", "accent": "units/cavalry_african/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_african/attack.png", "accent": "units/cavalry_african/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_african/victory.png", "accent": "units/cavalry_african/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_african/death.png", "accent": "units/cavalry_african/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "steppe": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_steppe/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_steppe/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_steppe/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_steppe/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_steppe/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_steppe/idle.png", "accent": "units/cavalry_steppe/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_steppe/run.png", "accent": "units/cavalry_steppe/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_steppe/attack.png", "accent": "units/cavalry_steppe/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_steppe/victory.png", "accent": "units/cavalry_steppe/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_steppe/death.png", "accent": "units/cavalry_steppe/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "native": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_native/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_native/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_native/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_native/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_native/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_native/idle.png", "accent": "units/cavalry_native/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_native/run.png", "accent": "units/cavalry_native/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_native/attack.png", "accent": "units/cavalry_native/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_native/victory.png", "accent": "units/cavalry_native/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_native/death.png", "accent": "units/cavalry_native/death_accent.png", "frames": 10, "ms": 90}
             }
           },
           "oceanic": {
             "frame": [160, 160],
             "clips": {
-              "idle": {"sheet": "units/cavalry_oceanic/idle.png", "frames": 8, "ms": 160},
-              "run": {"sheet": "units/cavalry_oceanic/run.png", "frames": 8, "ms": 60},
-              "attack": {"sheet": "units/cavalry_oceanic/attack.png", "frames": 10, "ms": 80},
-              "victory": {"sheet": "units/cavalry_oceanic/victory.png", "frames": 8, "ms": 90},
-              "death": {"sheet": "units/cavalry_oceanic/death.png", "frames": 10, "ms": 90}
+              "idle": {"sheet": "units/cavalry_oceanic/idle.png", "accent": "units/cavalry_oceanic/idle_accent.png", "frames": 8, "ms": 160},
+              "run": {"sheet": "units/cavalry_oceanic/run.png", "accent": "units/cavalry_oceanic/run_accent.png", "frames": 8, "ms": 60},
+              "attack": {"sheet": "units/cavalry_oceanic/attack.png", "accent": "units/cavalry_oceanic/attack_accent.png", "frames": 10, "ms": 80},
+              "victory": {"sheet": "units/cavalry_oceanic/victory.png", "accent": "units/cavalry_oceanic/victory_accent.png", "frames": 8, "ms": 90},
+              "death": {"sheet": "units/cavalry_oceanic/death.png", "accent": "units/cavalry_oceanic/death_accent.png", "frames": 10, "ms": 90}
             }
           }
         }
@@ -484,11 +484,11 @@
         "clips": {
           "frame": [160, 160],
           "clips": {
-            "idle": {"sheet": "units/artillery/idle.png", "frames": 8, "ms": 160},
-            "run": {"sheet": "units/artillery/run.png", "frames": 8, "ms": 60},
-            "attack": {"sheet": "units/artillery/attack.png", "frames": 10, "ms": 80},
-            "victory": {"sheet": "units/artillery/victory.png", "frames": 8, "ms": 90},
-            "death": {"sheet": "units/artillery/death.png", "frames": 10, "ms": 90}
+            "idle": {"sheet": "units/artillery/idle.png", "accent": "units/artillery/idle_accent.png", "frames": 8, "ms": 160},
+            "run": {"sheet": "units/artillery/run.png", "accent": "units/artillery/run_accent.png", "frames": 8, "ms": 60},
+            "attack": {"sheet": "units/artillery/attack.png", "accent": "units/artillery/attack_accent.png", "frames": 10, "ms": 80},
+            "victory": {"sheet": "units/artillery/victory.png", "accent": "units/artillery/victory_accent.png", "frames": 8, "ms": 90},
+            "death": {"sheet": "units/artillery/death.png", "accent": "units/artillery/death_accent.png", "frames": 10, "ms": 90}
           }
         }
       },
@@ -497,11 +497,11 @@
         "clips": {
           "frame": [160, 160],
           "clips": {
-            "idle": {"sheet": "units/worker/idle.png", "frames": 8, "ms": 160},
-            "run": {"sheet": "units/worker/run.png", "frames": 8, "ms": 60},
-            "attack": {"sheet": "units/worker/attack.png", "frames": 10, "ms": 80},
-            "victory": {"sheet": "units/worker/victory.png", "frames": 8, "ms": 90},
-            "death": {"sheet": "units/worker/death.png", "frames": 10, "ms": 90}
+            "idle": {"sheet": "units/worker/idle.png", "accent": "units/worker/idle_accent.png", "frames": 8, "ms": 160},
+            "run": {"sheet": "units/worker/run.png", "accent": "units/worker/run_accent.png", "frames": 8, "ms": 60},
+            "attack": {"sheet": "units/worker/attack.png", "accent": "units/worker/attack_accent.png", "frames": 10, "ms": 80},
+            "victory": {"sheet": "units/worker/victory.png", "accent": "units/worker/victory_accent.png", "frames": 8, "ms": 90},
+            "death": {"sheet": "units/worker/death.png", "accent": "units/worker/death_accent.png", "frames": 10, "ms": 90}
           }
         }
       },
@@ -510,11 +510,11 @@
         "clips": {
           "frame": [160, 160],
           "clips": {
-            "idle": {"sheet": "units/pioneer/idle.png", "frames": 8, "ms": 160},
-            "run": {"sheet": "units/pioneer/run.png", "frames": 8, "ms": 60},
-            "attack": {"sheet": "units/pioneer/attack.png", "frames": 10, "ms": 80},
-            "victory": {"sheet": "units/pioneer/victory.png", "frames": 8, "ms": 90},
-            "death": {"sheet": "units/pioneer/death.png", "frames": 10, "ms": 90}
+            "idle": {"sheet": "units/pioneer/idle.png", "accent": "units/pioneer/idle_accent.png", "frames": 8, "ms": 160},
+            "run": {"sheet": "units/pioneer/run.png", "accent": "units/pioneer/run_accent.png", "frames": 8, "ms": 60},
+            "attack": {"sheet": "units/pioneer/attack.png", "accent": "units/pioneer/attack_accent.png", "frames": 10, "ms": 80},
+            "victory": {"sheet": "units/pioneer/victory.png", "accent": "units/pioneer/victory_accent.png", "frames": 8, "ms": 90},
+            "death": {"sheet": "units/pioneer/death.png", "accent": "units/pioneer/death_accent.png", "frames": 10, "ms": 90}
           }
         }
       },
@@ -533,11 +533,11 @@
             [[180.1,88.8,0.7],[160.4,88.9,0.7],[140.6,89.0,0.7],[120.9,89.1,0.7],[101.1,89.2,0.7],[74.8,81.6,1.2],[71.9,81.6,1.2],[181.8,83.4,1.08],[179.2,83.4,1.08]]
           ],
           "clips": {
-            "idle": {"sheet": "units/ironclad/idle.png", "frames": 8, "ms": 170},
-            "run": {"sheet": "units/ironclad/run.png", "frames": 8, "ms": 90},
-            "attack": {"sheet": "units/ironclad/attack.png", "frames": 8, "ms": 120},
-            "victory": {"sheet": "units/ironclad/victory.png", "frames": 8, "ms": 110},
-            "death": {"sheet": "units/ironclad/death.png", "frames": 8, "ms": 220}
+            "idle": {"sheet": "units/ironclad/idle.png", "accent": "units/ironclad/idle_accent.png", "frames": 8, "ms": 170},
+            "run": {"sheet": "units/ironclad/run.png", "accent": "units/ironclad/run_accent.png", "frames": 8, "ms": 90},
+            "attack": {"sheet": "units/ironclad/attack.png", "accent": "units/ironclad/attack_accent.png", "frames": 8, "ms": 120},
+            "victory": {"sheet": "units/ironclad/victory.png", "accent": "units/ironclad/victory_accent.png", "frames": 8, "ms": 110},
+            "death": {"sheet": "units/ironclad/death.png", "accent": "units/ironclad/death_accent.png", "frames": 8, "ms": 220}
           }
         }
       },
@@ -556,11 +556,11 @@
             [[197.2,94.6,0.45],[89.2,95.1,0.45]]
           ],
           "clips": {
-            "idle": {"sheet": "units/transport/idle.png", "frames": 8, "ms": 170},
-            "run": {"sheet": "units/transport/run.png", "frames": 8, "ms": 90},
-            "attack": {"sheet": "units/transport/attack.png", "frames": 8, "ms": 120},
-            "victory": {"sheet": "units/transport/victory.png", "frames": 8, "ms": 110},
-            "death": {"sheet": "units/transport/death.png", "frames": 8, "ms": 220}
+            "idle": {"sheet": "units/transport/idle.png", "accent": "units/transport/idle_accent.png", "frames": 8, "ms": 170},
+            "run": {"sheet": "units/transport/run.png", "accent": "units/transport/run_accent.png", "frames": 8, "ms": 90},
+            "attack": {"sheet": "units/transport/attack.png", "accent": "units/transport/attack_accent.png", "frames": 8, "ms": 120},
+            "victory": {"sheet": "units/transport/victory.png", "accent": "units/transport/victory_accent.png", "frames": 8, "ms": 110},
+            "death": {"sheet": "units/transport/death.png", "accent": "units/transport/death_accent.png", "frames": 8, "ms": 220}
           }
         }
       },
@@ -579,11 +579,11 @@
             [[60.5,89.1,1.38],[57.8,89.1,1.38],[132.5,97.5,1.2],[130.2,97.5,1.2],[139.4,84.2,1.2],[137.1,84.2,1.2],[182.6,89.4,1.32],[179.9,89.5,1.32],[206.7,89.3,1.32],[204.0,89.3,1.32]]
           ],
           "clips": {
-            "idle": {"sheet": "units/battleship/idle.png", "frames": 8, "ms": 170},
-            "run": {"sheet": "units/battleship/run.png", "frames": 8, "ms": 90},
-            "attack": {"sheet": "units/battleship/attack.png", "frames": 8, "ms": 120},
-            "victory": {"sheet": "units/battleship/victory.png", "frames": 8, "ms": 110},
-            "death": {"sheet": "units/battleship/death.png", "frames": 8, "ms": 220}
+            "idle": {"sheet": "units/battleship/idle.png", "accent": "units/battleship/idle_accent.png", "frames": 8, "ms": 170},
+            "run": {"sheet": "units/battleship/run.png", "accent": "units/battleship/run_accent.png", "frames": 8, "ms": 90},
+            "attack": {"sheet": "units/battleship/attack.png", "accent": "units/battleship/attack_accent.png", "frames": 8, "ms": 120},
+            "victory": {"sheet": "units/battleship/victory.png", "accent": "units/battleship/victory_accent.png", "frames": 8, "ms": 110},
+            "death": {"sheet": "units/battleship/death.png", "accent": "units/battleship/death_accent.png", "frames": 8, "ms": 220}
           }
         }
       },
@@ -602,11 +602,11 @@
             [[57.5,93.6,0.95],[84.0,100.5,0.5],[98.0,100.5,0.5],[138.5,100.3,0.5],[159.6,100.2,0.5],[207.1,93.9,0.95]]
           ],
           "clips": {
-            "idle": {"sheet": "units/protected-cruiser/idle.png", "frames": 8, "ms": 170},
-            "run": {"sheet": "units/protected-cruiser/run.png", "frames": 8, "ms": 90},
-            "attack": {"sheet": "units/protected-cruiser/attack.png", "frames": 8, "ms": 120},
-            "victory": {"sheet": "units/protected-cruiser/victory.png", "frames": 8, "ms": 110},
-            "death": {"sheet": "units/protected-cruiser/death.png", "frames": 8, "ms": 220}
+            "idle": {"sheet": "units/protected-cruiser/idle.png", "accent": "units/protected-cruiser/idle_accent.png", "frames": 8, "ms": 170},
+            "run": {"sheet": "units/protected-cruiser/run.png", "accent": "units/protected-cruiser/run_accent.png", "frames": 8, "ms": 90},
+            "attack": {"sheet": "units/protected-cruiser/attack.png", "accent": "units/protected-cruiser/attack_accent.png", "frames": 8, "ms": 120},
+            "victory": {"sheet": "units/protected-cruiser/victory.png", "accent": "units/protected-cruiser/victory_accent.png", "frames": 8, "ms": 110},
+            "death": {"sheet": "units/protected-cruiser/death.png", "accent": "units/protected-cruiser/death_accent.png", "frames": 8, "ms": 220}
           }
         }
       },
@@ -625,11 +625,11 @@
             [[72.9,98.3,0.7],[138.2,103.2,0.4],[158.6,103.1,0.4]]
           ],
           "clips": {
-            "idle": {"sheet": "units/torpedo-boat/idle.png", "frames": 8, "ms": 170},
-            "run": {"sheet": "units/torpedo-boat/run.png", "frames": 8, "ms": 90},
-            "attack": {"sheet": "units/torpedo-boat/attack.png", "frames": 8, "ms": 120},
-            "victory": {"sheet": "units/torpedo-boat/victory.png", "frames": 8, "ms": 110},
-            "death": {"sheet": "units/torpedo-boat/death.png", "frames": 8, "ms": 220}
+            "idle": {"sheet": "units/torpedo-boat/idle.png", "accent": "units/torpedo-boat/idle_accent.png", "frames": 8, "ms": 170},
+            "run": {"sheet": "units/torpedo-boat/run.png", "accent": "units/torpedo-boat/run_accent.png", "frames": 8, "ms": 90},
+            "attack": {"sheet": "units/torpedo-boat/attack.png", "accent": "units/torpedo-boat/attack_accent.png", "frames": 8, "ms": 120},
+            "victory": {"sheet": "units/torpedo-boat/victory.png", "accent": "units/torpedo-boat/victory_accent.png", "frames": 8, "ms": 110},
+            "death": {"sheet": "units/torpedo-boat/death.png", "accent": "units/torpedo-boat/death_accent.png", "frames": 8, "ms": 220}
           }
         }
       }

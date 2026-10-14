@@ -49,12 +49,13 @@ class Kit:
 
     `style` picks the headgear and the small cultural flourishes (`kepi`, `brim`, `turban`,
     `conical`, `fez`, `shako`, `headband`, `bare`, `wrap`).  `band` is the accent colour the
-    kit wears at its collar, headband and cap: the client still tints the whole figure with the
-    nation's colour, so the accent is a hint, not the identity.
+    kit wears at its collar, headband and cap; only those designated cloth surfaces
+    take the nation's color in the client.
     """
 
-    def __init__(self, coat=NAVY, trousers=SLATE, cap=NAVY, band=RED, hat=None, pack="knapsack", tool="rifle", plume=None, style="kepi", labour=False):
+    def __init__(self, coat=NAVY, trousers=SLATE, cap=NAVY, band=RED, hat=None, pack="knapsack", tool="rifle", plume=None, style="kepi", labour=False, skin=SKIN):
         self.coat, self.trousers, self.cap, self.band, self.hat = coat, trousers, cap, band, hat
+        self.skin = skin
         self.pack, self.tool, self.plume = pack, tool, plume
         self.style, self.labour = style, labour
 
@@ -99,6 +100,7 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
         piv = p.fall_pivot
         xf = xf.at(piv).at((0, 0, p.lift)).pitch(-p.fall).at(mul(piv, -1))
     W = xf  # figure -> world
+    skin = kit.skin
     up, fwd, left = _torso_axes(p)
     hip = p.hip
     neck = add(hip, mul(up, 35.0))
@@ -117,6 +119,8 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
         knee = two_bone(W(h), W(ankle), 18.6, 18.0, pole)
         sc.limb(W(h), knee, 5.4, 4.2, kit.trousers, layer=layer)
         sc.limb(knee, W(ankle), 4.2, 3.3, kit.trousers, layer=layer)
+        # A soft fold at the knee, with the highlight above its shadow.
+        sc.limb(add(knee, W.vec((1.5, -1.8, 1))), add(knee, W.vec((1.5, 1.8, 0))), 0.65, 0.4, shade(kit.trousers, 1.18), ink=None, layer=layer, bias=-0.1)
         toe = add(ankle, (7.0, 0, -3.0))
         heel = add(ankle, (-3.0, 0, -3.5))
         sc.limb(W(heel), W(toe), 3.2, 2.6, "#1f1812", layer=layer, bias=-0.3)
@@ -126,6 +130,10 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
     sc.tube(W(base), W(top), 13.0, 11.8, kit.coat, side=W.vec(left), squash=0.55, sides=14, layer=layer)
     sc.tube(W(add(hip, mul(up, 3.2))), W(add(hip, mul(up, 6.6))), 12.4, 12.3, "#211a14", side=W.vec(left), squash=0.6, sides=14, caps=False, layer=layer, bias=-0.4)
     front = mul(fwd, 6.6)
+    for side in (-1, 1):
+        # Narrow lapel creases catch light; the rest stays in the culture's uniform palette.
+        crease = add(add(hip, mul(up, 26)), mul(left, side * 5.0))
+        sc.line(W(add(crease, front)), W(add(add(crease, mul(up, -15)), front)), shade(kit.coat, 1.18), 0.55, layer=layer, bias=-0.5)
     back = mul(fwd, -6.8)
     facing_viewer = W.vec(fwd)[1] < 0.2  # chest toward the camera
     if not kit.labour:
@@ -145,8 +153,13 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
         b = add(add(hip, mul(left, 9.0)), mul(up, 5.0))
         sc.poly([W(add(a, front)), W(add(add(a, front), mul(left, 2.6))), W(add(add(b, front), mul(left, -2.6))), W(add(b, front))], "#4a3a28", None, layer=layer, bias=-0.6)
         sc.box(W.at(add(hip, add(mul(fwd, 5.0), mul(left, 7.0)))), -1.5, 1.5, -3, 3, -3, 4, "#6a5236", layer=layer, bias=-0.5)
+    # Stitching and a back seam make the coat read as cloth rather than a smooth cylinder.
+    for side in (-1, 1):
+        a = add(add(hip, mul(up, -4.0)), mul(left, 9.8 * side))
+        b = add(add(hip, mul(up, 1.5)), mul(left, 9.8 * side))
+        sc.line(W(add(a, back)), W(add(b, back)), shade(kit.coat, 0.65), 0.65, layer=layer, bias=-0.5)
     # collar and epaulettes
-    sc.tube(W(add(neck, mul(up, -3.6))), W(add(neck, mul(up, -0.4))), 5.8, 5.2, kit.band if kit.tool != "pick" and kit.tool != "shovel" else kit.coat, side=W.vec(left), sides=10, layer=layer, bias=-0.2)
+    sc.tube(W(add(neck, mul(up, -3.6))), W(add(neck, mul(up, -0.4))), 5.8, 5.2, kit.band if kit.tool != "pick" and kit.tool != "shovel" else kit.coat, side=W.vec(left), sides=10, layer=layer, bias=-0.2, accent=True)
     if kit.tool in ("rifle", "sabre", None):
         for s in shoulders:
             sc.ball(W(add(s, mul(up, 1.5))), 3.4, shade(BRASS, 0.9), squash=0.6, layer=layer, bias=-0.5)
@@ -173,16 +186,22 @@ def person(sc: Scene, xf: Xf, p: Pose, kit: Kit, layer=0):
         elbow = two_bone(W(s), W(hand), 16.0, 15.0, pole)
         sc.limb(W(s), elbow, 4.0, 3.4, kit.coat, layer=layer)
         sc.limb(elbow, W(hand), 3.4, 2.9, kit.coat, layer=layer)
-        sc.ball(W(hand), 2.9, SKIN, sw=0.6, layer=layer, bias=-0.2)
+        cuff = mix(hand, add(s, mul(up, -22.0)), 0.14)
+        sc.limb(W(cuff), W(hand), 3.1, 2.9, kit.band, layer=layer, bias=-0.15, accent=True)
+        sc.ball(W(hand), 2.5, skin, sw=0.45, layer=layer, bias=-0.25)
     # head
     hy, hp = math.radians(p.head[0] + p.twist), math.radians(p.head[1])
     hf = unit((math.cos(hy) * math.cos(hp), math.sin(hy) * math.cos(hp), -math.sin(hp)))
     hl = unit((-math.sin(hy), math.cos(hy), 0.0))
     hu = unit((-hf[0] * hf[2], -hf[1] * hf[2], 1 - hf[2] * hf[2])) if abs(hf[2]) > 1e-6 else (0.0, 0.0, 1.0)
     hu = add(mul(hu, 0.85), mul(up, 0.15))
-    sc.limb(W(neck), W(add(neck, mul(up, 5.0))), 2.6, 2.6, shade(SKIN, 0.85), layer=layer)
+    sc.limb(W(neck), W(add(neck, mul(up, 5.0))), 2.6, 2.6, shade(skin, 0.85), layer=layer)
     hc = add(neck, add(mul(up, 9.5), mul(hf, 0.5)))
-    sc.ball(W(hc), 6.3, SKIN, squash=1.08, layer=layer)
+    sc.ball(W(hc), 6.3, skin, squash=1.08, layer=layer)
+    # Small ears and nose give the profile a human silhouette in the side facings.
+    for side in (-1, 1):
+        sc.ball(W(add(hc, mul(hl, 6.0 * side))), 1.35, shade(skin, 0.91), sw=0.35, layer=layer)
+    sc.limb(W(add(hc, add(mul(hf, 5.2), mul(hu, 1.3)))), W(add(hc, mul(hf, 7.1))), 1.3, 0.8, skin, ink=None, layer=layer, bias=-0.3)
     face = W.vec(hf)
     seen = -face[1] * 0.9 + face[2] * 0.45  # how much of the face looks at the camera
     if seen > 0.05:
@@ -238,7 +257,7 @@ def headgear(sc, W, kit, hc, hu, hf, hl, seen, layer):
         k0 = add(hc, add(mul(hu, 2.6), mul(hf, -0.3)))
         k1 = add(hc, add(mul(hu, 15.5), mul(hf, 2.2)))
         sc.tube(W(k0), W(k1), 7.0, 6.4, kit.cap, side=W.vec(hl), sides=16, layer=layer, bias=-0.3)
-        sc.tube(W(k0), W(add(k0, mul(hu, 3.4))), 7.2, 7.1, kit.band, side=W.vec(hl), sides=16, caps=False, layer=layer, bias=-0.4)
+        sc.tube(W(k0), W(add(k0, mul(hu, 3.4))), 7.2, 7.1, kit.band, accent=True, side=W.vec(hl), sides=16, caps=False, layer=layer, bias=-0.4)
         v = [add(k0, add(mul(hf, 5.2), mul(hl, 4.8))), add(k0, add(mul(hf, 5.2), mul(hl, -4.8))), add(k0, add(mul(hf, 10.0), add(mul(hl, -3.6), mul(hu, -1.0)))), add(k0, add(mul(hf, 10.0), add(mul(hl, 3.6), mul(hu, -1.0))))]
         sc.poly([W(q) for q in v], "#1a1511", two=True, layer=layer, bias=-0.5)
         if seen > 0.1:
@@ -255,7 +274,7 @@ def headgear(sc, W, kit, hc, hu, hf, hl, seen, layer):
             sc.tube(W(k0), W(k1), 6.5, 5.6, kit.hat, side=W.vec(hl), sides=14, layer=layer, bias=-0.3)
         band_c = add(hc, mul(hu, 2.4))
         lo = add(hc, mul(hu, 0.6))
-        sc.tube(W(lo), W(band_c), 6.55, 6.5, kit.band, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.4)
+        sc.tube(W(lo), W(band_c), 6.55, 6.5, kit.band, accent=True, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.4)
     elif style in ("headband", "steppe"):
         # a headband (and long hair for the steppe); nothing else covers the head
         if style == "steppe":
@@ -265,7 +284,7 @@ def headgear(sc, W, kit, hc, hu, hf, hl, seen, layer):
                 sc.limb(a, b, 1.2, 2.2, "#2a1d14", layer=layer, bias=-0.5)
         band_c = add(hc, mul(hu, 2.2))
         lo = add(hc, mul(hu, 0.4))
-        sc.tube(W(lo), W(band_c), 6.55, 6.5, kit.band, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.45)
+        sc.tube(W(lo), W(band_c), 6.55, 6.5, kit.band, accent=True, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.45)
         if kit.plume:
             # a single feather standing from the back of the band
             a = add(add(hc, mul(hu, 1.6)), mul(hf, -5.6))
@@ -282,7 +301,7 @@ def headgear(sc, W, kit, hc, hu, hf, hl, seen, layer):
     k0 = add(hc, add(mul(hu, 3.0), mul(hf, -0.3)))
     k1 = add(hc, add(mul(hu, 11.5), mul(hf, 1.6)))
     sc.tube(W(k0), W(k1), 6.6, 5.8, kit.cap, side=W.vec(hl), sides=14, layer=layer, bias=-0.3)
-    sc.tube(W(k0), W(add(k0, mul(hu, 2.6))), 6.7, 6.6, kit.band, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.4)
+    sc.tube(W(k0), W(add(k0, mul(hu, 2.6))), 6.7, 6.6, kit.band, accent=True, side=W.vec(hl), sides=14, caps=False, layer=layer, bias=-0.4)
     v = [add(k0, add(mul(hf, 5.0), mul(hl, 4.5))), add(k0, add(mul(hf, 5.0), mul(hl, -4.5))), add(k0, add(mul(hf, 9.5), add(mul(hl, -3.5), mul(hu, -1.2)))), add(k0, add(mul(hf, 9.5), add(mul(hl, 3.5), mul(hu, -1.2))))]
     sc.poly([W(q) for q in v], "#1a1511", two=True, layer=layer, bias=-0.5)
     if seen > 0.1:
@@ -298,11 +317,11 @@ def draw_tool(sc, W, kind, grip, d, layer, bias=0.0):
     d = unit(d)
     if kind == "rifle":
         butt = add(grip, mul(d, -14.0))
-        muzzle = add(grip, mul(d, 48.0))
+        muzzle = add(grip, mul(d, 40.0))
         sc.limb(W(butt), W(add(grip, mul(d, 4.0))), 2.0, 1.5, "#7e5632", sw=0.6, layer=layer, bias=bias - 0.1)
         sc.limb(W(add(grip, mul(d, 2.0))), W(muzzle), 1.5, 1.1, "#6a4a2c", sw=0.5, layer=layer, bias=bias - 0.1)
         sc.line(W(add(grip, mul(d, 10.0))), W(muzzle), "#4b5054", 0.9, layer=layer, bias=bias - 0.15)
-        sc.line(W(muzzle), W(add(muzzle, mul(d, 17.0))), STEEL, 1.3, layer=layer, bias=bias - 0.15)
+        sc.line(W(muzzle), W(add(muzzle, mul(d, 10.0))), STEEL, 1.3, layer=layer, bias=bias - 0.15)
     elif kind in ("pick", "shovel"):
         end = add(grip, mul(d, 30.0))
         start = add(grip, mul(d, -40.0))
@@ -332,8 +351,8 @@ def draw_tool(sc, W, kind, grip, d, layer, bias=0.0):
 # ---- what a soldier does ------------------------------------------------------------------------
 def _rest_rifle(p, breathe=0.0):
     """Order arms: the rifle stands by the right foot, the right hand at the barrel."""
-    p.hands[1] = (2.5, -14.0, 54.0 + breathe)
-    p.tool = ((2.0, -14.5, 52.0 + breathe), (0.03, 0.0, 1.0))
+    p.hands[1] = (2.5, -14.0, 46.0 + breathe)
+    p.tool = ((2.0, -14.5, 20.0 + breathe), (0.03, 0.0, 1.0))
     p.hands[0] = None
 
 
@@ -343,7 +362,7 @@ def soldier_pose(clip, t, kit=SOLDIER, phase=0.0):
         a = math.tau * (t + phase)
         breathe = 0.6 * math.sin(a)
         p.hip = (0.0, 0.8 * math.sin(a), 42.0 + 0.4 * math.sin(2 * a))
-        p.head = (14.0 * math.sin(a + 0.6), 2.0)
+        p.head = (7.0 * math.sin(a + 0.6), 1.0 + 1.2 * math.sin(a))
         p.lean = 1.0 + 1.0 * math.sin(a)
         if kit.tool == "rifle":
             _rest_rifle(p, breathe)
@@ -351,12 +370,15 @@ def soldier_pose(clip, t, kit=SOLDIER, phase=0.0):
             _shoulder_tool(p, kit)
     elif clip == "run":
         a = math.tau * (t + phase)
-        for i, off in enumerate((0.0, math.pi)):
+        for i in range(2):
             s = 1 if i == 0 else -1
-            x = 10.0 * math.cos(a + off)
-            z = 5.0 * max(0.0, -math.sin(a + off))
+            # The planted foot moves backward evenly; the free foot arcs forward.
+            stride = ((t + phase + i * 0.5) % 1.0)
+            x = 10.0 - 40.0 * stride if stride < 0.5 else -10.0 + 20.0 * ease((stride - 0.5) * 2.0)
+            z = 6.0 * math.sin(math.pi * (stride - 0.5) * 2.0) if stride >= 0.5 else 0.0
             p.feet[i] = (x, 5.0 * s, z)
-        p.hip = (1.0, 0.0, 41.0 + 1.3 * math.cos(2 * a))
+        p.hip = (1.0, 0.6 * math.sin(a), 41.0 + 0.9 * math.cos(2 * a))
+        p.twist = 3.0 * math.sin(a)
         p.lean = 7.0
         p.head = (0.0, 3.0)
         # the free arm swings against its leg
@@ -381,18 +403,18 @@ def soldier_pose(clip, t, kit=SOLDIER, phase=0.0):
         p.lean = -5.0 * k
         if kit.tool == "rifle":
             rest_r = (2.5, -14.0, 54.0)
-            up_r = (3.0, -8.0, 92.0 + hop)
-            up_l = (3.0, 8.0, 92.0 + hop)
+            up_r = (3.0, -8.0, 76.0 + hop)
+            up_l = (3.0, 8.0, 76.0 + hop)
             p.hands[1] = mix(rest_r, up_r, k)
             p.hands[0] = mix((1.0, 15.5, 47.0), up_l, k) if k > 0.02 else None
-            grip = mix((2.0, -14.5, 52.0), (3.0, -8.0, 92.0 + hop), k)
+            grip = mix((2.0, -14.5, 20.0), (3.0, -8.0, 76.0 + hop), k)
             d = unit(mix((0.03, 0.0, 1.0), (0.05, 1.0, 0.25), k))
             p.tool = (grip, d)
         else:
-            up_r = (4.0, -8.0, 92.0 + hop)
-            p.hands[1] = mix((7.0, -13.0, 64.0), up_r, k)
+            up_r = (4.0, -8.0, 76.0 + hop)
+            p.hands[1] = mix((7.0, -13.0, 56.0), up_r, k)
             p.hands[0] = mix((1.0, 15.5, 47.0), (4.0, 13.0, 86.0 + hop), k) if k > 0.02 else None
-            d = unit(mix((-0.55, -0.15, 0.82), (0.2, 0.0, 1.0), k))
+            d = unit(mix((-0.55, -0.15, 0.82), (-0.85, 0.0, 0.5), k))
             p.tool = (p.hands[1], d)
     elif clip == "death":
         _die(p, t, kit)
@@ -401,8 +423,8 @@ def soldier_pose(clip, t, kit=SOLDIER, phase=0.0):
 
 def _shoulder_tool(p, kit):
     """A pick or spade on the right shoulder, as the labourers carry it."""
-    p.hands[1] = (7.0, -13.0, 64.0)
-    p.tool = ((7.0, -13.0, 64.0), (-0.55, -0.15, 0.82))
+    p.hands[1] = (7.0, -13.0, 56.0)
+    p.tool = ((7.0, -13.0, 56.0), (-0.55, -0.15, 0.82))
 
 
 def _fire(p, t):
@@ -421,7 +443,7 @@ def _fire(p, t):
     # rifle at the shoulder, pointing forward, muzzle climbing with the recoil
     aim_d = unit((1.0, 0.04, 0.05 + 0.32 * kick))
     aim_grip = (4.0 - 3.0 * kick, -7.5, 69.0 + 1.0 * kick)
-    rest_grip, rest_d = (2.0, -14.5, 52.0), (0.03, 0.0, 1.0)
+    rest_grip, rest_d = (2.0, -14.5, 20.0), (0.03, 0.0, 1.0)
     grip = mix(rest_grip, aim_grip, raise_)
     d = unit(mix(rest_d, aim_d, raise_))
     p.tool = (grip, d)
@@ -429,7 +451,7 @@ def _fire(p, t):
     p.hands[0] = add(grip, mul(d, 22.0)) if raise_ > 0.25 else None
     if t >= FIRE_AT:
         x = span(t, FIRE_AT, 1.0)
-        muzzle = add(aim_grip, mul(aim_d, 62.0 + 8.0 * x))
+        muzzle = add(aim_grip, mul(aim_d, 40.0 + 8.0 * x))
         p.smoke = (add(muzzle, (2.0 * x, 0.0, 6.0 * x)), 5.0 + 11.0 * x, 0.85 * (1.0 - x) ** 1.2)
 
 
@@ -438,12 +460,12 @@ def _swing(p, t, kit):
     up = keys(t, [(0.0, 0.0), (0.3, 1.0), (STRIKE_AT, -0.4), (0.7, -0.4), (1.0, 0.0)])
     p.lean = 10.0 * max(0.0, -up) - 4.0 * max(0.0, up)
     p.feet = [(6.0, 5.5, 0.0), (-2.0, -5.5, 0.0)]
-    rest = (7.0, -13.0, 64.0)
-    high = (-2.0, -4.0, 94.0)
+    rest = (7.0, -13.0, 56.0)
+    high = (-2.0, -4.0, 74.0)
     low = (16.0, -3.0, 48.0)
     if up >= 0:
         hand = mix(rest, high, up)
-        d = unit(mix((-0.55, -0.15, 0.82), (-0.6, 0.0, 0.8), up))
+        d = unit(mix((-0.55, -0.15, 0.82), (-0.85, 0.0, 0.5), up))
     else:
         hand = mix(rest, low, -up / 0.4)
         d = unit(mix((-0.55, -0.15, 0.82), (0.85, 0.0, -0.5), -up / 0.4))
@@ -469,7 +491,7 @@ def _die(p, t, kit):
     p.hands = [(-4.0 * fling + 1.0, 17.0, 50.0 + 14.0 * fling), (-5.0 * fling + 2.5, -17.0, 50.0 + 14.0 * fling)]
     if kit.tool in ("rifle", "pick", "shovel"):
         # the rifle or tool drops and lies on the ground beside him
-        held = (2.0, -14.5, 52.0) if kit.tool == "rifle" else (7.0, -13.0, 64.0)
+        held = (2.0, -14.5, 20.0) if kit.tool == "rifle" else (7.0, -13.0, 56.0)
         held_d = (0.03, 0.0, 1.0) if kit.tool == "rifle" else (-0.55, -0.15, 0.82)
         drop = span(t, 0.1, 0.55)
         e = ease(drop)
@@ -515,7 +537,7 @@ def pioneer(k, clip, t):
 
 
 def worker(k, clip, t):
-    sc = Scene(U, U, ORIGIN, SCALE * 1.06)
+    sc = Scene(U, U, ORIGIN, SCALE)
     xf = facing_frame(k)
     ground_shadow(sc, xf((0.0, 0.0, 0.0)), 16, 5.0)
     figure(sc, xf, WORKER, clip, t)
@@ -598,10 +620,15 @@ def horse(sc, xf, h: Steed, layer=0):
         sc.draw(W(eye), lambda svg, x, y: svg.circle(x, y, 1.0, "#0f0b08"), layer=layer, bias=-0.35)
     # blaze
     sc.line(W(add(top, (1.5, 0, 3.0))), W(add(nose, (1.5, 0, 2.5))), "#e8dcc0", 1.2, op=0.7, layer=layer, bias=-0.4)
+    # Tack follows the neck instead of floating over the horse's skin.
+    for side in (-1, 1):
+        cheek = add(nose, (0.0, side * 4.0, 1.0))
+        sc.line(W(cheek), W(add(top, (0.0, side * 5.0, 0.0))), LEATHER, 1.1, layer=layer, bias=-0.5)
+        sc.line(W(cheek), W((0.0, side * 9.0, 76.0)), LEATHER, 0.7, layer=layer, bias=-0.6)
     # saddle blanket and saddle
     for e in (1, -1):
         y = 11.2 * e
-        sc.poly([W((-12.0, y, 70.0)), W((12.0, y, 70.0)), W((12.5, y * 1.02, 52.0)), W((-12.5, y * 1.02, 52.0))], "#7a2f28", INK, 0.7, layer=layer, bias=-0.3)
+        sc.poly([W((-12.0, y, 70.0)), W((12.0, y, 70.0)), W((12.5, y * 1.02, 52.0)), W((-12.5, y * 1.02, 52.0))], "#7a2f28", INK, 0.7, layer=layer, bias=-0.3, accent=True)
         sc.poly([W((-12.5, y * 1.03, 54.5)), W((12.5, y * 1.03, 54.5)), W((12.5, y * 1.03, 52.0)), W((-12.5, y * 1.03, 52.0))], BRASS, None, layer=layer, bias=-0.35)
     sc.box(W.at((0.0, 0.0, 69.0)), -12.0, 12.0, -10.0, 10.0, 0.0, 3.5, "#2a1d14", layer=layer, bias=-0.3)
     return W
@@ -646,7 +673,7 @@ def steed_pose(clip, t, coat=COAT):
         h.tail = math.sin(a)
     elif clip == "victory":
         rear = keys(t, [(0.0, 0.0), (0.35, 1.0), (0.65, 1.0), (1.0, 0.0)])
-        h.pitch = -30.0 * rear
+        h.pitch = -8.0 * rear
         h.pivot = (-27.0, 0.0, 0.0)
         kick = math.sin(math.tau * 2 * t) * rear
         h.legs = {"fl": (30 * rear + 12 * kick, 80 * rear), "fr": (20 * rear - 12 * kick, 90 * rear), "hl": (8 * rear, 0.0), "hr": (4 * rear, 0.0)}
@@ -688,7 +715,7 @@ def rider_pose(clip, t, steed: Steed):
         p.lean = 6.0 + 18.0 * max(0.0, -up)
         p.twist = -20.0 * max(0.0, up) + 18.0 * max(0.0, -up)
         if up >= 0:
-            grip = mix(rest_grip, (2.0, -12.0, 108.0), up)
+            grip = mix(rest_grip, (2.0, -12.0, 100.0), up)
             d = unit(mix(rest_d, (-0.7, -0.2, 0.6), up))
         else:
             grip = mix(rest_grip, (28.0, -14.0, 70.0), -up)
@@ -696,8 +723,8 @@ def rider_pose(clip, t, steed: Steed):
     elif clip == "victory":
         k = keys(t, [(0.0, 0.0), (0.3, 1.0), (0.7, 1.0), (1.0, 0.0)])
         p.lean = 4.0 - 18.0 * k
-        grip = mix(rest_grip, (8.0, -9.0, 116.0), k)
-        d = unit(mix(rest_d, (0.25, 0.0, 1.0), k))
+        grip = mix(rest_grip, (8.0, -9.0, 104.0), k)
+        d = unit(mix(rest_d, (0.8, 0.0, 0.6), k))
         p.head = (0.0, -15.0 * k)
     else:  # death: thrown off the far side as the horse goes over
         p.lean = keys(t, [(0.0, 4.0), (0.12, -20.0), (0.5, 10.0)])
@@ -711,7 +738,7 @@ def rider_pose(clip, t, steed: Steed):
 
 
 def cavalry(k, clip, t, kit=TROOPER, coat=COAT, scale=0.84):
-    sc = Scene(U, U, ORIGIN, SCALE * scale)
+    sc = Scene(U, U, (80, 105), SCALE * scale * 0.90)
     xf = facing_frame(k).at((-2.0, 0.0, 0.0))
     h = steed_pose(clip, t, coat)
     shadow_op = 0.5 * (1.0 - 0.5 * span(t, 0.5, 1.0)) if clip == "death" else 0.5
@@ -829,8 +856,8 @@ BUILDERS = {
 # ---- a culture's kit --------------------------------------------------------------------------
 # The Western soldier is the base design; each other culture fields its own kit and headgear so a
 # Zulu, an Ottoman and a Qing banner-man do not march in the same red coat.  Uniforms stay in the
-# muted, hand-painted range, because the client tints the whole figure with the nation's colour and
-# a busy coat would fight it.  The accent (`band`) is the collar and headband of the kit.
+# muted, hand-painted range. National paint is confined to collars, cuffs and headbands;
+# coats, trousers, skin and equipment keep their original colors.
 def _kit(coat, trousers, band, style, head=None, cap=None, plume=None):
     return Kit(
         coat=coat,
@@ -856,6 +883,14 @@ FLAVOR_KITS = {
     "native": _kit("#b8925e", "#6a4a2e", "#2f8a86", "headband", plume="#efe7cf"),
     "oceanic": _kit("#8a3a28", "#e0d6bc", "#e0b040", "bare"),
 }
+
+# Skin is part of the painted kit, never a national accent.
+for flavor, skin in {
+    "arab": "#bf8c63", "east_asian": "#c79d75", "south_asian": "#a97751",
+    "southeast_asian": "#a87951", "african": "#8c5837", "steppe": "#b88b64",
+    "native": "#ad7b55", "oceanic": "#956341",
+}.items():
+    FLAVOR_KITS[flavor].skin = skin
 
 # The horse's coat per culture, so a steppe pony and a European charger read apart.
 FLAVOR_STEEDS = {

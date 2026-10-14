@@ -51,6 +51,9 @@ impl Clip {
 pub struct Sheet {
     /// Pack-relative PNG: `frames` columns by eight facing rows of `frame`-sized cells.
     pub sheet: String,
+    /// Optional grayscale nation-color layer, with exactly the same frame layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
     pub frames: u32,
     /// Milliseconds per frame at normal speed.
     pub ms: u32,
@@ -116,9 +119,7 @@ impl UnitVisual {
 
 /// Every sheet the animations name.
 pub fn paths(units: &BTreeMap<String, UnitAnimation>) -> impl Iterator<Item = &String> {
-    units
-        .values()
-        .flat_map(|unit| unit.clips.values().map(|clip| &clip.sheet))
+    units.values().flat_map(paths_one)
 }
 
 /// Every sprite, flavor sprite and animation sheet the unit visuals name.
@@ -132,7 +133,9 @@ pub fn visual_paths(units: &BTreeMap<String, UnitVisual>) -> impl Iterator<Item 
 }
 
 fn paths_one(unit: &UnitAnimation) -> impl Iterator<Item = &String> {
-    unit.clips.values().map(|clip| &clip.sheet)
+    unit.clips
+        .values()
+        .flat_map(|clip| std::iter::once(&clip.sheet).chain(clip.accent.iter()))
 }
 
 pub fn validate(units: &BTreeMap<String, UnitVisual>, rules: &Rules) -> Result<(), ContentError> {
@@ -189,6 +192,7 @@ fn check_clips(id: &str, unit: &UnitAnimation) -> Result<(), ContentError> {
             || w * sheet.frames > MAX_SHEET_SIDE
             || !(20..=2000).contains(&sheet.ms)
             || !safe_path(&sheet.sheet)
+            || sheet.accent.as_ref().is_some_and(|path| !safe_path(path))
         {
             return Err(ContentError::Invalid(format!(
                 "visuals.units.{id}: the {clip:?} sheet needs 1-32 frames no wider than {MAX_SHEET_SIDE} pixels in all, 20-2000 ms a frame, and a path inside the pack"
@@ -243,6 +247,7 @@ mod tests {
     fn sheet(frames: u32) -> Sheet {
         Sheet {
             sheet: "units/x.png".into(),
+            accent: None,
             frames,
             ms: 100,
         }
@@ -263,6 +268,17 @@ mod tests {
             flavor_sprites: BTreeMap::new(),
             flavor_animations: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn accent_sheets_are_optional_pack_assets_and_paths_are_validated() {
+        let mut unit = animation();
+        assert!(unit.clips.values().all(|sheet| sheet.accent.is_none()));
+        unit.clips.get_mut(&Clip::Idle).unwrap().accent = Some("units/idle_accent.png".into());
+        assert!(paths_one(&unit).any(|path| path == "units/idle_accent.png"));
+        assert!(check_clips("infantry", &unit).is_ok());
+        unit.clips.get_mut(&Clip::Idle).unwrap().accent = Some("../outside.png".into());
+        assert!(check_clips("infantry", &unit).is_err());
     }
 
     #[test]
@@ -463,14 +479,19 @@ mod tests {
                 .clips
                 .as_ref()
                 .unwrap_or_else(|| panic!("{id} is not animated"));
-            for (clip, sheet) in &unit.clips {
-                let bytes = std::fs::read(root.join(&sheet.sheet)).unwrap();
-                let (w, h) = png_size(&bytes);
-                assert_eq!(
-                    (w, h),
-                    (unit.frame[0] * sheet.frames, unit.frame[1] * FACINGS),
-                    "{id} {clip:?}"
-                );
+            for unit in std::iter::once(unit).chain(visual.flavor_animations.values()) {
+                for (clip, sheet) in &unit.clips {
+                    for path in std::iter::once(&sheet.sheet).chain(sheet.accent.iter()) {
+                        let bytes = std::fs::read(root.join(path))
+                            .unwrap_or_else(|err| panic!("{path}: {err}"));
+                        let (w, h) = png_size(&bytes);
+                        assert_eq!(
+                            (w, h),
+                            (unit.frame[0] * sheet.frames, unit.frame[1] * FACINGS),
+                            "{id} {clip:?} {path}"
+                        );
+                    }
+                }
             }
         }
     }

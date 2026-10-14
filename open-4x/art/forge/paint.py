@@ -94,3 +94,56 @@ def render_sprite(svg_text: str, width: int, height: int, ss: int = 4, seed=1, *
     paint_kw.setdefault('grade_kw', {})
     big = paint(big, seed=seed, **paint_kw)
     return downsample(big, width, height)
+
+
+def render_unit_pair(svg_obj, width: int, height: int, ss: int = 3, seed=2, radius: int = 1, rim: float = 0.6) -> tuple[Image.Image, Image.Image]:
+    """Render a Scene's Svg and its 3D-occluded accent_svg in a single rsvg-convert pass."""
+    accent_svg = getattr(svg_obj, "accent_svg", None)
+    if accent_svg is None or not accent_svg.items:
+        base_im = render_sprite(svg_obj.render(), width, height, ss=ss, seed=seed, radius=radius, rim=rim)
+        return base_im, Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+    defs = "".join(svg_obj.defs) + "".join(accent_svg.defs)
+    body_base = "\n".join(svg_obj.items)
+    body_acc = "\n".join(accent_svg.items)
+    combined = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height * 2}" '
+        f'viewBox="0 0 {width} {height * 2}">\n<defs>{defs}</defs>\n'
+        f'{body_base}\n<g transform="translate(0,{height})">{body_acc}</g>\n</svg>\n'
+    )
+    both = rasterize(combined, width * ss, height * 2 * ss)
+    base_big = both.crop((0, 0, width * ss, height * ss))
+    mask_big = both.crop((0, height * ss, width * ss, height * 2 * ss))
+
+    base_im = downsample(paint(base_big, seed=seed, radius=radius, rim=rim, grade_kw={}), width, height)
+
+    m = to_array(mask_big)
+    cov = np.clip(m[..., 2:3] * m[..., 3:4], 0.0, 1.0)
+    if float(cov.max()) < 1e-3:
+        return base_im, Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    val = np.where(m[..., 2:3] > 1e-4, m[..., 1:2] / np.maximum(m[..., 2:3], 1e-4), 0.78)
+    acc_raw = to_image(np.dstack([val, val, val, cov]))
+    acc_painted = paint(acc_raw, seed=seed, radius=radius, rim=rim * 0.8, grade_kw={"sat": 0.0, "contrast": 1.08, "key": 0.12})
+    acc_im = downsample(acc_painted, width, height)
+
+    # Clamp accent alpha to base alpha so accent never fringes outside the silhouette.
+    b_arr = to_array(base_im)
+    a_arr = to_array(acc_im)
+    a_arr[..., 3] = np.minimum(a_arr[..., 3], b_arr[..., 3])
+    return base_im, to_image(a_arr)
+
+
+def tint_accent(base_im: Image.Image, accent_im: Image.Image, hex_col: str) -> Image.Image:
+    """Composite `accent_im` tinted by `hex_col` over `base_im` (for static UI preview sprites)."""
+    from .svgkit import rgb
+
+    cr, cg, cb = (c / 255.0 for c in rgb(hex_col))
+    b_arr = to_array(base_im)
+    a_arr = to_array(accent_im)
+    t_rgb = np.clip(a_arr[..., :3] * np.array([cr, cg, cb], dtype=np.float32) * 1.12, 0.0, 1.0)
+    ta = a_arr[..., 3:4]
+    ba = b_arr[..., 3:4]
+    out_a = ta + ba * (1.0 - ta)
+    out_rgb = np.where(out_a > 1e-5, (t_rgb * ta + b_arr[..., :3] * ba * (1.0 - ta)) / np.maximum(out_a, 1e-5), 0.0)
+    return to_image(np.dstack([out_rgb, out_a]))
+

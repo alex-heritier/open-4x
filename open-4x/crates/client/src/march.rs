@@ -5,7 +5,7 @@
 //! its run clip, turned toward each step, then hands back to the real unit facing the way it
 //! last walked. The walks of one snapshot play together, and fights wait for them. They never
 //! hold back orders: a newer snapshot cuts them short and starts its own.
-use super::presentation::{UNIT_LIFT as LIFT, Z_UNIT, depth, tint, unit_size};
+use super::presentation::{UNIT_LIFT as LIFT, Z_UNIT, depth, nation_color, unit_size};
 use super::puppet::{ClipArt, Puppetry};
 use super::{Session, camera_rect};
 use bevy::{prelude::*, window::PrimaryWindow};
@@ -196,11 +196,7 @@ fn start(
         flavor,
         Clip::Run,
     );
-    let color = if march.owner == session.player {
-        Color::WHITE
-    } else {
-        tint(game, march.owner)
-    };
+    let color = Color::WHITE;
     let size = unit_size(def);
     let first = path[0];
     let sprite = match &art {
@@ -223,6 +219,7 @@ fn start(
             sprite,
             Transform::from_xyz(first.x, first.y + LIFT, Z_UNIT + depth(first.y)),
             WalkerSprite,
+            super::puppet::NationAccent::new(nation_color(game, march.owner, 1.0)),
         ))
         .id();
     Some(Walker {

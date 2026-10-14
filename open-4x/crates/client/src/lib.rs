@@ -717,6 +717,7 @@ pub fn run() {
                 presentation::minimap_viewport,
                 presentation::draw_overlays,
                 puppet::animate,
+                puppet::accents,
                 smoke,
             )
                 .chain(),

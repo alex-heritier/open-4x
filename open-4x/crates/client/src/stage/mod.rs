@@ -11,8 +11,8 @@ mod motion;
 mod script;
 
 use super::march::Walks;
-use super::presentation::{UNIT_LIFT as LIFT, tint, unit_size};
-use super::puppet::{ClipSet, Puppetry};
+use super::presentation::{UNIT_LIFT as LIFT, nation_color, unit_size};
+use super::puppet::{ClipSet, NationAccent, Puppetry};
 use super::{Session, WorldRect, camera_rect, option};
 use bevy::{
     asset::RenderAssetUsages,
@@ -61,8 +61,16 @@ pub(super) struct StageVisual;
 #[derive(Component)]
 pub(super) struct Part;
 /// The pieces `drive` poses each frame: apart from the camera, which it only reads.
-type Sprites<'w, 's> =
-    Query<'w, 's, (&'static mut Transform, &'static mut Sprite), (With<Part>, Without<Camera2d>)>;
+type Sprites<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Transform,
+        &'static mut Sprite,
+        Option<&'static mut NationAccent>,
+    ),
+    (With<Part>, Without<Camera2d>),
+>;
 #[derive(Component)]
 pub(super) struct SkipButton;
 
@@ -106,6 +114,8 @@ struct Parts {
 struct Look {
     start: Color,
     captor: Color,
+    nation: Color,
+    captor_nation: Color,
 }
 
 impl Stage {
@@ -500,17 +510,12 @@ fn spawn_skip_button(commands: &mut Commands) {
         });
 }
 
-/// How a unit is coloured on the map: its nation's tint, or plain when it is the player's own.
-fn unit_color(session: &Session, owner: Id, spent: bool) -> Color {
-    let Some(game) = &session.game else {
-        return Color::WHITE;
-    };
-    // A nation's colour sits on its own units and its rivals' alike; only the spent grey is a
-    // player-only signal.
+/// Spent movement dims the paint without changing its hue.
+fn unit_color(spent: bool) -> Color {
     if spent {
         Color::srgb(0.66, 0.66, 0.70)
     } else {
-        tint(game, owner)
+        Color::WHITE
     }
 }
 
@@ -542,9 +547,9 @@ fn spawn_actors(
                     .units
                     .get(&u.kind)
                     .is_some_and(|def| u.moves_left(def) == 0);
-            unit_color(session, u.owner, spent)
+            unit_color(spent)
         });
-        let recorded = unit_color(session, fighter.owner, false);
+        let recorded = Color::WHITE;
         let start = if actor.captor.is_some() {
             recorded
         } else {
@@ -552,9 +557,16 @@ fn spawn_actors(
         };
         let captor = actor
             .captor
-            .map(|id| now.unwrap_or_else(|| unit_color(session, id, false)))
+            .map(|_| now.unwrap_or(Color::WHITE))
             .unwrap_or(start);
-        looks.push(Look { start, captor });
+        let nation = nation_color(game, fighter.owner, 1.0);
+        let captor_nation = nation_color(game, actor.captor.unwrap_or(fighter.owner), 1.0);
+        looks.push(Look {
+            start,
+            captor,
+            nation,
+            captor_nation,
+        });
         let flavor = game
             .factions
             .get(&fighter.owner)
@@ -593,7 +605,15 @@ fn spawn_actors(
         arts.push(art);
         let z = STAGE_Z - actor.anchor.y / 1000.0 + i as f32 * 0.01;
         let place = |dz: f32| Transform::from_xyz(actor.anchor.x, actor.anchor.y + LIFT, z + dz);
-        let sprite = commands.spawn((sprite, place(0.0), Part, StageVisual)).id();
+        let sprite = commands
+            .spawn((
+                sprite,
+                place(0.0),
+                Part,
+                StageVisual,
+                NationAccent::new(nation),
+            ))
+            .id();
         let frame = commands
             .spawn((
                 shapes.bar(Vec2::new(BAR_WIDTH + 4.0, 10.0), PLATE.with_alpha(0.0)),
@@ -661,7 +681,7 @@ fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
         let pose = script.pose_at(i, t);
         let parts = &playing.parts[i];
         let z = STAGE_Z - actor.anchor.y / 1000.0 + i as f32 * 0.01;
-        if let Ok((mut transform, mut sprite)) = sprites.get_mut(parts.sprite) {
+        if let Ok((mut transform, mut sprite, accent)) = sprites.get_mut(parts.sprite) {
             if let Some(art) = &playing.arts[i] {
                 show_clip(art, script, i, t, &mut sprite, images);
             }
@@ -672,6 +692,15 @@ fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
                 scale: Vec3::splat(pose.scale),
             };
             sprite.color = shade(&playing.looks[i], &pose, fade);
+            if let Some(mut accent) = accent {
+                let look = &playing.looks[i];
+                let (a, b) = (look.nation.to_srgba(), look.captor_nation.to_srgba());
+                accent.color = Color::srgb(
+                    mix(a.red, b.red, pose.tint),
+                    mix(a.green, b.green, pose.tint),
+                    mix(a.blue, b.blue, pose.tint),
+                );
+            }
         }
         let visible = pose.alpha * fade;
         let max_hp = actor.fighter.max_hp.max(1);
@@ -679,7 +708,7 @@ fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
         let fraction = (hp as f32 / max_hp as f32).clamp(0.0, 1.0);
         // A unit that crosses to another square takes its bar along; a lunge or a fall does not.
         let base = Vec2::new(actor.anchor.x, actor.anchor.y - 22.0) + pose.travel;
-        if let Ok((mut transform, mut sprite)) = sprites.get_mut(parts.frame) {
+        if let Ok((mut transform, mut sprite, _)) = sprites.get_mut(parts.frame) {
             transform.translation = base.extend(z + 0.1);
             sprite.color = PLATE.with_alpha(PLATE.alpha() * visible);
         }
@@ -688,7 +717,7 @@ fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
             // Too many hit points to segment: the lone pip is the old continuous fill,
             // shrinking toward its left edge.
             if let Some(&fill) = parts.pips.first()
-                && let Ok((mut transform, mut sprite)) = sprites.get_mut(fill)
+                && let Ok((mut transform, mut sprite, _)) = sprites.get_mut(fill)
             {
                 let width = (BAR_WIDTH * fraction).max(6.0);
                 transform.translation =
@@ -699,7 +728,7 @@ fn paint(playing: &Playing, sprites: &mut Sprites, images: &Assets<Image>) {
         } else {
             let lit = hp_color(fraction);
             for (pip, entity) in layout.iter().zip(parts.pips.iter()) {
-                let Ok((mut transform, mut sprite)) = sprites.get_mut(*entity) else {
+                let Ok((mut transform, mut sprite, _)) = sprites.get_mut(*entity) else {
                     continue;
                 };
                 transform.translation = Vec3::new(base.x + pip.centre, base.y, z + 0.2);

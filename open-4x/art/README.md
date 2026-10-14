@@ -104,7 +104,11 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 ## Unit animation (`units/`)
 
 `python build.py units` renders every design's five clips (about a quarter of an hour on four cores) and writes them as
-`units/<design>/<clip>.png`, plus the design's single `sprites/<design>.png` (its first idle frame, facing south-west).
+`units/<design>/<clip>.png` and its matching `<clip>_accent.png`, plus the design's single `sprites/<design>.png` (its first idle frame, facing south-west).
+The base sheet keeps the culture's uniform, skin, leather, wood and metal colors. The accent sheet is grayscale with transparency, drawn from designated 3D surfaces and occluded by the same depth-sorted geometry. Only collars, cuffs, headbands, saddle blankets, flags and cargo bindings are recolored. The client draws this layer above the base with the nation's color, matching its exact atlas frame, facing, brightness and opacity during idle, movement, combat and capture. Packs opt in with `accent` beside each clip's `sheet`; older packs keep their original colors.
+
+`crate` now uses the same eight-facing, five-clip pipeline as the other land designs. `build.py cargo` rebuilds just that design. Unit builds process one design at a time to bound memory use.
+
 A clip sheet has a column per frame and a row per facing, in Civ3's strip order: south-west, south, south-east, east,
 north-east, north, north-west, west. Facing `k` looks along the ground at `225 + 45k` degrees (east 0, north 90).
 
@@ -133,8 +137,7 @@ as that culture's people. `pack.json`'s `visuals.units.<design>.flavor_sprites` 
 banner-man from its own art while every other design stays shared. `python build.py units
 cavalry_steppe infantry` re-renders just the named designs.
 
-Each kit stays in the muted, hand-painted range, because the client tints a figure with its nation's
-colour and a busy coat would fight it. The accent is the collar, cap band or headband, and the
+Each kit keeps its own uniform palette. National color appears only on designated cloth accents. The
 headgear carries the strongest read at the drawn size: a white tunic under a dark kepi for Latin
 America, a shako for the Orthodox world, a turban for the Islamic one, a dark blue coat under a red-banded
 kepi for East Asia (the Meiji army's uniform), a steep conical straw hat for South-East Asia, a cloth cap for the subcontinent, a red headband over an ochre tunic for Africa,
