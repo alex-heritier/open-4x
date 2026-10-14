@@ -1019,7 +1019,7 @@ pub(super) fn refresh(params: Refresh) {
                 let surface = resolved_overlay_names(tile, visuals)
                     .0
                     .and_then(|name| visuals.relief_borders.get(name));
-                let (mut dashes, lift, size) = if let Some((path, (_, layout))) =
+                let (mut dashes, lift) = if let Some((path, (_, layout))) =
                     surface.and_then(|path| art.relief_borders.get(path).map(|entry| (path, entry)))
                 {
                     let image = contour_images
@@ -1033,7 +1033,7 @@ pub(super) fn refresh(params: Refresh) {
                     });
                     let size = Vec2::new(128.0, 112.0);
                     sprite.custom_size = Some(size);
-                    (sprite, 24.0, size)
+                    (sprite, 24.0)
                 } else {
                     let mut sprite = Sprite::from_atlas_image(
                         border_sheet.clone(),
@@ -1044,11 +1044,10 @@ pub(super) fn refresh(params: Refresh) {
                     );
                     let size = Vec2::new(128.0, 64.0);
                     sprite.custom_size = Some(size);
-                    (sprite, 0.0, size)
+                    (sprite, 0.0)
                 };
+                // The sheets already place rival ribbons on opposite sides of their shared edge.
                 dashes.color = ink;
-                // The coloured dash alone carries the frontier, slightly enlarged.
-                dashes.custom_size = Some(size * 1.12);
                 commands.spawn((
                     dashes,
                     Transform::from_xyz(sx, sy + lift, Z_BORDER + depth(sy)),
