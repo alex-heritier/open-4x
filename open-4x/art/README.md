@@ -99,7 +99,7 @@ Overlays (`sprites/`): `forest`, `pine`, `jungle`, `marsh`, `hills`, `hills_dry`
 | `fleet.py` | the five ships on one 3D hull (stations, bow and stern, strakes, planked deck) with casemates, oval funnels and their trailing plumes, turrets that train round to the starboard beam, sponsons, tripod masts, ensign, bow and stern foam, and their five clips; `muzzle_table(design)` reports where the guns are when a broadside fires, for `pack.json`'s `muzzles` |
 | `chrome.py`, `emblems.py`, `scenes.py` | window chrome: parchment/slate/felt surfaces, gilt frames with boss and scroll corners, cartouches, compass; yield emblems; terrain vignettes (`build.py chrome`) |
 | `icons.py` | flat white glyph icons (`icon_*`, `hud_*`) |
-| `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (heaps of rounded, softly lit stones or packed coal lumps, crops, animals on tapered legs, a derrick over an oil slick, flags for the colonial markers; no frame or outline, only a contact shadow and a few grass blades at the foot), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
+| `resources.py` | the 43 natural resources of the Age of Imperialism map as small free-standing paintings (heaps of rounded, softly lit stones or packed coal lumps, crops, animals on tapered legs, a derrick over an oil slick, a hamlet of cottages for bonus terrain, flags for the colonial markers; no frame or outline, only a contact shadow and a few grass blades at the foot), `sprites/resources/<id>.png`, 128 px shown at 60; `python build.py resources` |
 
 ## Unit animation (`units/`)
 

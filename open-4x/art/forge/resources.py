@@ -706,20 +706,95 @@ def flag(svg: Svg, col: str, charge: str | None = None):
         svg.path("M76,26 L80,26 L80,58 L76,58 Z", "#ffffff", op=0.75)
 
 
-def cornucopia(svg: Svg):
-    """Bonus terrain: a horn of plenty."""
-    shadow(svg, rx=38, ry=7)
-    horn = "M96,96 C60,98 30,84 26,56 C24,40 38,32 50,36 C44,46 48,60 64,70 C76,78 92,82 102,84 Z"
-    svg.path(horn, svg.lin([(0, "#e8c27a"), (0.5, "#b8864a"), (1, "#7a4e26")], 0, 0, 0.8, 1))
-    for t in (0.2, 0.4, 0.6):
-        x, y = 96 - 70 * t, 96 - 50 * t
-        svg.path(f"M{x:.1f},{y + 5:.1f} Q{x - 4:.1f},{y - 6:.1f} {x - 3:.1f},{y - 14:.1f}", "none", "#7a4e26", 1.3, 0.6)
-    svg.path("M96,92 C62,92 36,80 32,58", "none", "#fff0c4", 2.0, 0.5)
-    # the harvest spilling out of the mouth
-    for x, y, r, col in ((98, 78, 8.5, "#d33a2a"), (90, 70, 7.5, "#e8a22a"), (82, 86, 6.5, "#6aa83a"), (104, 90, 7, "#8a3a9a"), (92, 90, 6, "#f0d03a"), (76, 74, 6, "#c92c2c")):
-        sphere(svg, x, y, r, col, lo=0.45, hi=1.55)
-    leaf(svg, 100, 72, -40, 18, 5, "#4f9a36")
-    leaf(svg, 86, 66, -80, 16, 5, "#5aa840")
+def cottage(svg: Svg, x, y, w, d, h, roof: str, wall: str, rise=None, chimney=False, lit_window=True):
+    """A gabled cottage in the map's 2:1 view.  (x, y) is its back corner on the ground; `w` runs
+    down-right along the ridge, `d` down-left across it.  Only the faces toward the viewer are drawn:
+    the long front wall (lit, it faces the lower left), the gable end (in shade) and the front roof."""
+    r = rise if rise is not None else d * 0.62
+
+    def P(a, b, z=0.0):
+        return (x + a - b, y + (a + b) * 0.5 - z)
+
+    o = 1.6  # eaves overhang
+    # contact shadow, cast toward the lower right
+    foot = [P(0, 0), P(w, 0), P(w, d), P(0, d)]
+    svg.poly([(px + 3, py + 1.5) for px, py in foot], "#0d0a06", op=0.35, extra=f'filter="{svg.blur(1.6)}"')
+    # gable end, facing the lower right: in shade
+    svg.poly([P(w, 0), P(w, d), P(w, d, h), P(w, d / 2, h + r), P(w, 0, h)], svg.lin([(0, shade(wall, 0.78)), (1, shade(wall, 0.55))], 0, 0, 0, 1))
+    # the long wall, facing the lower left: in the light
+    svg.poly([P(0, d), P(w, d), P(w, d, h), P(0, d, h)], svg.lin([(0, shade(wall, 1.12)), (1, shade(wall, 0.86))], 0, 0, 1, 1))
+    # a timber sill and the corner post
+    svg.line(P(0, d, 0.6), P(w, d, 0.6), shade(wall, 0.5), 1.0, 0.7)
+    svg.line(P(w, d), P(w, d, h), shade(wall, 0.45), 0.9, 0.6)
+    # door and windows on the long wall
+    def quad(a0, a1, z0, z1, fill, op=1.0):
+        svg.poly([P(a0, d, z0), P(a1, d, z0), P(a1, d, z1), P(a0, d, z1)], fill, op=op)
+    quad(w * 0.42, w * 0.42 + 3.2, 0, h * 0.78, "#3e2a1a")
+    for a0 in (w * 0.14, w * 0.70):
+        if a0 + 3 < w:
+            quad(a0, a0 + 3.0, h * 0.40, h * 0.74, "#f2c862" if lit_window else "#2a2622")
+    # gable-end window
+    svg.poly([P(w, d * 0.40, h * 0.45), P(w, d * 0.60, h * 0.45), P(w, d * 0.60, h * 0.78), P(w, d * 0.40, h * 0.78)], "#2a2420")
+    # the front roof slope, from the eaves up to the ridge, overhanging the walls
+    eave0, eave1 = P(-o, d + o, h - 0.8), P(w + o, d + o, h - 0.8)
+    ridge0, ridge1 = P(-o, d / 2, h + r), P(w + o, d / 2, h + r)
+    svg.poly([eave0, eave1, ridge1, ridge0], svg.lin([(0, shade(roof, 1.32)), (1, shade(roof, 0.72))], 0, 0, 0.3, 1))
+    # thatch or tile courses across the slope, and a dark lip under the eaves
+    for k in range(1, 4):
+        t = k / 4
+        a, b = lerp(eave0, ridge0, t), lerp(eave1, ridge1, t)
+        svg.line(a, b, shade(roof, 0.7), 0.8, 0.55)
+    svg.line(eave0, eave1, shade(roof, 0.45), 1.3, 0.8)
+    svg.line(ridge0, ridge1, shade(roof, 1.45), 1.1, 0.8)
+    # the gable's roof edge
+    svg.line(P(w + o, d + o, h - 0.8), ridge1, shade(roof, 0.6), 1.2, 0.8)
+    if chimney:
+        c0 = P(w * 0.72, d * 0.5, h + r * 0.55)
+        svg.rect(c0[0] - 2.2, c0[1] - 9, 4.4, 9, svg.lin([(0, "#a8705a"), (1, "#6a4234")], 0, 0, 1, 0))
+        svg.rect(c0[0] - 2.8, c0[1] - 10, 5.6, 1.8, "#5a382c")
+        for k, (dx, dy, rr) in enumerate(((1, -14, 3.0), (4, -20, 3.8), (8, -26, 4.4))):
+            svg.circle(c0[0] + dx, c0[1] + dy, rr, "#d8d4cc", op=0.45 - 0.1 * k, blur=svg.blur(1.2))
+
+
+def haystack(svg: Svg, x, y, r=7.0):
+    svg.ellipse(x + 2, y + 1, r * 1.1, r * 0.35, "#0d0a06", op=0.35, blur=svg.blur(1.2))
+    svg.path(f"M{x - r},{y} C{x - r},{y - r * 1.2} {x - r * 0.3},{y - r * 1.7} {x},{y - r * 1.75} C{x + r * 0.3},{y - r * 1.7} {x + r},{y - r * 1.2} {x + r},{y} Z",
+             svg.rad([(0, "#f0d27a"), (0.55, "#c99a44"), (1, "#7a5a26")], 0.32, 0.25, 0.85))
+    for k in range(3):
+        yy = y - r * (0.35 + 0.4 * k)
+        svg.path(f"M{x - r * (0.95 - 0.25 * k):.1f},{yy:.1f} Q{x:.1f},{yy + 2:.1f} {x + r * (0.95 - 0.25 * k):.1f},{yy:.1f}", "none", "#8a6a2e", 0.7, 0.6)
+
+
+def hamlet(svg: Svg):
+    """Bonus terrain: a little hamlet of cottages among their gardens, a haystack and a tree."""
+    rng = random.Random(31)
+    shadow(svg, rx=46, ry=10, op=0.32)
+    # trodden earth and garden plots round the houses, with a path running off to the lower left
+    ground_patch(svg, 66, 88, 50, 22, "#6e5a38", 0.45)
+    ground_patch(svg, 68, 82, 34, 13, "#7a6440", 0.35)
+    svg.path("M60,100 C50,104 40,106 26,112", "none", "#9a8256", 4.0, 0.7)
+    for i in range(4):  # a vegetable plot in green and brown rows, behind the fence
+        a, b = (78 + i * 3.0, 92 + i * 1.5), (92 + i * 3.0, 85 + i * 1.5)
+        svg.line(a, b, "#5d7a2c" if i % 2 else "#6a5232", 2.2, 0.9)
+    # a tree behind the hamlet
+    tube(svg, "M30,92 C31,84 29,78 31,72", "#5a3e24", 3.2)
+    for _ in range(26):  # the crown in leafy dabs, darker underneath and to the lower right
+        a_, d_ = rng.uniform(0, math.tau), rng.random() ** 0.7
+        dx, dy = math.cos(a_) * d_ * 11, math.sin(a_) * d_ * 9
+        tone = 1.0 - 0.035 * (dx + dy) + rng.uniform(-0.1, 0.1)
+        svg.ellipse(31 + dx, 64 + dy, rng.uniform(3.5, 5.5), rng.uniform(3, 4.5), shade("#3a6020", tone), rot=rng.uniform(-30, 30))
+    # the houses, back to front
+    cottage(svg, 66, 50, 24, 14, 10, "#c9a456", "#e6dcc4", chimney=True)
+    cottage(svg, 92, 66, 20, 12, 9, "#b0563c", "#d8ccb0", lit_window=False)
+    cottage(svg, 46, 72, 20, 13, 9, "#bf9a50", "#e2d6bc")
+    haystack(svg, 98, 96, 6.5)
+    # a wattle fence along the front of the garden
+    for i in range(6):
+        px, py = 70 + i * 5, 104 + i * -2.5
+        svg.line((px, py), (px, py - 6), "#6a4a2a", 1.3)
+    svg.line((70, 101), (95, 88.5), "#8a6a40", 1.1)
+    svg.line((70, 103.5), (95, 91), "#8a6a40", 1.1)
+    tufts(svg, rng, cx=60, cy=BASE[1] + 2, half=42, n=6)
 
 
 # --- the table ------------------------------------------------------------------------------------------
@@ -766,7 +841,7 @@ RESOURCES = {
     "cocoa": ("bonus", lambda s: cocoa(s)),
     "pearls": ("bonus", lambda s: pearls(s)),
     "camels": ("bonus", lambda s: beast(s, "#c4985a", "#e8d4a8", kind="camel")),
-    "bonus-terrain": ("bonus", lambda s: cornucopia(s)),
+    "bonus-terrain": ("bonus", lambda s: hamlet(s)),
     "coconuts": ("bonus", lambda s: coconuts(s)),
 }
 
