@@ -569,7 +569,7 @@ mod tests {
         assert_eq!(start, after);
     }
     #[test]
-    fn attacking_a_neutral_nation_declares_war() {
+    fn peace_blocks_combat_until_war_is_declared() {
         let mut h = starter_at_peace(9);
         assert!(!h.game.at_war(1, 2));
         let attacker = unit_of(&h, 1, "cavalry");
@@ -578,16 +578,18 @@ mod tests {
         let square = Coord::new(capital.x + 1, capital.y);
         make_grass(&mut h, square);
         h.game.set_position(target, square);
-        h.command(
-            1,
-            Command::Attack {
-                unit: attacker,
-                target: square,
-            },
-        )
-        .unwrap();
+        // Combat cannot begin while the two nations are at peace.
+        let attack = Command::Attack {
+            unit: attacker,
+            target: square,
+        };
+        assert!(h.command(1, attack.clone()).is_err());
+        assert!(!h.game.at_war(1, 2));
+        // Declaring war opens the way, and both nations know it.
+        h.command(1, Command::DeclareWar { nation: 2 }).unwrap();
         assert!(h.game.at_war(1, 2));
         assert!(h.game.at_war(2, 1));
+        h.command(1, attack).unwrap();
     }
     #[test]
     fn a_battle_wounds_or_kills_with_civ3_combat() {

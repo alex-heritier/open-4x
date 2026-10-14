@@ -383,9 +383,8 @@ enum Action {
     Produce(String),
     Save,
     SelectUnit(Id),
+    /// Open one of the player's own cities.
     SelectCity(Id),
-    /// Centre the camera on a city without opening its detail view.
-    ZoomCity(Id),
     /// Build a design in a city without opening its detail view.
     ProduceAt {
         city: Id,
@@ -394,12 +393,12 @@ enum Action {
     /// Open the window for choosing what a city builds.
     OpenProduction(Id),
     CloseProduction,
-    /// Dismiss the right-click menu.
-    CloseMenu,
     /// Close the city's detail view.
     CloseCity,
     /// Open the diplomacy window with a nation's leader.
     Talk(Id),
+    /// Declare war on a nation from the diplomacy window.
+    DeclareWar(Id),
     CloseTalk,
     /// A control that is drawn but does nothing yet.
     Idle,
@@ -687,7 +686,7 @@ pub fn run() {
                 stage::drive,
                 stage::fx,
                 presentation::fit_terrain_atlas,
-                presentation::refresh,
+                (presentation::refresh, presentation::animate_selection_top).chain(),
                 presentation::update_minimap,
                 presentation::minimap_viewport,
                 presentation::draw_overlays,
@@ -736,7 +735,14 @@ fn setup(
             ..OrthographicProjection::default_2d()
         }),
     ));
-    commands.insert_resource(theme::Shapes::new(&mut images));
+    let shapes = theme::Shapes::new(&mut images);
+    commands.spawn((
+        shapes.selection_top(),
+        Transform::default(),
+        Visibility::Hidden,
+        presentation::SelectionMarker,
+    ));
+    commands.insert_resource(shapes);
     commands.insert_resource(Minimap {
         image: images.add(Image::new_fill(
             bevy::render::render_resource::Extent3d::default(),
@@ -919,17 +925,20 @@ fn selected_unit(session: &Session) -> Option<&fourx_sim::Unit> {
         .filter(|u| u.owner == session.player)
 }
 
-/// What clicking `target` means for a unit: bombard or attack a hostile square in reach,
-/// otherwise march there.
+/// What clicking `target` means for a unit: bombard or attack a hostile square in reach when
+/// the two nations are at war, otherwise march there. A nation at peace must be declared on
+/// before its units may be attacked (see the diplomacy window).
 fn order_for(session: &Session, unit: Id, target: Coord) -> Option<Command> {
     let game = session.game.as_ref()?;
     let u = game.units.get(&unit)?;
     let def = session.rules.def(u);
     let distance = game.map.distance(u.position, target);
-    let hostile = game.hostile_holder(target, session.player).is_some();
-    Some(if hostile && def.can_bombard() && distance <= def.range {
+    let enemy = game
+        .hostile_holder(target, session.player)
+        .is_some_and(|holder| game.at_war(session.player, holder));
+    Some(if enemy && def.can_bombard() && distance <= def.range {
         Command::Bombard { unit, target }
-    } else if hostile && def.can_attack() && distance == 1 {
+    } else if enemy && def.can_attack() && distance == 1 {
         Command::Attack { unit, target }
     } else {
         Command::Move {
@@ -1004,7 +1013,6 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
     }
     let unit = selected_unit(session).map(|u| u.id);
     let command = match action {
-        Action::CloseMenu => None,
         Action::EndTurn => Some(Command::EndTurn),
         Action::Found => unit.map(|unit| Command::FoundCity {
             unit,
@@ -1045,10 +1053,6 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             session.dirty = true;
             None
         }
-        Action::ZoomCity(_) => {
-            session.dirty = true;
-            None
-        }
         Action::OpenProduction(city) => {
             session.production = Some(*city);
             session.dirty = true;
@@ -1082,6 +1086,12 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
             session.selection = Selection::None;
             session.dirty = true;
             None
+        }
+        Action::DeclareWar(nation) => {
+            // The words have been said; the window closes on the state of war.
+            session.diplomacy = None;
+            session.dirty = true;
+            Some(Command::DeclareWar { nation: *nation })
         }
         Action::CloseTalk => {
             session.diplomacy = None;
@@ -1178,11 +1188,6 @@ fn buttons(
                 .and_then(|g| g.units.get(id))
                 .map(|u| u.position),
             Action::SelectCity(id) => session
-                .game
-                .as_ref()
-                .and_then(|g| g.cities.get(id))
-                .map(|c| c.position),
-            Action::ZoomCity(id) => session
                 .game
                 .as_ref()
                 .and_then(|g| g.cities.get(id))
@@ -1507,6 +1512,8 @@ fn controls(params: Controls) {
         .filter(|id| game.units[*id].owner == session.player)
         .copied()
         .collect();
+    // Only a city of the player's own can be opened; a foreign one is reached from the menu.
+    let own_city = city.filter(|id| game.cities.get(id).is_some_and(|c| c.owner == session.player));
     if mouse.just_pressed(MouseButton::Right) {
         if should_open_menu(city, &present) {
             // A city or a stack of units: offer what fits, rather than marching into it.
@@ -1537,12 +1544,13 @@ fn controls(params: Controls) {
         return;
     }
     // A second click on the same square soon after the first is a double click, which opens
-    // a city's detail view. A single click on a city is just a click on its square: it
-    // selects the units standing there and nothing else.
+    // the detail view of one of the player's own cities. A single click on a city is just a
+    // click on its square: it selects the units standing there and nothing else. A foreign
+    // city is never opened; its leader is reached from the right-click menu.
     let now = time.elapsed_secs_f64();
     let double = is_double_click(*last_click, position, now);
     *last_click = if double { None } else { Some((position, now)) };
-    if double && let Some(id) = city {
+    if double && let Some(id) = own_city {
         session.selection = Selection::City(id);
         session.dirty = true;
         return;

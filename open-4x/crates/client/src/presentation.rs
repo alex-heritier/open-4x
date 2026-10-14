@@ -9,6 +9,7 @@ use fourx_sim::{
     terrain::{Cover, Relief, Terrain, Tile},
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::f32::consts::TAU;
 
 use crate::chrome::{Frame, Skin, dress, texture, trim};
 use crate::theme::*;
@@ -247,6 +248,9 @@ struct Sight {
     height: i32,
     states: Vec<u8>,
 }
+
+#[derive(Component)]
+pub(super) struct SelectionMarker;
 impl Sight {
     /// The rectangle `(x0, y0)..=(x1, y1)` of tiles. A spectator (player 0) sees everything.
     fn over(game: &Game, player: Id, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> Sight {
@@ -1193,23 +1197,19 @@ pub(super) fn refresh(params: Refresh) {
         _ => None,
     };
     for (&(px, py), ids) in &stacks {
-        let top = ids
-            .iter()
-            .copied()
-            .find(|id| Some(*id) == selected)
-            .unwrap_or_else(|| {
-                *ids.iter()
-                    .max_by_key(|id| {
-                        let unit = &game.units[id];
-                        let def = session.rules.def(unit);
-                        (
-                            def.defense * unit.hp(def),
-                            def.attack + def.bombard,
-                            std::cmp::Reverse(**id),
-                        )
-                    })
-                    .expect("a stack is never empty")
-            });
+        let top = stack_representative(ids, selected, || {
+            *ids.iter()
+                .max_by_key(|id| {
+                    let unit = &game.units[id];
+                    let def = session.rules.def(unit);
+                    (
+                        def.defense * unit.hp(def),
+                        def.attack + def.bombard,
+                        std::cmp::Reverse(**id),
+                    )
+                })
+                .expect("a stack is never empty")
+        });
         let unit = &game.units[&top];
         let Some(def) = session.rules.units.get(&unit.kind) else {
             continue;
@@ -1319,6 +1319,11 @@ pub(super) fn unit_size(def: &UnitDef) -> Vec2 {
     } else {
         Vec2::splat(105.0)
     }
+}
+
+/// A stack draws its selected member when there is one, otherwise its best defender.
+fn stack_representative(ids: &[Id], selected: Option<Id>, best: impl FnOnce() -> Id) -> Id {
+    selected.filter(|id| ids.contains(id)).unwrap_or_else(best)
 }
 
 /// A unit's hit-point bar, its standing order, its experience, and the size of its stack.
@@ -1453,7 +1458,14 @@ pub(super) fn strike_targets(game: &Game, rules: &Rules, unit: &Unit) -> Vec<(Co
             let Some(tile) = game.map.get(target) else {
                 continue;
             };
-            if (dx, dy) == (0, 0) || game.hostile_holder(target, unit.owner).is_none() {
+            if (dx, dy) == (0, 0) {
+                continue;
+            }
+            // Only a nation at war is a target: peace must be broken by a declaration first.
+            let enemy = game
+                .hostile_holder(target, unit.owner)
+                .is_some_and(|holder| game.at_war(unit.owner, holder));
+            if !enemy {
                 continue;
             }
             // Land units fight on land and ships at sea, whether bombarding or not.
@@ -2355,25 +2367,35 @@ fn menu_button(parent: &mut ChildSpawnerCommands, title: String, action: Action,
             ContextMenuPane,
             Node {
                 width: percent(100),
-                min_height: px(32),
+                min_height: px(22),
                 flex_shrink: 0.0,
-                padding: UiRect::axes(px(12), px(6)),
-                border_radius: rounded(10.0),
+                padding: UiRect::axes(px(8), px(2)),
+                border_radius: rounded(3.0),
                 align_items: AlignItems::Center,
                 ..default()
             },
             BackgroundColor(tone.fill(Interaction::None)),
         ))
-        .with_children(|p| bold(p, title, 13.0, tone.ink()));
+        .with_children(|p| bold(p, title, 12.5, tone.ink()));
 }
 
 /// Width of the right-click menu, and how far from the window's edges it stays.
 const MENU_WIDTH: f32 = 280.0;
 const MENU_MARGIN: f32 = 12.0;
 
+/// The nation a right-click menu over a square speaks for, when it is not the player's own:
+/// the holder of a city there, else the owner of the units standing on it. A tile holds a
+/// single nation, so there is at most one, and the player's own square names none.
+fn menu_nation(player: Id, city_owner: Option<Id>, units: &[&Unit]) -> Option<Id> {
+    city_owner
+        .or_else(|| units.first().map(|u| u.owner))
+        .filter(|owner| *owner != player)
+}
+
 /// The right-click menu over the map: the order a selected unit could take there, what a city
-/// there offers, and who stands there. A city and a stack share one menu when a unit stands
-/// in a city. Entries that name nothing still on the map are left out.
+/// there offers, who stands there, and on a foreign square the way to its nation's leader.
+/// A city and a stack share one menu when a unit stands in a city. Only the player's own city
+/// may be opened; entries that name nothing still on the map are left out.
 fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
     let Some(menu) = &session.menu else {
         return;
@@ -2390,6 +2412,9 @@ fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
     if city.is_none() && units.is_empty() {
         return;
     }
+    // A foreign city or unit on the square always offers a way to its leader: declaring war
+    // (or its refusal) lives in that window.
+    let foreign = menu_nation(session.player, city.map(|c| c.owner), &units);
     let left = menu
         .at
         .x
@@ -2399,6 +2424,9 @@ fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
     face.left = px(left.max(MENU_MARGIN));
     face.top = px(top.max(MENU_MARGIN));
     face.width = px(MENU_WIDTH);
+    // Denser than a page: this menu is a short list of rows.
+    face.padding = UiRect::axes(px(10), px(8));
+    face.row_gap = px(2);
     face.max_height = px((size.y - top - MENU_MARGIN).max(120.0));
     face.overflow = Overflow::scroll_y();
     face.align_items = AlignItems::Stretch;
@@ -2435,29 +2463,26 @@ fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
                 menu_button(p, label, Action::Strike(menu.tile), Tone::Primary);
             }
             if let Some(c) = city {
-                caption(p, "city");
-                bold(p, c.name.clone(), 16.0, INK);
-                text(
-                    p,
-                    game.factions
-                        .get(&c.owner)
-                        .map_or("Unknown".to_string(), |f| f.adjective.clone()),
-                    12.0,
-                    INK_SOFT,
-                );
-                menu_button(
-                    p,
-                    format!("Open {}", c.name),
-                    Action::SelectCity(c.id),
-                    Tone::Quiet,
-                );
-                menu_button(
-                    p,
-                    format!("Zoom to {}", c.name),
-                    Action::ZoomCity(c.id),
-                    Tone::Quiet,
-                );
+                // The city's nation shows as its flag beside the name; it is not spelled out.
+                p.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: px(8),
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|p| {
+                    nation_flag(p, nation_color(game, c.owner, 1.0), 20.0);
+                    bold(p, c.name.clone(), 15.0, INK);
+                });
+                // A foreign city cannot be opened; its leader is reached from the diplomacy
+                // entry below instead.
                 if c.owner == session.player {
+                    menu_button(
+                        p,
+                        format!("Open {}", c.name),
+                        Action::SelectCity(c.id),
+                        Tone::Quiet,
+                    );
                     menu_button(
                         p,
                         "Change production".to_string(),
@@ -2466,43 +2491,32 @@ fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
                     );
                 }
             }
+            // The leader of a foreign square, above the units standing there.
+            if let Some(nation) = foreign
+                && let Some(faction) = game.factions.get(&nation)
+            {
+                menu_button(
+                    p,
+                    format!("Open diplomacy with {}", faction.name),
+                    Action::Talk(nation),
+                    Tone::Quiet,
+                );
+            }
             if !units.is_empty() {
-                if city.is_some() {
+                if city.is_some() || foreign.is_some() {
                     rule(p);
                 }
-                caption(
-                    p,
-                    if units.len() == 1 {
-                        "unit here"
-                    } else {
-                        "units here"
-                    },
-                );
                 for u in units {
                     let def = session.rules.def(u);
-                    let owner = game
-                        .factions
-                        .get(&u.owner)
-                        .map_or("Unknown".to_string(), |f| f.adjective.clone());
                     menu_button(
                         p,
-                        if u.owner == session.player {
-                            format!(
-                                "{} · {} · {} moves",
-                                def.name,
-                                owner,
-                                moves_text(u.moves_left(def))
-                            )
-                        } else {
-                            format!("{} · {}", def.name, owner)
-                        },
+                        // Attack, defense and moves, the way the manual lists a unit.
+                        format!("{} {}/{}/{}", def.name, def.attack, def.defense, def.moves),
                         Action::SelectUnit(u.id),
                         Tone::Quiet,
                     );
                 }
             }
-            rule(p);
-            menu_button(p, "Close".to_string(), Action::CloseMenu, Tone::Quiet);
         });
 }
 
@@ -2710,6 +2724,44 @@ fn diamond(center: Vec2) -> [Vec2; 5] {
     ]
 }
 
+/// Spin the selected unit's top slowly through a full turn.
+pub(super) fn animate_selection_top(
+    session: Res<Session>,
+    shapes: Res<Shapes>,
+    mut markers: Query<(&mut Transform, &mut Visibility, &mut Sprite), With<SelectionMarker>>,
+) {
+    let turn = session.frames as f32 * TAU / 80.0;
+    let frame = (session.frames / 5) as usize;
+    let selected = match session.selection {
+        Selection::Unit(id) => Some(id),
+        _ => None,
+    };
+    for (mut transform, mut visibility, mut sprite) in &mut markers {
+        let Some(unit) = session
+            .game
+            .as_ref()
+            .and_then(|game| selected.and_then(|id| game.units.get(&id)))
+        else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let Some(def) = session.rules.units.get(&unit.kind) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let (x, y) = unit.position.screen();
+        transform.translation = Vec3::new(
+            x + 18.0,
+            y + 12.0 + unit_size(def).y / 2.0 + 22.0,
+            Z_UNIT + 10.0,
+        );
+        transform.rotation = Quat::IDENTITY;
+        transform.scale = Vec3::new(0.2 + 0.8 * turn.cos().abs(), 1.0, 1.0);
+        sprite.image = shapes.selection_top_frame(frame).clone();
+        *visibility = Visibility::Visible;
+    }
+}
+
 /// The selection's marks: the chosen city's own region outlined, the chosen square, and what a
 /// selected unit is heading for and could strike. A nation's borders are part of the map (see
 /// `refresh`); only the tiles near the camera are visited here.
@@ -2802,6 +2854,32 @@ mod tests {
         fourx_runtime::Host::base_scenario("russo-japanese-war", 42)
             .expect("the starter scenario starts")
             .game
+    }
+
+    #[test]
+    fn a_selected_unit_represents_its_stack() {
+        assert_eq!(stack_representative(&[3, 8, 5], Some(8), || 3), 8);
+        assert_eq!(stack_representative(&[3, 8, 5], Some(7), || 3), 3);
+        assert_eq!(stack_representative(&[3, 8, 5], None, || 3), 3);
+    }
+
+    #[test]
+    fn a_foreign_square_names_the_nation_for_the_menu() {
+        let game = starter();
+        let player = game.commander;
+        // A city on the square names its holder; failing a city, the units there name theirs.
+        let their_city = game.cities.values().find(|c| c.owner != player).unwrap();
+        assert_eq!(
+            menu_nation(player, Some(their_city.owner), &[]),
+            Some(their_city.owner)
+        );
+        let theirs = game.units.values().find(|u| u.owner != player).unwrap();
+        assert_eq!(menu_nation(player, None, &[theirs]), Some(theirs.owner));
+        // A player's own city or unit names nobody: there is no diplomacy with oneself.
+        let own_city = game.cities.values().find(|c| c.owner == player).unwrap();
+        assert_eq!(menu_nation(player, Some(own_city.owner), &[]), None);
+        let mine = game.units.values().find(|u| u.owner == player).unwrap();
+        assert_eq!(menu_nation(player, None, &[mine]), None);
     }
 
     #[test]

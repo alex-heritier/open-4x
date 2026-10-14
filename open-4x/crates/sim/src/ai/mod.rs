@@ -13,8 +13,8 @@
 //! The computer plays by the player's rules, through the same commands, and it remembers
 //! nothing from one day to the next: every decision is worked out again from the map, so a
 //! saved game needs no AI state and a loaded one plays on exactly as before. It does not
-//! respect the fog of war, and it never starts a war (that is for the scenario, or for
-//! whoever attacks first).
+//! respect the fog of war, and it never declares war: it fights the nations the scenario set
+//! it against, and any that have declared war on it.
 //!
 //! Designs are chosen by what they can do, not by name (see [`Roster`]), so any pack plays.
 //! Searches are bounded (see the budgets below) because a world turn has a hundred nations.

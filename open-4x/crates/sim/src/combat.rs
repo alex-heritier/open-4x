@@ -308,13 +308,15 @@ impl Game {
         if !def.can_attack() {
             return Err(error("This unit cannot attack"));
         }
+        if !self.at_war(player, holder) {
+            return Err(error("You must declare war before attacking"));
+        }
         let defender = self.best_defender(target, holder, rules);
         if defender.is_none() && def.is_naval() {
             return Err(error("Ships cannot take prisoners or cities"));
         }
         let cost = MOVE_UNIT.min(unit.moves_left(def));
         let total_moves = def.total_moves();
-        self.declare_war(player, holder);
         {
             let unit = self.units.get_mut(&id).unwrap();
             unit.attacked = true;
@@ -555,12 +557,14 @@ impl Game {
         if !def.can_bombard() {
             return Err(error("This unit cannot bombard"));
         }
+        if !self.at_war(player, holder) {
+            return Err(error("You must declare war before attacking"));
+        }
         let victim = self
             .bombard_victim(def, target, holder, rules)
             .ok_or_else(|| error("Nothing there can be bombarded"))?;
         let (strength, shots, total_moves) = (def.bombard, def.rate_of_fire, def.total_moves());
         let name = self.name_of(unit, rules);
-        self.declare_war(player, holder);
         {
             let unit = self.units.get_mut(&id).unwrap();
             unit.attacked = true;

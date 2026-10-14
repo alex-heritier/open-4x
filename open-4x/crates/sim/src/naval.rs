@@ -144,7 +144,7 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{arena, arena_rows, rules, spawn};
+    use crate::tests::{arena, arena_rows, rules, spawn, war};
     use crate::{Command, Game, Id, Rules, TickRules, terrain::Coord, units::*};
 
     const RED: Id = 1;
@@ -621,6 +621,7 @@ mod tests {
         for seed in 1..=40u64 {
             let mut game = map(&COAST);
             seeded(&mut game, seed);
+            war(&mut game, RED, BLUE);
             let ship = spawn(&mut game, BLUE, "transport", 6, 2);
             let rider = spawn(&mut game, BLUE, "infantry", 6, 2);
             board(&mut game, rider, ship);
@@ -667,6 +668,7 @@ mod tests {
         spawn(&mut game, BLUE, "ironclad", 10, 4);
         assert_eq!(game.best_defender(port, BLUE, &rules), None);
         let raider = spawn(&mut game, RED, "cavalry", 9, 4);
+        war(&mut game, RED, BLUE);
         run(
             &mut game,
             RED,
@@ -695,6 +697,7 @@ mod tests {
                 for gun in ["gunboat", "torpedo-boat"] {
                     let mut game = map(&COAST);
                     seeded(&mut game, seed);
+                    war(&mut game, RED, BLUE);
                     let target = spawn(&mut game, BLUE, victim, place.x, place.y);
                     let hull = unit(&game, target).max_hp(&rules.units[victim]);
                     game.units.get_mut(&target).unwrap().damage = hull - 1;

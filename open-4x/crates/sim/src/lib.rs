@@ -250,6 +250,11 @@ pub enum Command {
     Develop {
         city: Id,
     },
+    /// Declare war on another nation. Combat against a nation requires war, so an attack on a
+    /// nation at peace is refused until this order is given. See [`Game::at_war`].
+    DeclareWar {
+        nation: Id,
+    },
     EndTurn,
 }
 
@@ -478,6 +483,21 @@ impl Game {
     pub fn at_war(&self, a: Id, b: Id) -> bool {
         self.wars.contains(&war_key(a, b))
     }
+    /// Carry out a [`Command::DeclareWar`]: the named nation must exist, must not be the
+    /// caller, and must not already be at war with the caller.
+    fn declare_war_as(&mut self, player: Id, nation: Id) -> Result<()> {
+        if nation == player {
+            return Err(error("A nation cannot declare war on itself"));
+        }
+        if !self.factions.contains_key(&nation) {
+            return Err(error("Unknown nation"));
+        }
+        if self.at_war(player, nation) {
+            return Err(error("You are already at war with them"));
+        }
+        self.declare_war(player, nation);
+        Ok(())
+    }
     fn declare_war(&mut self, a: Id, b: Id) {
         if a != b && a != 0 && b != 0 && self.wars.insert(war_key(a, b)) {
             self.note(format!(
@@ -688,6 +708,7 @@ impl Game {
                 faction.gold -= 40;
                 self.cities.get_mut(&city).unwrap().industry += 2;
             }
+            Command::DeclareWar { nation } => self.declare_war_as(player, nation)?,
             Command::EndTurn => {
                 if player != self.commander {
                     return Err(error("Only the campaign host can advance time"));

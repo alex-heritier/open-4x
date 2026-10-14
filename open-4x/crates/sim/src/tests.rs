@@ -118,6 +118,11 @@ pub(crate) fn spawn(game: &mut Game, owner: Id, kind: &str, x: i32, y: i32) -> I
     game.add_unit(owner, kind, Coord::new(x, y))
 }
 
+/// Put two nations at war, as a declaration of war would, so that they may fight.
+pub(crate) fn war(game: &mut Game, a: Id, b: Id) {
+    game.wars.insert((a.min(b), a.max(b)));
+}
+
 const RED: Id = 1;
 const BLUE: Id = 2;
 
@@ -378,7 +383,10 @@ fn attacks_only_reach_adjacent_hostile_squares() {
     assert!(err(&mut game, Coord::new(4, 5)).contains("Nothing"));
     assert!(game.units.contains_key(&far) && game.units.contains_key(&friend));
     assert!(!game.at_war(RED, BLUE));
-    // The real attack declares war and spends a full move, whatever the dice say.
+    // At peace there is no combat: the attack is refused until war is declared.
+    assert!(err(&mut game, Coord::new(5, 5)).contains("declare war"));
+    // Once war is declared the attack goes through and spends a full move, whatever the dice say.
+    war(&mut game, RED, BLUE);
     run(
         &mut game,
         RED,
@@ -397,6 +405,45 @@ fn attacks_only_reach_adjacent_hostile_squares() {
 }
 
 #[test]
+fn combat_comes_only_after_a_declaration_of_war() {
+    let mut game = arena(10, 10);
+    let a = spawn(&mut game, RED, "infantry", 4, 4);
+    spawn(&mut game, BLUE, "militia", 5, 5);
+    // An attack on a nation at peace is refused and changes nothing at all.
+    let refusal = run(
+        &mut game,
+        RED,
+        Command::Attack {
+            unit: a,
+            target: Coord::new(5, 5),
+        },
+    )
+    .unwrap_err()
+    .0;
+    assert!(refusal.contains("declare war"), "{refusal}");
+    assert!(!game.at_war(RED, BLUE));
+    assert_eq!(unit(&game, a).moves_used, 0, "no move is spent");
+    // Only a known nation other than one's own may be declared on.
+    assert!(run(&mut game, RED, Command::DeclareWar { nation: RED }).is_err());
+    assert!(run(&mut game, RED, Command::DeclareWar { nation: 99 }).is_err());
+    assert!(!game.at_war(RED, BLUE));
+    // The declaration puts both in a state of war, once, and then the attack goes through.
+    run(&mut game, RED, Command::DeclareWar { nation: BLUE }).unwrap();
+    assert!(game.at_war(RED, BLUE) && game.at_war(BLUE, RED));
+    assert!(run(&mut game, RED, Command::DeclareWar { nation: BLUE }).is_err());
+    run(
+        &mut game,
+        RED,
+        Command::Attack {
+            unit: a,
+            target: Coord::new(5, 5),
+        },
+    )
+    .unwrap();
+    assert_eq!(game.battles.len(), 1);
+}
+
+#[test]
 fn only_blitz_units_attack_more_than_once_a_turn() {
     let mut game = arena(10, 10);
     let rules = rules();
@@ -410,6 +457,7 @@ fn only_blitz_units_attack_more_than_once_a_turn() {
     for id in [infantry, cavalry] {
         game.units.get_mut(&id).unwrap().level = 3;
     }
+    war(&mut game, RED, BLUE);
     run(
         &mut game,
         RED,
@@ -463,6 +511,7 @@ fn win_rate(attacker: &str, defender: &str, tile: &str, fortified: bool, trials:
     for seed in 1..=trials {
         let mut game = arena_rows(&rows);
         game.rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        war(&mut game, RED, BLUE);
         let a = spawn(&mut game, RED, attacker, 1, 0);
         let d = spawn(&mut game, BLUE, defender, 2, 0);
         if fortified {
@@ -568,6 +617,7 @@ fn defenseless_units_are_captured_not_fought() {
     let soldier = spawn(&mut game, RED, "infantry", 4, 4);
     let worker = spawn(&mut game, BLUE, "worker", 5, 5);
     let gun = spawn(&mut game, BLUE, "artillery", 5, 5);
+    war(&mut game, RED, BLUE);
     run(
         &mut game,
         RED,
@@ -577,7 +627,6 @@ fn defenseless_units_are_captured_not_fought() {
         },
     )
     .unwrap();
-    assert!(game.at_war(RED, BLUE));
     for id in [worker, gun] {
         assert_eq!(unit(&game, id).owner, RED, "captured");
         assert_eq!(unit(&game, id).moves_left(rules.def(unit(&game, id))), 0);
@@ -623,6 +672,7 @@ fn artillery_cannot_attack_but_bombards_from_one_tile_away() {
         },
     );
     assert!(out_of_range.unwrap_err().0.contains("range"));
+    war(&mut game, RED, BLUE);
     run(
         &mut game,
         RED,
@@ -632,7 +682,6 @@ fn artillery_cannot_attack_but_bombards_from_one_tile_away() {
         },
     )
     .unwrap();
-    assert!(game.at_war(RED, BLUE));
     assert!(unit(&game, target).damage <= 2);
     assert!(unit(&game, gun).attacked);
     assert_eq!(unit(&game, gun).moves_left(&rules.units["artillery"]), 0);
@@ -656,6 +705,7 @@ fn bombardment_wounds_but_never_kills() {
         game.rng = seed.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1;
         let target = spawn(&mut game, BLUE, "militia", 5, 5);
         let max = unit(&game, target).max_hp(&rules.units["militia"]);
+        war(&mut game, RED, BLUE);
         for _ in 0..8 {
             let gun = spawn(&mut game, RED, "artillery", 4, 4);
             let _ = run(
@@ -682,6 +732,7 @@ fn artillery_defends_a_stack_by_shooting_the_attacker_first() {
         for gun in [true, false] {
             let mut game = arena(10, 10);
             game.rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+            war(&mut game, RED, BLUE);
             let a = spawn(&mut game, RED, "cavalry", 4, 4);
             // The attacker is nearly unbreakable so the fight always runs to the end.
             game.units.get_mut(&a).unwrap().level = 3;
@@ -716,6 +767,7 @@ fn fast_units_can_withdraw_and_slow_ones_cannot() {
     for seed in 1..=600u64 {
         let mut game = arena(10, 10);
         game.rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        war(&mut game, RED, BLUE);
         // Cavalry (fast) against militia (slow): only the attacker may withdraw.
         let a = spawn(&mut game, RED, "cavalry", 4, 4);
         let d = spawn(&mut game, BLUE, "militia", 5, 5);
@@ -740,6 +792,7 @@ fn fast_units_can_withdraw_and_slow_ones_cannot() {
         // Militia (slow) attacking infantry (fast): only the defender may withdraw.
         let mut game = arena(10, 10);
         game.rng = seed.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1;
+        war(&mut game, RED, BLUE);
         let a = spawn(&mut game, RED, "militia", 4, 4);
         game.units.get_mut(&a).unwrap().level = 3;
         let d = spawn(&mut game, BLUE, "infantry", 5, 5);
@@ -776,6 +829,7 @@ fn winners_are_promoted_and_level_three_is_the_ceiling() {
     for seed in 1..=300u64 {
         let mut game = arena(10, 10);
         game.rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        war(&mut game, RED, BLUE);
         let a = spawn(&mut game, RED, "cavalry", 4, 4);
         spawn(&mut game, BLUE, "militia", 5, 5);
         run(
@@ -848,6 +902,7 @@ fn an_empty_city_is_taken_by_walking_in_and_its_land_goes_with_it() {
             .all(|p| game.map.get(*p).unwrap().owner == BLUE)
     );
     let soldier = spawn(&mut game, RED, "infantry", 11, 11);
+    war(&mut game, RED, BLUE);
     run(
         &mut game,
         RED,
@@ -857,7 +912,6 @@ fn an_empty_city_is_taken_by_walking_in_and_its_land_goes_with_it() {
         },
     )
     .unwrap();
-    assert!(game.at_war(RED, BLUE));
     assert_eq!(game.cities[&city].owner, RED);
     assert_eq!(unit(&game, soldier).position, Coord::new(12, 12));
     assert_eq!(
@@ -883,6 +937,7 @@ fn defended_cities_must_be_fought_for() {
     let gun = spawn(&mut game, BLUE, "artillery", 12, 12);
     let soldier = spawn(&mut game, RED, "cavalry", 11, 11);
     game.units.get_mut(&soldier).unwrap().level = 3;
+    war(&mut game, RED, BLUE);
     for _ in 0..3 {
         if game.units.contains_key(&soldier) && game.cities[&city].owner == BLUE {
             let _ = run(
@@ -1210,6 +1265,7 @@ fn runs_are_deterministic_and_saves_roundtrip() {
         let mut game = arena(16, 16);
         let a = spawn(&mut game, RED, "infantry", 6, 6);
         spawn(&mut game, BLUE, "infantry", 7, 7);
+        war(&mut game, RED, BLUE);
         run(
             &mut game,
             RED,
@@ -1358,6 +1414,7 @@ fn sight_borders_and_attacks_cross_the_horizontal_seam() {
     game.reveal();
     assert!(game.factions[&RED].explored.contains(east));
     assert!(game.view(RED).units.contains_key(&captive));
+    war(&mut game, RED, BLUE);
     run(
         &mut game,
         RED,

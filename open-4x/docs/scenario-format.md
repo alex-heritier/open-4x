@@ -216,9 +216,10 @@ from 1 in document order when the game is built; `0` always means "nobody".
   their own nation, where they begin in port. Passengers are not part of the format: units start
   ashore and board in play. One tile holds the units of a single nation, at
   most 64, and a city's tile holds only its owner's units.
-- **Wars** are unordered pairs, each listed once, between two different nations. The computer
-  nations attack their enemies in range and otherwise stay home, so a scenario with no wars is
-  peaceful until the player starts one.
+- **Wars** are unordered pairs, each listed once, between two different nations. A nation must
+  be at war before it can attack another's units or take its cities, and the computer nations
+  attack their enemies in range and otherwise stay home, so a scenario with no wars stays
+  peaceful until the player declares war.
 
 ## Calendar
 

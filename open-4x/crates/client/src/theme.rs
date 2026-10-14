@@ -16,6 +16,7 @@ use super::*;
 use bevy::asset::AssetId;
 use bevy::sprite::{BorderRect, SliceScaleMode, SpriteImageMode, TextureSlicer};
 use bevy::text::{Font, FontWeight};
+use std::f32::consts::TAU;
 
 /// Room the two cards along the top edge take: their height plus the margin around them. The
 /// pane under them is kept clear of it.
@@ -622,10 +623,66 @@ pub(crate) fn button(
 #[derive(Resource)]
 pub(crate) struct Shapes {
     disc: Handle<Image>,
+    selection_tops: Vec<Handle<Image>>,
 }
 
 /// Side of the disc picture, in pixels.
 const DISC: u32 = 64;
+/// Side of the selected unit's fake-3D top picture, in pixels.
+const TOP_ART: u32 = 64;
+const TOP_FRAMES: usize = 8;
+
+fn inside_triangle(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
+    let side = |a: Vec2, b: Vec2| (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    let (ab, bc, ca) = (side(a, b), side(b, c), side(c, a));
+    (ab >= 0.0 && bc >= 0.0 && ca >= 0.0) || (ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
+}
+
+/// A small, filled upside-down pyramid: tan top, warm orange left, bright yellow right.
+fn selection_top_image(frame: usize) -> Image {
+    const TAN: [u8; 4] = [214, 173, 102, 255];
+    const ORANGE: [u8; 4] = [224, 103, 38, 255];
+    const YELLOW: [u8; 4] = [248, 194, 55, 255];
+    let mut data = vec![0; (TOP_ART * TOP_ART * 4) as usize];
+    for y in 0..TOP_ART {
+        for x in 0..TOP_ART {
+            let turn = frame as f32 * TAU / TOP_FRAMES as f32;
+            let (sin, cos) = turn.sin_cos();
+            let q = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - Vec2::splat(32.0);
+            let p = Vec2::new(cos * q.x + sin * q.y, -sin * q.x + cos * q.y)
+                + Vec2::splat(32.0);
+            let top = [(4.0, 25.0), (32.0, 5.0), (32.0, 29.0), (60.0, 25.0)];
+            let bottom = (32.0, 62.0);
+            let left = [(4.0, 25.0), (32.0, 29.0), bottom];
+            let right = [(60.0, 25.0), (32.0, 29.0), bottom];
+            let v = |(x, y)| Vec2::new(x, y);
+            let colour = if inside_triangle(p, v(top[0]), v(top[1]), v(top[2]))
+                || inside_triangle(p, v(top[0]), v(top[2]), v(top[3]))
+            {
+                TAN
+            } else if inside_triangle(p, v(left[0]), v(left[1]), v(left[2])) {
+                ORANGE
+            } else if inside_triangle(p, v(right[0]), v(right[1]), v(right[2])) {
+                YELLOW
+            } else {
+                [0; 4]
+            };
+            let at = ((y * TOP_ART + x) * 4) as usize;
+            data[at..at + 4].copy_from_slice(&colour);
+        }
+    }
+    Image::new(
+        bevy::render::render_resource::Extent3d {
+            width: TOP_ART,
+            height: TOP_ART,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        data,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    )
+}
 
 impl Shapes {
     pub(crate) fn new(images: &mut Assets<Image>) -> Self {
@@ -653,12 +710,27 @@ impl Shapes {
         );
         Self {
             disc: images.add(image),
+            selection_tops: (0..TOP_FRAMES)
+                .map(|frame| images.add(selection_top_image(frame)))
+                .collect(),
         }
     }
 
     /// A pill-shaped sprite, for the bars and plates the map's pieces carry.
     pub(crate) fn bar(&self, size: Vec2, color: Color) -> Sprite {
         self.sprite(size, color, true)
+    }
+
+    /// The compact fake-3D top drawn above a selected unit.
+    pub(crate) fn selection_top(&self) -> Sprite {
+        let mut sprite = Sprite::from_image(self.selection_top_frame(0).clone());
+        sprite.custom_size = Some(Vec2::new(36.0, 50.0));
+        sprite
+    }
+
+    /// One orientation of the selected unit's top.
+    pub(crate) fn selection_top_frame(&self, frame: usize) -> &Handle<Image> {
+        &self.selection_tops[frame % TOP_FRAMES]
     }
 
     fn sprite(&self, size: Vec2, color: Color, pill: bool) -> Sprite {

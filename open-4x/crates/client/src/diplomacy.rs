@@ -4,9 +4,9 @@
 //! A dark window over the dimmed map. On the left the leader's portrait (the nation's flag in the
 //! pack, which is also its leader art) in a gilt frame, with the leader's name and nation under
 //! it; on the right what the leader says, what is known of the nation, and the ways to answer.
-//! The game has no treaties yet, so the only answer that does anything is to take one's leave;
-//! the others are drawn and dimmed, so the window already has the shape the treaties will fill.
-//! Music plays under it for as long as it is open (see [`music`]).
+//! Treaties are not yet part of the game, so the answers are to declare war, or to take one's
+//! leave; a treaty is drawn and dimmed, so the window already has the shape the treaties will
+//! fill. Music plays under it for as long as it is open (see [`music`]).
 use super::*;
 use crate::chrome::{Frame, Skin, dress};
 use crate::presentation::{nation_art, nation_color};
@@ -273,10 +273,23 @@ pub(super) fn spawn(
                         ..default()
                     })
                     .with_children(|p| {
-                        button(p, "Propose a treaty", Action::Idle, Tone::Dormant);
+                        if at_war {
+                            button(p, "Propose peace", Action::Idle, Tone::Dormant);
+                        } else {
+                            button(p, "Declare war", Action::DeclareWar(them), Tone::Quiet);
+                        }
                         button(p, "Farewell", Action::CloseTalk, Tone::Quiet);
                     });
-                    text(p, "Treaties are not yet part of the game.", 11.5, MUTED);
+                    text(
+                        p,
+                        if at_war {
+                            "Peace cannot be made yet; the war goes on."
+                        } else {
+                            "War is the only answer the game offers yet."
+                        },
+                        11.5,
+                        MUTED,
+                    );
                 });
             });
         });

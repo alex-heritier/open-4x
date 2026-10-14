@@ -158,7 +158,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::{arena, rules, spawn};
+    use crate::tests::{arena, rules, spawn, war};
     use crate::{Command, TickRules};
 
     const RED: Id = 1;
@@ -240,6 +240,7 @@ mod tests {
         for seed in 1..=500u64 {
             // Cavalry (fast) against militia (slow): only the attacker may withdraw.
             let mut game = seeded(arena(10, 10), seed);
+            war(&mut game, RED, BLUE);
             let a = spawn(&mut game, RED, "cavalry", 4, 4);
             let d = spawn(&mut game, BLUE, "militia", 5, 5);
             game.units.get_mut(&a).unwrap().level = (seed % 4) as u8;
@@ -250,6 +251,7 @@ mod tests {
             seen.insert(format!("{outcome:?}"));
             // Militia (slow) against infantry (fast): only the defender may withdraw.
             let mut game = seeded(arena(10, 10), seed);
+            war(&mut game, RED, BLUE);
             let a = spawn(&mut game, RED, "militia", 4, 4);
             let d = spawn(&mut game, BLUE, "infantry", 5, 5);
             game.units.get_mut(&a).unwrap().level = 3;
@@ -272,6 +274,7 @@ mod tests {
         let (mut hit, mut missed) = (0, 0);
         for seed in 1..=300u64 {
             let mut game = seeded(arena(10, 10), seed);
+            war(&mut game, RED, BLUE);
             let a = spawn(&mut game, RED, "cavalry", 4, 4);
             let d = spawn(&mut game, BLUE, "militia", 5, 5);
             let gun = spawn(&mut game, BLUE, "artillery", 5, 5);
@@ -298,6 +301,7 @@ mod tests {
     #[test]
     fn no_support_shot_without_a_gun_on_the_square() {
         let mut game = seeded(arena(10, 10), 5);
+        war(&mut game, RED, BLUE);
         let a = spawn(&mut game, RED, "cavalry", 4, 4);
         let d = spawn(&mut game, BLUE, "militia", 5, 5);
         // Artillery that is not with the defender does not help it.
@@ -315,6 +319,7 @@ mod tests {
         let mut game = arena(10, 10);
         let a = spawn(&mut game, RED, "infantry", 4, 4);
         let w = spawn(&mut game, BLUE, "worker", 5, 5);
+        war(&mut game, RED, BLUE);
         attack(&mut game, RED, a, 5, 5);
         let Battle::Capture {
             attacker,
@@ -341,6 +346,7 @@ mod tests {
         let a = spawn(&mut game, RED, "infantry", 7, 7);
         let ship = spawn(&mut game, BLUE, "ironclad", 8, 8);
         let worker = spawn(&mut game, BLUE, "worker", 8, 8);
+        war(&mut game, RED, BLUE);
         attack(&mut game, RED, a, 8, 8);
         let Battle::Capture {
             taken,
@@ -365,6 +371,7 @@ mod tests {
         let mut full = 0;
         for seed in 1..=300u64 {
             let mut game = seeded(arena(10, 10), seed);
+            war(&mut game, RED, BLUE);
             let gun = spawn(&mut game, RED, "artillery", 4, 4);
             let target = spawn(&mut game, BLUE, "infantry", 5, 5);
             run(
@@ -402,6 +409,7 @@ mod tests {
         let (mut kills, mut escapes) = (0, 0);
         for seed in 1..=300u64 {
             let mut game = seeded(arena(10, 10), seed);
+            war(&mut game, RED, BLUE);
             let boat = spawn(&mut game, RED, "torpedo-boat", 4, 4);
             let target = spawn(&mut game, BLUE, "infantry", 5, 5);
             // One hit point left: any hit is fatal to a lethal gun.
@@ -446,6 +454,7 @@ mod tests {
         let a = spawn(&mut game, RED, "cavalry", 4, 4);
         spawn(&mut game, BLUE, "militia", 5, 5);
         let idle = spawn(&mut game, RED, "infantry", 2, 2);
+        war(&mut game, RED, BLUE);
         attack(&mut game, RED, a, 5, 5);
         assert_eq!(game.battles.len(), 1);
         run(&mut game, RED, Command::Fortify { unit: idle });
@@ -457,6 +466,7 @@ mod tests {
         let mut game = seeded(arena(10, 10), 3);
         let a = spawn(&mut game, RED, "cavalry", 4, 4);
         spawn(&mut game, BLUE, "militia", 5, 5);
+        war(&mut game, RED, BLUE);
         attack(&mut game, RED, a, 5, 5);
         // Nothing stands at (9, 9), so this attack is refused.
         let refused = game.apply(
@@ -504,6 +514,7 @@ mod tests {
         let mut game = seeded(arena(30, 30), 11);
         let green = game.factions[&RED].clone();
         game.factions.insert(GREEN, green);
+        war(&mut game, GREEN, BLUE);
         if red_scout {
             spawn(&mut game, RED, "infantry", 17, 17);
         }
