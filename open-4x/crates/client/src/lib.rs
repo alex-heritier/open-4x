@@ -7,6 +7,7 @@ mod diplomacy;
 mod goto;
 mod march;
 mod margin;
+mod menu;
 mod music;
 mod presentation;
 mod production;
@@ -558,17 +559,9 @@ fn local_host(seed: u64) -> Host {
             return host;
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let content = match option("--pack") {
-        Some(path) => fourx_content::load_directory(std::path::Path::new(&path))
-            .expect("valid pack directory"),
-        None => Content::base(),
-    };
-    #[cfg(target_arch = "wasm32")]
-    let content = Content::base();
     let (scenario, nation) = (option("--scenario"), option("--nation"));
     Host::start(
-        content,
+        content(),
         Start {
             scenario: scenario.as_deref(),
             nation: nation.as_deref(),
@@ -576,6 +569,16 @@ fn local_host(seed: u64) -> Host {
         },
     )
     .unwrap_or_else(|error| panic!("cannot start the campaign: {error}"))
+}
+
+/// The pack and its scenarios: `--pack`'s directory, else the bundled base pack.
+fn content() -> Content {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(path) = option("--pack") {
+        return fourx_content::load_directory(std::path::Path::new(&path))
+            .expect("valid pack directory");
+    }
+    Content::base()
 }
 
 /// `--select unit:ID`, `--select city:ID` or `--select tile:X,Y` starts with that piece selected, which is how the
@@ -598,7 +601,14 @@ fn initial_selection() -> Selection {
 pub fn run() {
     let server = option("--server");
     let seed = option("--seed").and_then(|s| s.parse().ok()).unwrap_or(42);
-    let pack = Pack::base();
+    let screen = menu::first_screen();
+    // The title screens offer the pack's scenarios; a remote server brings its own.
+    let menu = menu::Menu::new(content(), seed);
+    let pack = if server.is_none() {
+        menu.pack().clone()
+    } else {
+        Pack::base()
+    };
     let asset_prefix = server
         .as_ref()
         .map(|s| {
@@ -612,8 +622,10 @@ pub fn run() {
         .unwrap_or("packs/base/".into());
     let connection = if let Some(server) = server {
         Connection::remote(server, option("--token").unwrap_or_default())
-    } else {
+    } else if screen == menu::Screen::Campaign {
         Connection::local(local_host(seed))
+    } else {
+        Connection::idle()
     };
     #[cfg(not(target_arch = "wasm32"))]
     let (asset_root, asset_prefix) = if let Some(path) = option("--pack") {
@@ -666,6 +678,8 @@ pub fn run() {
             diplomacy: option("--talk").and_then(|id| id.parse().ok()),
             production: None,
         })
+        .insert_resource(screen)
+        .insert_resource(menu)
         .insert_resource(stage::Stage::new())
         .init_resource::<march::Walks>()
         .init_resource::<puppet::UnitArt>()
@@ -690,7 +704,24 @@ pub fn run() {
                 }),
         )
         .add_systems(Startup, (setup, stage::setup))
-        .add_systems(Update, (production::scroll, music::soundtrack))
+        .add_systems(Update, (production::scroll, music::soundtrack, smoke))
+        .add_systems(
+            Update,
+            (
+                menu::press,
+                menu::keys,
+                menu::pick_on_chart,
+                menu::paint_chart,
+                menu::show,
+                menu::paint,
+                menu::fit,
+                menu::scroll,
+                menu::volume_label,
+                menu::music,
+            )
+                .chain()
+                .run_if(not(menu::in_campaign)),
+        )
         .add_systems(
             Update,
             (
@@ -722,10 +753,12 @@ pub fn run() {
                 (presentation::draw_overlays, goto::draw).chain(),
                 puppet::animate,
                 puppet::accents,
-                smoke,
             )
-                .chain(),
-        );
+                .chain()
+                .run_if(menu::in_campaign),
+        )
+        // Takes the title screens down in the frame the campaign starts.
+        .add_systems(Update, menu::show.run_if(menu::in_campaign));
     app.insert_gizmo_config(route::RouteGizmos, route::gizmo_config());
     theme::install_font(&mut app);
     city::install_fonts(&mut app);
@@ -936,11 +969,13 @@ fn receive(
                         // A newer state may have moved what the menu named.
                         session.menu = None;
                         session.dirty = true;
+                        // Nothing to announce while play is going normally: the strip at the
+                        // foot of the map is for what the host has to say, and it stays away
+                        // until it does.
                         session.message = if player == 0 {
                             "Spectator | another client commands this campaign".into()
                         } else {
-                            "Select a unit; G chooses a destination. Right-click for tile info or city and unit menus. Space advances one week."
-                            .into()
+                            String::new()
                         };
                     }
                 }
@@ -953,19 +988,21 @@ fn receive(
         }
     }
 }
-fn issue(session: &mut Session, connection: &mut Connection, command: Command) {
+/// Hand an order to the host. Returns whether it went: a control that finishes with a unit
+/// only moves on once the order it gave has actually been sent.
+fn issue(session: &mut Session, connection: &mut Connection, command: Command) -> bool {
     if session.pending || session.game.is_none() {
-        return;
+        return false;
     }
     if session.staging {
         session.message = "Orders wait for the fight to end. Space skips it.".into();
         session.dirty = true;
-        return;
+        return false;
     }
     if session.player == 0 {
         session.message = "Spectators cannot issue orders".into();
         session.dirty = true;
-        return;
+        return false;
     }
     session.sequence += 1;
     session.pending = true;
@@ -975,6 +1012,7 @@ fn issue(session: &mut Session, connection: &mut Connection, command: Command) {
         revision: session.game.as_ref().unwrap().revision,
         command,
     });
+    true
 }
 /// The selected unit, when it is one of the player's own.
 fn selected_unit(session: &Session) -> Option<&fourx_sim::Unit> {
@@ -1023,6 +1061,44 @@ fn next_road_job(game: &Game, unit: &fourx_sim::Unit) -> Job {
 
 /// The unit Tab selects next: units still waiting for orders come first; with none idle, every
 /// unit of the player's is in turn.
+/// The unit after `after` that is still waiting for orders, or none when every one of the
+/// player's units has been given something to do. Units are visited in id order, the same
+/// order Tab walks them in, so a control that finishes with a unit hands over the way Tab
+/// would.
+fn next_active_unit(game: &Game, rules: &Rules, player: Id, after: Id) -> Selection {
+    let active = game
+        .units
+        .values()
+        .filter(|u| u.owner == player && u.id != after)
+        .filter(|u| u.moves_left(rules.def(u)) > 0 && u.order.is_none() && u.goto.is_none())
+        .map(|u| u.id);
+    // The map is ordered by id, so the first unit past `after` is the next in the rotation;
+    // with none past it the rotation starts again at the first unit still waiting.
+    let mut first = None;
+    for id in active {
+        if id > after {
+            return Selection::Unit(id);
+        }
+        first = first.or(Some(id));
+    }
+    first.map_or(Selection::None, Selection::Unit)
+}
+
+/// Whether `unit` could be told to fortify at all: a land unit that can defend itself and is
+/// not aboard a ship, the same condition the action bar shows the button under. A unit that
+/// fails it is left to the host to refuse, which is what happens when the key is pressed
+/// rather than the button.
+fn can_fortify(session: &Session, unit: Id) -> bool {
+    session
+        .game
+        .as_ref()
+        .and_then(|game| game.units.get(&unit))
+        .is_some_and(|u| {
+            let def = session.rules.def(u);
+            def.domain == fourx_sim::Domain::Land && def.defense > 0 && u.carrier.is_none()
+        })
+}
+
 fn next_unit(session: &Session) -> Option<Id> {
     let game = session.game.as_ref()?;
     let mine: Vec<_> = game
@@ -1089,8 +1165,6 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
         Action::GoTo => {
             if let Some(unit) = unit {
                 session.goto = Some(goto::Targeting::new(unit, false));
-                session.message =
-                    "Go to: choose a destination. Right click or Escape cancels.".into();
                 session.dirty = true;
             }
             None
@@ -1269,7 +1343,21 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
         }
     };
     if let Some(command) = command {
-        issue(session, connection, command);
+        let ordered = issue(session, connection, command);
+        // Fortifying takes a unit out of the rotation, so the player is handed the next unit
+        // still waiting for orders, or is left with nothing selected when there is no such
+        // unit. A refused order leaves the selection where it was.
+        if ordered
+            && matches!(action, Action::Fortify)
+            && let Some(unit) = unit
+            && can_fortify(session, unit)
+        {
+            let next = session.game.as_ref().map_or(Selection::None, |game| {
+                next_active_unit(game, &session.rules, session.player, unit)
+            });
+            session.selection = next;
+            session.dirty = true;
+        }
     }
 }
 
@@ -1865,6 +1953,45 @@ mod tests {
         assert!(should_open_menu(Some(1), &[]));
         assert!(should_open_menu(None, &[7]));
         assert!(should_open_menu(Some(1), &[7, 8]));
+    }
+
+    #[test]
+    fn a_unit_that_fortifies_hands_over_the_next_one_waiting_for_orders() {
+        use fourx_sim::Order;
+
+        let host =
+            Host::base_scenario("russo-japanese-war", 42).expect("the starter scenario starts");
+        let player = host.commander();
+        let rules = host.rules;
+        let mut game = host.game;
+        let mine: Vec<Id> = game
+            .units
+            .values()
+            .filter(|u| u.owner == player)
+            .map(|u| u.id)
+            .collect();
+        assert!(mine.len() >= 2, "Japan starts with a stack");
+        // Only the first two units are waiting for orders; the rest are dug in and spent.
+        for (id, unit) in game.units.iter_mut() {
+            if mine[..2].contains(id) {
+                unit.order = Order::None;
+                unit.moves_used = 0;
+            } else {
+                unit.order = Order::Fortified;
+                unit.moves_used = rules.def(unit).total_moves();
+            }
+        }
+        let (first, second) = (mine[0], mine[1]);
+        assert_eq!(
+            next_active_unit(&game, &rules, player, first),
+            Selection::Unit(second)
+        );
+        // Fortifying the last one still waiting leaves nothing to select.
+        game.units.get_mut(&second).unwrap().order = Order::Fortified;
+        assert_eq!(
+            next_active_unit(&game, &rules, player, first),
+            Selection::None
+        );
     }
 
     #[test]

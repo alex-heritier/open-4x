@@ -21,7 +21,8 @@
 //! * **Improvements.** Roads, railroads, mines, and irrigation.
 //! * **Nations and cities.** One nation for each player and every pre-placed city, because a
 //!   scenario needs them to be playable. Each city gets a garrison and each capital the usual
-//!   starting units; the file's own 1,358 units are not converted.
+//!   starting units; the file's own 1,358 units are not converted. Each nation's `profile` (the
+//!   nation selection screen's text) is written by hand and kept from the scenario it replaces.
 use civ3_biq::{Biq, MapView, sections::tile::overlay};
 use fourx_sim::{
     Flavor, Status,
@@ -195,7 +196,8 @@ fn run(input: &str, out: &str) -> Result<(), String> {
         map.resources.len()
     );
 
-    let (nations, cities, units) = build_nations(&biq, &mut map)?;
+    let (mut nations, cities, units) = build_nations(&biq, &mut map)?;
+    keep_profiles(&mut nations, out);
     for city in &cities {
         // A city's own square counts as roaded and farmed; worker improvements add nothing there.
         map.get_mut(city.position).expect("on the map").improvements = 0;
@@ -441,6 +443,22 @@ fn assign_bases(map: &mut Map, features: Vec<Coord>) {
     }
 }
 
+/// The nation selection screen's profiles are written by hand in the scenario, not taken from
+/// the file: a re-import keeps those of the scenario it replaces.
+fn keep_profiles(nations: &mut [NationStart], out: &str) {
+    let Some(old) = std::fs::read_to_string(out)
+        .ok()
+        .and_then(|json| serde_json::from_str::<Scenario>(&json).ok())
+    else {
+        return;
+    };
+    for nation in nations {
+        if let Some(kept) = old.nations.iter().find(|n| n.id == nation.id) {
+            nation.profile = kept.profile.clone();
+        }
+    }
+}
+
 fn build_nations(
     biq: &Biq,
     map: &mut Map,
@@ -485,6 +503,7 @@ fn build_nations(
             gold: Some(lead.starting_treasury.clamp(0, 1_000_000)),
             technology: 3,
             notes: String::new(),
+            profile: Default::default(),
         });
     }
 

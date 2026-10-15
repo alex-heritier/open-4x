@@ -55,7 +55,21 @@
       "flavor": "east_asian",
       "status": "sovereign",
       "government": "Meiji Oligarchy",
-      "leader": "Matsuhito"
+      "leader": "Matsuhito",
+      "profile": {
+        "epithet": "The rising sun",
+        "summary": "February 1904. Japan's fleet stands off Port Arthur and its army is ready to land at Chemulpo. Strike before Russia can bring its strength east along the Trans-Siberian.",
+        "strengths": [
+          "Short sea lines",
+          "Ready army and fleet",
+          "The first blow"
+        ],
+        "challenges": [
+          "Russia's reserves",
+          "Port Arthur's guns",
+          "A short war or none"
+        ]
+      }
     },
     {
       "id": "russia",
@@ -65,7 +79,21 @@
       "flavor": "orthodox",
       "status": "sovereign",
       "government": "Tsarist Monarchy",
-      "leader": "Tsar Nicolas II"
+      "leader": "Tsar Nicolas II",
+      "profile": {
+        "epithet": "The colossus of the east",
+        "summary": "Russia's Pacific squadron rests at Port Arthur and its armies are spread thin across Manchuria. Hold on until the might of the empire arrives along a single railway.",
+        "strengths": [
+          "Fortress Port Arthur",
+          "Vast reserves",
+          "Time on its side"
+        ],
+        "challenges": [
+          "Thin forces in the east",
+          "One long railway",
+          "A fleet caught in port"
+        ]
+      }
     }
   ],
   "cities": [

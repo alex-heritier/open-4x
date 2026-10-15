@@ -50,6 +50,15 @@ impl Connection {
             remote: None,
         }
     }
+    /// No campaign yet: the title screens are up. Requests go nowhere.
+    pub fn idle() -> Self {
+        Self {
+            host: None,
+            player: 0,
+            inbox: VecDeque::new(),
+            remote: None,
+        }
+    }
     pub fn remote(url: String, token: String) -> Self {
         let mut connection = Self {
             host: None,

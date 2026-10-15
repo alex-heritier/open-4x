@@ -657,7 +657,12 @@ fn selection_top_image(frame: usize) -> Image {
     };
     let apex = Vec3::new(0.0, -2.0, 0.0);
     let scale = 23.0;
-    let project = |p: Vec3| Vec2::new(32.0 + p.x * scale, 18.0 + (-p.y * cos_e + p.z * sin_e) * scale);
+    let project = |p: Vec3| {
+        Vec2::new(
+            32.0 + p.x * scale,
+            18.0 + (-p.y * cos_e + p.z * sin_e) * scale,
+        )
+    };
     let view = Vec3::new(0.0, sin_e, cos_e);
     let light = Vec3::new(-0.6, 0.55, 0.6).normalize();
     // Faces back to front: the sides that face the camera, then the top over them.
@@ -697,7 +702,9 @@ fn selection_top_image(frame: usize) -> Image {
                         .find(|(t, _)| inside_triangle(p, t[0], t[1], t[2]))
                         .map(|(_, c)| *c);
                     if hit.is_none()
-                        && faces.iter().any(|(t, _)| inside_triangle(p, grow(t[0]), grow(t[1]), grow(t[2])))
+                        && faces
+                            .iter()
+                            .any(|(t, _)| inside_triangle(p, grow(t[0]), grow(t[1]), grow(t[2])))
                     {
                         hit = Some(RIM);
                     }
@@ -729,7 +736,10 @@ fn selected_square_image() -> Image {
     for y in 0..H {
         for x in 0..W {
             // distance, in image pixels, to the diamond |dx|/128 + |dy|/64 = 1, drawn just inside it
-            let (dx, dy) = ((x as f32 + 0.5 - 128.0).abs(), (y as f32 + 0.5 - 64.0).abs());
+            let (dx, dy) = (
+                (x as f32 + 0.5 - 128.0).abs(),
+                (y as f32 + 0.5 - 64.0).abs(),
+            );
             let d = ((dx / 128.0 + dy / 64.0) - 1.0) * (128.0 * 64.0) / (64.0f32.hypot(128.0));
             let cover = (2.6 - (d + 3.2).abs()).clamp(0.0, 1.0);
             let at = ((y * W + x) * 4) as usize;
@@ -890,7 +900,8 @@ pub(crate) fn map_text(
 /// How wide `label` is when set at `size` in the semibold serif of [`map_text`], from the font's
 /// own advance widths, so a plate can be cut to fit its name.
 pub(crate) fn measure(label: &str, size: f32) -> f32 {
-    static FACE: std::sync::OnceLock<Option<ttf_parser::Face<'static>>> = std::sync::OnceLock::new();
+    static FACE: std::sync::OnceLock<Option<ttf_parser::Face<'static>>> =
+        std::sync::OnceLock::new();
     let face = FACE.get_or_init(|| {
         let mut face = ttf_parser::Face::parse(SERIF, 0).ok()?;
         face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), 600.0);

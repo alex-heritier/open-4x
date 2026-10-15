@@ -19,7 +19,7 @@ aggression is a weighted campaign roll, not a scripted event or guaranteed decla
   requires a built Port. Ordinary troops retain the existing naval landing rules.
 - **Dispatches** opens the dated campaign log. Demands also open the relevant leader's
   window, with accept/refuse choices. Diplomacy offers peace and 25-gold payments.
-- **End Week** or Space advances seven calendar days. Existing production, income and
+- **End Turn** or Space advances seven calendar days. Existing production, income and
   movement rates retain their per-turn values. There is no twelfth-turn boom.
 
 ## Goods and industry

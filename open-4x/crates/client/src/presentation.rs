@@ -1121,13 +1121,15 @@ pub(super) fn refresh(params: Refresh) {
                     flag,
                 );
             }
-            // The plate: the city's size in its nation's colour at one end, the days
-            // until its current work is done at the other, its name between.
+            // The plate: the city's size in its nation's colour at one end, the work it is
+            // busy with at the other, its name between. The days left until that work is
+            // done ride a small badge on the corner of its medallion.
             // The plate is cut to the measured name, so the medallions never crowd it.
             const NAME: f32 = 13.0;
             const BADGE: f32 = 22.0; // medallion diameter
             const INSET: f32 = 3.0; // how far a medallion's centre sits inside the plate's end
             const GAP: f32 = 5.0; // the least room between the name and a medallion
+            const DAYS: f32 = 15.0; // the badge carrying the days left on the current work
             let width = measure(&city.name, NAME) + 2.0 * (INSET + BADGE / 2.0 + GAP);
             let plate = Vec3::new(x, y - 24.0, z + 0.1);
             label_plate(&mut commands, &shapes, plate, Vec2::new(width, 18.0));
@@ -1155,31 +1157,39 @@ pub(super) fn refresh(params: Refresh) {
                 plate + Vec3::Z * 0.3,
             );
             let right = plate + Vec3::new(width / 2.0 - INSET, 0.0, 0.1);
-            medallion(
-                &mut commands,
-                &shapes,
-                right,
-                BADGE,
-                if ours {
-                    Color::srgb(0.082, 0.157, 0.122)
-                } else {
-                    Color::srgb(0.075, 0.082, 0.094)
-                },
-            );
-            map_text(
-                &mut commands,
-                builds_in(
-                    city.production
-                        .as_ref()
-                        .and_then(|id| session.rules.units.get(id))
-                        .map(|def| def.cost),
-                    city.progress,
-                    city.shields(),
+            let fill = if ours {
+                Color::srgb(0.082, 0.157, 0.122)
+            } else {
+                Color::srgb(0.075, 0.082, 0.094)
+            };
+            medallion(&mut commands, &shapes, right, BADGE, fill);
+            match working_on(&session, &assets, &prefix, city) {
+                Some((icon, size, cost, progress)) => {
+                    image_sprite(
+                        &mut commands,
+                        &icon,
+                        right + Vec3::Z * 0.2,
+                        size,
+                        Color::WHITE,
+                    );
+                    let days = right + Vec3::new(9.0, -9.0, 0.3);
+                    medallion(&mut commands, &shapes, days, DAYS, fill);
+                    map_text(
+                        &mut commands,
+                        builds_in(Some(cost), progress, city.shields()),
+                        10.0,
+                        ON_ACCENT,
+                        days + Vec3::Z * 0.1,
+                    );
+                }
+                None => map_text(
+                    &mut commands,
+                    builds_in(None, 0, city.shields()),
+                    10.5,
+                    ON_ACCENT,
+                    right + Vec3::Z * 0.2,
                 ),
-                10.5,
-                ON_ACCENT,
-                right + Vec3::Z * 0.2,
-            );
+            }
         }
     }
     // One piece stands for a stack, as in Civ3: the selected unit if it is there, otherwise
@@ -1414,6 +1424,52 @@ fn draw_unit_badges(
             Vec3::new(x + corner.x, y + corner.y, z),
             text_width(2, 11.0) + 14.0,
         );
+    }
+}
+
+/// What a city is working on, for the far medallion of its plate: the picture that stands in
+/// the circle, the size to draw it at, and the cost and progress the countdown is read from.
+/// A city building nothing has none.
+fn working_on(
+    session: &Session,
+    assets: &AssetServer,
+    prefix: &str,
+    city: &fourx_sim::City,
+) -> Option<(Handle<Image>, Vec2, i32, i32)> {
+    // A design's art is a whole tile with the figure standing in the middle of it, so its
+    // picture is drawn at a wider box than the medallion: the figure, not the tile, is what
+    // has to fit. A building's engraving fills its own picture, so it is drawn smaller.
+    const DESIGN: f32 = 26.0;
+    const BUILDING: f32 = 18.0;
+    if let Some(def) = city
+        .production
+        .as_ref()
+        .and_then(|id| session.rules.units.get(id))
+    {
+        // The design's own art, in the proportions the map draws it in: a ship is wider
+        // than it is tall, a land piece square.
+        let size = unit_size(def);
+        return Some((
+            assets.load(format!("{prefix}{}", def.sprite)),
+            size * (DESIGN / size.max_element()),
+            def.cost,
+            city.progress,
+        ));
+    }
+    let building = city.construction?;
+    Some((
+        crate::chrome::picture(assets, prefix, building_icon(building)),
+        Vec2::splat(BUILDING),
+        session.rules.economy.building_cost(building),
+        city.construction_progress,
+    ))
+}
+
+/// The pack's engraving for a building: the harbour for a port, the ingots for a factory.
+fn building_icon(building: fourx_sim::Building) -> &'static str {
+    match building {
+        fourx_sim::Building::Port => "ico_ship",
+        fourx_sim::Building::Factory => "ico_ingots",
     }
 }
 
@@ -2181,7 +2237,7 @@ fn build_ui(
                     if session.pending {
                         "Waiting..."
                     } else {
-                        "End Week"
+                        "End Turn"
                     },
                     19.0,
                     ON_ACCENT,
@@ -2346,52 +2402,55 @@ fn build_ui(
         crate::bar::spawn(commands, assets, &session.asset_prefix, rows, place);
     }
     // What the game has to say, in a dark pill at the foot of the map between the minimap and
-    // the pane.
-    let (left, right, bottom) = if narrow {
-        (8.0, 8.0, 6.0)
-    } else {
-        let chart = chart_size(size.y, &game.map);
-        (
-            CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
-            16.0 + INFO_WIDTH + 16.0,
-            CHART_BOTTOM,
-        )
-    };
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(left),
-                right: px(right),
-                bottom: px(bottom),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            UiRoot,
-        ))
-        .with_children(|p| {
-            p.spawn((
+    // the pane. It is only there when there is something to say: a refused order, a save that
+    // failed, a fight to wait out. Nothing stands on the map in ordinary play.
+    if !session.message.is_empty() {
+        let (left, right, bottom) = if narrow {
+            (8.0, 8.0, 6.0)
+        } else {
+            let chart = chart_size(size.y, &game.map);
+            (
+                CHART_LEFT + chart.x + 2.0 * CHART_FRAME + 16.0,
+                16.0 + INFO_WIDTH + 16.0,
+                CHART_BOTTOM,
+            )
+        };
+        commands
+            .spawn((
                 Node {
-                    min_height: px(MESSAGE_HEIGHT),
-                    padding: UiRect::axes(px(18), px(5)),
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(px(1.5)),
-                    border_radius: rounded(4.0),
+                    position_type: PositionType::Absolute,
+                    left: px(left),
+                    right: px(right),
+                    bottom: px(bottom),
+                    justify_content: JustifyContent::Center,
                     ..default()
                 },
-                BackgroundColor(PLATE),
-                BorderColor::all(TRIM.with_alpha(0.55)),
-                lift_small(),
+                UiRoot,
             ))
             .with_children(|p| {
-                text(
-                    p,
-                    &session.message,
-                    if narrow { 11.5 } else { 12.5 },
-                    ON_PLATE,
-                );
+                p.spawn((
+                    Node {
+                        min_height: px(MESSAGE_HEIGHT),
+                        padding: UiRect::axes(px(18), px(5)),
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(px(1.5)),
+                        border_radius: rounded(4.0),
+                        ..default()
+                    },
+                    BackgroundColor(PLATE),
+                    BorderColor::all(TRIM.with_alpha(0.55)),
+                    lift_small(),
+                ))
+                .with_children(|p| {
+                    text(
+                        p,
+                        &session.message,
+                        if narrow { 11.5 } else { 12.5 },
+                        ON_PLATE,
+                    );
+                });
             });
-        });
+    }
     if let Selection::City(id) = session.selection
         && game.cities.contains_key(&id)
     {
@@ -2690,6 +2749,20 @@ const NATION_EDGE: f32 = 0.5;
 /// another holder's land, and the player's own cities stand out. Tiles the player has not
 /// explored stay dark.
 fn minimap_pixels(game: &Game, player: Id) -> (u32, u32, Vec<u8>) {
+    chart_pixels(game, player, None)
+}
+
+/// How strongly the nations other than the one in focus are filled on a chart that has one.
+const BYSTANDER_FILL: f32 = 0.32;
+/// The land and the waters of a chart with a nation in focus.
+const POLITICAL_LAND: [u8; 3] = [178, 162, 124];
+const POLITICAL_COAST: [u8; 3] = [36, 78, 108];
+const POLITICAL_SEA: [u8; 3] = [24, 54, 86];
+
+/// The minimap picture as `player` knows the world. With a nation in `focus` (the nation
+/// selection screen's world map) every other nation is faded, the focus's frontier is drawn in
+/// cream, and its cities are marked instead of the player's.
+pub(crate) fn chart_pixels(game: &Game, player: Id, focus: Option<Id>) -> (u32, u32, Vec<u8>) {
     let chart = Chart::of(&game.map);
     let (width, height) = (chart.width, chart.height);
     let explored = game.factions.get(&player).map(|f| &f.explored);
@@ -2736,6 +2809,14 @@ fn minimap_pixels(game: &Game, player: Id) -> (u32, u32, Vec<u8>) {
                 Relief::Mountains => mix(base, [226, 222, 214], 0.55),
                 Relief::Flat => base,
             };
+            // A chart with a nation in focus is a political map: flat seas, and land in one
+            // parchment tone with only a trace of the ground under it.
+            let base = match (focus, tile.is_land()) {
+                (None, _) => base,
+                (Some(_), true) => mix(base, POLITICAL_LAND, 0.8),
+                (Some(_), false) if tile.terrain == Terrain::Coast => POLITICAL_COAST,
+                (Some(_), false) => POLITICAL_SEA,
+            };
             match ink.get(&tile.owner) {
                 Some(owner) if tile.is_land() && tile.owner != 0 => {
                     let frontier = EDGE_NEIGHBORS.iter().any(|(dx, dy)| {
@@ -2744,10 +2825,18 @@ fn minimap_pixels(game: &Game, player: Id) -> (u32, u32, Vec<u8>) {
                             .get(beyond)
                             .is_some_and(|other| other.is_land() && other.owner != tile.owner)
                     });
-                    if frontier {
-                        mix(*owner, [0, 0, 0], NATION_EDGE)
-                    } else {
-                        mix(base, *owner, NATION_FILL)
+                    let bystander = focus.is_some_and(|f| f != tile.owner);
+                    match (frontier, bystander, focus.is_some()) {
+                        (true, false, true) => MAP_OWN_CITY,
+                        (false, false, true) => *owner,
+                        (true, true, _) => mix(
+                            mix(base, *owner, BYSTANDER_FILL),
+                            [0, 0, 0],
+                            NATION_EDGE * 0.5,
+                        ),
+                        (true, false, false) => mix(*owner, [0, 0, 0], NATION_EDGE),
+                        (false, true, _) => mix(base, *owner, BYSTANDER_FILL),
+                        (false, false, _) => mix(base, *owner, NATION_FILL),
                     }
                 }
                 _ => base,
@@ -2755,7 +2844,12 @@ fn minimap_pixels(game: &Game, player: Id) -> (u32, u32, Vec<u8>) {
         };
         put(tile.position, rgb);
     }
-    for city in game.cities.values().filter(|c| c.owner == player) {
+    let marked = focus.unwrap_or(player);
+    for city in game.cities.values().filter(|c| c.owner == marked) {
+        if focus.is_some() && !city.capital {
+            put(city.position, MAP_OWN_CITY_CORE);
+            continue;
+        }
         let (x, y) = chart.pixel(city.position);
         // A 3 x 3 blot of pixels, which on a lattice chart is the tile's own neighbours.
         for dy in -1..=1 {

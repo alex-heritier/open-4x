@@ -173,6 +173,34 @@ screen: on an upright map the grid's `x + 1` neighbour is the tile to the lower 
 | `gold` | Starting treasury. Defaults to the rules' `starting_gold`. |
 | `technology` | Starting technology level, 0–100. |
 | `notes` | Free-form historical context, up to 1000 characters. Not used by the simulation. |
+| `profile` | Optional. How the nation selection screen presents the nation; see below. Not used by the simulation. |
+
+### Nation profiles and menu art
+
+```json
+"profile": {
+  "epithet": "A global power",
+  "summary": "The workshop of the world rules a quarter of the globe. …",
+  "strengths": ["Naval supremacy", "Industrial lead", "Colonies on every continent"],
+  "challenges": ["Overstretched garrisons", "Rivals on every frontier", "Far-flung supply lines"]
+}
+```
+
+`epithet` (up to 48 characters) is set in spaced capitals under the nation's name, `summary` (up
+to 600) describes its position on the start date, and `strengths` and `challenges` take up to four
+lines of up to 32 characters each. Every part is optional; a nation without a summary is
+introduced by its adjective and the start date. The Age of Imperialism profiles are written by
+hand, and `tools/biq-import` keeps them when it rewrites the scenario.
+
+The pack's `visuals.menu` paints the title and nation selection screens. Every key is optional:
+
+| Key | Picture |
+| --- | --- |
+| `background` | The painting behind the title screen, scaled to cover the window (landscape, 16:10). |
+| `logo` | The game's title, in place of the lettered plate. |
+| `desk` | The surface behind the nation selection screen, scaled to cover the window. |
+| `scenes` | A picture of each nation by its `id`, beside its profile (landscape, about 4:3). Without one the nation's flag stands there. |
+| `music` | Music under both screens, in a loop. Without it the soundtrack plays. |
 
 `dependent` covers vassals, tributaries, protectorates, and self-governing dominions: they hold
 their own land and field their own forces but answer to a suzerain. `unrecognized` covers

@@ -477,6 +477,7 @@ fn nation_start(n: &NationSource) -> NationStart {
         gold: Some(60 + 40 * n.dev as i32),
         technology: n.dev / 3,
         notes: n.notes.clone(),
+        profile: Default::default(),
     }
 }
 

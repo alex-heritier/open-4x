@@ -92,6 +92,15 @@ pub fn validate_scenario(s: &Scenario, rules: &Rules) -> Result<(), ContentError
             || !text_ok(&n.government, 96)
             || !text_ok(&n.leader, 96)
             || !text_ok(&n.notes, 1000)
+            || !text_ok(&n.profile.epithet, 48)
+            || !text_ok(&n.profile.summary, 600)
+            || n.profile.strengths.len() > 4
+            || n.profile.challenges.len() > 4
+            || n.profile
+                .strengths
+                .iter()
+                .chain(&n.profile.challenges)
+                .any(|line| line.trim().is_empty() || !text_ok(line, 32))
         {
             return fail(format!(
                 "nation {:?} has an empty or oversized text field",

@@ -116,6 +116,9 @@ pub struct Visuals {
     /// of its colour.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub nations: BTreeMap<String, String>,
+    /// Optional: the art of the title screen and the nation selection screen.
+    #[serde(default, skip_serializing_if = "MenuArt::is_empty")]
+    pub menu: MenuArt,
     /// How fights look and sound; every part is optional.
     #[serde(default)]
     pub combat: combat::CombatVisuals,
@@ -125,6 +128,41 @@ pub struct Visuals {
     /// from its single sprite.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub units: BTreeMap<String, animation::UnitVisual>,
+}
+
+/// The art of the screens before a campaign begins. Every part is optional: without it the
+/// client draws the screens from the pack's chrome and margin art.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MenuArt {
+    /// The painting behind the title screen, drawn to cover the window (landscape, 16:10).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub background: String,
+    /// The game's title, drawn in place of the lettered title plate.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub logo: String,
+    /// The surface behind the nation selection screen, drawn to cover the window.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub desk: String,
+    /// A picture of each nation on the nation selection screen, by its scenario tag
+    /// (landscape, about 4:3).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub scenes: BTreeMap<String, String>,
+    /// Music under the title screens, in a loop. Without it the soundtrack plays.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub music: String,
+}
+
+impl MenuArt {
+    pub fn is_empty(&self) -> bool {
+        *self == MenuArt::default()
+    }
+    fn paths(&self) -> impl Iterator<Item = &String> {
+        [&self.background, &self.logo, &self.desk, &self.music]
+            .into_iter()
+            .filter(|path| !path.is_empty())
+            .chain(self.scenes.values())
+    }
 }
 
 /// The farm of one culture: its crop, whole and (optionally) cut along the shore.
@@ -187,6 +225,7 @@ impl Visuals {
         .chain(self.nations.values())
         .chain(self.cities.values())
         .chain(self.city_banners.values())
+        .chain(self.menu.paths())
         .chain(self.combat.paths())
         .chain(animation::visual_paths(&self.units))
     }

@@ -219,6 +219,30 @@ pub struct NationStart {
     /// Free-form historical context. Not used by the simulation.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub notes: String,
+    /// How the nation selection screen presents the nation. Not used by the simulation.
+    #[serde(default, skip_serializing_if = "Profile::is_empty")]
+    pub profile: Profile,
+}
+
+/// A nation as the nation selection screen presents it: a short epithet under its name
+/// (`A global power`), a paragraph about its position on the start date, and what plays in its
+/// favour and against it. Every part is optional.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Profile {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub epithet: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strengths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub challenges: Vec<String>,
+}
+impl Profile {
+    pub fn is_empty(&self) -> bool {
+        *self == Profile::default()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

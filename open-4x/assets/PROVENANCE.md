@@ -17,3 +17,5 @@ surface and projection; no reference images, Civ3 sheets or reference renderer s
 enter the generator. The behavior was specified from the terrain notes under
 `open-civ3/reverse-engineering/`; the undocumented border-contour algorithm is implemented
 independently. The `terrain-study` scenario is a hand-authored visual regression fixture.
+
+The title screen's painting (`ui/menu/title.png`) and the nation selection screen's harbour scenes (`ui/menu/scenes/<nation id>.png`: Japan, London, Brest, Amsterdam, Istanbul, Shanghai and Vladivostok) were supplied by the project owner as finished pictures; the scenes were scaled to 720 px wide and all were converted to PNG. The title screens play `audio/music/clair-de-lune.mp3` of the soundtrack (above) under them.

@@ -23,7 +23,7 @@ const DEVELOP_COST: i32 = 40;
 
 // --- faces -----------------------------------------------------------------------------------
 /// Playfair Display, SIL OFL 1.1: `fonts/PlayfairDisplay-OFL.txt`.
-const DISPLAY: Handle<Font> = uuid_handle!("7a1c0b9e-52d4-4f1b-9d6e-3b1f6a0c8d21");
+pub(crate) const DISPLAY: Handle<Font> = uuid_handle!("7a1c0b9e-52d4-4f1b-9d6e-3b1f6a0c8d21");
 /// EB Garamond, SIL OFL 1.1: `fonts/EBGaramond-OFL.txt`.
 const SERIF: Handle<Font> = uuid_handle!("c4e2f7a8-1b36-4a5d-8e90-62d7b13f4a55");
 

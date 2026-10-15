@@ -8,9 +8,11 @@ use bevy::audio::AudioSinkPlayback;
 pub(super) struct Track;
 
 /// Start the next track when the last one has finished, and pause the soundtrack while the
-/// diplomacy window is open.
+/// diplomacy window, or the title screens' own music, plays.
 pub(super) fn soundtrack(
     session: Res<Session>,
+    menu: Res<menu::Menu>,
+    screen: Res<menu::Screen>,
     assets: Res<AssetServer>,
     mut commands: Commands,
     mut next: Local<usize>,
@@ -18,6 +20,9 @@ pub(super) fn soundtrack(
 ) {
     let music = &session.pack.visuals.music;
     if music.is_empty() {
+        return;
+    }
+    if menu::has_own_music(&menu, *screen) && playing.is_empty() {
         return;
     }
     match playing.single() {
@@ -32,7 +37,7 @@ pub(super) fn soundtrack(
             ));
         }
         Ok(Some(sink)) => {
-            let hushed = session.diplomacy.is_some();
+            let hushed = session.diplomacy.is_some() || menu::has_own_music(&menu, *screen);
             if hushed && !sink.is_paused() {
                 sink.pause();
             } else if !hushed && sink.is_paused() {

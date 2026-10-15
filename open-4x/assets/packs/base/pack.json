@@ -165,6 +165,19 @@
     "railroads": "terrain/railroads.png",
     "turn_sound": "audio/bell.wav",
     "diplomacy_music": "audio/diplomacy.mp3",
+    "menu": {
+      "background": "ui/menu/title.png",
+      "music": "audio/music/clair-de-lune.mp3",
+      "scenes": {
+        "british-empire": "ui/menu/scenes/british-empire.png",
+        "china": "ui/menu/scenes/china.png",
+        "france": "ui/menu/scenes/france.png",
+        "japan": "ui/menu/scenes/japan.png",
+        "netherlands": "ui/menu/scenes/netherlands.png",
+        "ottoman-empire": "ui/menu/scenes/ottoman-empire.png",
+        "russia": "ui/menu/scenes/russia.png"
+      }
+    },
     "music": [
       "audio/music/blue-danube.mp3",
       "audio/music/a-hot-time-in-the-old-town.mp3",
