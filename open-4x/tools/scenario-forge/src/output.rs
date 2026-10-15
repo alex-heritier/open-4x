@@ -12,6 +12,31 @@ pub fn render(value: &Value) -> String {
     out
 }
 
+/// [`render`] an object that replaces `original`, copying the text of every top-level entry
+/// that has not changed, so hand-formatted parts of a file survive a tool rewriting the rest.
+pub fn render_over(value: &Value, original: &str) -> String {
+    let Value::Object(entries) = value else {
+        return render(value);
+    };
+    let kept: std::collections::HashMap<String, Box<serde_json::value::RawValue>> =
+        serde_json::from_str(original).unwrap_or_default();
+    let mut out = String::from("{\n");
+    for (i, (key, item)) in entries.iter().enumerate() {
+        out.push_str("  ");
+        out.push_str(&serde_json::to_string(key).expect("key serializes"));
+        out.push_str(": ");
+        match kept.get(key) {
+            Some(raw) if serde_json::from_str::<Value>(raw.get()).is_ok_and(|v| v == *item) => {
+                out.push_str(raw.get());
+            }
+            _ => write(item, 1, &mut out),
+        }
+        out.push_str(if i + 1 < entries.len() { ",\n" } else { "\n" });
+    }
+    out.push_str("}\n");
+    out
+}
+
 fn write(value: &Value, depth: usize, out: &mut String) {
     let compact = serde_json::to_string(value).expect("value serializes");
     if compact.len() <= COMPACT {
@@ -71,6 +96,16 @@ fn write(value: &Value, depth: usize, out: &mut String) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_rewrite_keeps_the_text_of_what_it_leaves_alone() {
+        let original = "{\n  \"kept\": [ {\"a\": 1} ],\n  \"changed\": 1\n}\n";
+        let value = json!({"kept": [{"a": 1}], "changed": 2, "added": true});
+        assert_eq!(
+            render_over(&value, original),
+            "{\n  \"kept\": [ {\"a\": 1} ],\n  \"changed\": 2,\n  \"added\": true\n}\n"
+        );
+    }
 
     #[test]
     fn small_values_stay_on_one_line_and_large_ones_wrap() {

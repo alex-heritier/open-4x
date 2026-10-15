@@ -1,5 +1,5 @@
 //! Physical industrial goods, colonial cargo, fixed-price trade and national budgets.
-use crate::{Domain, Game, Id, Result, Rules, UnitDef, error};
+use crate::{Domain, Game, Id, Result, Rules, UnitDef, borders::reach_percent, error};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -323,11 +323,11 @@ impl Game {
                 }
             }
         }
-        if self
-            .turn
-            .saturating_sub(1)
-            .is_multiple_of(r.resource_period.max(1))
-        {
+        // A resource past its city's border reach produces less often, by the same share
+        // the harvest takes from it: twice as far out as the border, every fourth period.
+        let day = self.turn.saturating_sub(1);
+        let period = r.resource_period.max(1);
+        if day.is_multiple_of(period) {
             let inputs: Vec<_> = self
                 .map
                 .tiles
@@ -335,6 +335,14 @@ impl Game {
                 .filter_map(|t| {
                     let city = self.cities.get(&t.claim)?;
                     if city.owner != t.owner {
+                        return None;
+                    }
+                    let share = reach_percent(
+                        city.border,
+                        self.map.distance_squared(city.position, t.position),
+                    )
+                    .max(1) as u32;
+                    if !(day / period).is_multiple_of(100_u32.div_ceil(share)) {
                         return None;
                     }
                     Some((

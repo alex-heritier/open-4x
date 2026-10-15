@@ -23,6 +23,9 @@
 //!   scenario needs them to be playable. Each city gets a garrison and each capital the usual
 //!   starting units; the file's own 1,358 units are not converted. Each nation's `profile` (the
 //!   nation selection screen's text) is written by hand and kept from the scenario it replaces.
+//! * **Territory.** The 1895 regions, which hand land beyond the cities' borders to the nation
+//!   that held it, are painted by `scenario-forge aoi` and likewise kept from the scenario it
+//!   replaces.
 use civ3_biq::{Biq, MapView, sections::tile::overlay};
 use fourx_sim::{
     Flavor, Status,
@@ -197,7 +200,9 @@ fn run(input: &str, out: &str) -> Result<(), String> {
     );
 
     let (mut nations, cities, units) = build_nations(&biq, &mut map)?;
-    keep_profiles(&mut nations, out);
+    let kept = previous(out);
+    keep_profiles(&mut nations, kept.as_ref());
+    keep_regions(&mut map, kept.as_ref());
     for city in &cities {
         // A city's own square counts as roaded and farmed; worker improvements add nothing there.
         map.get_mut(city.position).expect("on the map").improvements = 0;
@@ -217,7 +222,7 @@ fn run(input: &str, out: &str) -> Result<(), String> {
             with --nation."
             .into(),
         charted: true,
-        regional_fill: false,
+        regional_fill: kept.as_ref().is_some_and(|old| old.regional_fill),
         rules: RuleOverrides {
             victory_industry: Some(1_000_000),
             research_cost: Some(3000),
@@ -225,7 +230,7 @@ fn run(input: &str, out: &str) -> Result<(), String> {
         },
         map,
         nations,
-        regions: Vec::new(),
+        regions: kept.as_ref().map_or_else(Vec::new, |old| old.regions.clone()),
         cities,
         units,
         wars: Vec::new(),
@@ -443,19 +448,34 @@ fn assign_bases(map: &mut Map, features: Vec<Coord>) {
     }
 }
 
-/// The nation selection screen's profiles are written by hand in the scenario, not taken from
-/// the file: a re-import keeps those of the scenario it replaces.
-fn keep_profiles(nations: &mut [NationStart], out: &str) {
-    let Some(old) = std::fs::read_to_string(out)
+/// The scenario a re-import replaces, if there is one to read.
+fn previous(out: &str) -> Option<Scenario> {
+    std::fs::read_to_string(out)
         .ok()
         .and_then(|json| serde_json::from_str::<Scenario>(&json).ok())
-    else {
+}
+
+/// The nation selection screen's profiles are written by hand in the scenario, not taken from
+/// the file: a re-import keeps those of the scenario it replaces.
+fn keep_profiles(nations: &mut [NationStart], old: Option<&Scenario>) {
+    let Some(old) = old else {
         return;
     };
     for nation in nations {
         if let Some(kept) = old.nations.iter().find(|n| n.id == nation.id) {
             nation.profile = kept.profile.clone();
         }
+    }
+}
+
+/// The 1895 territory is painted by `scenario-forge aoi`, not taken from the file: a re-import
+/// keeps the region of every tile of the scenario it replaces.
+fn keep_regions(map: &mut Map, old: Option<&Scenario>) {
+    let Some(old) = old.filter(|old| old.map.tiles.len() == map.tiles.len()) else {
+        return;
+    };
+    for (tile, kept) in map.tiles.iter_mut().zip(&old.map.tiles) {
+        tile.region = if tile.is_land() { kept.region } else { 0 };
     }
 }
 

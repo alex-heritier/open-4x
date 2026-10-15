@@ -1,0 +1,10 @@
+[
+  { "name": "Fort Simpson", "nation": "british-empire", "lon": -121.35, "lat": 61.86, "population": 1, "home": false },
+  { "name": "Fort Churchill", "nation": "british-empire", "lon": -94.17, "lat": 58.77, "population": 1, "home": false },
+  { "name": "Fort Chimo", "nation": "british-empire", "lon": -68.42, "lat": 58.11, "population": 1, "home": false },
+  { "name": "Obdorsk", "nation": "russia", "lon": 66.6, "lat": 66.53, "population": 1, "home": true },
+  { "name": "Turukhansk", "nation": "russia", "lon": 87.95, "lat": 65.8, "population": 1, "home": true },
+  { "name": "Vilyuysk", "nation": "russia", "lon": 121.63, "lat": 63.75, "population": 1, "home": true },
+  { "name": "Verkhoyansk", "nation": "russia", "lon": 133.4, "lat": 67.55, "population": 1, "home": true },
+  { "name": "Srednekolymsk", "nation": "russia", "lon": 153.7, "lat": 67.45, "population": 1, "home": true }
+]

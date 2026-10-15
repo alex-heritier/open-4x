@@ -39,6 +39,7 @@ is the small fixture the tests use.
 | `commander` | nation ID | The nation played unless the host picks another (`--nation`). |
 | `intro` | string | First dispatch. Up to 600 characters. |
 | `charted` | boolean | Optional, default `false`. When `true`, every nation starts with the whole map known: all terrain, borders, and cities. Enemy units are still only seen within sight of a friendly unit or city. |
+| `regional_fill` | boolean | Optional, default `false`. When `true`, land no city's border reaches but a region names goes to the nearest city of that region's nation, so remote interiors (Siberia, the Sahara) belong to their historical holder. It adds to that city's harvest, but land past the city's own border reach yields a share that falls with the square of the distance: twice as far out as the border gives a quarter, and a resource there produces every fourth period. |
 | `rules` | object | Optional overrides of pack rule values for this scenario only. |
 | `map` | object | Terrain and regions. See below. |
 | `nations` | array | 1–250 nations. |
@@ -224,7 +225,9 @@ from 1 in document order when the game is built; `0` always means "nobody".
 ```
 
 - **Regions** are named stretches of map held by one nation on the start date. Several regions
-  can belong to the same nation. Selecting a tile shows its region and owner.
+  can belong to the same nation. Selecting a tile shows its region and owner. With
+  `regional_fill` they also decide who holds land beyond every city's border. The Age of
+  Imperialism regions are painted from 1895 history by `scenario-forge aoi` (see below).
 - **Cities** must be on land, one per tile, with `population` and `industry` of 1–100.
   `population` is the number of citizens, who each eat 2 food a day; `industry` is the city's own
   workshops, which add shields to what the land of its region yields. Food, shields, and gold
@@ -279,6 +282,27 @@ cargo run -p fourx-server -- --scenario russo-japanese-war --nation russia --sim
 Paths are relative to the pack directory and may not leave it. A save embeds the pack, rules,
 and the full game state, so it resumes independently of later edits to the files. Saves
 and packs from earlier versions (pack format 1, save formats before 5) are refused with a clear message.
+
+## Painting the 1895 territory
+
+The Age of Imperialism cities' borders leave the remote interiors of 1895 empires to nobody.
+`scenario-forge aoi` writes the scenario's regions from who held what on 1 January 1895, authored
+in longitude and latitude in `tools/scenario-forge/data/aoi-1895/regions.json` (the same paint
+operations as the 1876 tables; a region with `"nation": null` stays unclaimed). The hand-drawn
+map is tied to the globe by `anchors.json`, the real position of most of its cities: a warp
+through them finds the ground under each tile. Small islands no region reaches join the region
+of the nearest city. `tools/biq-import` keeps the regions when it rewrites the scenario.
+
+Where filled land would still lie far past every border, `cities.json` adds the real 1895
+settlement there (Hudson's Bay posts in the Canadian north, district seats in Siberia), placed
+on the tile the warp puts nearest its position. Rerunning the command replaces them by name; run
+it again after a fresh `biq-import`, which drops them. The rewrite leaves every other part of
+the file as it was.
+
+```sh
+cargo run --release -p scenario-forge -- aoi --check   # preview only: cache/aoi-1895.png
+cargo run --release -p scenario-forge -- aoi           # rewrite the scenario's regions
+```
 
 ## Building a world scenario
 

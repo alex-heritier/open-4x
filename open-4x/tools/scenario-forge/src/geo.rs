@@ -141,11 +141,11 @@ fn sample_row_lat(row: f64) -> f64 {
     unit_to_lat((row + (ROW0 * SUPER) as f64) / (FULL_ROWS * SUPER) as f64)
 }
 /// Fractional sample row of a latitude (may fall outside `0..GY`).
-fn lat_to_sample_row(lat: f64) -> f64 {
+pub(crate) fn lat_to_sample_row(lat: f64) -> f64 {
     lat_to_unit(lat) * (FULL_ROWS * SUPER) as f64 - (ROW0 * SUPER) as f64
 }
 /// Fractional sample column of a longitude.
-fn lon_to_sample_col(lon: f64) -> f64 {
+pub(crate) fn lon_to_sample_col(lon: f64) -> f64 {
     lon_to_unit(lon) * GX as f64
 }
 /// Samples rows covering a latitude band: `(first, end)`, clamped to the raster.

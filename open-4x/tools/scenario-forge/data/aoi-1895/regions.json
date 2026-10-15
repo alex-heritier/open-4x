@@ -1,0 +1,147 @@
+[
+  {"id":"canada","name":"Dominion of Canada","nation":"british-empire","paint":[{"country":"CAN"}]},
+  {"id":"united-states","name":"United States","nation":"usa","paint":[{"country":"USA","bbox":[-130.0,24.0,-66.0,50.0]}]},
+  {"id":"alaska","name":"Alaska","nation":"usa","paint":[{"country":"USA","bbox":[-180.0,51.0,-129.0,72.0]},{"country":"USA","bbox":[170.0,50.0,180.0,55.0]}]},
+  {"id":"hawaii","name":"Hawaiian Islands","nation":"usa","paint":[{"country":"USA","bbox":[-161.0,18.5,-154.5,22.5]}]},
+  {"id":"american-samoa","name":"Tutuila","nation":"usa","paint":[{"country":"ASM"}]},
+  {"id":"greenland","name":"Greenland","nation":"scandinavia","paint":[{"country":"GRL"}]},
+  {"id":"iceland","name":"Iceland","nation":"scandinavia","paint":[{"country":"ISL"},{"country":"FRO"}]},
+  {"id":"mexico","name":"Mexico","nation":"mexico","paint":[{"country":"MEX"}]},
+  {"id":"central-america","name":"Central America","nation":"central-america","paint":[
+    {"country":"GTM"},{"country":"SLV"},{"country":"HND"},{"country":"NIC"},{"country":"CRI"}]},
+  {"id":"british-honduras","name":"British Honduras","nation":"british-empire","paint":[{"country":"BLZ"}]},
+  {"id":"new-granada","name":"Colombia, Venezuela and Ecuador","nation":"new-granada","paint":[
+    {"country":"COL"},{"country":"PAN"},{"country":"VEN"},{"country":"ECU"}]},
+  {"id":"british-guiana","name":"British Guiana","nation":"british-empire","paint":[{"country":"GUY"}]},
+  {"id":"suriname","name":"Suriname","nation":"netherlands","paint":[{"country":"SUR"}]},
+  {"id":"brazil","name":"Brazil","nation":"brazil","paint":[{"country":"BRA"}]},
+  {"id":"peru-bolivia","name":"Peru, Bolivia and Paraguay","nation":"la-plata","paint":[
+    {"country":"PER"},{"country":"BOL"},{"country":"PRY"},
+    {"poly":[[-74.0,-7.1],[-65.4,-10.3],[-66.6,-11.0],[-70.6,-11.0],[-72.4,-10.0],[-73.5,-9.4],[-74.0,-7.6]]}]},
+  {"id":"chile","name":"Chile","nation":"chile","paint":[
+    {"country":"CHL"},{"poly":[[-71.0,-17.9],[-69.5,-17.3],[-69.4,-18.4],[-70.4,-18.4]]}]},
+  {"id":"argentina","name":"Argentina","nation":"argentina","paint":[{"country":"ARG"}]},
+  {"id":"uruguay","name":"Uruguay","nation":"uruguay","paint":[{"country":"URY"}]},
+  {"id":"south-atlantic","name":"Falkland Islands and South Georgia","nation":"british-empire","paint":[{"country":"FLK"},{"country":"SGS"}]},
+  {"id":"spanish-antilles","name":"Cuba and Puerto Rico","nation":"spain","paint":[{"country":"CUB"},{"country":"PRI"}]},
+  {"id":"hispaniola","name":"Hispaniola","nation":"hispaniola","paint":[{"country":"HTI"},{"country":"DOM"}]},
+  {"id":"british-west-indies","name":"British West Indies","nation":"british-empire","paint":[
+    {"country":"JAM"},{"country":"BHS"},{"country":"TTO"},{"country":"BRB"},{"country":"TCA"},{"country":"VGB"},
+    {"country":"CYM"},{"country":"AIA"},{"country":"ATG"},{"country":"KNA"},{"country":"LCA"},{"country":"VCT"},
+    {"country":"GRD"},{"country":"DMA"},{"country":"MSR"},{"country":"BMU"}]},
+  {"id":"danish-west-indies","name":"Danish West Indies","nation":"scandinavia","paint":[{"country":"VIR"}]},
+  {"id":"dutch-antilles","name":"Curacao and Dependencies","nation":"netherlands","paint":[{"country":"CUW"},{"country":"ABW"},{"country":"SXM"}]},
+
+  {"id":"russia","name":"Russian Empire","nation":"russia","paint":[
+    {"country":"RUS"},{"country":"FIN"},{"country":"ALD"},{"country":"EST"},{"country":"LVA"},{"country":"LTU"},
+    {"country":"BLR"},{"country":"UKR"},{"country":"MDA"},{"country":"POL"},
+    {"country":"GEO"},{"country":"ARM"},{"country":"AZE"}]},
+  {"id":"turkestan","name":"Russian Turkestan and the Steppe","nation":"russia","paint":[
+    {"country":"KAZ"},{"country":"UZB"},{"country":"KGZ"},{"country":"TKM"},{"country":"TJK"}]},
+  {"id":"britain","name":"United Kingdom","nation":"british-empire","paint":[
+    {"country":"GBR"},{"country":"IRL"},{"country":"IMN"},{"country":"GGY"},{"country":"JEY"},{"country":"MLT"},{"country":"CYP"},{"country":"CYN"}]},
+  {"id":"france","name":"France","nation":"france","paint":[{"country":"FRA"},{"country":"MCO"}]},
+  {"id":"spain","name":"Spain","nation":"spain","paint":[{"country":"ESP"},{"country":"AND"}]},
+  {"id":"portugal","name":"Portugal","nation":"portugal","paint":[{"country":"PRT"}]},
+  {"id":"italy","name":"Italy","nation":"italy","paint":[{"country":"ITA"},{"country":"SMR"},{"country":"VAT"}]},
+  {"id":"switzerland","name":"Switzerland","nation":null,"paint":[{"country":"CHE"},{"country":"LIE"}]},
+  {"id":"germany","name":"German Empire","nation":"german-empire","paint":[
+    {"country":"DEU"},
+    {"country":"FRA","bbox":[5.9,47.4,8.3,49.6]},
+    {"country":"DNK","bbox":[8.0,54.5,10.5,55.45]},
+    {"poly":[[14.0,54.6],[19.5,54.9],[21.0,55.9],[22.6,55.1],[22.8,54.3],[21.5,53.4],[20.0,53.15],[19.4,53.1],[18.9,52.7],[18.0,52.2],[18.1,51.5],[18.4,51.0],[18.6,50.25],[17.6,50.15],[16.8,50.4],[16.0,50.6],[14.8,50.9],[14.0,52.0]]}]},
+  {"id":"luxembourg","name":"Luxembourg","nation":null,"paint":[{"country":"LUX"}]},
+  {"id":"netherlands","name":"Netherlands","nation":"netherlands","paint":[{"country":"NLD"}]},
+  {"id":"belgium","name":"Belgium","nation":"belgium","paint":[{"country":"BEL"}]},
+  {"id":"scandinavia","name":"Sweden-Norway and Denmark","nation":"scandinavia","paint":[{"country":"NOR"},{"country":"SWE"},{"country":"DNK","bbox":[8.0,55.45,16.0,58.0]}]},
+  {"id":"romania","name":"Romania","nation":"romania","paint":[{"country":"ROU"}]},
+  {"id":"austria-hungary","name":"Austria-Hungary","nation":"austria-hungary","paint":[
+    {"country":"AUT"},{"country":"CZE"},{"country":"SVK"},{"country":"HUN"},{"country":"SVN"},{"country":"HRV"},{"country":"BIH"},
+    {"poly":[[19.0,50.3],[20.5,50.2],[22.0,50.4],[23.5,50.4],[24.1,50.8],[25.0,49.9],[26.6,48.3],[24.0,47.9],[22.5,49.0],[19.5,49.3],[18.8,49.6]]},
+    {"poly":[[22.0,47.9],[23.5,48.0],[25.0,47.8],[25.4,47.2],[26.4,46.0],[26.0,45.5],[25.3,45.4],[24.0,45.4],[23.0,45.0],[22.4,44.6],[21.4,44.8],[21.0,46.0],[22.0,47.5]]},
+    {"country":"SRB","bbox":[18.8,44.85,21.6,46.2]},
+    {"poly":[[10.5,45.7],[11.4,45.7],[11.8,46.0],[12.5,46.4],[12.4,47.1],[10.4,46.9]]},
+    {"country":"ITA","bbox":[13.5,45.55,13.95,45.8]}]},
+  {"id":"balkans","name":"Serbia, Montenegro, Bulgaria and Greece","nation":"balcan-nations","paint":[
+    {"country":"SRB","bbox":[18.8,42.0,23.1,44.85]},{"country":"MNE"},{"country":"BGR"},{"country":"GRC"}]},
+  {"id":"ottoman-europe","name":"Rumelia","nation":"ottoman-empire","paint":[
+    {"country":"MKD"},{"country":"ALB"},{"country":"KOS"},{"country":"SRB","bbox":[19.0,42.0,21.0,43.6]},
+    {"country":"GRC","bbox":[19.0,39.85,27.0,42.0]},{"country":"GRC","bbox":[23.4,34.7,26.4,35.75]},
+    {"country":"GRC","bbox":[25.95,35.8,30.0,39.6]}]},
+  {"id":"ottoman-asia","name":"Ottoman Asia","nation":"ottoman-empire","paint":[
+    {"country":"TUR"},{"country":"SYR"},{"country":"LBN"},{"country":"ISR"},{"country":"PSX"},{"country":"JOR"},{"country":"IRQ"},{"country":"QAT"}]},
+  {"id":"kars","name":"Kars and Batum","nation":"russia","paint":[
+    {"poly":[[41.5,41.6],[43.4,41.25],[43.7,40.1],[43.0,40.0],[42.2,40.4],[41.4,41.0]]}]},
+  {"id":"central-arabia","name":"Nejd and Jabal Shammar","nation":null,"paint":[{"country":"SAU"}]},
+  {"id":"hejaz","name":"Hejaz and Asir","nation":"ottoman-empire","paint":[
+    {"poly":[[34.5,29.6],[37.5,29.2],[38.8,27.5],[39.5,26.0],[41.0,24.0],[41.8,21.0],[42.8,19.0],[43.2,17.0],[42.6,16.2],[36.0,16.2],[34.0,28.0]]}]},
+  {"id":"hasa","name":"Hasa","nation":"ottoman-empire","paint":[{"poly":[[48.0,28.5],[50.0,28.5],[52.0,25.0],[51.2,24.0],[49.0,24.0],[48.5,26.0]]}]},
+  {"id":"aden","name":"Aden and the Gulf protectorates","nation":"british-empire","paint":[
+    {"country":"YEM"},{"country":"OMN"},{"country":"ARE"},{"country":"KWT"},{"country":"BHR"}]},
+  {"id":"yemen","name":"Ottoman Yemen","nation":"ottoman-empire","paint":[
+    {"poly":[[42.4,12.7],[44.0,12.7],[45.3,14.0],[45.3,16.8],[43.3,17.2],[42.7,16.3]]}]},
+  {"id":"persia","name":"Persia","nation":"persia","paint":[{"country":"IRN"}]},
+  {"id":"afghanistan","name":"Afghanistan","nation":"british-empire","paint":[{"country":"AFG"}]},
+  {"id":"british-india","name":"British India","nation":"british-empire","paint":[
+    {"country":"IND"},{"country":"PAK"},{"country":"BGD"},{"country":"LKA"},{"country":"MMR"},{"country":"MDV"},{"country":"KAS"}]},
+  {"id":"himalayan-kingdoms","name":"Nepal and Bhutan","nation":null,"paint":[{"country":"NPL"},{"country":"BTN"}]},
+  {"id":"china","name":"Qing Empire","nation":"china","paint":[
+    {"country":"CHN"},{"country":"MNG"},{"poly":[[88.5,49.5],[99.5,49.5],[99.5,52.5],[88.5,52.5]]}]},
+  {"id":"tibet","name":"Tibet","nation":"tibet","paint":[
+    {"poly":[[79.0,30.5],[79.2,34.5],[90.0,35.5],[98.0,34.0],[98.5,30.0],[98.5,28.5],[92.0,27.8],[88.0,27.8],[82.0,29.5]]}]},
+  {"id":"hong-kong","name":"Hong Kong","nation":"british-empire","paint":[{"country":"HKG"}]},
+  {"id":"macau","name":"Macau","nation":"portugal","paint":[{"country":"MAC"}]},
+  {"id":"japan","name":"Japan","nation":"japan","paint":[{"country":"JPN"},{"country":"TWN"},{"rect":[145.0,43.2,156.4,50.9]}]},
+  {"id":"korea","name":"Korea","nation":"japan","paint":[{"country":"PRK"},{"country":"KOR"}]},
+  {"id":"indochina","name":"French Indochina","nation":"france","paint":[{"country":"VNM"},{"country":"LAO"},{"country":"KHM"}]},
+  {"id":"siam","name":"Siam","nation":"siam","paint":[
+    {"country":"THA"},{"poly":[[102.3,12.0],[104.3,12.6],[104.4,14.4],[102.5,14.3]]},
+    {"country":"MYS","bbox":[99.5,5.05,103.7,6.8]}]},
+  {"id":"malaya","name":"Straits Settlements and Malaya","nation":"british-empire","paint":[
+    {"country":"MYS","bbox":[99.5,1.0,104.5,5.05]},{"country":"SGP"},{"country":"MYS","bbox":[109.0,0.0,120.0,8.0]},{"country":"BRN"}]},
+  {"id":"dutch-east-indies","name":"Dutch East Indies","nation":"netherlands","paint":[{"country":"IDN"}]},
+  {"id":"timor","name":"Portuguese Timor","nation":"portugal","paint":[{"country":"TLS"}]},
+  {"id":"philippines","name":"Spanish East Indies","nation":"spain","paint":[{"country":"PHL"},{"country":"PLW"},{"country":"FSM"},{"country":"MNP"},{"country":"GUM"}]},
+  {"id":"british-new-guinea","name":"British New Guinea and the Solomons","nation":"british-empire","paint":[{"country":"PNG"},{"country":"SLB"}]},
+  {"id":"german-new-guinea","name":"German New Guinea","nation":"german-empire","paint":[
+    {"country":"PNG","bbox":[140.8,-8.0,156.0,-1.0]},{"country":"MHL"},{"country":"NRU"},{"country":"WSM"}]},
+  {"id":"british-papua","name":"British New Guinea","nation":"british-empire","paint":[
+    {"poly":[[140.8,-5.0],[144.0,-6.0],[146.0,-7.3],[147.8,-8.0],[152.0,-8.0],[152.0,-12.0],[140.8,-12.0]]}]},
+  {"id":"australasia","name":"Australia and New Zealand","nation":"british-empire","paint":[
+    {"country":"AUS"},{"country":"NZL"},{"country":"NFK"},{"country":"FJI"},{"country":"KIR"},{"country":"TUV"},{"country":"COK"}]},
+  {"id":"french-oceania","name":"French Oceania","nation":"france","paint":[{"country":"NCL"},{"country":"VUT"},{"country":"PYF"},{"country":"WLF"}]},
+
+  {"id":"egypt","name":"Egypt","nation":"british-empire","paint":[{"country":"EGY"}]},
+  {"id":"sudan","name":"The Sudan","nation":"british-empire","paint":[{"country":"SDN"},{"country":"SDS"}]},
+  {"id":"libya","name":"Tripolitania and Cyrenaica","nation":"ottoman-empire","paint":[{"country":"LBY"}]},
+  {"id":"french-north-africa","name":"Algeria and Tunisia","nation":"france","paint":[{"country":"DZA"},{"country":"TUN"}]},
+  {"id":"morocco","name":"Morocco","nation":null,"paint":[{"country":"MAR"}]},
+  {"id":"rio-de-oro","name":"Rio de Oro","nation":"spain","paint":[{"country":"SAH"}]},
+  {"id":"french-west-africa","name":"French West and Equatorial Africa","nation":"france","paint":[
+    {"country":"MRT"},{"country":"MLI"},{"country":"NER"},{"country":"SEN"},{"country":"GIN"},{"country":"CIV"},{"country":"BFA"},
+    {"country":"BEN"},{"country":"TCD"},{"country":"CAF"},{"country":"GAB"},{"country":"COG"}]},
+  {"id":"british-west-africa","name":"British West Africa","nation":"british-empire","paint":[
+    {"country":"GMB"},{"country":"SLE"},{"country":"GHA"},{"country":"NGA"}]},
+  {"id":"liberia","name":"Liberia","nation":null,"paint":[{"country":"LBR"}]},
+  {"id":"german-west-africa","name":"Togo and Kamerun","nation":"german-empire","paint":[{"country":"TGO"},{"country":"CMR"}]},
+  {"id":"portuguese-africa","name":"Portuguese Africa","nation":"portugal","paint":[
+    {"country":"GNB"},{"country":"STP"},{"country":"CPV"},{"country":"AGO"},{"country":"MOZ"}]},
+  {"id":"spanish-guinea","name":"Spanish Guinea","nation":"spain","paint":[{"country":"GNQ"}]},
+  {"id":"congo","name":"Congo Free State","nation":"belgium","paint":[{"country":"COD"}]},
+  {"id":"german-southwest-africa","name":"German South West Africa","nation":"german-empire","paint":[{"country":"NAM"}]},
+  {"id":"british-south-africa","name":"British South and Central Africa","nation":"british-empire","paint":[
+    {"country":"ZAF"},{"country":"LSO"},{"country":"BWA"},{"country":"ZWE"},{"country":"ZMB"},{"country":"MWI"}]},
+  {"id":"boer-republics","name":"Transvaal and the Orange Free State","nation":"boer-republics","paint":[
+    {"country":"SWZ"},
+    {"poly":[[25.8,-22.4],[31.3,-22.4],[32.0,-25.5],[31.1,-27.0],[30.6,-27.6],[29.6,-27.5],[29.0,-27.0],[27.0,-27.0],[26.0,-27.8],[25.5,-26.0],[25.6,-24.5]]},
+    {"poly":[[24.4,-28.8],[25.0,-29.7],[26.4,-30.7],[27.4,-30.2],[29.4,-29.0],[29.6,-27.5],[27.0,-27.0],[26.0,-27.8],[25.0,-28.0]]}]},
+  {"id":"german-east-africa","name":"German East Africa","nation":"german-empire","paint":[{"country":"TZA"},{"country":"RWA"},{"country":"BDI"}]},
+  {"id":"zanzibar","name":"Zanzibar","nation":"british-empire","paint":[{"poly":[[39.1,-6.6],[39.7,-6.6],[39.9,-4.8],[39.5,-4.8]]}]},
+  {"id":"british-east-africa","name":"British East Africa and Uganda","nation":"british-empire","paint":[{"country":"KEN"},{"country":"UGA"},{"country":"SOL"}]},
+  {"id":"italian-east-africa","name":"Eritrea and Italian Somaliland","nation":"italy","paint":[{"country":"ERI"},{"country":"SOM"}]},
+  {"id":"french-somaliland","name":"French Somali Coast","nation":"france","paint":[{"country":"DJI"}]},
+  {"id":"abyssinia","name":"Abyssinia","nation":"abyssinia","paint":[{"country":"ETH"}]},
+  {"id":"ogaden","name":"Ogaden","nation":null,"paint":[{"poly":[[42.5,3.5],[48.0,3.5],[48.0,8.5],[44.5,8.5],[42.5,6.5]]}]},
+  {"id":"madagascar","name":"Madagascar and the Comoros","nation":"france","paint":[{"country":"MDG"},{"country":"COM"}]},
+  {"id":"british-indian-ocean","name":"British Indian Ocean islands","nation":"british-empire","paint":[{"country":"MUS"},{"country":"SYC"},{"country":"SHN"}]}
+]

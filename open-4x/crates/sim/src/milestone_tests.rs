@@ -179,6 +179,33 @@ fn resource_tiles_pay_home_stockpiles_and_spawn_colonial_cargo_every_four_weeks(
     assert!(g.units.values().any(|u| u.cargo == Some((Good::Coal, 1))));
 }
 #[test]
+fn a_resource_far_past_the_border_produces_less_often() {
+    let mut g = arena(12, 6);
+    let r = industrial();
+    g.map.resources.push(resources::ResourceKind {
+        id: "coal".into(),
+        name: "Coal".into(),
+        class: resources::ResourceClass::Strategic,
+        food: 0,
+        shields: 0,
+        gold: 0,
+    });
+    let city = g.cities.values().find(|c| c.owner == RED).unwrap().id;
+    g.cities.get_mut(&city).unwrap().border = 3;
+    // Level 3 reaches squared distance 10; this square lies at 40, twice as far out.
+    let at = g.cities[&city].position;
+    let far = Coord::new(at.x + 6, at.y + 2);
+    let tile = g.map.get_mut(far).unwrap();
+    (tile.claim, tile.owner, tile.resource) = (city, RED, 1);
+    let mut mined = Vec::new();
+    for turn in [1, 5, 9, 13, 17] {
+        g.turn = turn;
+        g.industry_turn(&r);
+        mined.push(g.factions[&RED].stockpile.get(Good::Coal));
+    }
+    assert_eq!(mined, [1, 1, 1, 1, 2], "every fourth period");
+}
+#[test]
 fn market_spread_prevents_roundtrip_profit_and_rejects_overselling() {
     let mut g = arena(12, 6);
     let r = industrial();

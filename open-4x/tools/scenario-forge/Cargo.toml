@@ -9,7 +9,8 @@ description = "Builds the upright 512x342 Mercator world scenario from curated 1
 fourx-sim.workspace = true
 fourx-content.workspace = true
 serde.workspace = true
-# preserve_order keeps struct field order in the generated JSON.
-serde_json = { workspace = true, features = ["preserve_order"] }
+# preserve_order keeps struct field order in the generated JSON; raw_value lets a rewrite copy
+# the original text of what it leaves alone.
+serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
 sha2 = "0.10"
 png = "0.17"

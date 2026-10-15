@@ -9,11 +9,13 @@
 //!
 //! The land decides what a square yields; workers improve it: a mine adds shields, a farm adds
 //! food, a road adds gold, and a railroad adds shields and gold on top of its road. Every
-//! square of the region counts, so there is no citizen assignment. The only link to borders is
-//! [`crate::terrain::Tile::claim`], so whatever shape a region takes, the economy follows it,
-//! and a conquered city takes its harvest to its new owner along with its land.
+//! square of the region counts, so there is no citizen assignment, though land held past the
+//! city's own border reach gives a falling share (see [`reach_percent`]). The only link to
+//! borders is [`crate::terrain::Tile::claim`], so whatever shape a region takes, the economy
+//! follows it, and a conquered city takes its harvest to its new owner along with its land.
 use crate::{
     City, Game, Id,
+    borders::reach_percent,
     terrain::{Cover, Map, Terrain, Tile},
 };
 use serde::{Deserialize, Serialize};
@@ -212,17 +214,32 @@ impl City {
 
 impl Game {
     /// What every city gathers from the squares its region holds. A single pass over the map,
-    /// whatever the number of cities.
+    /// whatever the number of cities. Squares past the city's border reach count for less
+    /// (see [`reach_percent`]); the shares are summed in hundredths and rounded once per city.
     pub fn harvests(&self) -> BTreeMap<Id, Yield> {
-        let mut totals: BTreeMap<Id, Yield> = BTreeMap::new();
+        let mut hundredths: BTreeMap<Id, Yield> = BTreeMap::new();
         for tile in self.map.tiles.iter().filter(|t| t.claim != 0) {
             let Some(city) = self.cities.get(&tile.claim) else {
                 continue;
             };
-            *totals.entry(city.id).or_default() +=
-                square_yield(&self.map, tile, city.position == tile.position);
+            let share = reach_percent(
+                city.border,
+                self.map.distance_squared(city.position, tile.position),
+            );
+            let full = square_yield(&self.map, tile, city.position == tile.position);
+            *hundredths.entry(city.id).or_default() +=
+                Yield::new(full.food * share, full.shields * share, full.gold * share);
         }
-        totals
+        let round = |n: i32| (n + 50).div_euclid(100);
+        hundredths
+            .into_iter()
+            .map(|(id, y)| {
+                (
+                    id,
+                    Yield::new(round(y.food), round(y.shields), round(y.gold)),
+                )
+            })
+            .collect()
     }
 
     /// Recount every city's harvest. The count is derived from the map, so it is redone
@@ -472,9 +489,16 @@ mod tests {
         game.map.get_mut(held).unwrap().claim = blue;
         game.refresh_harvest();
         assert_eq!(game.cities[&red].harvest, red_before + Yield::new(-2, 0, 0));
+        // The square lies far past blue's border, so blue gathers only its share of it.
+        let blue_city = &game.cities[&blue];
+        let share = reach_percent(
+            blue_city.border,
+            game.map.distance_squared(blue_city.position, held),
+        );
+        assert!(share < 25, "{share}");
         assert_eq!(
             game.cities[&blue].harvest,
-            blue_before + Yield::new(2, 0, 0)
+            blue_before + Yield::new((2 * share + 50) / 100, 0, 0)
         );
         // An unclaimed square, or a claim by a city that no longer exists, counts for no one.
         game.map.get_mut(held).unwrap().claim = 0;
@@ -482,6 +506,38 @@ mod tests {
         game.refresh_harvest();
         assert_eq!(game.cities[&red].harvest, red_before + Yield::new(-4, 0, 0));
         assert_eq!(game.cities[&blue].harvest, blue_before);
+    }
+
+    #[test]
+    fn land_past_the_border_yields_less_the_farther_out_it_lies() {
+        // Level 4 reaches squared distance 18: everything inside is worked in full, then the
+        // share falls with the squared distance, twice the border's distance out yielding a
+        // quarter and the far wilds nothing.
+        assert_eq!(reach_percent(4, 0), 100);
+        assert_eq!(reach_percent(4, 18), 100);
+        assert_eq!(reach_percent(4, 19), 94);
+        assert_eq!(reach_percent(4, 4 * 18), 25);
+        assert_eq!(reach_percent(4, 9 * 18), 11);
+        assert_eq!(reach_percent(4, 10_000), 0);
+        // A city handed a far-off square gathers a share of it, rounded once over its land.
+        let mut game = arena_rows(&vec![".".repeat(30); 4]);
+        let red = red_capital(&game).id;
+        let before = game.cities[&red].harvest;
+        let border = game.cities[&red].border;
+        for x in 20..24 {
+            let p = Coord::new(x, 1);
+            assert_eq!(game.map.get(p).unwrap().claim, 0, "{p:?} starts unclaimed");
+            game.map.get_mut(p).unwrap().claim = red;
+        }
+        game.refresh_harvest();
+        let shares: i32 = (20..24)
+            .map(|x| reach_percent(border, (x - 1) * (x - 1)))
+            .sum();
+        assert!((1..100).contains(&shares), "{shares}");
+        assert_eq!(
+            game.cities[&red].harvest,
+            before + Yield::new((2 * shares + 50) / 100, 0, 0)
+        );
     }
 
     #[test]

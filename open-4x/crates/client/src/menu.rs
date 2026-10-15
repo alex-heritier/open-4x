@@ -371,6 +371,11 @@ pub(crate) struct NationList;
 #[derive(Component)]
 pub(crate) struct WorldChart;
 
+/// The frame around the world map, sized to the map's own proportions so no sea is added at
+/// its sides.
+#[derive(Component)]
+pub(crate) struct ChartFrame;
+
 // --- systems -------------------------------------------------------------------------------------
 
 /// Rebuild the screen when it changes, and take it down when the campaign starts.
@@ -392,7 +397,11 @@ pub(crate) fn show(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let narrow = windows.single().is_ok_and(|w| w.width() < 1000.0);
+    let width = windows.single().map_or(f32::MAX, |w| w.width());
+    let layout = Layout {
+        narrow: width < 1000.0,
+        pictured: width >= 1550.0,
+    };
     let kit = Kit {
         assets: &assets,
         prefix: &session.asset_prefix,
@@ -402,7 +411,7 @@ pub(crate) fn show(
         Screen::Title => title_screen(&mut commands, &kit, &menu),
         Screen::Nations => {
             menu.world();
-            nation_screen(&mut commands, &kit, &menu, narrow);
+            nation_screen(&mut commands, &kit, &menu, layout);
         }
         Screen::Campaign => {}
     }
@@ -685,6 +694,35 @@ pub(crate) fn fit(
         if (node.width, node.height, node.left, node.top) != wanted {
             (node.width, node.height, node.left, node.top) = wanted;
             node.position_type = PositionType::Absolute;
+        }
+    }
+}
+
+/// Size the world map's frame to the largest box of the map's proportions that fits the room
+/// left for it, its band included.
+pub(crate) fn frame_chart(
+    menu: Res<Menu>,
+    images: Res<Assets<Image>>,
+    mut frames: Query<(&ChildOf, &mut Node), With<ChartFrame>>,
+    rooms: Query<&ComputedNode>,
+) {
+    let Some(chart) = menu.chart.as_ref().and_then(|chart| images.get(chart)) else {
+        return;
+    };
+    let chart = chart.size().as_vec2();
+    for (parent, mut node) in &mut frames {
+        let Ok(room) = rooms.get(parent.parent()) else {
+            continue;
+        };
+        let room = room.size() * room.inverse_scale_factor();
+        let inner = room - Vec2::splat(2.0 * CHART_BAND);
+        if chart.min_element() <= 0.0 || inner.min_element() <= 0.0 {
+            continue;
+        }
+        let size = chart * (inner / chart).min_element() + Vec2::splat(2.0 * CHART_BAND);
+        let wanted = (px(size.x), px(size.y));
+        if (node.width, node.height) != wanted {
+            (node.width, node.height) = wanted;
         }
     }
 }
@@ -1440,8 +1478,23 @@ fn credits(p: &mut ChildSpawnerCommands) {
 
 /// Nations per row of the list.
 const GRID: i32 = 4;
+/// Width of the picture beside a profile, a painted scene or the nation's flag alike.
+const PROFILE_PICTURE: f32 = 270.0;
+/// The sea between the world map and its frame's edge, which the frame's band sits over.
+const CHART_BAND: f32 = 16.0;
 
-fn nation_screen(commands: &mut Commands, kit: &Kit, menu: &Menu, narrow: bool) {
+/// How much of the nation selection screen the window has room for.
+#[derive(Clone, Copy)]
+struct Layout {
+    /// One column: the list above the profile, which drops its strengths and challenges.
+    narrow: bool,
+    /// The profile has room for its picture beside the text; without it the flag stands by
+    /// the nation's name.
+    pictured: bool,
+}
+
+fn nation_screen(commands: &mut Commands, kit: &Kit, menu: &Menu, layout: Layout) {
+    let Layout { narrow, .. } = layout;
     let scenario = menu.scenario();
     let art = &menu.content.pack.visuals.menu;
     root(commands).with_children(|p| {
@@ -1470,9 +1523,7 @@ fn nation_screen(commands: &mut Commands, kit: &Kit, menu: &Menu, narrow: bool) 
                 ..default()
             })
             .with_children(|p| {
-                if let Some(nation) = scenario.nations.get(menu.nation) {
-                    profile(p, kit, menu, nation, narrow);
-                }
+                profiles(p, kit, menu, scenario, layout);
                 world_map(p, kit, menu);
                 footer(p, kit, menu, scenario);
             });
@@ -1626,14 +1677,39 @@ fn flag_cut(p: &mut ChildSpawnerCommands, kit: &Kit, tag: &str, color: Color, wi
 }
 
 /// The chosen nation: its flag and name, its profile, and its picture.
+/// Every nation's profile laid in the same cell, only the chosen one shown: the panel is as tall
+/// as the tallest of them, so choosing another nation never moves the map below it.
+fn profiles(
+    p: &mut ChildSpawnerCommands,
+    kit: &Kit,
+    menu: &Menu,
+    scenario: &Scenario,
+    layout: Layout,
+) {
+    p.spawn(Node {
+        width: percent(100),
+        flex_shrink: 0.0,
+        display: Display::Grid,
+        grid_template_columns: vec![GridTrack::flex(1.0)],
+        ..default()
+    })
+    .with_children(|p| {
+        for (i, nation) in scenario.nations.iter().enumerate() {
+            profile(p, kit, menu, i, nation, layout);
+        }
+    });
+}
+
 fn profile(
     p: &mut ChildSpawnerCommands,
     kit: &Kit,
     menu: &Menu,
+    index: usize,
     nation: &fourx_sim::NationStart,
-    narrow: bool,
+    layout: Layout,
 ) {
-    let id = menu.nation as Id + 1;
+    let Layout { narrow, pictured } = layout;
+    let id = index as Id + 1;
     let game = menu.world.as_ref().map(|(_, game)| game);
     let color = game.map_or(Color::srgb(0.5, 0.5, 0.5), |g| {
         presentation::nation_color(g, id, 1.0)
@@ -1642,13 +1718,19 @@ fn profile(
     p.spawn((
         Node {
             width: percent(100),
-            flex_shrink: 0.0,
+            grid_row: GridPlacement::start(1),
+            grid_column: GridPlacement::start(1),
             padding: UiRect::axes(px(34), px(28)),
             column_gap: px(28),
             ..default()
         },
         BackgroundColor(WELL),
         lift(),
+        if index == menu.nation {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        },
     ))
     .with_children(|p| {
         dress(p, kit.assets, kit.prefix, Skin::Paper, Frame::Grand, true);
@@ -1665,15 +1747,18 @@ fn profile(
             p.spawn(Node {
                 align_items: AlignItems::Center,
                 column_gap: px(18),
+                // As tall as the flag, whether or not it is shown here.
+                min_height: px(80),
                 ..default()
             })
             .with_children(|p| {
-                if scene.is_some() || narrow {
+                if scene.is_some() || !pictured {
                     flag_cut(p, kit, &nation.id, color, px(120));
                 }
                 p.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     min_width: px(0),
+                    overflow: Overflow::clip_x(),
                     ..default()
                 })
                 .with_children(|p| {
@@ -1759,11 +1844,13 @@ fn profile(
                 traits(p, "Challenges", &nation.profile.challenges, BAD);
             });
         }
+        if !pictured {
+            return;
+        }
         // The nation's picture, or its leader's portrait (the flag).
         p.spawn((
             Node {
-                width: px(if scene.is_some() { 270.0 } else { 170.0 }),
-                min_height: px(204),
+                width: px(PROFILE_PICTURE),
                 flex_shrink: 0.0,
                 border: UiRect::all(px(3)),
                 overflow: Overflow::clip(),
@@ -1848,56 +1935,68 @@ fn traits(p: &mut ChildSpawnerCommands, heading: &str, lines: &[String], mark: C
     }
 }
 
-/// The world on the start date, the chosen nation's land lit.
+/// The world on the start date, the chosen nation's land lit, in a frame of its own proportions
+/// centred in the room left for it.
 fn world_map(p: &mut ChildSpawnerCommands, kit: &Kit, menu: &Menu) {
-    p.spawn((
-        Node {
-            width: percent(100),
-            flex_grow: 1.0,
-            min_height: px(160),
-            padding: UiRect::all(px(16)),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(0.086, 0.204, 0.329)),
-        lift(),
-    ))
+    p.spawn(Node {
+        width: percent(100),
+        flex_grow: 1.0,
+        min_height: px(160),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
+    })
     .with_children(|p| {
-        // The frame's band sits over the chart's edge.
-        p.spawn(Node {
-            flex_grow: 1.0,
-            overflow: Overflow::clip(),
-            ..default()
-        })
-        .with_children(|p| {
-            if let Some(chart) = &menu.chart {
-                p.spawn((
-                    ImageNode::new(chart.clone()),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        ..default()
-                    },
-                    Fit::Contain,
-                    Button,
-                    WorldChart,
-                    RelativeCursorPosition::default(),
-                ));
-            }
-        });
-        trim(p, kit.assets, kit.prefix, Frame::Grand);
-        // A hint in the lower left.
         p.spawn((
             Node {
-                position_type: PositionType::Absolute,
-                left: px(28),
-                bottom: px(22),
-                padding: UiRect::axes(px(10), px(3)),
-                border_radius: rounded(3.0),
+                width: percent(100),
+                height: percent(100),
+                padding: UiRect::all(px(CHART_BAND)),
+                flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.05, 0.06, 0.08, 0.72)),
+            BackgroundColor(Color::srgb(0.086, 0.204, 0.329)),
+            lift(),
+            ChartFrame,
         ))
         .with_children(|p| {
-            crate::theme::text(p, "Click a nation on the map to choose it", 12.0, MUTED)
+            // The frame's band sits over the chart's edge.
+            p.spawn(Node {
+                flex_grow: 1.0,
+                overflow: Overflow::clip(),
+                ..default()
+            })
+            .with_children(|p| {
+                if let Some(chart) = &menu.chart {
+                    p.spawn((
+                        ImageNode::new(chart.clone()),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            ..default()
+                        },
+                        Fit::Contain,
+                        Button,
+                        WorldChart,
+                        RelativeCursorPosition::default(),
+                    ));
+                }
+            });
+            trim(p, kit.assets, kit.prefix, Frame::Grand);
+            // A hint in the lower left.
+            p.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(28),
+                    bottom: px(22),
+                    padding: UiRect::axes(px(10), px(3)),
+                    border_radius: rounded(3.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.05, 0.06, 0.08, 0.72)),
+            ))
+            .with_children(|p| {
+                crate::theme::text(p, "Click a nation on the map to choose it", 12.0, MUTED)
+            });
         });
     });
 }

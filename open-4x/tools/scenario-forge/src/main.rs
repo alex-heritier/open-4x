@@ -9,6 +9,7 @@
 //! History (who held what, the cities, the units, the wars) is authored in `data/`. Coastlines,
 //! rivers, elevation, and climate come from public sources (Natural Earth, ETOPO5, Köppen–Geiger),
 //! fetched once into `cache/` and verified against a pinned SHA-256.
+mod aoi;
 mod classify;
 mod data;
 mod forge;
@@ -32,6 +33,7 @@ fn main() {
     let result = match args.first().map(String::as_str) {
         Some("build") => build(&args[1..]),
         Some("fetch") => fetch(),
+        Some("aoi") => aoi::run(&args[1..], &root()),
         _ => Err("usage: scenario-forge build [--out FILE] [--preview FILE] [--terrain FILE] [--crop X,Y,W,H,SCALE,FILE]...\n       scenario-forge fetch".to_string()),
     };
     if let Err(error) = result {

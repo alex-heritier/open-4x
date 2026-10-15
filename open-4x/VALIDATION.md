@@ -1,5 +1,40 @@
 # Validation
 
+## Right clicks choose, put down, and dismiss — 2026-10-15
+
+- `cargo test --workspace`: **380 tests passed** at `bfe7c33` with this work on top (163
+  simulation, 120 client, 37 content, 24 runtime unit tests, 3 + 4 integration, 4 economy
+  integration, 1 server, 5 asset-forge and 19 scenario-forge). `cargo fmt --all --check`
+  passes on the changed crates (`cargo fmt -p fourx-client --check`; the workspace-wide check
+  reports only `tools/scenario-forge/src/aoi.rs`, which this work did not touch and which is
+  still being written). The one warning left in the client is the pre-existing unused `Id`
+  import in `crates/client/src/stage/mod.rs`.
+- A right click on the square that is already the chosen one now clears the selection, the
+  way Escape does, instead of leaving it chosen (`right_click_clears`, covered by
+  `a_second_right_click_on_the_chosen_square_puts_it_down`). Any other square is chosen as
+  before, a city or stack still opens its menu, and a chosen unit is still left in place so
+  the menu's explicit attack and bombard entries keep working. A menu over the square goes
+  down with the selection.
+- A right click with the menu open now puts the menu down and does nothing else — the same
+  shape as the left click away from the menu — so the click that dismisses no longer chooses
+  the square under the pointer. This holds wherever the click lands, the menu's own card
+  included, and the selection behind the menu is left alone. Choosing a second square's menu
+  therefore takes two right clicks: the first dismisses, the second opens.
+- Checked by hand in the running client under Xvfb/lavapipe at 1440 × 900 (`--nation japan
+  --focus 40,80`): the first right click on the tundra at (40, 80) raised its card and the
+  white outline (65,578 pixels changed against the frame before), the second right click on
+  the same square took both down (65,578 pixels changed again), and a third brought them
+  back. On the stack at Tokyo: right click opened the menu, **Tile info** chose the square,
+  the next right click cleared it, and the one after that opened the menu again.
+- The same run, on the dismiss rule (`--nation japan`, Tab onto the Dragoon Cavalry at
+  Tokyo): right click opened the menu (36,243 pixels changed); a right click 100, 150 pixels
+  away over empty ground took it down and left the unit chosen and no square chosen (283
+  pixels against the frame before the menu opened — the pointer's own hover); a right click
+  on that same square then chose it (Plains at (113, 32), its card and outline up); and after
+  raising the menu again, a right click on the menu's own card put it down with the square
+  still chosen (429 pixels against the frame with the menu closed). Captures are development
+  artifacts under `/tmp` (`t1`–`t4`, `a1`–`a4`, `b0`–`b5`).
+
 ## Nation panel — the stockpile beside the flag — 2026-10-14
 
 - `cargo test --workspace`: **372 tests passed** on master after `a5e7c02` (improve unit art)

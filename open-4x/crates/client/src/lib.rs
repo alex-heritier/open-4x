@@ -98,6 +98,13 @@ fn should_open_menu(city: Option<Id>, units: &[Id]) -> bool {
     city.is_some() || !units.is_empty()
 }
 
+/// Whether a right click on `tile` puts the map down again instead of choosing the square: a
+/// right click on the square that is already chosen clears the selection, the way Escape does,
+/// so the tile's card and outline are dismissed with the same button that raised them.
+fn right_click_clears(selection: Selection, tile: Coord) -> bool {
+    matches!(selection, Selection::Tile(chosen) if chosen == tile)
+}
+
 /// A rectangle of the world in screen units (what the camera shows). Only tiles, cities and
 /// units inside one are ever spawned, because a whole world is hundreds of thousands of
 /// sprites.
@@ -715,6 +722,7 @@ pub fn run() {
                 menu::show,
                 menu::paint,
                 menu::fit,
+                menu::frame_chart,
                 menu::scroll,
                 menu::volume_label,
                 menu::music,
@@ -1730,6 +1738,12 @@ fn controls(params: Controls) {
         session.dirty = true;
         return;
     }
+    // A right click with the menu open puts the menu down and nothing else, the way a left click
+    // away from it does: the square under the pointer is not chosen by the click that dismisses.
+    if mouse.just_pressed(MouseButton::Right) && session.menu.take().is_some() {
+        session.dirty = true;
+        return;
+    }
     let touch = touches
         .iter_just_released()
         .find(|t| t.position().distance(t.start_position()) < 12.0)
@@ -1827,6 +1841,14 @@ fn controls(params: Controls) {
         return;
     }
     if mouse.just_pressed(MouseButton::Right) {
+        // A second right click on the chosen square puts it down again, and takes any menu over
+        // it along: the tile's card and outline go with the same button that raised them.
+        if right_click_clears(session.selection, position) {
+            session.selection = Selection::None;
+            session.menu = None;
+            session.dirty = true;
+            return;
+        }
         session.menu = should_open_menu(city, &present).then_some(ContextMenu {
             at: cursor,
             tile: position,
@@ -1840,7 +1862,7 @@ fn controls(params: Controls) {
         session.dirty = true;
         return;
     }
-    // A click anywhere else dismisses the menu instead of selecting under it.
+    // A left click anywhere else dismisses the menu instead of selecting under it.
     if session.menu.take().is_some() {
         session.dirty = true;
         return;
@@ -1953,6 +1975,17 @@ mod tests {
         assert!(should_open_menu(Some(1), &[]));
         assert!(should_open_menu(None, &[7]));
         assert!(should_open_menu(Some(1), &[7, 8]));
+    }
+
+    #[test]
+    fn a_second_right_click_on_the_chosen_square_puts_it_down() {
+        let here = Coord::new(4, 7);
+        assert!(!right_click_clears(Selection::None, here));
+        assert!(!right_click_clears(Selection::Unit(3), here));
+        assert!(!right_click_clears(Selection::City(2), here));
+        assert!(right_click_clears(Selection::Tile(here), here));
+        // Another square is chosen, not put down.
+        assert!(!right_click_clears(Selection::Tile(Coord::new(5, 7)), here));
     }
 
     #[test]

@@ -35,6 +35,19 @@ pub fn default_level(population: i32, capital: bool) -> u8 {
     };
     (level + u8::from(capital)).min(MAX_LEVEL)
 }
+/// Percent of a held square's output its city can gather, from the square's squared distance
+/// to the city. Everything within the city's own border reach is worked in full; past it the
+/// share falls with the square of the distance, so land twice as far out as the border yields
+/// a quarter and land three times as far a ninth. Only regional fill and orphan gaps hold
+/// squares that far out.
+pub fn reach_percent(level: u8, distance_squared: i32) -> i32 {
+    let reach = reach_squared(level);
+    if distance_squared <= reach {
+        100
+    } else {
+        100 * reach / distance_squared
+    }
+}
 
 impl Game {
     /// Every tile a city's border can reach, with its squared distance from the city.

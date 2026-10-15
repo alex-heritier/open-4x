@@ -21,12 +21,12 @@ fn rect_ring([west, south, east, north]: [f64; 4]) -> Ring {
     vec![(west, south), (east, south), (east, north), (west, north)]
 }
 
-enum Shape {
+pub(crate) enum Shape {
     Polygons(Vec<Polygon>, Option<[f64; 4]>),
     Points(Vec<(f64, f64)>),
 }
 
-fn shape(
+pub(crate) fn shape(
     paint: &Paint,
     countries: &BTreeMap<String, Vec<Polygon>>,
     context: &str,
