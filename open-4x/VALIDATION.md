@@ -1,5 +1,31 @@
 # Validation
 
+## Nation panel — the stockpile beside the flag — 2026-10-14
+
+- `cargo test --workspace`: **372 tests passed** on master after `a5e7c02` (improve unit art)
+  was pulled in with this work on top (162 simulation, 113 client, 37 content, 24 runtime unit
+  tests, 3 + 4 integration, 4 economy integration, 1 server, 5 asset-forge and 19
+  scenario-forge). `cargo fmt --all --check` and `git diff --check` pass on the changed files;
+  the only formatting drift left is in `crates/client/src/theme.rs`, which this work did not
+  touch.
+- The top left is a row of two cards: the nation's banner (unchanged — the pack's nation
+  picture in a portrait banner, with the city-count disc on its lower corner) and, to its
+  right, the stockpile.
+- The stockpile card lists the six goods the economy runs on, in `Good::ALL` order — coal,
+  iron, food, cotton, steel and supplies — each under its own icon with the amount held, in two
+  columns when the window is wide and one when it is narrow. A factory good wears the art of the
+  natural resource it is gathered as (`visuals.resources`: coal, iron, wheat, cotton); steel
+  wears the chrome emblem of its ingots and supplies the colonial cargo crate. It is paper
+  rather than slate, because the resource pictures are painted to read on the map's ground.
+  Nothing is drawn when `rules.economy` is off, since there is no stockpile then.
+- The `Steel 8 · Supplies 12` line came out of the nation card: the new card is where those are
+  read, and with icons rather than a cramped line.
+- `--smoke --screenshot` frames under Xvfb/llvmpipe were checked by eye for Japan: the two cards
+  stand on one line, the goods read as coal, iron, food, cotton, steel and supplies at the
+  stockpile's starting figures (0, 0, 0, 0, 8, 12), the card clears the calendar card, and the
+  flag is the vertical banner it was. The narrow layout (below 900 logical pixels wide, one
+  column) was not captured on screen.
+
 ## Industrial milestone — 2026-10-14
 
 - `cargo test --workspace`: **367 tests passed** (162 simulation, 109 client, 36 content,

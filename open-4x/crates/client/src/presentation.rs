@@ -5,7 +5,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::ui::RelativeCursorPosition;
 use fourx_content::{Visuals, animation::Clip};
 use fourx_sim::{
-    Command, Date, Flavor, Order, Unit, UnitDef, VISION_RADIUS,
+    Command, Date, Flavor, Good, Order, Unit, UnitDef, VISION_RADIUS,
     terrain::{Cover, Relief, Terrain, Tile},
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -104,6 +104,26 @@ pub(crate) fn nation_art(
 ) -> Option<Handle<Image>> {
     let path = session.pack.visuals.nations.get(tag)?;
     Some(assets.load(format!("{}{path}", session.asset_prefix)))
+}
+
+/// The pack's icon for a natural resource, by its id, if it has one.
+fn resource_icon(session: &Session, assets: &AssetServer, id: &str) -> Option<Handle<Image>> {
+    let path = session.pack.visuals.resources.get(id)?;
+    Some(assets.load(format!("{}{path}", session.asset_prefix)))
+}
+
+/// The picture that stands for a good in the nation's panel: the art of the natural resource it
+/// is gathered as, or, for what only a factory makes, the pack's own emblem of the thing.
+fn good_icon(session: &Session, assets: &AssetServer, good: Good) -> Option<Handle<Image>> {
+    let load = |path: &str| Some(assets.load(format!("{}{path}", session.asset_prefix)));
+    match good {
+        Good::Coal => resource_icon(session, assets, "coal"),
+        Good::Iron => resource_icon(session, assets, "iron"),
+        Good::Food => resource_icon(session, assets, "wheat"),
+        Good::Cotton => resource_icon(session, assets, "cotton"),
+        Good::Steel => load("ui/chrome/ico_ingots.png"),
+        Good::Supplies => load("sprites/crate.png"),
+    }
 }
 
 fn nation_rgb(game: &Game, owner: Id) -> [u8; 3] {
@@ -1897,157 +1917,218 @@ fn build_ui(
         align_items: AlignItems::Center,
         ..default()
     };
-    let face = |fill: Color| {
+    // The face of one card of the top bar: its fill, the shadow that lifts it, and an
+    // `Interaction`, so that a click on it is not a click on the map under it.
+    let top_face = |fill: Color| {
         (
             BackgroundColor(fill),
             lift(),
             GlobalZIndex(5),
-            UiRoot,
             TopCard,
             Interaction::default(),
         )
     };
+    let face = |fill: Color| (top_face(fill), UiRoot);
     // Top left: the nation's banner with the number of its cities, and beside it its name over
-    // what it holds, one row each: treasury and income, research and its goal, industry.
+    // what it holds, one row each: treasury and income, research and its goal, industry. To the
+    // right of that card stands the stockpile: the goods its industry runs on, each under its own
+    // icon.
     let cities = game.cities.values().filter(|c| c.owner == me).count();
     let (banner_width, banner_height) = if narrow { (46.0, 66.0) } else { (66.0, 94.0) };
-    let mut nation = top_card(Side::Left);
-    nation.padding = UiRect::axes(px(if narrow { 18 } else { 24 }), px(18));
-    nation.column_gap = px(if narrow { 12 } else { 18 });
-    commands.spawn((nation, face(SLATE))).with_children(|p| {
-        dress(p, assets, prefix, Skin::Slate, Frame::Grand, !narrow);
-        p.spawn(Node {
-            flex_shrink: 0.0,
-            margin: UiRect::right(px(4)),
+    let mut left = top_card(Side::Left);
+    left.column_gap = px(if narrow { 8.0 } else { 12.0 });
+    // The two cards of the row stand on the same line, however tall each of them is.
+    left.align_items = AlignItems::FlexStart;
+    commands.spawn((left, UiRoot)).with_children(|row| {
+        let nation = Node {
+            align_items: AlignItems::Center,
+            padding: UiRect::axes(px(if narrow { 18 } else { 24 }), px(18)),
+            column_gap: px(if narrow { 12 } else { 18 }),
             ..default()
-        })
-        .with_children(|f| {
-            // The flag hangs from a gilt rod.
-            f.spawn((
+        };
+        row.spawn((nation, top_face(SLATE))).with_children(|p| {
+            dress(p, assets, prefix, Skin::Slate, Frame::Grand, !narrow);
+            p.spawn(Node {
+                flex_shrink: 0.0,
+                margin: UiRect::right(px(4)),
+                ..default()
+            })
+            .with_children(|f| {
+                // The flag hangs from a gilt rod.
+                f.spawn((
+                    Node {
+                        width: px(banner_width),
+                        height: px(banner_height),
+                        border: UiRect::new(px(1), px(1), px(0), px(1)),
+                        flex_shrink: 0.0,
+                        margin: UiRect::top(px(5)),
+                        ..default()
+                    },
+                    BackgroundColor(nation_color(game, me, 1.0)),
+                    BorderColor::all(BRONZE),
+                ))
+                .with_children(|b| {
+                    if let Some(art) = nation_art(session, assets, &faction.tag) {
+                        b.spawn((
+                            ImageNode::new(art),
+                            Node {
+                                width: percent(100),
+                                height: percent(100),
+                                ..default()
+                            },
+                        ));
+                    }
+                });
+                f.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(-4),
+                        top: px(0),
+                        width: px(banner_width + 8.0),
+                        height: px(7),
+                        border: UiRect::all(px(1)),
+                        border_radius: rounded(3.0),
+                        ..default()
+                    },
+                    BackgroundColor(TRIM),
+                    BorderColor::all(BRONZE),
+                ));
+                // A round badge on the banner's lower corner.
+                f.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: px(-17),
+                        bottom: px(-9),
+                        width: px(32),
+                        height: px(32),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(px(3)),
+                        border_radius: rounded(999.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.075, 0.082, 0.094)),
+                    BorderColor::all(TRIM),
+                    BoxShadow::new(Color::BLACK.with_alpha(0.5), px(0), px(2), px(0), px(4)),
+                ))
+                .with_children(|b| bold(b, cities.to_string(), 14.0, ON_PLATE));
+            });
+            // A gilt rule between the banner and the figures.
+            p.spawn((
                 Node {
-                    width: px(banner_width),
-                    height: px(banner_height),
-                    border: UiRect::new(px(1), px(1), px(0), px(1)),
+                    width: px(1),
+                    align_self: AlignSelf::Stretch,
+                    margin: UiRect::vertical(px(2)),
                     flex_shrink: 0.0,
-                    margin: UiRect::top(px(5)),
                     ..default()
                 },
-                BackgroundColor(nation_color(game, me, 1.0)),
-                BorderColor::all(BRONZE),
-            ))
-            .with_children(|b| {
-                if let Some(art) = nation_art(session, assets, &faction.tag) {
-                    b.spawn((
-                        ImageNode::new(art),
-                        Node {
-                            width: percent(100),
-                            height: percent(100),
-                            ..default()
-                        },
-                    ));
+                BackgroundColor(TRIM.with_alpha(0.4)),
+            ));
+            p.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                width: px(if narrow { 128 } else { 176 }),
+                ..default()
+            })
+            .with_children(|p| {
+                if !narrow {
+                    bold(p, faction.name.clone(), 19.0, ON_PLATE);
+                }
+                let income = game.income(me)
+                    - if session.rules.economy.enabled {
+                        game.budget_upkeep(me, &session.rules)
+                    } else {
+                        0
+                    };
+                stat(
+                    p,
+                    assets,
+                    prefix,
+                    "coin",
+                    faction.gold.to_string(),
+                    Some((format!("{income:+}"), if income >= 0 { GAIN } else { LOSS })),
+                );
+                if !session.rules.economy.enabled && !narrow {
+                    stat(
+                        p,
+                        assets,
+                        prefix,
+                        "flask",
+                        faction.research.to_string(),
+                        Some((
+                            (session.rules.research_cost * (faction.technology as i32 + 1))
+                                .to_string(),
+                            ON_PLATE.with_alpha(0.7),
+                        )),
+                    );
+                    stat(
+                        p,
+                        assets,
+                        prefix,
+                        "ingots",
+                        faction.industry.to_string(),
+                        None,
+                    );
                 }
             });
-            f.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: px(-4),
-                    top: px(0),
-                    width: px(banner_width + 8.0),
-                    height: px(7),
-                    border: UiRect::all(px(1)),
-                    border_radius: rounded(3.0),
-                    ..default()
-                },
-                BackgroundColor(TRIM),
-                BorderColor::all(BRONZE),
-            ));
-            // A round badge on the banner's lower corner.
-            f.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    right: px(-17),
-                    bottom: px(-9),
-                    width: px(32),
-                    height: px(32),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    border: UiRect::all(px(3)),
-                    border_radius: rounded(999.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.075, 0.082, 0.094)),
-                BorderColor::all(TRIM),
-                BoxShadow::new(Color::BLACK.with_alpha(0.5), px(0), px(2), px(0), px(4)),
-            ))
-            .with_children(|b| bold(b, cities.to_string(), 14.0, ON_PLATE));
         });
-        // A gilt rule between the banner and the figures.
-        p.spawn((
-            Node {
-                width: px(1),
-                align_self: AlignSelf::Stretch,
-                margin: UiRect::vertical(px(2)),
-                flex_shrink: 0.0,
+        // What the industry runs on, to the right of the figures: the six goods of the stockpile,
+        // one line each under its icon, from the raw ones a factory eats to what it makes of
+        // them. The figures behind the banner already name the treasury, so this card is the
+        // only place the goods are read.
+        if session.rules.economy.enabled {
+            // Two columns on a wide screen; a small one stacks them, so the card always leaves
+            // the calendar its corner.
+            let item = if narrow { 128.0 } else { 152.0 };
+            let columns = if narrow { 1 } else { 2 };
+            let held = Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(8),
+                padding: UiRect::axes(px(if narrow { 18 } else { 22 }), px(16)),
                 ..default()
-            },
-            BackgroundColor(TRIM.with_alpha(0.4)),
-        ));
-        p.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            width: px(if narrow { 128 } else { 176 }),
-            ..default()
-        })
-        .with_children(|p| {
-            if !narrow {
-                bold(p, faction.name.clone(), 19.0, ON_PLATE);
-            }
-            let income = game.income(me)
-                - if session.rules.economy.enabled {
-                    game.budget_upkeep(me, &session.rules)
-                } else {
-                    0
-                };
-            stat(
-                p,
-                assets,
-                prefix,
-                "coin",
-                faction.gold.to_string(),
-                Some((format!("{income:+}"), if income >= 0 { GAIN } else { LOSS })),
-            );
-            if session.rules.economy.enabled {
-                text(
-                    p,
-                    format!(
-                        "Steel {} · Supplies {}",
-                        faction.stockpile.get(fourx_sim::Good::Steel),
-                        faction.stockpile.get(fourx_sim::Good::Supplies)
-                    ),
-                    13.0,
-                    ON_PLATE,
-                );
-            } else if !narrow {
-                stat(
-                    p,
-                    assets,
-                    prefix,
-                    "flask",
-                    faction.research.to_string(),
-                    Some((
-                        (session.rules.research_cost * (faction.technology as i32 + 1)).to_string(),
-                        ON_PLATE.with_alpha(0.7),
-                    )),
-                );
-                stat(
-                    p,
-                    assets,
-                    prefix,
-                    "ingots",
-                    faction.industry.to_string(),
-                    None,
-                );
-            }
-        });
+            };
+            // Paper, not slate: the resource pictures are painted to stand on the map's ground,
+            // and read there rather than on a dark panel.
+            row.spawn((held, top_face(CARD))).with_children(|p| {
+                dress(p, assets, prefix, Skin::Paper, Frame::Grand, false);
+                bold(p, "Resources", 16.0, INK);
+                p.spawn(Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    width: px(columns as f32 * item + 10.0 * (columns as f32 - 1.0)),
+                    column_gap: px(10),
+                    row_gap: px(4),
+                    ..default()
+                })
+                .with_children(|g| {
+                    for good in Good::ALL {
+                        g.spawn(Node {
+                            width: px(item),
+                            align_items: AlignItems::Center,
+                            column_gap: px(7),
+                            ..default()
+                        })
+                        .with_children(|r| {
+                            if let Some(icon) = good_icon(session, assets, good) {
+                                r.spawn((
+                                    ImageNode::new(icon),
+                                    Node {
+                                        width: px(26),
+                                        height: px(26),
+                                        flex_shrink: 0.0,
+                                        ..default()
+                                    },
+                                ));
+                            }
+                            bold(r, good.name(), 14.0, INK);
+                            r.spawn(Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            });
+                            bold(r, faction.stockpile.get(good).to_string(), 15.0, INK);
+                        });
+                    }
+                });
+            });
+        }
     });
     // Top right: the calendar and the one button that moves it on, joined by a compass.
     let mut right = top_card(Side::Right);
