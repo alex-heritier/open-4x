@@ -492,6 +492,12 @@ impl Game {
         if def.is_naval() && !self.passable(Domain::Sea, player, destination) {
             return Err(error("Ships stay at sea or in their own coastal cities"));
         }
+        if self
+            .city_at(destination)
+            .is_some_and(|id| self.cities[&id].owner != player)
+        {
+            return Err(error("Cannot go to a foreign city; attack it instead"));
+        }
         let held = self.blocked_for(player, destination);
         if held && self.map.distance(unit.position, destination) == 1 {
             return Err(error("Another nation holds that square; attack it instead"));
@@ -560,6 +566,22 @@ mod tests {
     use crate::tests::{arena, rules, spawn};
     use crate::units::MOVE_UNIT;
     use crate::{Command, TickRules, terrain::Coord};
+
+    #[test]
+    fn go_to_rejects_a_foreign_city_even_from_far_away() {
+        let mut game = arena(14, 14);
+        let unit = spawn(&mut game, 1, "infantry", 3, 3);
+        let destination = Coord::new(12, 12);
+        let before = game.units[&unit].clone();
+        let result = game.apply(
+            1,
+            Command::Move { unit, destination },
+            &rules(),
+            TickRules::default(),
+        );
+        assert!(result.unwrap_err().to_string().contains("foreign city"));
+        assert_eq!(game.units[&unit], before);
+    }
 
     #[test]
     fn a_walk_is_recorded_square_by_square_and_cleared_by_the_next_command() {

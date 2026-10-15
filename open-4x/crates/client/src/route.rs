@@ -36,6 +36,7 @@ pub(super) fn draw(
     goal: Coord,
     route: &[Coord],
     colour: Color,
+    destination_marker: bool,
 ) {
     let squares = if route.len() < 2 {
         vec![from, goal]
@@ -57,13 +58,22 @@ pub(super) fn draw(
         if route.len() < 2 {
             gizmos.line_2d(centre(path[0]), centre(path[1]), colour.with_alpha(0.45));
         } else {
-            gizmos.linestrip_2d(path.iter().map(|&p| centre(p)), colour);
+            let mut points: Vec<_> = path.iter().map(|&p| centre(p)).collect();
+            // Targeting puts the turn count at the destination; leave that centre clear.
+            if !destination_marker {
+                let last = points.len() - 1;
+                let back = points[last - 1] - points[last];
+                points[last] += back.normalize_or_zero() * 20.0_f32.min(back.length());
+            }
+            gizmos.linestrip_2d(points, colour);
             for &p in &path[1..path.len() - 1] {
                 gizmos.circle_2d(centre(p), 4.5, colour);
             }
         }
-        let goal = map.nearest(*path.last().unwrap(), goal);
-        gizmos.circle_2d(centre(goal), 14.0, colour);
-        gizmos.circle_2d(centre(goal), 7.0, colour);
+        if destination_marker {
+            let goal = map.nearest(*path.last().unwrap(), goal);
+            gizmos.circle_2d(centre(goal), 14.0, colour);
+            gizmos.circle_2d(centre(goal), 7.0, colour);
+        }
     }
 }

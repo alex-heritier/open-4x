@@ -21,6 +21,7 @@ fn session() -> Session {
         rules: host.rules,
         pack: host.pack,
         selection: initial_selection(),
+        goto: None,
         sequence: 0,
         pending: false,
         dirty: false,

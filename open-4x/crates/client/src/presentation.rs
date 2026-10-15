@@ -1635,7 +1635,7 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
     }
     text(
         p,
-        "Right-click a square to send it there, or an enemy to attack it.",
+        "Go to [G] chooses a destination. Hold this unit to drag a route.",
         12.0,
         INK_SOFT,
     );
@@ -2549,10 +2549,17 @@ fn context_menu(commands: &mut Commands, session: &Session, size: Vec2) {
             ScrollPosition::default(),
         ))
         .with_children(|p| {
+            menu_button(
+                p,
+                "Tile info".into(),
+                Action::SelectTile(menu.tile),
+                Tone::Quiet,
+            );
             // The selected unit's order for the square stays one click away, so striking an
             // enemy there still goes through the right button.
             if let Selection::Unit(id) = session.selection
-                && let Some(command) = order_for(session, id, menu.tile)
+                && let Some(command @ (Command::Attack { .. } | Command::Bombard { .. })) =
+                    order_for(session, id, menu.tile)
             {
                 let label = match &command {
                     Command::Move { destination, .. } => {
@@ -2969,7 +2976,9 @@ pub(super) fn draw_overlays(
         && let Some(unit) = game.units.get(&id).filter(|u| u.owner == session.player)
     {
         // Where it is heading: the exact squares it will walk (see `route`).
-        if let Some(goal) = unit.goto {
+        if let Some(goal) = unit.goto
+            && session.goto.is_none()
+        {
             crate::route::draw(
                 &mut route_gizmos,
                 &game.map,
@@ -2978,6 +2987,7 @@ pub(super) fn draw_overlays(
                 goal,
                 &unit.route,
                 mark,
+                true,
             );
         }
         for (target, bombard) in strike_targets(game, &session.rules, unit) {

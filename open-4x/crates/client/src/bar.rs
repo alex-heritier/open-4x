@@ -8,8 +8,7 @@
 //! given right now is dimmed and does nothing. The pointer resting on a button names it above
 //! the bar, and says what is missing when it is dimmed.
 //!
-//! Right-clicking the map is how a unit is sent somewhere or at an enemy (see `controls`);
-//! the strike buttons offer the same blows from the bar.
+//! Go to chooses a movement destination; strike buttons give explicit combat orders.
 use super::*;
 use crate::theme::{BAD, INK, INK_SOFT, ON_PLATE, PLATE, TRIM, Tone, glyph, lift_small, rounded};
 use fourx_sim::{Domain, Order, Unit};
@@ -102,7 +101,13 @@ pub(super) fn rows(game: &Game, rules: &Rules, unit: &Unit, player: Id) -> Vec<V
             blocked: None,
         });
     }
-    let mut standing = Vec::new();
+    let mut standing = vec![Entry {
+        action: Action::GoTo,
+        icon: "road",
+        key: Some("G"),
+        label: "Go to".into(),
+        blocked: None,
+    }];
     if unit.carrier.is_some() || (def.is_carrier() && !game.passengers(unit.id).is_empty()) {
         standing.push(Entry {
             action: Action::Unload,
@@ -430,7 +435,7 @@ mod tests {
         let bar = bar_of(&host, player, unit_of(&host, player, "cavalry"));
         assert_eq!(bar.len(), 1, "a soldier with no one to hit has the one row");
         let actions: Vec<_> = bar[0].iter().map(|e| e.icon).collect();
-        assert_eq!(actions, ["shield", "cancel", "cross"]);
+        assert_eq!(actions, ["road", "shield", "cancel", "cross"]);
     }
 
     #[test]

@@ -4,6 +4,7 @@ mod chrome;
 mod city;
 mod connection;
 mod diplomacy;
+mod goto;
 mod march;
 mod margin;
 mod music;
@@ -45,6 +46,7 @@ struct Session {
     pack: Pack,
     player: Id,
     selection: Selection,
+    goto: Option<goto::Targeting>,
     sequence: u64,
     pending: bool,
     dirty: bool,
@@ -90,8 +92,7 @@ fn context_targets(game: &Game, tile: Coord) -> (Option<Id>, Vec<Id>) {
 }
 
 /// Whether a right click on a tile with this city and these units opens the menu. A click on
-/// a city or on any unit does; a click on an empty square stays an order for the selected
-/// unit instead.
+/// a city or on any unit does; a click on an empty square selects that tile.
 fn should_open_menu(city: Option<Id>, units: &[Id]) -> bool {
     city.is_some() || !units.is_empty()
 }
@@ -378,6 +379,8 @@ enum Action {
     EndTurn,
     Found,
     Fortify,
+    GoTo,
+    SelectTile(Coord),
     Cancel,
     Disband,
     Work(Job),
@@ -638,6 +641,7 @@ pub fn run() {
             pack,
             player: 1,
             selection: initial_selection(),
+            goto: None,
             sequence: 0,
             pending: false,
             dirty: true,
@@ -715,7 +719,7 @@ pub fn run() {
                     .chain(),
                 presentation::update_minimap,
                 presentation::minimap_viewport,
-                presentation::draw_overlays,
+                (presentation::draw_overlays, goto::draw).chain(),
                 puppet::animate,
                 puppet::accents,
                 smoke,
@@ -935,7 +939,7 @@ fn receive(
                         session.message = if player == 0 {
                             "Spectator | another client commands this campaign".into()
                         } else {
-                            "Select a unit; right-click a square to move, an enemy to attack. Space advances one week. X + right-click orders the stack."
+                            "Select a unit; G chooses a destination. Right-click for tile info or city and unit menus. Space advances one week."
                             .into()
                         };
                     }
@@ -1080,7 +1084,22 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
         session.dirty = true;
     }
     let unit = selected_unit(session).map(|u| u.id);
+    session.goto = None;
     let command = match action {
+        Action::GoTo => {
+            if let Some(unit) = unit {
+                session.goto = Some(goto::Targeting::new(unit, false));
+                session.message =
+                    "Go to: choose a destination. Right click or Escape cancels.".into();
+                session.dirty = true;
+            }
+            None
+        }
+        Action::SelectTile(tile) => {
+            session.selection = Selection::Tile(*tile);
+            session.dirty = true;
+            None
+        }
         Action::OpenBureau(panel) => {
             session.bureau = Some(*panel);
             session.dirty = true;
@@ -1399,6 +1418,7 @@ struct Controls<'w, 's> {
     session: ResMut<'w, Session>,
     connection: NonSendMut<'w, Connection>,
     last_click: Local<'s, Option<(Coord, f64)>>,
+    hold: Local<'s, Option<(Id, f64)>>,
 }
 fn controls(params: Controls) {
     let Controls {
@@ -1414,7 +1434,20 @@ fn controls(params: Controls) {
         mut session,
         mut connection,
         mut last_click,
+        mut hold,
     } = params;
+    if let Some(targeting) = session.goto.as_mut() {
+        targeting.hovered = None;
+    }
+    if session.goto.as_ref().is_some_and(|g| g.drag)
+        && !mouse.pressed(MouseButton::Left)
+        && !mouse.just_released(MouseButton::Left)
+    {
+        session.goto = None;
+    }
+    if !mouse.pressed(MouseButton::Left) && !mouse.just_released(MouseButton::Left) {
+        *hold = None;
+    }
     let Ok(window) = windows.single() else {
         return;
     };
@@ -1519,6 +1552,9 @@ fn controls(params: Controls) {
     if keys.just_pressed(KeyCode::Space) && !session.staging {
         act(&Action::EndTurn, &mut session, &mut connection);
     }
+    if keys.just_pressed(KeyCode::KeyG) {
+        act(&Action::GoTo, &mut session, &mut connection);
+    }
     if keys.just_pressed(KeyCode::KeyF) {
         act(&Action::Fortify, &mut session, &mut connection);
     }
@@ -1551,7 +1587,10 @@ fn controls(params: Controls) {
         act(&Action::Save, &mut session, &mut connection);
     }
     if keys.just_pressed(KeyCode::Escape) {
-        session.selection = Selection::None;
+        if session.goto.take().is_none() {
+            session.selection = Selection::None;
+        }
+        *hold = None;
         session.menu = None;
         session.dirty = true;
     }
@@ -1597,20 +1636,23 @@ fn controls(params: Controls) {
             act(&Action::Produce(unit), &mut session, &mut connection);
         }
     }
+    if mouse.just_pressed(MouseButton::Right) && session.goto.is_some() {
+        session.goto = None;
+        *hold = None;
+        session.dirty = true;
+        return;
+    }
     let touch = touches
         .iter_just_released()
         .find(|t| t.position().distance(t.start_position()) < 12.0)
         .map(|t| t.position());
-    let clicked = mouse.just_pressed(MouseButton::Left)
-        || mouse.just_pressed(MouseButton::Right)
-        || touch.is_some();
-    if !clicked
-        || fingers.len() > 1
+    let blocked = fingers.len() > 1
         || ui
             .iter()
             .chain(info.iter())
-            .any(|i| *i != Interaction::None)
-    {
+            .any(|i| *i != Interaction::None);
+    if blocked {
+        *hold = None;
         return;
     }
     // The city's detail view is a modal: nothing behind it takes clicks.
@@ -1643,32 +1685,71 @@ fn controls(params: Controls) {
             .get(id)
             .is_some_and(|c| c.owner == session.player)
     });
-    if mouse.just_pressed(MouseButton::Right) {
-        if should_open_menu(city, &present) && !keys.pressed(KeyCode::KeyX) {
-            // A city or a stack of units: offer what fits, rather than marching into it.
-            // The menu carries the order along when one applies, so an enemy in reach can
-            // still be struck from it.
-            session.menu = Some(ContextMenu {
-                at: cursor,
-                tile: position,
-                city,
-                units: present,
-            });
-            session.dirty = true;
-            return;
+    if let Some((id, started)) = *hold {
+        if !matches!(session.selection, Selection::Unit(selected) if selected == id) {
+            *hold = None;
+        } else if mouse.pressed(MouseButton::Left) && time.elapsed_secs_f64() - started >= 0.3 {
+            session.goto = Some(goto::Targeting::new(id, true));
+            *hold = None;
         }
-        if session.menu.take().is_some() {
-            session.dirty = true;
-        }
-        if let Selection::Unit(unit) = session.selection
-            && let Some(command) = if keys.pressed(KeyCode::KeyX) {
-                stack_order_for(&session, unit, position)
+    }
+    if session.goto.as_ref().is_some_and(|g| {
+        !matches!(session.selection, Selection::Unit(id) if id == g.unit)
+            || selected_unit(&session).is_none()
+    }) {
+        session.goto = None;
+    }
+    if session.goto.is_some() {
+        goto::update(&mut session, position);
+        let confirm = session.goto.as_ref().is_some_and(|g| {
+            if g.drag {
+                mouse.just_released(MouseButton::Left)
             } else {
-                order_for(&session, unit, position)
+                mouse.just_pressed(MouseButton::Left) || touch.is_some()
             }
-        {
-            issue(&mut session, &mut connection, command);
+        });
+        if confirm {
+            let targeting = session.goto.take().unwrap();
+            if targeting.preview.is_some() {
+                issue(
+                    &mut session,
+                    &mut connection,
+                    Command::Move {
+                        unit: targeting.unit,
+                        destination: position,
+                    },
+                );
+            }
+            session.dirty = true;
         }
+        return;
+    }
+    if mouse.just_pressed(MouseButton::Left)
+        && selected_unit(&session).is_some_and(|u| u.position == position)
+    {
+        *hold = selected_unit(&session).map(|u| (u.id, time.elapsed_secs_f64()));
+        return;
+    }
+    let released_click = mouse.just_released(MouseButton::Left) && hold.take().is_some();
+    if !mouse.just_pressed(MouseButton::Left)
+        && !mouse.just_pressed(MouseButton::Right)
+        && !released_click
+        && touch.is_none()
+    {
+        return;
+    }
+    if mouse.just_pressed(MouseButton::Right) {
+        session.menu = should_open_menu(city, &present).then_some(ContextMenu {
+            at: cursor,
+            tile: position,
+            city,
+            units: present,
+        });
+        // Keep a selected unit for explicit combat menu actions; empty ground selects a tile.
+        if session.menu.is_none() {
+            session.selection = Selection::Tile(position);
+        }
+        session.dirty = true;
         return;
     }
     // A click anywhere else dismisses the menu instead of selecting under it.
@@ -1695,22 +1776,8 @@ fn controls(params: Controls) {
             0
         };
         session.selection = Selection::Unit(own[next]);
-    } else if touch.is_some()
-        && let Selection::Unit(unit) = session.selection
-    {
-        // Left-clicking only selects; orders go with the right button. A tap has no right
-        // button, so on a touch screen it is the order.
-        if let Some(command) = if keys.pressed(KeyCode::KeyX) {
-            stack_order_for(&session, unit, position)
-        } else {
-            order_for(&session, unit, position)
-        } {
-            issue(&mut session, &mut connection, command);
-        }
-    } else if city.is_some() {
-        return;
     } else {
-        session.selection = Selection::Tile(position);
+        return;
     }
     session.dirty = true;
 }
