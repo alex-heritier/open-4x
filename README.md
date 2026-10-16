@@ -54,7 +54,7 @@ Left-click one of your units (click again to cycle a stack) to select it, or Tab
 
 Useful client flags: `--menu [nations]` (show the title screens even with other flags), `--scenario ID`, `--nation ID`, `--seed N`, `--pack DIR`, `--zoom SCALE` (0.4 to 4), `--talk NATION_ID` (open the diplomacy window), `--focus X,Y` (start the camera on a tile), `--load SAVE`, `--combat-speed N` (scale fight playback, default 1; also `FOURX_COMBAT_SPEED`), `--demo-combat NAME[@SECONDS]` (play a hand-made fight, see [`docs/combat-animation.md`](docs/combat-animation.md) §10).
 
-Save with F5 or the Save button; resume with `cargo run -p fourx-client -- --load dawn.save.json`. Custom saves require the matching `--pack` for their artwork. Browser saves use local storage and resume with `?load=browser`. Saves from earlier builds (before save format 5) cannot be loaded.
+Save with F5 or the Save button; resume with `cargo run -p fourx-client -- --load dawn.save.json`. Custom saves require the matching `--pack` for their artwork. Saves from earlier builds (before save format 5) cannot be loaded.
 
 ### The campaign at scale
 
@@ -187,11 +187,6 @@ The pack ships flat white glyph icons (`ui/icons/`) and window chrome (`ui/chrom
 
 ## Platforms
 
-Development is currently focused only on the desktop build. The other targets below are deferred until a second user needs them: documented for reference, not built or tested here.
+Development is focused on the desktop build: Linux/X11/Wayland, Windows, and macOS through Bevy. Linux requires the usual window/audio development packages (ALSA, udev, X11/Wayland).
 
-- Desktop: Linux/X11/Wayland, Windows, macOS through Bevy. Linux requires the usual window/audio development packages (ALSA, udev, X11/Wayland).
-- Web: `wasm32-unknown-unknown`, WebGL2. Install the Rust target and Trunk, then `cd web && trunk serve`. Offline local play is the default.
-- Android: the client exposes a `cdylib` and `android_main`, with the `android` feature enabling Bevy NativeActivity. APK metadata bundles the assets; `cargo apk run -p fourx-client --lib --no-default-features --features android` uses an Android SDK/NDK/toolchain. Desktop features must stay disabled.
-- iOS: an exported C entry and XcodeGen project configuration live in `platforms/ios/`. Build a static client library for `aarch64-apple-ios`, generate the project, select a signing team, and run from Xcode. See `platforms/README.md`. Platform SDKs, signing, and device testing are required and have not been performed here.
-
-Native gameplay and native/web compile checks are recorded in `VALIDATION.md`. Cross-platform source support does not imply that every device build has been tested.
+Web and mobile targets are deferred. Their remaining source support does not imply a working or tested build.
