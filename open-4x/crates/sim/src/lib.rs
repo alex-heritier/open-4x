@@ -177,6 +177,9 @@ pub struct City {
     /// Surplus food stored toward the next citizen. See [`economy`].
     #[serde(default)]
     pub granary: i32,
+    /// Food bought with the treasury last turn to make up what the land could not feed.
+    #[serde(default)]
+    pub imported: i32,
     #[serde(default)]
     pub buildings: BTreeSet<Building>,
     #[serde(default)]
@@ -623,6 +626,7 @@ impl Game {
                 progress: 0,
                 harvest: Yield::default(),
                 granary: economy::starting_granary(3),
+                imported: 0,
                 buildings: BTreeSet::new(),
                 construction: None,
                 construction_progress: 0,
@@ -881,7 +885,9 @@ impl Game {
             *gold.entry(city.owner).or_default() += city.harvest.gold;
             faction.research += city.population + city.industry / 2;
             faction.industry += city.shields();
-            if city.eat() == Some(economy::Change::Starved) && city.owner == self.commander {
+            if city.eat(&mut faction.gold) == Some(economy::Change::Starved)
+                && city.owner == self.commander
+            {
                 famines.push(format!(
                     "Famine in {}: its population falls to {}.",
                     city.name, city.population

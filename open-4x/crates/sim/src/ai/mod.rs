@@ -18,7 +18,7 @@
 //!
 //! Designs are chosen by what they can do, not by name (see [`Roster`]), so any pack plays.
 //! Searches are bounded (see the budgets below) because a world turn has a hundred nations.
-use crate::combat::TOWN_MAX;
+use crate::economy::SizeClass;
 use crate::terrain::{Coord, Map};
 use crate::units::*;
 use crate::{City, Game, Id, Rules};
@@ -58,7 +58,7 @@ const THREAT_RADIUS: i32 = 8;
 pub(crate) fn garrison_goal(city: &City, threatened: bool) -> i32 {
     let mut goal = 1;
     goal += i32::from(city.capital);
-    goal += i32::from(city.population > TOWN_MAX);
+    goal += i32::from(city.size_class() > SizeClass::Town);
     goal += i32::from(threatened);
     goal.min(MAX_GARRISON)
 }

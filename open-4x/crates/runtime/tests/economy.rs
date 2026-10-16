@@ -84,12 +84,8 @@ fn every_city_gathers_something_and_cities_level_off() {
     let grown: Vec<_> = host.game.cities.values().map(|c| c.population).collect();
     assert!(grown.iter().zip(&starting).any(|(now, then)| now > then));
     for city in host.game.cities.values() {
-        // At most one mouth too many: a city that has just outgrown its land is about to starve.
-        assert!(
-            city.food_surplus() >= -fourx_sim::economy::FOOD_PER_CITIZEN,
-            "{} outgrew its land",
-            city.name
-        );
+        // A city grows only into what its land feeds.
+        assert!(city.food_surplus() >= 0, "{} outgrew its land", city.name);
     }
 }
 

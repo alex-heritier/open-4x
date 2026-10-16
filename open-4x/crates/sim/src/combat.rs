@@ -11,9 +11,6 @@ use std::cmp::Reverse;
 
 /// Dice are drawn from 0..1024; a die at or above the odds is a hit for the attacker.
 const DIE: u32 = 1024;
-/// City size classes: towns up to this many citizens, cities up to the next.
-pub(crate) const TOWN_MAX: i32 = 6;
-const CITY_MAX: i32 = 12;
 /// Defender bonus of a city by size class: town, city, metropolis.
 const CITY_PERCENT: [i32; 3] = [0, 50, 100];
 /// Promotion dice by current level: a promotion needs a roll of zero.
@@ -78,9 +75,7 @@ impl Game {
         let Some(city) = self.city_at(p).and_then(|id| self.cities.get(&id)) else {
             return 0;
         };
-        let class =
-            usize::from(city.population > TOWN_MAX) + usize::from(city.population > CITY_MAX);
-        CITY_PERCENT[class]
+        CITY_PERCENT[city.size_class().index()]
     }
     /// Fortify bonus a land unit has this instant. Units in a city count as fortified; the
     /// bonus needs movement left, so a unit that has spent its turn is exposed.

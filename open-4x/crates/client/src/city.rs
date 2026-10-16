@@ -17,6 +17,7 @@ use bevy::asset::uuid_handle;
 use bevy::text::{Font, FontWeight};
 use bevy::ui::FocusPolicy;
 use fourx_sim::City;
+use fourx_sim::economy::{GRAIN_PRICE, SizeClass, food_eaten};
 
 /// Cost of one step of industrial development, in gold (see `Command::Develop`).
 const DEVELOP_COST: i32 = 40;
@@ -749,7 +750,13 @@ fn header(
 /// The left column: what the land gives and what the people eat.
 fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
     section(p, "Economy");
-    let surplus = c.food_surplus();
+    // What the granary sees: the land's surplus with any grain the treasury bought added in.
+    let surplus = c.food_surplus() + c.imported;
+    let class = match c.size_class() {
+        SizeClass::Town => "A town",
+        SizeClass::City => "A city",
+        SizeClass::Metropolis => "A metropolis",
+    };
     p.spawn(Node {
         display: Display::Grid,
         grid_template_columns: vec![RepeatedGridTrack::flex(2, 1.0)],
@@ -768,7 +775,11 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
             brown,
             (c.population.to_string(), INK),
             "Citizens",
-            Some(format!("{} eat {} food", c.population, c.food_eaten())),
+            Some(format!(
+                "{class}: {} a head, {} in all",
+                c.size_class().food_per_citizen(),
+                c.food_eaten()
+            )),
         );
         readout(
             p,
@@ -780,11 +791,16 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
                 if surplus < 0 { FAMINE } else { INK },
             ),
             "Food a week",
-            Some(format!(
-                "{} grown, {} eaten",
-                c.harvest.food,
-                c.food_eaten()
-            )),
+            Some(if c.imported > 0 {
+                format!(
+                    "{} grown, {} bought, {} eaten",
+                    c.harvest.food,
+                    c.imported,
+                    c.food_eaten()
+                )
+            } else {
+                format!("{} grown, {} eaten", c.harvest.food, c.food_eaten())
+            }),
         );
         readout(
             p,
@@ -847,9 +863,18 @@ fn economy(p: &mut ChildSpawnerCommands, kit: &Kit, game: &Game, c: &City) {
         );
         display(p, format!("{} / {}", c.granary, size), 15.0, 600, INK);
     });
+    let land_full = c.harvest.food < food_eaten(c.population + 1);
     serif(
         p,
         match surplus {
+            _ if c.imported > 0 && surplus >= 0 => format!(
+                "Its land falls {} short: grain bought for {} gold a week feeds the rest.",
+                c.imported,
+                c.imported * GRAIN_PRICE
+            ),
+            s if s >= 0 && land_full => {
+                "Its land feeds no more citizens: farms would let it grow.".to_string()
+            }
             s if s > 0 => format!(
                 "A citizen is born in {}.",
                 in_days(days(size - c.granary, s).unwrap_or(0))

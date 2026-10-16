@@ -1,8 +1,12 @@
 //! The economy: every square yields food, shields, and gold, and a city gathers all of them
 //! from the squares of its preset border region (see [`crate::borders`]).
 //!
-//! * **Food** feeds the citizens (2 each). The surplus fills the city's granary and the city
-//!   grows when it is full; a shortfall drains it and the city starves a citizen at a time.
+//! * **Food** feeds the citizens: 2 each in a town, 3 in a city, 4 in a metropolis (see
+//!   [`SizeClass`]), so the land of a typical region holds a city in the middle class and only
+//!   rich or farmed land feeds a metropolis. The surplus fills the city's granary and the city
+//!   grows when it is full and its land can feed one more. A shortfall is made up with grain
+//!   bought from the nation's treasury while it can pay (see [`GRAIN_PRICE`]); past that it
+//!   drains the granary and the city starves a citizen at a time.
 //! * **Shields** are production. They finish what the city is building and add up to the
 //!   nation's industrial output, which is one way to win.
 //! * **Gold** is the nation's income.
@@ -22,8 +26,51 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ops::{Add, AddAssign};
 
-/// Food a citizen eats each day.
-pub const FOOD_PER_CITIZEN: i32 = 2;
+/// The largest town, and the largest city; anything bigger is a metropolis. Civ3's classes:
+/// they decide what each citizen eats, how fast the city grows, how the city is drawn, and how
+/// well it is defended.
+pub const TOWN_MAX: i32 = 6;
+pub const CITY_MAX: i32 = 12;
+
+/// Gold the treasury pays for each unit of food a city's land falls short by.
+pub const GRAIN_PRICE: i32 = 2;
+
+/// The size class of a city.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SizeClass {
+    Town,
+    City,
+    Metropolis,
+}
+impl SizeClass {
+    pub fn of(population: i32) -> Self {
+        match population {
+            ..=TOWN_MAX => Self::Town,
+            ..=CITY_MAX => Self::City,
+            _ => Self::Metropolis,
+        }
+    }
+    /// 0 for a town, 1 for a city, 2 for a metropolis.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+    /// Food each citizen of this class eats per turn: a bigger city brings its food farther.
+    pub fn food_per_citizen(self) -> i32 {
+        2 + self as i32
+    }
+}
+
+/// Food `population` citizens eat per turn: the first six eat as townsfolk, the next six as a
+/// city's, and every one past twelve as a metropolis's.
+pub fn food_eaten(population: i32) -> i32 {
+    let n = population.max(0);
+    let town = n.min(TOWN_MAX);
+    let city = (n - TOWN_MAX).clamp(0, CITY_MAX - TOWN_MAX);
+    let metropolis = (n - CITY_MAX).max(0);
+    town * SizeClass::Town.food_per_citizen()
+        + city * SizeClass::City.food_per_citizen()
+        + metropolis * SizeClass::Metropolis.food_per_citizen()
+}
 
 /// An amount of each resource, per day.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,11 +135,13 @@ pub const IMPROVEMENT_YIELD: [(u8, Yield); 4] = [
     (Tile::FARM, Yield::new(1, 0, 0)),
 ];
 
-/// Food a city of this size must store to grow by one citizen. Tuned so that a typical new
-/// city (a surplus of about 20 a day) grows every few days at first, then slows as the land
-/// fills, instead of every city gaining a citizen on a timer.
+/// Food a city of this size must store to grow by one citizen: twice as much once it is a
+/// city, three times as a metropolis. Tuned on the Age of Imperialism map so that towns
+/// become cities over the first year or two, and the richest land raises new metropolises
+/// over several, instead of every city racing to its ceiling in a few months.
 pub fn granary_size(population: i32) -> i32 {
-    20 * (population.max(1) + 1)
+    let n = population.max(1);
+    20 * (n + 1) * (SizeClass::of(n).index() as i32 + 1)
 }
 /// A city starts, and restarts after famine, with half a granary, so a poor city shrinks over
 /// days rather than all at once.
@@ -179,7 +228,10 @@ impl City {
         self.harvest.shields + self.industry
     }
     pub fn food_eaten(&self) -> i32 {
-        self.population * FOOD_PER_CITIZEN
+        food_eaten(self.population)
+    }
+    pub fn size_class(&self) -> SizeClass {
+        SizeClass::of(self.population)
     }
     /// Food left after feeding everyone. Negative means famine is coming.
     pub fn food_surplus(&self) -> i32 {
@@ -189,11 +241,25 @@ impl City {
         granary_size(self.population)
     }
 
-    /// One day of eating: store the surplus, then grow if the granary is full or starve a
-    /// citizen if it has run dry. A city never starves below one citizen.
-    pub(crate) fn eat(&mut self) -> Option<Change> {
-        self.granary += self.food_surplus();
+    /// One turn of eating. A shortfall is first bought as grain from `treasury`, as far as it
+    /// can pay; then the surplus is stored, and the city grows if the granary is full and its
+    /// land can feed one more, or starves a citizen if the granary has run dry. Bought grain
+    /// only holds a city's size, it never grows one, and a city never starves below one citizen.
+    pub(crate) fn eat(&mut self, treasury: &mut i32) -> Option<Change> {
+        let mut surplus = self.food_surplus();
+        self.imported = 0;
+        if surplus < 0 {
+            self.imported = (-surplus).min((*treasury).max(0) / GRAIN_PRICE);
+            *treasury -= self.imported * GRAIN_PRICE;
+            surplus += self.imported;
+        }
+        self.granary += surplus;
         if self.granary >= self.granary_size() {
+            if self.harvest.food < food_eaten(self.population + 1) {
+                // A full granary, but the land cannot feed another mouth: the city holds.
+                self.granary = self.granary_size();
+                return None;
+            }
             self.population += 1;
             self.granary = 0;
             Some(Change::Grew)
@@ -650,6 +716,25 @@ mod tests {
     }
 
     #[test]
+    fn bigger_cities_eat_more_per_head_and_grow_slower() {
+        assert_eq!(
+            [1, 6, 7, 12, 13, 20].map(SizeClass::of),
+            [
+                SizeClass::Town,
+                SizeClass::Town,
+                SizeClass::City,
+                SizeClass::City,
+                SizeClass::Metropolis,
+                SizeClass::Metropolis
+            ]
+        );
+        // Six townsfolk eat 2 each, the next six 3, every one past twelve 4.
+        assert_eq!([1, 6, 7, 12, 13, 15].map(food_eaten), [2, 12, 15, 30, 34, 42]);
+        // A town's granary is as it always was; a city's twice, a metropolis's three times.
+        assert_eq!([3, 6, 7, 12, 13].map(granary_size), [80, 140, 320, 520, 840]);
+    }
+
+    #[test]
     fn surplus_food_grows_a_city() {
         let mut game = arena_rows(&open_ground());
         let id = red_capital(&game).id;
@@ -658,11 +743,12 @@ mod tests {
         city.population = 3;
         city.granary = 0;
         assert_eq!(city.food_surplus(), 4);
-        // A granary of 80 fills at 4 a day.
+        // A granary of 80 fills at 4 a turn.
+        let mut treasury = 0;
         for day in 1..20 {
-            assert_eq!(city.eat(), None, "day {day}");
+            assert_eq!(city.eat(&mut treasury), None, "day {day}");
         }
-        assert_eq!(city.eat(), Some(Change::Grew));
+        assert_eq!(city.eat(&mut treasury), Some(Change::Grew));
         assert_eq!((city.population, city.granary), (4, 0));
     }
 
@@ -672,12 +758,42 @@ mod tests {
         let id = red_capital(&game).id;
         let city = game.cities.get_mut(&id).unwrap();
         city.harvest = Yield::new(25, 1, 1);
-        // 25 food feeds 12 citizens. A 13th is hungry, starves, and the city regrows.
+        // 25 food feeds ten (12 for six townsfolk, 12 more for four city dwellers); an eleventh
+        // would eat 27. The city fills its granary and holds at ten instead of growing to starve.
+        let mut treasury = 10_000;
         for _ in 0..2000 {
-            city.eat();
-            assert!(city.population <= 13);
+            city.eat(&mut treasury);
+            assert!(city.population <= 10);
         }
-        assert!(matches!(city.population, 12 | 13), "{}", city.population);
+        assert_eq!(city.population, 10);
+        assert_eq!(city.granary, city.granary_size());
+        assert_eq!(treasury, 10_000, "a city its land feeds buys no grain");
+    }
+
+    #[test]
+    fn bought_grain_holds_a_city_its_land_cannot_feed_while_the_treasury_pays() {
+        let mut game = arena_rows(&open_ground());
+        let id = red_capital(&game).id;
+        let city = game.cities.get_mut(&id).unwrap();
+        // A historic metropolis on cramped land: 13 citizens eat 34, the land grows 24.
+        city.harvest = Yield::new(24, 1, 1);
+        city.population = 13;
+        city.granary = starting_granary(13);
+        let granary = city.granary;
+        let mut treasury = 100;
+        for _ in 0..5 {
+            assert_eq!(city.eat(&mut treasury), None);
+        }
+        // Ten short a turn at two gold each: five turns cost 100, and nothing was drawn or grown.
+        assert_eq!((treasury, city.imported, city.population), (0, 10, 13));
+        assert_eq!(city.granary, granary);
+        // With the treasury empty the shortfall falls on the granary again.
+        city.eat(&mut treasury);
+        assert_eq!((city.imported, city.granary), (0, granary - 10));
+        // A treasury that can pay for part of the shortfall buys what it can.
+        treasury = 7;
+        city.eat(&mut treasury);
+        assert_eq!((treasury, city.imported), (1, 3));
     }
 
     #[test]
@@ -690,8 +806,9 @@ mod tests {
         city.granary = starting_granary(5);
         assert_eq!(city.food_surplus(), -7);
         let mut first = None;
+        let mut treasury = 0;
         for day in 1..=400 {
-            let change = city.eat();
+            let change = city.eat(&mut treasury);
             if first.is_none() && change.is_some() {
                 first = Some((day, change, city.population));
             }

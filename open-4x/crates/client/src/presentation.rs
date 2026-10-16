@@ -360,10 +360,6 @@ impl Sight {
     }
 }
 
-/// The largest population still drawn as a town, and as a city; anything bigger is a metropolis.
-const TOWN_MAX: i32 = 6;
-const CITY_MAX: i32 = 12;
-
 /// The city sprite for a city of `population` owned by `owner`: its flavor's town, city or
 /// metropolis, falling back to that flavor's city art, then to the pack's western one for a
 /// nation the player has no record of.
@@ -377,10 +373,10 @@ pub(crate) fn city_sprite<'a>(
         .factions
         .get(&owner)
         .map_or(Flavor::Western, |faction| faction.flavor);
-    let sized = match population {
-        ..=TOWN_MAX => &visuals.towns,
-        ..=CITY_MAX => &visuals.cities,
-        _ => &visuals.metropolises,
+    let sized = match fourx_sim::economy::SizeClass::of(population) {
+        fourx_sim::economy::SizeClass::Town => &visuals.towns,
+        fourx_sim::economy::SizeClass::City => &visuals.cities,
+        fourx_sim::economy::SizeClass::Metropolis => &visuals.metropolises,
     };
     sized
         .get(flavor.key())

@@ -229,7 +229,7 @@ from 1 in document order when the game is built; `0` always means "nobody".
   `regional_fill` they also decide who holds land beyond every city's border. The Age of
   Imperialism regions are painted from 1895 history by `scenario-forge aoi` (see below).
 - **Cities** must be on land, one per tile, with `population` and `industry` of 1–100.
-  `population` is the number of citizens, who each eat 2 food a day; `industry` is the city's own
+  `population` is the number of citizens, who each eat 2 food a turn in a town (1–6), 3 in a city (7–12), and 4 in a metropolis (13+), with any shortfall bought from the treasury; `industry` is the city's own
   workshops, which add shields to what the land of its region yields. Food, shields, and gold
   come from the squares of the border region and are not part of the document: they follow from
   the map's terrain, rivers, and improvements (see the README's Economy rules). A poor region
