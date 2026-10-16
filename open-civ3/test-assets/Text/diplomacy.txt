@@ -1,3 +1,0 @@
-#HELLO
-#random 1
-Placeholder greeting.
