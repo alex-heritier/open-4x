@@ -164,6 +164,9 @@ def roof(svg, iso, x, y, dx, dy, zb, kind, col, rh=12, o=0.28, tiles=6, ridge_ca
         left = f"M{w_[0]:.2f},{w_[1]:.2f} Q{sag(w_, s_)[0]:.2f},{sag(w_, s_)[1] + 2:.2f} {s_[0]:.2f},{s_[1]:.2f} L{r1[0]:.2f},{r1[1]:.2f} L{r0[0]:.2f},{r0[1]:.2f} Z"
         right = f"M{s_[0]:.2f},{s_[1]:.2f} Q{sag(s_, e_)[0]:.2f},{sag(s_, e_)[1] + 2:.2f} {e_[0]:.2f},{e_[1]:.2f} L{r1[0]:.2f},{r1[1]:.2f} Z"
         end_l = f"M{w_[0]:.2f},{w_[1]:.2f} L{r0[0]:.2f},{r0[1]:.2f} L{n_[0]:.2f},{n_[1]:.2f} Z"
+        # The far slope shows above the ridge from this camera: paint it, or the roof is see-through.
+        back = f"M{n_[0]:.2f},{n_[1]:.2f} L{e_[0]:.2f},{e_[1]:.2f} L{r1[0]:.2f},{r1[1]:.2f} L{r0[0]:.2f},{r0[1]:.2f} Z"
+        svg.path(back, shade(col, 0.66), stroke=ink, sw=0.9)
         svg.path(end_l, shade(col, 0.82), stroke=ink, sw=0.9)
         svg.path(right, svg.lin([(0, shade(col, 0.7)), (1, shade(col, 0.5))], 0, 1, 1, 0), stroke=ink, sw=0.9)
         svg.path(left, svg.lin([(0, shade(col, 1.14)), (1, shade(col, 0.86))], 0, 1, 1, 0), stroke=ink, sw=0.9)

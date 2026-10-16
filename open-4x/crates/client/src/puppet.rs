@@ -180,6 +180,13 @@ impl UnitArt {
             clips: clips.try_into().ok()?,
         })
     }
+
+    /// The nation-colour sheet that goes over a clip, if the pack drew one.
+    pub fn accent(&self, assets: &AssetServer, image: &Handle<Image>) -> Option<Handle<Image>> {
+        self.accents
+            .get(&image.id())
+            .map(|path| assets.load(path.clone()))
+    }
 }
 
 /// Which way each unit looks. A unit nobody has turned looks south-west, toward the viewer, as in

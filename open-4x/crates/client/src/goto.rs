@@ -4,6 +4,7 @@ use super::*;
 const COLOUR: Color = Color::srgb(0.3, 0.95, 1.0);
 pub(super) struct Targeting {
     pub unit: Id,
+    pub stack: bool,
     pub drag: bool,
     pub preview: Option<Preview>,
     pub hovered: Option<Coord>,
@@ -15,9 +16,10 @@ pub(super) struct Preview {
     turns: u32,
 }
 impl Targeting {
-    pub fn new(unit: Id, drag: bool) -> Self {
+    pub fn new(unit: Id, stack: bool, drag: bool) -> Self {
         Self {
             unit,
+            stack,
             drag,
             preview: None,
             hovered: None,
@@ -50,9 +52,27 @@ fn travel_turns(game: &Game, rules: &Rules, unit: &fourx_sim::Unit, path: &[Coor
     }
     turns
 }
-fn preview(game: &Game, rules: &Rules, unit: Id, destination: Coord) -> Option<Preview> {
+fn preview(
+    game: &Game,
+    rules: &Rules,
+    unit: Id,
+    stack: bool,
+    destination: Coord,
+) -> Option<Preview> {
     let destination = game.map.normalize(destination)?;
     let unit = game.units.get(&unit)?;
+    if stack
+        && matches!(
+            stack_command(game, rules, unit.owner, unit.id, destination),
+            Some(Command::AttackStack { .. })
+        )
+    {
+        return Some(Preview {
+            destination,
+            path: vec![unit.position, destination],
+            turns: 1,
+        });
+    }
     if game.blocked_for(unit.owner, destination) {
         return None;
     }
@@ -83,7 +103,13 @@ pub(super) fn update(session: &mut Session, destination: Coord) {
     targeting.hovered = Some(destination);
     let key = (destination, game.revision);
     if targeting.cached != Some(key) {
-        targeting.preview = preview(game, &session.rules, targeting.unit, destination);
+        targeting.preview = preview(
+            game,
+            &session.rules,
+            targeting.unit,
+            targeting.stack,
+            destination,
+        );
         targeting.cached = Some(key);
     }
 }
@@ -170,12 +196,12 @@ mod tests {
             .find(|c| c.owner != unit.owner)
             .unwrap()
             .position;
-        assert!(preview(&game, &host.rules, unit.id, foreign).is_none());
-        assert!(preview(&game, &host.rules, unit.id, unit.position).is_none());
+        assert!(preview(&game, &host.rules, unit.id, false, foreign).is_none());
+        assert!(preview(&game, &host.rules, unit.id, false, unit.position).is_none());
         let route = (0..game.map.tiles.len())
             .filter_map(|i| {
                 let to = Coord::new(i as i32 % game.map.width, i as i32 / game.map.width);
-                preview(&game, &host.rules, unit.id, to)
+                preview(&game, &host.rules, unit.id, false, to)
             })
             .find(|p| p.path.len() >= 4)
             .expect("a walkable destination");
@@ -203,5 +229,45 @@ mod tests {
         let mut exhausted = unit.clone();
         exhausted.moves_used = host.rules.def(unit).total_moves();
         assert!(travel_turns(&game, &host.rules, &exhausted, &route.path) >= route.turns);
+    }
+
+    #[test]
+    fn stack_targeting_attacks_an_adjacent_enemy_city() {
+        let mut host = Host::base_scenario("russo-japanese-war", 42).unwrap();
+        let player = host.commander();
+        let attacker = host
+            .game
+            .units
+            .values()
+            .find(|u| u.owner == player && host.rules.def(u).can_attack())
+            .unwrap()
+            .id;
+        let (enemy, city) = host
+            .game
+            .cities
+            .values()
+            .find(|c| c.owner != player)
+            .map(|c| (c.owner, c.position))
+            .unwrap();
+        let approach = city.offset(-1, 0);
+        let ground = host.game.map.get_mut(approach).unwrap();
+        ground.terrain = fourx_sim::terrain::Terrain::Grass;
+        ground.relief = fourx_sim::terrain::Relief::Flat;
+        ground.cover = fourx_sim::terrain::Cover::Bare;
+        host.game.set_position(attacker, approach);
+        if !host.game.at_war(player, enemy) {
+            host.command(player, Command::DeclareWar { nation: enemy })
+                .unwrap();
+        }
+
+        assert!(preview(&host.game, &host.rules, attacker, false, city).is_none());
+        let attack = preview(&host.game, &host.rules, attacker, true, city)
+            .expect("the stack can strike the adjacent city");
+        assert_eq!((attack.destination, attack.turns), (city, 1));
+        assert!(matches!(
+            stack_command(&host.game, &host.rules, player, attacker, city),
+            Some(Command::AttackStack { unit, target })
+                if unit == attacker && target == city
+        ));
     }
 }

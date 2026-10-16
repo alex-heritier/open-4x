@@ -87,9 +87,9 @@ def build_relief():
                 print(f"  {name}", flush=True)
 
 
-def city_scene(flavor, build):
+def city_scene(flavor, build, size=cities.MEDIUM):
     """A city skin with the nation's banner raised over it: white cloth, tinted to the owner."""
-    svg = build()
+    svg = build(size=size)
     cities.banner(svg, cities.Iso(cities.CX, cities.CY - 64, cities.K), flavor)
     return svg
 
@@ -123,9 +123,12 @@ def build_farms():
 
 
 def build_cities():
-    """The eleven city skins, plus the matching transparent banner each raises over its town."""
+    """The eleven city skins at their three sizes (town, city, metropolis; the city keeps the plain
+    name), plus the matching transparent banner each raises over its town."""
     for flavor, build in cities.BUILDERS.items():
-        sprite(f"city_{flavor}", city_scene(flavor, build), (256, 224), f"sprites/city_{flavor}.png", ss=4, seed=3, radius=1)
+        for size in cities.SIZES:
+            name = f"city_{flavor}" if size == cities.MEDIUM else f"city_{flavor}_{size}"
+            sprite(name, city_scene(flavor, build, size), (256, 224), f"sprites/{name}.png", ss=4, seed=3, radius=1)
         banner = cities.Svg(256, 224)
         cities.banner(banner, cities.Iso(cities.CX, cities.CY - 64, cities.K), flavor)
         sprite(f"city_{flavor}_banner", banner, (256, 224), f"sprites/city_{flavor}_banner.png", ss=4, seed=3, radius=1)

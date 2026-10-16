@@ -10,6 +10,9 @@ mod headless;
 mod motion;
 mod script;
 
+/// The map's own motions, which the stack fight's field plays too.
+pub(super) use motion::{Motion, Pose, STRIKE_AT};
+
 use super::march::Walks;
 use super::presentation::{UNIT_LIFT as LIFT, nation_color, unit_size};
 use super::puppet::{ClipSet, NationAccent, Puppetry};
@@ -21,8 +24,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use fourx_content::combat::Style;
-use fourx_sim::{Battle, Id, terrain::Coord};
-use motion::Pose;
+use fourx_sim::{Battle, terrain::Coord};
 use script::{Event as Moment, LEAD_IN, Script, Setting, Showing};
 use std::collections::VecDeque;
 use std::f32::consts::PI;
@@ -176,6 +178,14 @@ pub(super) struct FxArt {
     star: Handle<Image>,
     /// A thin bright ring, for a blast's shock across the water.
     ring: Handle<Image>,
+}
+
+impl FxArt {
+    /// The round puff the effects are drawn with: solid in the middle, clear at the edge. The
+    /// stack fight's field borrows it for a blow's flash and for the shading of its ground.
+    pub(super) fn soft(&self) -> Handle<Image> {
+        self.soft.clone()
+    }
 }
 
 pub(super) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {

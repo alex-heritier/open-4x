@@ -32,29 +32,46 @@ ROOF_ORANGE = "#b5582c"
 TERRACOTTA = "#b8562e"
 
 
+# A city is drawn at three sizes, after Civ3's town, city and metropolis: `SMALL` for size 1-6,
+# `MEDIUM` 7-12 and `LARGE` 13 and up.  Each builder lays out the medium town and tags what the
+# other sizes leave out or add: `sizes` names the sizes ("s", "m", "l") an item appears in.
+SMALL, MEDIUM, LARGE = "small", "medium", "large"
+SIZES = (SMALL, MEDIUM, LARGE)
+EARTH = {SMALL: 3.1, MEDIUM: 3.95, LARGE: 3.95}  # the radius of the town's ground disc, in grid units
+TALL = {SMALL: 1.0, MEDIUM: 1.0, LARGE: 1.3}  # a metropolis builds its houses a storey or two higher
+
+
 class Scene:
     """A town under construction: things are queued with a depth and painted far to near."""
 
-    def __init__(self, seed):
+    def __init__(self, seed, size=MEDIUM):
         self.svg = Svg(W, H)
         self.iso = Iso(CX, CY - 64, K)  # an 8 x 8 grid exactly fills the 256 x 128 ground diamond
         self.rng = random.Random(seed)
         self.items = []
+        self.size = size
+        self.radius = EARTH[size]
 
-    def add(self, depth, draw):
-        self.items.append((depth, len(self.items), draw))
+    def on(self, sizes):
+        """Whether this town's size is among `sizes` ("s", "m", "l")."""
+        return self.size[0] in sizes
 
-    def house(self, x, y, dx, dy, h, wall, kind, col, rh=10, **kw):
+    def add(self, depth, draw, sizes="sml"):
+        if self.on(sizes):
+            self.items.append((depth, len(self.items), draw))
+
+    def house(self, x, y, dx, dy, h, wall, kind, col, rh=10, sizes="sml", **kw):
         svg, iso, rng = self.svg, self.iso, self.rng
-        self.add(x + dx / 2 + y + dy / 2, lambda: building(svg, iso, rng, x, y, dx, dy, h, wall, kind, col, rh=rh, **kw))
+        h = h * TALL[self.size]
+        self.add(x + dx / 2 + y + dy / 2, lambda: building(svg, iso, rng, x, y, dx, dy, h, wall, kind, col, rh=rh, **kw), sizes)
 
-    def tree(self, x, y, **kw):
+    def tree(self, x, y, sizes="sml", **kw):
         svg, iso = self.svg, self.iso
-        self.add(x + y, lambda: tree(svg, iso, x, y, **kw))
+        self.add(x + y, lambda: tree(svg, iso, x, y, **kw), sizes)
 
-    def palm(self, x, y, **kw):
+    def palm(self, x, y, sizes="sml", **kw):
         svg, iso = self.svg, self.iso
-        self.add(x + y, lambda: palm(svg, iso, x, y, **kw))
+        self.add(x + y, lambda: palm(svg, iso, x, y, **kw), sizes)
 
     def render(self):
         for _, _, draw in sorted(self.items, key=lambda t: (t[0], t[1])):
@@ -67,49 +84,58 @@ def _ring(cx, cy, r, angles):
 
 
 # ---- western: brick and slate, chimneys, a clock tower ------------------------------------------
-def western(seed=7):
-    sc = Scene(seed)
+def western(seed=7, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng)
-    rail(svg, iso, [(0.7, 4.4), (2.4, 4.7), (4.2, 5.4), (7.3, 6.9)])
+    earth(svg, iso, rng, radius=sc.radius)
+    if sc.on("ml"):
+        rail(svg, iso, [(0.7, 4.4), (2.4, 4.7), (4.2, 5.4), (7.3, 6.9)])
     lots = [
-        (0.9, 1.5, 1.7, 1.6, 20, OCHRE_WALL, "gable_x", ROOF_TILE, 9),
-        (5.3, 0.9, 2.1, 1.9, 28, CONCRETE, "flat", "#85827a", 0),
-        (2.8, 3.1, 1.7, 1.6, 30, GREY_STUCCO, "gable_y", ROOF_SLATE, 11),
-        (0.7, 3.4, 1.5, 1.5, 16, PLASTER, "hip", ROOF_BROWN, 8),
-        (4.7, 3.2, 1.7, 1.6, 24, BRICK, "hip", ROOF_SLATE, 10),
-        (6.3, 3.1, 1.3, 1.5, 18, PLASTER, "gable_y", ROOF_ORANGE, 8),
-        (1.0, 5.2, 1.7, 1.5, 18, GREY_STUCCO, "gable_x", ROOF_ORANGE, 8),
-        (3.1, 5.0, 1.8, 1.7, 22, PLASTER, "gable_x", ROOF_TILE, 10),
-        (5.2, 5.1, 1.7, 1.5, 17, BRICK, "gable_y", ROOF_BROWN, 8),
-        (2.3, 6.8, 1.4, 0.9, 11, OCHRE_WALL, "gable_x", ROOF_BROWN, 6),
-        (4.6, 6.8, 1.5, 0.9, 12, CONCRETE, "gable_x", ROOF_TILE, 6),
+        (0.9, 1.5, 1.7, 1.6, 20, OCHRE_WALL, "gable_x", ROOF_TILE, 9, "ml"),
+        (5.3, 0.9, 2.1, 1.9, 28, CONCRETE, "flat", "#85827a", 0, "ml"),
+        (2.8, 3.1, 1.7, 1.6, 30, GREY_STUCCO, "gable_y", ROOF_SLATE, 11, "sml"),
+        (0.7, 3.4, 1.5, 1.5, 16, PLASTER, "hip", ROOF_BROWN, 8, "ml"),
+        (4.7, 3.2, 1.7, 1.6, 24, BRICK, "hip", ROOF_SLATE, 10, "sml"),
+        (6.3, 3.1, 1.3, 1.5, 18, PLASTER, "gable_y", ROOF_ORANGE, 8, "ml"),
+        (1.0, 5.2, 1.7, 1.5, 18, GREY_STUCCO, "gable_x", ROOF_ORANGE, 8, "ml"),
+        (3.1, 5.0, 1.8, 1.7, 22, PLASTER, "gable_x", ROOF_TILE, 10, "sml"),
+        (5.2, 5.1, 1.7, 1.5, 17, BRICK, "gable_y", ROOF_BROWN, 8, "sml"),
+        (2.3, 6.8, 1.4, 0.9, 11, OCHRE_WALL, "gable_x", ROOF_BROWN, 6, "ml"),
+        (4.6, 6.8, 1.5, 0.9, 12, CONCRETE, "gable_x", ROOF_TILE, 6, "ml"),
+        # the metropolis fills the corners with offices and a long works shed
+        (1.2, 0.3, 1.7, 1.0, 34, CONCRETE, "flat", "#7d7a72", 0, "l"),
+        (6.4, 5.0, 1.0, 1.5, 22, GREY_STUCCO, "flat", "#85827a", 0, "l"),
+        (0.6, 6.7, 1.4, 0.8, 12, BRICK, "gable_x", ROOF_SLATE, 6, "l"),
+        (6.2, 6.7, 1.2, 0.8, 13, OCHRE_WALL, "gable_x", ROOF_TILE, 6, "l"),
     ]
-    for x, y, dx, dy, h, wall, kind, col, rh in lots:
-        sc.house(x, y, dx, dy, h, wall, kind, col, rh=rh)
-    for x, y, h in ((4.9, 0.55, 78), (7.35, 0.7, 64), (2.55, 2.55, 52)):
-        sc.add(x + y - 1.5, lambda x=x, y=y, h=h: chimney(svg, iso, x, y, h, seed=int(x * 10)))
+    for x, y, dx, dy, h, wall, kind, col, rh, sizes in lots:
+        sc.house(x, y, dx, dy, h, wall, kind, col, rh=rh, sizes=sizes)
+    stacks = [(4.9, 0.55, 78, "ml"), (7.35, 0.7, 64, "ml"), (2.55, 2.55, 52, "sml"), (7.3, 2.75, 72, "l"), (0.75, 1.25, 60, "l")]
+    for x, y, h, sizes in stacks:
+        sc.add(x + y - 1.5, lambda x=x, y=y, h=h: chimney(svg, iso, x, y, h, seed=int(x * 10)), sizes)
+
+    th = 40 * TALL[size]
 
     def tower():
-        building(svg, iso, rng, 3.3, 1.2, 1.4, 1.4, 40, "#b9b19c", "hip", "#4f8a72", rh=27, cols=1, rows=2, o=0.2, lit=0.3)
-        face = lambda s, t: p(3.3 + s * 1.4, 2.6, t * 40)
-        c = face(0.5, 0.64)
+        building(svg, iso, rng, 3.3, 1.2, 1.4, 1.4, th, "#b9b19c", "hip", "#4f8a72", rh=27, cols=1, rows=2, o=0.2, lit=0.3)
+        face = lambda s, t: p(3.3 + s * 1.4, 2.6, t * th)
+        c = face(0.5, 0.64 if th == 40 else 0.74)
         svg.circle(c[0], c[1], 4.3, "#f1e8cf", stroke="#3a3126", sw=0.9)
         svg.line(c, (c[0], c[1] - 2.9), "#2a241c", 0.9)
         svg.line(c, (c[0] + 2.1, c[1] + 0.8), "#2a241c", 0.9)
-        finial(svg, p(4.0, 1.9, 40 + 27), h=9, col="#c9a85c")
+        finial(svg, p(4.0, 1.9, th + 27), h=9, col="#c9a85c")
 
     sc.add(3.3 + 1.2 + 1.4, tower)
     return sc.render()
 
 
 # ---- latin: whitewash and terracotta around a cathedral and a plaza --------------------------------
-def latin(seed=11):
-    sc = Scene(seed)
+def latin(seed=11, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#6b5a40", mid="#a8946c", core="#c3b08a", stone="#bfae88")
+    earth(svg, iso, rng, rim="#6b5a40", mid="#a8946c", core="#c3b08a", stone="#bfae88", radius=sc.radius)
     svg.poly(iso.ground(2.7, 3.0, 3.0, 2.9), "#dccda8", "#8a7a58", 0.8, op=0.92)
     for i in range(1, 6):  # paving
         t = i / 6
@@ -123,22 +149,29 @@ def latin(seed=11):
         top = dome(svg, c[0], c[1], radii(0.8)[0] * 1.12, 24, "#3a7d78", ribs=5)
         finial(svg, top, h=9, col="#d6b25e", cross=True)
 
-    sc.add(4.5 + 1.55, cathedral)
-    for tx in (3.0, 4.95):
+    sc.add(4.5 + 1.55, cathedral, "ml")
+    # A town makes do with one bell tower for its church; the city and metropolis raise two over the cathedral.
+    for tx, sizes in ((3.0, "ml"), (4.95, "sml")):
         def bell(tx=tx):
             building(svg, iso, rng, tx, 1.45, 0.95, 0.95, 38, "#efe5cc", "hip", "#3a7d78", rh=13, cols=1, rows=3, arch=True, lit=0.25, o=0.16)
             finial(svg, p(tx + 0.475, 1.925, 51), h=7, col="#d6b25e", cross=True)
 
-        sc.add(tx + 0.5 + 1.9 + 1.0, bell)
-    for x, y, dx, dy, h, wall, kind, col, rh in (
-        (0.8, 4.4, 1.8, 1.5, 17, "#e2a57e", "gable_x", TERRACOTTA, 8),
-        (1.0, 2.6, 1.6, 1.4, 20, "#ead9a8", "hip", "#a5482a", 9),
-        (6.0, 2.3, 1.5, 1.6, 16, "#dcaa60", "gable_y", TERRACOTTA, 8),
-        (5.9, 4.4, 1.7, 1.5, 19, "#bdd0c2", "hip", TERRACOTTA, 9),
-        (2.8, 6.0, 1.7, 1.3, 14, "#e6b9a2", "gable_x", "#a5482a", 7),
-        (4.8, 6.0, 1.6, 1.3, 15, "#f0e5c3", "gable_x", TERRACOTTA, 7),
+        sc.add(tx + 0.5 + 1.9 + 1.0, bell, sizes)
+    if sc.on("s"):
+        sc.house(3.5, 1.6, 1.45, 1.1, 16, "#ece1c6", "gable_x", TERRACOTTA, rh=7, cols=2, rows=1, arch=True, lit=0.1, tiles=8)
+    for x, y, dx, dy, h, wall, kind, col, rh, sizes in (
+        (0.8, 4.4, 1.8, 1.5, 17, "#e2a57e", "gable_x", TERRACOTTA, 8, "sml"),
+        (1.0, 2.6, 1.6, 1.4, 20, "#ead9a8", "hip", "#a5482a", 9, "sml"),
+        (6.0, 2.3, 1.5, 1.6, 16, "#dcaa60", "gable_y", TERRACOTTA, 8, "sml"),
+        (5.9, 4.4, 1.7, 1.5, 19, "#bdd0c2", "hip", TERRACOTTA, 9, "ml"),
+        (2.8, 6.0, 1.7, 1.3, 14, "#e6b9a2", "gable_x", "#a5482a", 7, "sml"),
+        (4.8, 6.0, 1.6, 1.3, 15, "#f0e5c3", "gable_x", TERRACOTTA, 7, "ml"),
+        (1.3, 0.7, 1.5, 1.4, 18, "#e8c890", "hip", TERRACOTTA, 8, "l"),
+        (0.7, 6.1, 1.6, 1.1, 14, "#dcaa60", "gable_x", "#a5482a", 7, "l"),
+        (6.5, 6.1, 1.1, 1.1, 15, "#ead9a8", "hip", TERRACOTTA, 7, "l"),
+        (6.4, 0.6, 1.2, 1.3, 20, "#e6b9a2", "hip", "#a5482a", 8, "l"),
     ):
-        sc.house(x, y, dx, dy, h, wall, kind, col, rh=rh, arch=True, lit=0.2, tiles=8)
+        sc.house(x, y, dx, dy, h, wall, kind, col, rh=rh, sizes=sizes, arch=True, lit=0.2, tiles=8)
 
     def fountain():
         cylinder(svg, iso, 4.2, 4.3, 0.62, 5, "#b8b19e", grain=8, seed=2, top=False)
@@ -150,57 +183,120 @@ def latin(seed=11):
         svg.circle(c[0], c[1] - 11, 2.4, "#cfeff2", op=0.9)
 
     sc.add(8.5, fountain)
-    sc.palm(0.7, 0.9, h=44, seed=1)
-    sc.palm(7.3, 0.8, h=40, seed=2)
+    sc.palm(0.7, 0.9, h=44, seed=1, sizes="sm")
+    sc.palm(7.3, 0.8, h=40, seed=2, sizes="sm")
     return sc.render()
 
 
 # ---- orthodox: white churches with gold onion domes, log houses, a bell tower --------------------------
-def orthodox(seed=13):
-    sc = Scene(seed)
+GREEN_ROOF = "#3e7a62"
+CHURCH_WALL = "#f1ebde"
+
+
+def starred_onion(svg, cx, cy, R, H, col, stars=False):
+    """An onion dome on its cross; a blue one is strewn with gold stars, as over a Russian church."""
+    top = onion(svg, cx, cy, R, H, col)
+    if stars:
+        for u, v in ((-0.45, 0.32), (0.1, 0.22), (0.5, 0.4), (-0.15, 0.52), (0.3, 0.62)):
+            svg.circle(cx + u * R, cy - v * H, max(0.8, R * 0.09), "#f2cf5a")
+    return top
+
+
+def russian_church(svg, iso, rng, x, y, dx, dy, h, rh, drum, centre_r, side_r):
+    """A cross-in-square church: white walls under a steep green cross gable, a row of kokoshnik
+    gables along the eaves, and five tall drums, blue starred onions round a gilt one."""
+    p = iso.p
+    building(svg, iso, rng, x, y, dx, dy, h, CHURCH_WALL, "gable_x", GREEN_ROOF, rh=rh, cols=3, rows=2, arch=True, lit=0.12, tiles=7, o=0.18)
+    roof(svg, iso, x + dx * 0.34, y, dx * 0.32, dy, h, "gable_y", GREEN_ROOF, rh=rh + 2, o=0.18, tiles=5)
+    n = max(3, round(dx * 1.6))  # kokoshniks: round-topped gables standing on the front eave
+    for i in range(n):
+        a, b = p(x + dx * i / n, y + dy + 0.18, h), p(x + dx * (i + 1) / n, y + dy + 0.18, h)
+        w = (b[0] - a[0]) / 2
+        svg.path(f"M{a[0]:.2f},{a[1]:.2f} Q{a[0] + w * 0.15:.2f},{a[1] - w * 1.25:.2f} {a[0] + w:.2f},{a[1] + (b[1] - a[1]) / 2 - w * 1.35:.2f} "
+                 f"Q{b[0] - w * 0.15:.2f},{b[1] - w * 1.25:.2f} {b[0]:.2f},{b[1]:.2f} Z", CHURCH_WALL, stroke=shade(CHURCH_WALL, 0.45), sw=0.8)
+    z0 = h + rh * 0.55
+    cx_, cy_ = x + dx / 2, y + dy / 2
+    corners = [(x + dx * 0.2, y + dy * 0.22), (x + dx * 0.8, y + dy * 0.22), (x + dx * 0.2, y + dy * 0.78), (x + dx * 0.8, y + dy * 0.78)]
+
+    def side(qx, qy):
+        top = cylinder(svg, iso, qx, qy, side_r, drum * 0.7, CHURCH_WALL, z0=z0, shadow=False, bands=[(0.3, 0.7, "#394a52")])
+        R = radii(side_r)[0]
+        starred_onion(svg, top[0], top[1], R * 1.3, R * 2.6, "#2c5c9a", stars=True)
+
+    for q in corners[:3]:  # far drums first, the centre, then the near one
+        side(*q)
+    top = cylinder(svg, iso, cx_, cy_, centre_r, drum, CHURCH_WALL, z0=z0, shadow=False, bands=[(0.3, 0.7, "#394a52")])
+    R = radii(centre_r)[0]
+    starred_onion(svg, top[0], top[1], R * 1.3, R * 2.5, "#d9b13c")
+    side(*corners[3])
+
+
+def tent_tower(svg, iso, rng, x, y, s, h, spire):
+    """A bell tower under a tall tented roof (a shatyor), topped by a small onion and its cross."""
+    building(svg, iso, rng, x, y, s, s, h, CHURCH_WALL, "flat", CHURCH_WALL, cols=1, rows=3, arch=True, lit=0.3, o=0.06)
+    c = iso.p(x + s / 2, y + s / 2, h)
+    R = radii(s * 0.62)[0]
+    apex = cone(svg, c[0], c[1], R, spire, GREEN_ROOF, texture=False, eave=False)
+    for k in (-0.5, 0.0, 0.5):  # the tent's ribs
+        svg.line((c[0] + k * R, c[1] + R / 2 * (1 - k * k) ** 0.5), apex, shade(GREEN_ROOF, 0.55), 0.8, 0.6)
+    starred_onion(svg, apex[0], apex[1] + 1, 4.5, 9, "#d9b13c")
+
+def orthodox(seed=13, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#4f5a36", mid="#86905a", core="#a2a870", stone="#9a9a72")
-    path_strip(svg, iso, [(0.5, 4.2), (2.6, 4.9), (4.6, 5.3), (7.5, 5.8)], "#a89a78")
+    earth(svg, iso, rng, rim="#4f5a36", mid="#86905a", core="#a2a870", stone="#9a9a72", radius=sc.radius)
+    path_strip(svg, iso, [(0.5, 4.2), (2.6, 4.9), (4.6, 5.3), (7.5, 5.8)] if sc.on("ml") else [(1.2, 4.4), (2.6, 4.9), (4.6, 5.3), (6.9, 5.7)], "#a89a78")
 
-    def church():
-        building(svg, iso, rng, 2.9, 2.4, 2.8, 2.2, 22, "#f1ebde", "parapet", "#f1ebde", cols=3, rows=2, arch=True, lit=0.12)
-        for dx, dy in ((0.6, 0.6), (2.2, 0.6), (0.6, 1.6), (2.2, 1.6)):
-            c = p(2.9 + dx, 2.4 + dy, 25.4)
-            cylinder(svg, iso, 2.9 + dx, 2.4 + dy, 0.28, 7, "#f1ebde", z0=25.4, shadow=False)
-            onion(svg, c[0], c[1] - 7, 8, 13, "#2f7f8a" if (dx, dy) != (0.6, 0.6) else "#d9b13c")
-        cylinder(svg, iso, 4.3, 3.5, 0.72, 13, "#f1ebde", z0=25.4, shadow=False, bands=[(0.35, 0.75, "#394a52")])
-        c = p(4.3, 3.5, 38.4)
-        onion(svg, c[0], c[1], 17, 29, "#d9b13c")
+    def chapel():  # the town's wooden church: a log nave under one onion dome
+        building(svg, iso, rng, 3.2, 2.7, 1.8, 1.4, 14, "#8a5d3a", "gable_x", "#5a5a4f", rh=8, cols=2, rows=1, course=3.4, course_op=0.4, tiles=11, lit=0.2)
+        cylinder(svg, iso, 4.5, 3.4, 0.36, 12, "#8a5d3a", z0=12, shadow=False, grain=10, seed=4)
+        c = p(4.5, 3.4, 24)
+        starred_onion(svg, c[0], c[1], 10, 18, "#2c5c9a", stars=True)
 
-    sc.add(4.3 + 3.5 + 0.6, church)
+    sc.add(4.5 + 3.4 + 0.6, chapel, "s")
 
-    def bell_tower():
-        building(svg, iso, rng, 6.0, 1.1, 1.0, 1.0, 36, "#f1ebde", "hip", "#3e7a62", rh=21, cols=1, rows=3, arch=True, lit=0.3, o=0.14)
-        finial(svg, p(6.5, 1.6, 57), h=10, col="#d9b13c", cross=True)
-
-    sc.add(6.5 + 1.6, bell_tower)
-    for x, y, dx, dy, h, kind, col, rh in (
-        (0.8, 3.0, 1.8, 1.5, 12, "gable_x", "#6c5b49", 7),
-        (0.7, 5.3, 1.6, 1.4, 11, "gable_y", "#5a5a4f", 7),
-        (5.9, 3.8, 1.6, 1.5, 12, "gable_y", "#6c5b49", 7),
-        (5.5, 5.7, 1.8, 1.4, 11, "gable_x", "#5a5a4f", 7),
-        (2.6, 6.3, 1.6, 1.3, 11, "gable_x", "#6c5b49", 6),
+    sc.add(4.3 + 3.5 + 0.6, lambda: russian_church(svg, iso, rng, 2.9, 2.4, 2.8, 2.2, 19, 10, 17, 0.5, 0.26), "ml")
+    sc.add(6.5 + 1.6, lambda: tent_tower(svg, iso, rng, 6.0, 1.1, 1.0, 26, 30), "ml")
+    # the metropolis's second church, a monastery's, smaller and on the west side of town
+    sc.add(0.6 + 2.6 + 1.8 + 0.6, lambda: russian_church(svg, iso, rng, 0.6, 2.6, 1.9, 1.7, 16, 8, 13, 0.38, 0.2), "l")
+    for x, y, dx, dy, h, kind, col, rh, sizes in (
+        (0.8, 3.0, 1.8, 1.5, 12, "gable_x", "#6c5b49", 7, "sm"),
+        (0.9, 0.9, 1.5, 1.3, 11, "gable_x", "#5a5a4f", 6, "l"),
+        (0.7, 5.3, 1.6, 1.4, 11, "gable_y", "#5a5a4f", 7, "ml"),
+        (5.9, 3.8, 1.6, 1.5, 12, "gable_y", "#6c5b49", 7, "sml"),
+        (5.5, 5.7, 1.8, 1.4, 11, "gable_x", "#5a5a4f", 7, "ml"),
+        (2.6, 6.3, 1.6, 1.3, 11, "gable_x", "#6c5b49", 6, "ml"),
+        (2.4, 5.4, 1.5, 1.2, 11, "gable_x", "#5a5a4f", 6, "s"),
+        (4.4, 5.6, 1.4, 1.2, 10, "gable_y", "#6c5b49", 6, "s"),
+        (0.8, 7.0, 1.3, 0.7, 10, "gable_x", "#6c5b49", 6, "l"),
+        (6.8, 0.4, 1.0, 1.4, 11, "gable_y", "#5a5a4f", 6, "l"),
+        (4.6, 7.0, 1.5, 0.7, 10, "gable_x", "#6c5b49", 6, "l"),
+        (7.0, 5.6, 0.7, 1.6, 10, "gable_y", "#6c5b49", 6, "l"),
     ):
-        sc.house(x, y, dx, dy, h, "#8a5d3a", kind, col, rh=rh, course=3.4, course_op=0.4, tiles=11, lit=0.3)
-    sc.tree(0.6, 0.9, kind="birch", h=40, seed=1)
+        sc.house(x, y, dx, dy, h, "#8a5d3a", kind, col, rh=rh, sizes=sizes, course=3.4, course_op=0.4, tiles=11, lit=0.3)
+    sc.tree(0.6, 0.9, kind="birch", h=40, seed=1, sizes="sm")
+    sc.tree(6.6, 1.4, kind="pine", h=34, seed=4, leaf="#3d6b48", sizes="s")
     sc.tree(7.5, 7.0, kind="birch", h=38, seed=2)
-    sc.tree(1.0, 7.3, kind="birch", h=34, seed=3)
-    sc.tree(7.4, 0.5, kind="pine", h=36, seed=4, leaf="#3d6b48")
+    sc.tree(1.0, 7.3, kind="birch", h=34, seed=3, sizes="m")
+    sc.tree(7.4, 0.5, kind="pine", h=36, seed=4, leaf="#3d6b48", sizes="m")
     return sc.render()
 
 
 # ---- arab: sand-coloured cubes, a blue-domed mosque, minarets, palms ------------------------------------
-def arab(seed=17):
-    sc = Scene(seed)
+def arab(seed=17, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#8a7444", mid="#c5ae78", core="#dcc895", stone="#d3bf8a", spots=0.4)
+    earth(svg, iso, rng, rim="#8a7444", mid="#c5ae78", core="#dcc895", stone="#d3bf8a", spots=0.4, radius=sc.radius)
+
+    def masjid():  # the town's mosque: one whitewashed cube under a single dome
+        building(svg, iso, rng, 3.1, 2.3, 1.7, 1.5, 15, "#f0e7d0", "parapet", "#f0e7d0", cols=2, rows=1, arch=True, lit=0.1)
+        c = p(3.95, 3.05, 18.4)
+        top = dome(svg, c[0], c[1], 17, 17, "#2f9390", ribs=5)
+        finial(svg, top, h=8, col="#d6b25e", crescent=True)
+
+    sc.add(3.95 + 3.05, masjid, "s")
 
     def mosque():
         building(svg, iso, rng, 2.8, 1.7, 2.7, 2.2, 18, "#f0e7d0", "parapet", "#f0e7d0", cols=3, rows=1, arch=True, lit=0.1)
@@ -212,47 +308,66 @@ def arab(seed=17):
             c2 = p(x, y, 21.4)
             dome(svg, c2[0], c2[1], 9, 8, "#d8b24e")
 
-    sc.add(4.15 + 2.8, mosque)
-    sc.add(2.5 + 1.5, lambda: minaret(svg, iso, 2.45, 1.45, 66, "#f0e7d0", "#2f9390"))
-    sc.add(5.7 + 4.0, lambda: minaret(svg, iso, 5.75, 4.0, 60, "#f0e7d0", "#2f9390"))
-    for x, y, dx, dy, h, wall in (
-        (0.8, 3.0, 1.7, 1.5, 14, "#e1d0a4"),
-        (0.9, 5.0, 1.8, 1.6, 18, "#d7be8c"),
-        (3.1, 5.6, 1.7, 1.5, 12, "#efe7d0"),
-        (5.3, 5.3, 1.8, 1.6, 16, "#dcc597"),
-        (6.2, 1.9, 1.4, 1.4, 12, "#c9a56a"),
+    sc.add(4.15 + 2.8, mosque, "ml")
+    sc.add(2.5 + 1.5, lambda: minaret(svg, iso, 2.45, 1.45, 66, "#f0e7d0", "#2f9390"), "ml")
+    sc.add(5.7 + 4.0, lambda: minaret(svg, iso, 5.75, 4.0, 60 if sc.on("ml") else 48, "#f0e7d0", "#2f9390"))
+    sc.add(1.2 + 4.4, lambda: minaret(svg, iso, 1.2, 4.4, 58, "#f0e7d0", "#d8b24e"), "l")
+    for x, y, dx, dy, h, wall, sizes in (
+        (0.8, 3.0, 1.7, 1.5, 14, "#e1d0a4", "sml"),
+        (0.9, 5.0, 1.8, 1.6, 18, "#d7be8c", "sml"),
+        (3.1, 5.6, 1.7, 1.5, 12, "#efe7d0", "sml"),
+        (5.3, 5.3, 1.8, 1.6, 16, "#dcc597", "ml"),
+        (6.2, 1.9, 1.4, 1.4, 12, "#c9a56a", "ml"),
+        (5.1, 1.5, 1.2, 1.1, 11, "#d7be8c", "s"),
+        (1.0, 0.8, 1.6, 1.4, 16, "#dcc597", "l"),
+        (6.5, 3.5, 1.0, 1.4, 14, "#efe7d0", "l"),
+        (1.1, 6.8, 1.6, 0.8, 12, "#c9a56a", "l"),
+        (5.4, 0.4, 1.4, 1.1, 15, "#e1d0a4", "l"),
     ):
-        sc.house(x, y, dx, dy, h, wall, "parapet", wall, arch=True, lit=0.14, cols=2)
+        sc.house(x, y, dx, dy, h, wall, "parapet", wall, sizes=sizes, arch=True, lit=0.14, cols=2)
 
     def small_dome():
-        c = p(5.3 + 0.9, 5.3 + 0.8, 16 + 3.4)
+        c = p(5.3 + 0.9, 5.3 + 0.8, 16 * TALL[size] + 3.4)
         dome(svg, c[0], c[1], 14, 12, "#efe7d0")
 
-    sc.add(5.3 + 0.9 + 5.3 + 0.8 + 0.1, small_dome)
+    sc.add(5.3 + 0.9 + 5.3 + 0.8 + 0.1, small_dome, "ml")
     sc.add(4.3 + 4.7, lambda: awning(svg, iso, 3.8, 4.3, 1.3, 0.9, 12, cols=("#a3361f", "#efe3c4")))
-    sc.palm(7.2, 0.7, h=48, seed=5)
-    sc.palm(0.6, 1.0, h=44, seed=6)
-    sc.palm(7.3, 7.1, h=42, seed=7)
-    sc.palm(0.9, 7.2, h=38, seed=8)
+    sc.palm(7.2, 0.7, h=48, seed=5, sizes="ml")
+    sc.palm(0.6, 1.0, h=44, seed=6, sizes="m")
+    sc.palm(7.3, 7.1, h=42, seed=7, sizes="ml")
+    sc.palm(0.9, 7.2, h=38, seed=8, sizes="m")
+    sc.palm(6.6, 1.3, h=44, seed=5, sizes="s")
+    sc.palm(1.4, 6.6, h=38, seed=8, sizes="s")
     return sc.render()
 
 
 # ---- east asian: red halls with sweeping grey eaves around a pagoda ---------------------------------------
-def east_asian(seed=19):
-    sc = Scene(seed)
+def east_asian(seed=19, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#4f5a3a", mid="#7f8756", core="#aaa592", stone="#b7b2a1")
-    svg.poly(iso.ground(1.4, 1.4, 5.4, 5.4), "#b6b19f", "#6c6a5c", 0.8, op=0.55)
+    earth(svg, iso, rng, rim="#4f5a3a", mid="#7f8756", core="#aaa592", stone="#b7b2a1", radius=sc.radius)
+    if sc.on("ml"):
+        svg.poly(iso.ground(1.4, 1.4, 5.4, 5.4), "#b6b19f", "#6c6a5c", 0.8, op=0.55)
+    else:
+        svg.poly(iso.ground(2.4, 2.4, 3.4, 3.4), "#b6b19f", "#6c6a5c", 0.8, op=0.55)
     slate = "#4c5964"
-    sc.add(4.0 + 2.0, lambda: pagoda(svg, iso, rng, 3.3, 0.9, 1.6, tiers=4, wall="#a23c2c", roof_col=slate, h0=15, step=0.84, rh=7))
-    for x, y, dx, dy, h, wall, rh in (
-        (0.7, 2.7, 2.2, 1.7, 13, "#a8402e", 12),
-        (1.3, 5.2, 2.1, 1.6, 12, "#b8503a", 10),
-        (5.9, 3.2, 1.7, 2.0, 13, "#a8402e", 12),
-        (4.3, 5.9, 2.3, 1.4, 11, "#b8503a", 10),
+    tiers = {SMALL: 3, MEDIUM: 4, LARGE: 5}[size]
+    sc.add(4.0 + 2.0, lambda: pagoda(svg, iso, rng, 3.3, 0.9 if sc.on("ml") else 1.6, 1.6, tiers=tiers, wall="#a23c2c", roof_col=slate, h0=15, step=0.84, rh=7))
+    for x, y, dx, dy, h, wall, rh, sizes in (
+        (0.7, 2.7, 2.2, 1.7, 13, "#a8402e", 12, "ml"),
+        (1.3, 5.2, 2.1, 1.6, 12, "#b8503a", 10, "ml"),
+        (5.9, 3.2, 1.7, 2.0, 13, "#a8402e", 12, "ml"),
+        (4.3, 5.9, 2.3, 1.4, 11, "#b8503a", 10, "ml"),
+        (1.4, 3.3, 1.8, 1.5, 12, "#a8402e", 11, "s"),
+        (2.5, 5.3, 1.9, 1.4, 11, "#b8503a", 10, "s"),
+        (5.4, 3.6, 1.5, 1.7, 12, "#b8503a", 10, "s"),
+        (0.8, 0.8, 1.9, 1.5, 13, "#b8503a", 11, "l"),
+        (5.8, 0.6, 1.6, 1.8, 12, "#a8402e", 11, "l"),
+        (6.8, 5.6, 0.9, 1.7, 11, "#a8402e", 10, "l"),
+        (0.6, 7.0, 2.0, 0.8, 10, "#a8402e", 9, "l"),
     ):
-        sc.house(x, y, dx, dy, h, wall, "hip_curved", slate, rh=rh, cols=3, lit=0.2, tiles=7, o=0.4)
+        sc.house(x, y, dx, dy, h, wall, "hip_curved", slate, rh=rh, sizes=sizes, cols=3, lit=0.2, tiles=7, o=0.4)
 
     def lantern(x, y):
         a = p(x, y, 0)
@@ -261,11 +376,13 @@ def east_asian(seed=19):
         svg.poly([(a[0] - 4.4, a[1] - 13), (a[0] + 4.4, a[1] - 13), (a[0], a[1] - 17)], "#7a766a")
 
     for x, y in ((3.4, 4.8), (5.2, 4.8)):
-        sc.add(x + y, lambda x=x, y=y: lantern(x, y))
-    sc.tree(0.7, 1.0, kind="pine", h=42, seed=1, leaf="#355f3a")
-    sc.tree(7.2, 1.2, kind="pine", h=38, seed=2, leaf="#3b6a3a")
-    sc.tree(7.3, 6.0, kind="round", h=34, seed=3, leaf="#c79a2e")
-    sc.tree(0.6, 7.0, kind="pine", h=36, seed=4, leaf="#355f3a")
+        sc.add(x + y, lambda x=x, y=y: lantern(x, y), "ml")
+    sc.tree(0.7, 1.0, kind="pine", h=42, seed=1, leaf="#355f3a", sizes="m")
+    sc.tree(7.2, 1.2, kind="pine", h=38, seed=2, leaf="#3b6a3a", sizes="m")
+    sc.tree(7.3, 6.0, kind="round", h=34, seed=3, leaf="#c79a2e", sizes="ml")
+    sc.tree(0.6, 7.0, kind="pine", h=36, seed=4, leaf="#355f3a", sizes="m")
+    sc.tree(1.6, 1.8, kind="pine", h=38, seed=1, leaf="#355f3a", sizes="s")
+    sc.tree(6.3, 6.0, kind="round", h=32, seed=3, leaf="#c79a2e", sizes="s")
     return sc.render()
 
 
@@ -299,11 +416,11 @@ def shikhara(svg, cx, cy, w, h, col, seed=0):
     svg.poly([(cx, top[1] - 9), (cx + 10, top[1] - 6.5), (cx, top[1] - 4)], "#e0762a", stroke="#8a3a12", sw=0.5)  # saffron pennant
 
 
-def south_asian(seed=23):
-    sc = Scene(seed)
+def south_asian(seed=23, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#6b5836", mid="#b09a66", core="#cdb988", stone="#c4ae7a", spots=0.4)
+    earth(svg, iso, rng, rim="#6b5836", mid="#b09a66", core="#cdb988", stone="#c4ae7a", spots=0.4, radius=sc.radius)
 
     def haveli():
         building(svg, iso, rng, 2.0, 1.0, 3.0, 2.2, 24, "#c97a5a", "parapet", "#c97a5a", cols=4, rows=2, arch=True, lit=0.2)
@@ -312,23 +429,40 @@ def south_asian(seed=23):
         c = p(3.5, 2.1, 27.4)
         dome(svg, c[0], c[1], 17, 18, "#f1e8d2", ribs=5)
 
-    sc.add(3.5 + 2.1 + 0.4, haveli)
+    sc.add(3.5 + 2.1 + 0.4, haveli, "ml")
 
-    def temple():
-        building(svg, iso, rng, 5.6, 3.3, 1.8, 1.8, 11, "#d9b88a", "parapet", "#d9b88a", cols=2, rows=1, arch=True, lit=0.05)
-        c = p(6.5, 4.2, 14.4)
-        shikhara(svg, c[0], c[1], 17, 44, "#dfba84")
+    def temple(x=5.6, y=3.3, h=44):
+        building(svg, iso, rng, x, y, 1.8, 1.8, 11, "#d9b88a", "parapet", "#d9b88a", cols=2, rows=1, arch=True, lit=0.05)
+        c = p(x + 0.9, y + 0.9, 14.4)
+        shikhara(svg, c[0], c[1], 17, h, "#dfba84")
 
-    sc.add(6.5 + 4.2 + 0.2, temple)
-    for x, y, dx, dy, h, wall in (
-        (0.8, 4.0, 1.7, 1.6, 13, "#e0b044"),
-        (1.0, 5.9, 1.8, 1.4, 12, "#d98a8a"),
-        (3.5, 5.7, 1.8, 1.6, 15, "#ece2c8"),
-        (6.0, 6.0, 1.5, 1.4, 11, "#c98a5a"),
+    if sc.on("s"):
+        sc.add(4.9 + 3.6 + 0.2, lambda: temple(4.0, 2.7, 34))
+    else:
+        sc.add(6.5 + 4.2 + 0.2, temple)
+    sc.add(1.9 + 2.2 + 0.2, lambda: temple(1.0, 1.3, 38), "l")
+
+    def ghat_palace():  # the metropolis's second haveli, its roofline crowned with chhatris
+        building(svg, iso, rng, 4.6, 0.4, 2.6, 1.6, 26, "#d9a070", "parapet", "#d9a070", cols=3, rows=2, arch=True, lit=0.2)
+        for cx_, cy_ in ((4.85, 0.65), (6.95, 0.65), (4.85, 1.75), (6.95, 1.75)):
+            chhatri(svg, iso, cx_, cy_, 29.4)
+
+    sc.add(5.9 + 1.2 + 0.4, ghat_palace, "l")
+    for x, y, dx, dy, h, wall, sizes in (
+        (0.8, 4.0, 1.7, 1.6, 13, "#e0b044", "sml"),
+        (1.0, 5.9, 1.8, 1.4, 12, "#d98a8a", "ml"),
+        (3.5, 5.7, 1.8, 1.6, 15, "#ece2c8", "sml"),
+        (6.0, 6.0, 1.5, 1.4, 11, "#c98a5a", "ml"),
+        (5.4, 4.4, 1.5, 1.4, 12, "#d98a8a", "s"),
+        (1.7, 2.2, 1.5, 1.3, 11, "#c98a5a", "s"),
+        (6.5, 2.4, 1.0, 0.8, 12, "#ece2c8", "l"),
+        (1.0, 7.0, 1.7, 0.7, 11, "#c98a5a", "l"),
+        (5.6, 7.0, 1.6, 0.6, 10, "#e0b044", "l"),
     ):
-        sc.house(x, y, dx, dy, h, wall, "parapet", wall, arch=True, lit=0.16, cols=2)
-    sc.tree(7.1, 1.0, kind="round", h=46, seed=2, leaf="#4d7b30")
-    sc.tree(0.7, 0.9, kind="round", h=38, seed=3, leaf="#5c8a34")
+        sc.house(x, y, dx, dy, h, wall, "parapet", wall, sizes=sizes, arch=True, lit=0.16, cols=2)
+    sc.tree(7.1, 1.0, kind="round", h=46, seed=2, leaf="#4d7b30", sizes="m")
+    sc.tree(0.7, 0.9, kind="round", h=38, seed=3, leaf="#5c8a34", sizes="sm")
+    sc.tree(6.4, 1.8, kind="round", h=40, seed=2, leaf="#4d7b30", sizes="s")
     return sc.render()
 
 
@@ -366,7 +500,7 @@ def stupa(svg, iso, x, y):
     svg.circle(cx, yt - 26, 1.5, "#fff0b0")
 
 
-def stilt_house(sc, x, y, dx, dy, lift, h, wall, roof_col, rh, roof_kind="gable_x", tiles=12):
+def stilt_house(sc, x, y, dx, dy, lift, h, wall, roof_col, rh, roof_kind="gable_x", tiles=12, sizes="sml"):
     svg, iso, rng = sc.svg, sc.iso, sc.rng
 
     def draw():
@@ -376,39 +510,50 @@ def stilt_house(sc, x, y, dx, dy, lift, h, wall, roof_col, rh, roof_kind="gable_
         svg.line((a[0] + 2, a[1]), (b[0] + 2, b[1]), "#5b4026", 1.3)
         building(svg, iso, rng, x, y, dx, dy, h, wall, roof_kind, roof_col, rh=rh, z0=lift, door_on=False, course=3.2, course_op=0.3, tiles=tiles, lit=0.2, o=0.32)
 
-    sc.add(x + dx / 2 + y + dy / 2, draw)
+    sc.add(x + dx / 2 + y + dy / 2, draw, sizes)
 
 
-def southeast_asian(seed=29):
-    sc = Scene(seed)
+def southeast_asian(seed=29, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#4d4a2a", mid="#8a8650", core="#a29c62", stone="#9a9460", spots=0.4)
+    earth(svg, iso, rng, rim="#4d4a2a", mid="#8a8650", core="#a29c62", stone="#9a9460", spots=0.4, radius=sc.radius)
+    lo, hi = (0.8, 7.2) if sc.on("ml") else (1.6, 6.4)
     for i in range(10):  # lush green patches
-        q = p(rng.uniform(0.8, 7.2), rng.uniform(0.8, 7.2), 0)
+        q = p(rng.uniform(lo, hi), rng.uniform(lo, hi), 0)
         svg.ellipse(q[0], q[1], rng.uniform(6, 11), rng.uniform(2.6, 5), "#5d7a34", op=0.4)
-    sc.add(3.8 + 2.7, lambda: stupa(svg, iso, 3.7, 2.7))
+    sc.add(3.8 + 2.7, lambda: stupa(svg, iso, 3.7, 2.7), "ml")
+    sc.add(4.0 + 3.4, lambda: stupa(svg, iso, 3.9, 3.3), "s")
+    sc.add(1.6 + 4.6, lambda: stupa(svg, iso, 1.5, 4.7), "l")
     teak, thatch, dark = "#8a5a35", "#b39650", "#6a4630"
-    stilt_house(sc, 0.9, 3.6, 1.5, 1.4, 11, 10, teak, thatch, 10)
-    stilt_house(sc, 1.4, 5.5, 1.5, 1.4, 11, 10, "#a06a3c", dark, 10, tiles=9)
-    stilt_house(sc, 5.9, 4.3, 1.5, 1.4, 11, 10, teak, thatch, 10)
-    stilt_house(sc, 5.2, 6.0, 1.5, 1.3, 11, 10, "#a06a3c", thatch, 10)
-    stilt_house(sc, 3.2, 6.2, 1.4, 1.3, 11, 9, teak, dark, 10, tiles=9)
+    stilt_house(sc, 0.9, 3.6, 1.5, 1.4, 11, 10, teak, thatch, 10, sizes="m")
+    stilt_house(sc, 1.4, 5.5, 1.5, 1.4, 11, 10, "#a06a3c", dark, 10, tiles=9, sizes="ml")
+    stilt_house(sc, 5.9, 4.3, 1.5, 1.4, 11, 10, teak, thatch, 10, sizes="sml")
+    stilt_house(sc, 5.2, 6.0, 1.5, 1.3, 11, 10, "#a06a3c", thatch, 10, sizes="ml")
+    stilt_house(sc, 3.2, 6.2, 1.4, 1.3, 11, 9, teak, dark, 10, tiles=9, sizes="ml")
+    stilt_house(sc, 1.0, 2.8, 1.4, 1.3, 11, 10, teak, thatch, 10, sizes="s")
+    stilt_house(sc, 2.6, 5.3, 1.5, 1.3, 11, 10, "#a06a3c", dark, 10, tiles=9, sizes="s")
+    stilt_house(sc, 0.8, 1.0, 1.5, 1.4, 12, 12, teak, thatch, 10, sizes="l")
+    stilt_house(sc, 6.4, 6.3, 1.2, 1.1, 11, 10, teak, dark, 10, tiles=9, sizes="l")
+    stilt_house(sc, 3.1, 0.5, 1.4, 1.2, 12, 11, "#a06a3c", dark, 10, tiles=9, sizes="l")
+    stilt_house(sc, 6.0, 2.9, 1.4, 1.2, 11, 10, "#a06a3c", thatch, 10, sizes="l")
 
     def hall():
         building(svg, iso, rng, 5.2, 1.0, 2.0, 1.6, 12, "#8a3a2a", "gable_x", "#b3562a", rh=10, cols=3, rows=1, lit=0.12, o=0.35, tiles=10)
         roof(svg, iso, 5.5, 1.25, 1.4, 1.1, 12 + 6.5, "gable_x", "#c8782e", rh=7, o=0.25, tiles=8)
         finial(svg, p(5.5 + 0.7, 1.8, 12 + 6.5 + 7), h=7, col="#d6b25e")
 
-    sc.add(6.2 + 1.8, hall)
-    sc.palm(0.7, 0.9, h=50, seed=1)
-    sc.palm(7.3, 6.9, h=46, seed=2)
-    sc.palm(4.9, 7.4, h=42, seed=3)
+    sc.add(6.2 + 1.8, hall, "ml")
+    sc.palm(0.7, 0.9, h=50, seed=1, sizes="m")
+    sc.palm(7.3, 6.9, h=46, seed=2, sizes="ml")
+    sc.palm(4.9, 7.4, h=42, seed=3, sizes="ml")
+    sc.palm(6.3, 2.4, h=48, seed=1, sizes="s")
+    sc.palm(4.8, 6.3, h=40, seed=3, sizes="s")
     return sc.render()
 
 
 # ---- african: a palisaded ring of round mud huts under thatch ------------------------------------------------------
-def round_hut(sc, x, y, r, wall_h, wall, thatch, roof_h, seed=0, band="#3a2a20", door=True):
+def round_hut(sc, x, y, r, wall_h, wall, thatch, roof_h, seed=0, band="#3a2a20", door=True, sizes="sml"):
     svg, iso = sc.svg, sc.iso
 
     def draw():
@@ -421,31 +566,40 @@ def round_hut(sc, x, y, r, wall_h, wall, thatch, roof_h, seed=0, band="#3a2a20",
         top = cone(svg, c[0], c[1], rx * 1.22, roof_h, thatch, ridges=16, seed=seed)
         svg.line(top, (top[0], top[1] - 4), shade(thatch, 0.6), 1.6)
 
-    sc.add(x + y, draw)
+    sc.add(x + y, draw, sizes)
 
 
-def african(seed=31):
-    sc = Scene(seed)
+def african(seed=31, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
-    earth(svg, iso, rng, rim="#6a4a2c", mid="#a87a50", core="#c39a68", stone="#b88c60", n=40, spots=0.4)
+    earth(svg, iso, rng, rim="#6a4a2c", mid="#a87a50", core="#c39a68", stone="#b88c60", n=40, spots=0.4, radius=sc.radius)
     for i in range(14):
         tuft(svg, iso, rng.uniform(0.6, 7.4), rng.uniform(0.6, 7.4), "#8a8a3a")
-    ring = arc_points(4, 4, 3.55, 45 + 16, 45 + 360 - 16, 44)
+    # The palisade rings the disc: a town's is drawn tighter, a metropolis builds a second hut ring inside it.
+    fence = 3.55 if sc.on("ml") else 2.75
+    ring = arc_points(4, 4, fence, 45 + 16, 45 + 360 - 16, 44 if sc.on("ml") else 34)
     for x, y in ring:
         sc.add(x + y + 0.05, lambda x=x, y=y: post(svg, iso, x, y, h=11, col="#7a5a3a", w=1.6))
     walls = ["#b5764c", "#a86a44", "#c48a5a", "#b07048"]
     thatches = ["#bd9d52", "#a8843f", "#c7a85e"]
-    angles = (85, 130, 175, 220, 265, 310, 355)
-    for i, (x, y) in enumerate(_ring(4, 4, 2.55, angles)):
-        round_hut(sc, x, y, 0.82, 10 + (i % 3), walls[i % 4], thatches[i % 3], 17 + (i % 2) * 2, seed=i)
-    round_hut(sc, 4.0, 4.0, 1.05, 12, "#c8905e", "#cdb061", 24, seed=9, band="#4a2f20")
+    if sc.on("ml"):
+        angles = (85, 130, 175, 220, 265, 310, 355)
+        for i, (x, y) in enumerate(_ring(4, 4, 2.55, angles)):
+            round_hut(sc, x, y, 0.82, 10 + (i % 3), walls[i % 4], thatches[i % 3], 17 + (i % 2) * 2, seed=i)
+    else:
+        for i, (x, y) in enumerate(_ring(4, 4, 1.75, (100, 190, 280, 10))):
+            round_hut(sc, x, y, 0.72, 10 + (i % 2), walls[i % 4], thatches[i % 3], 16 + (i % 2) * 2, seed=i)
+    for i, (x, y) in enumerate(_ring(4, 4, 1.45, (150, 240, 330, 60))):  # the metropolis's inner ring
+        round_hut(sc, x, y, 0.62, 9, walls[(i + 2) % 4], thatches[(i + 1) % 3], 15, seed=20 + i, sizes="l")
+    chief = {SMALL: (0.85, 11, 20), MEDIUM: (1.05, 12, 24), LARGE: (1.05, 15, 30)}[size]
+    round_hut(sc, 4.0, 4.0, chief[0], chief[1], "#c8905e", "#cdb061", chief[2], seed=9, band="#4a2f20")
     sc.tree(6.5, 1.0, kind="baobab", h=52, seed=1, leaf="#5a7a2c")
     sc.tree(1.1, 6.5, kind="acacia", h=44, seed=2, leaf="#6a7f34")
     return sc.render()
 
 
 # ---- steppe: felt yurts, the khan's banner, horses ----------------------------------------------------------------------
-def yurt(sc, x, y, r, wall_h, felt, band, seed=0, finial_gold=False):
+def yurt(sc, x, y, r, wall_h, felt, band, seed=0, finial_gold=False, sizes="sml"):
     svg, iso = sc.svg, sc.iso
 
     def draw():
@@ -461,20 +615,27 @@ def yurt(sc, x, y, r, wall_h, felt, band, seed=0, finial_gold=False):
         if finial_gold:
             finial(svg, apex, h=9, col="#d6b25e")
 
-    sc.add(x + y, draw)
+    sc.add(x + y, draw, sizes)
 
 
-def steppe(seed=37):
-    sc = Scene(seed)
+def steppe(seed=37, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#6a5a30", mid="#a39a58", core="#bfb472", stone="#b0a468", n=30, spots=0.3)
+    earth(svg, iso, rng, rim="#6a5a30", mid="#a39a58", core="#bfb472", stone="#b0a468", n=30, spots=0.3, radius=sc.radius)
     for i in range(18):
         tuft(svg, iso, rng.uniform(0.6, 7.4), rng.uniform(0.6, 7.4), "#9a9a40")
     felt = ["#ece4cf", "#e4dcc4", "#f0e9d6"]
-    for i, (x, y) in enumerate(_ring(4, 4, 2.75, (95, 140, 185, 230, 275, 320, 5))):
-        yurt(sc, x, y, 0.86, 12, felt[i % 3], "#a2432c", seed=i)
-    yurt(sc, 4.0, 4.0, 1.25, 14, "#f3ecd8", "#b8832a", seed=9, finial_gold=True)
+    if sc.on("ml"):
+        for i, (x, y) in enumerate(_ring(4, 4, 2.75, (95, 140, 185, 230, 275, 320, 5))):
+            yurt(sc, x, y, 0.86, 12, felt[i % 3], "#a2432c", seed=i)
+    else:
+        for i, (x, y) in enumerate(_ring(4, 4, 1.95, (110, 200, 290, 20))):
+            yurt(sc, x, y, 0.8, 11, felt[i % 3], "#a2432c", seed=i)
+    for i, (x, y) in enumerate(_ring(4, 4, 3.55, (70, 115, 160, 205, 250, 295, 340, 25))):  # the metropolis's outer camp
+        yurt(sc, x, y, 0.62, 10, felt[(i + 1) % 3], "#27465e" if i % 2 else "#a2432c", seed=20 + i, sizes="l")
+    khan = {SMALL: (1.0, 12), MEDIUM: (1.25, 14), LARGE: (1.45, 17)}[size]
+    yurt(sc, 4.0, 4.0, khan[0], khan[1], "#f3ecd8", "#b8832a", seed=9, finial_gold=True)
 
     def standard():
         a = p(7.0, 5.2, 0)
@@ -484,15 +645,18 @@ def steppe(seed=37):
             ang = math.radians(200 + k * 35)
             svg.line((a[0], a[1] - 54), (a[0] + math.cos(ang) * 11, a[1] - 54 + math.sin(ang) * 3 + 14), c, 2.2, 0.95)
 
-    sc.add(12.4, standard)
-    for hx, hy, f, col in ((176, 192, 1, "#7a4e2c"), (192, 186, -1, "#c9c0a4"), (150, 207, 1, "#3e2a1c")):
+    sc.add(12.4, standard, "ml")
+    horses = ((176, 192, 1, "#7a4e2c"), (192, 186, -1, "#c9c0a4"), (150, 207, 1, "#3e2a1c"))
+    for hx, hy, f, col in horses if sc.on("ml") else horses[:2]:
         sc.add(15.5, lambda hx=hx, hy=hy, f=f, col=col: horse(svg, hx, hy, 1.15, col, f))
-    sc.add(13.0, lambda: puffs(svg, p(4.0, 4.0, 22), 3, n=5, drift=(4, -9), size=5.5, op=0.6))
+    for hx, hy, f, col in ((86, 196, -1, "#5a3a22"), (68, 186, 1, "#c9c0a4")):
+        sc.add(15.5, lambda hx=hx, hy=hy, f=f, col=col: horse(svg, hx, hy, 1.15, col, f), "l")
+    sc.add(13.0, lambda: puffs(svg, p(4.0, 4.0, 22 * khan[1] / 14), 3, n=5, drift=(4, -9), size=5.5, op=0.6))
     return sc.render()
 
 
 # ---- native: a ring of tipis around a fire, a log lodge, a drying rack ----------------------------------------------------
-def tipi(sc, x, y, R, H, hide, seed=0, paint=("#a8412c", "#27465e")):
+def tipi(sc, x, y, R, H, hide, seed=0, paint=("#a8412c", "#27465e"), sizes="sml"):
     svg, iso = sc.svg, sc.iso
 
     def draw():
@@ -515,20 +679,26 @@ def tipi(sc, x, y, R, H, hide, seed=0, paint=("#a8412c", "#27465e")):
         for k in range(4):
             svg.circle(cx + (k % 2 * 2 - 1) * 1.6, door_y - 4 - k * 3.2, 0.7, "#c9a96a")
 
-    sc.add(x + y, draw)
+    sc.add(x + y, draw, sizes)
 
 
-def native(seed=41):
-    sc = Scene(seed)
+def native(seed=41, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#6a5a34", mid="#a8995f", core="#c3b67e", stone="#b5a76e", n=30, spots=0.3)
+    earth(svg, iso, rng, rim="#6a5a34", mid="#a8995f", core="#c3b67e", stone="#b5a76e", n=30, spots=0.3, radius=sc.radius)
     for i in range(16):
         tuft(svg, iso, rng.uniform(0.6, 7.4), rng.uniform(0.6, 7.4), "#8f8f3e")
     hides = ["#e0cfa6", "#d6c196", "#e6d7b2", "#d9c79f"]
     paints = [("#a8412c", "#27465e"), ("#27465e", "#d6a53a"), ("#2f6a48", "#a8412c")]
-    for i, (x, y) in enumerate(_ring(4, 4.2, 2.65, (100, 148, 196, 244, 292, 340))):
-        tipi(sc, x, y, 21 + (i % 2) * 2, 50 + (i % 3) * 3, hides[i % 4], seed=i, paint=paints[i % 3])
+    if sc.on("ml"):
+        for i, (x, y) in enumerate(_ring(4, 4.2, 2.65, (100, 148, 196, 244, 292, 340))):
+            tipi(sc, x, y, 21 + (i % 2) * 2, 50 + (i % 3) * 3, hides[i % 4], seed=i, paint=paints[i % 3])
+    else:
+        for i, (x, y) in enumerate(_ring(4, 4.2, 1.9, (120, 210, 300, 30))):
+            tipi(sc, x, y, 19 + (i % 2) * 2, 44 + (i % 3) * 3, hides[i % 4], seed=i, paint=paints[i % 3])
+    for i, (x, y) in enumerate(_ring(4, 4.0, 3.5, (60, 170, 215, 260, 350))):  # the metropolis's outer lodges
+        tipi(sc, x, y, 17, 42 + (i % 2) * 4, hides[(i + 1) % 4], seed=10 + i, paint=paints[(i + 1) % 3], sizes="l")
 
     def fire():
         c = p(4.0, 4.2, 0)
@@ -541,16 +711,19 @@ def native(seed=41):
         puffs(svg, (c[0], c[1] - 12), 5, n=5, drift=(3, -9), size=4.5, op=0.55)
 
     sc.add(8.6, fire)
-    sc.house(5.0, 0.8, 1.9, 1.4, 11, "#80613f", "gable_x", "#6d5a3a", rh=8, course=3.2, course_op=0.4, tiles=13, lit=0.14)
-    sc.add(6.9 + 6.9, lambda: rack(svg, iso, 6.1, 6.3, 1.6, 15))
-    sc.add(1.4 + 7.4, lambda: rack(svg, iso, 0.9, 6.6, 1.2, 12))
-    sc.tree(0.6, 0.8, kind="pine", h=40, seed=1, leaf="#3d6340")
-    sc.tree(7.4, 7.5, kind="pine", h=34, seed=2, leaf="#3d6340")
+    sc.house(5.0, 0.8, 1.9, 1.4, 11, "#80613f", "gable_x", "#6d5a3a", rh=8, sizes="ml", course=3.2, course_op=0.4, tiles=13, lit=0.14)
+    sc.house(0.9, 1.6, 1.4, 1.9, 11, "#80613f", "gable_y", "#6d5a3a", rh=8, sizes="l", course=3.2, course_op=0.4, tiles=13, lit=0.14)
+    sc.add(6.9 + 6.9, lambda: rack(svg, iso, 6.1, 6.3, 1.6, 15), "ml")
+    sc.add(1.4 + 7.4, lambda: rack(svg, iso, 0.9, 6.6, 1.2, 12), "m")
+    sc.add(5.6 + 6.0, lambda: rack(svg, iso, 5.0, 5.9, 1.2, 12), "s")
+    sc.tree(0.6, 0.8, kind="pine", h=40, seed=1, leaf="#3d6340", sizes="m")
+    sc.tree(7.4, 7.5, kind="pine", h=34, seed=2, leaf="#3d6340", sizes="ml")
+    sc.tree(1.6, 1.6, kind="pine", h=38, seed=1, leaf="#3d6340", sizes="s")
     return sc.render()
 
 
 # ---- oceanic: thatched fale on coral platforms, a carved meeting house, palms and a canoe --------------------------------------------
-def fale(sc, x, y, r, seed=0, thatch="#b99a56"):
+def fale(sc, x, y, r, seed=0, thatch="#b99a56", sizes="sml"):
     svg, iso = sc.svg, sc.iso
 
     def draw():
@@ -566,16 +739,17 @@ def fale(sc, x, y, r, seed=0, thatch="#b99a56"):
         top = dome(svg, c[0], c[1], rx * 1.16, 21, thatch, ribs=9)
         svg.line(top, (top[0], top[1] - 5), shade(thatch, 0.55), 1.6)
 
-    sc.add(x + y, draw)
+    sc.add(x + y, draw, sizes)
 
 
-def oceanic(seed=43):
-    sc = Scene(seed)
+def oceanic(seed=43, size=MEDIUM):
+    sc = Scene(seed, size)
     svg, iso, rng = sc.svg, sc.iso, sc.rng
     p = iso.p
-    earth(svg, iso, rng, rim="#8a7a52", mid="#cdbd8c", core="#e2d6ab", stone="#ebe0bd", n=36, spots=0.35)
+    earth(svg, iso, rng, rim="#8a7a52", mid="#cdbd8c", core="#e2d6ab", stone="#ebe0bd", n=36, spots=0.35, radius=sc.radius)
+    lo, hi = (0.6, 7.4) if sc.on("ml") else (1.4, 6.6)
     for i in range(16):
-        q = p(rng.uniform(0.6, 7.4), rng.uniform(0.6, 7.4), 0)
+        q = p(rng.uniform(lo, hi), rng.uniform(lo, hi), 0)
         svg.ellipse(q[0], q[1], rng.uniform(5, 10), rng.uniform(2.2, 4.4), "#5d8a3a", op=0.34)
 
     def meeting_house():
@@ -591,14 +765,31 @@ def oceanic(seed=43):
                 svg.circle(m[0], m[1], 1.3, "#b3261e")
         finial(svg, c, h=8, col="#d9d0b4")
 
-    sc.add(5.7 + 1.85, meeting_house)
-    for x, y, r, th in ((1.9, 2.5, 1.0, "#b99a56"), (1.4, 5.2, 1.0, "#a8884a"), (3.9, 4.4, 1.15, "#c0a25c"), (6.3, 4.7, 1.0, "#b99a56"), (4.1, 6.5, 0.95, "#a8884a")):
-        fale(sc, x, y, r, seed=int(x * 10), thatch=th)
-    sc.palm(0.6, 0.8, h=56, seed=1)
-    sc.palm(7.5, 3.7, h=50, seed=2)
-    sc.palm(0.7, 7.3, h=48, seed=3)
-    sc.palm(7.0, 7.3, h=52, seed=4)
-    sc.add(14.2, lambda: canoe(svg, 150, 205, 44))
+    sc.add(5.7 + 1.85, meeting_house, "ml")
+    for x, y, r, th, sizes in (
+        (1.9, 2.5, 1.0, "#b99a56", "ml"),
+        (1.4, 5.2, 1.0, "#a8884a", "ml"),
+        (3.9, 4.4, 1.15, "#c0a25c", "sml"),
+        (6.3, 4.7, 1.0, "#b99a56", "ml"),
+        (4.1, 6.5, 0.95, "#a8884a", "ml"),
+        (2.4, 2.9, 0.95, "#b99a56", "s"),
+        (5.6, 2.6, 0.9, "#a8884a", "s"),
+        (2.3, 5.6, 0.9, "#b99a56", "s"),
+        (5.5, 5.8, 0.85, "#c0a25c", "s"),
+        (1.9, 0.9, 0.85, "#a8884a", "l"),
+        (6.6, 6.5, 0.85, "#c0a25c", "l"),
+        (2.0, 6.9, 0.8, "#b99a56", "l"),
+        (6.9, 3.0, 0.8, "#a8884a", "l"),
+    ):
+        fale(sc, x, y, r, seed=int(x * 10), thatch=th, sizes=sizes)
+    sc.palm(0.6, 0.8, h=56, seed=1, sizes="ml")
+    sc.palm(7.5, 3.7, h=50, seed=2, sizes="m")
+    sc.palm(0.7, 7.3, h=48, seed=3, sizes="ml")
+    sc.palm(7.0, 7.3, h=52, seed=4, sizes="m")
+    sc.palm(1.5, 1.6, h=50, seed=1, sizes="s")
+    sc.palm(6.6, 6.6, h=46, seed=4, sizes="s")
+    sc.add(14.2, lambda: canoe(svg, 150, 205, 44), "ml")
+    sc.add(13.0, lambda: canoe(svg, 150, 196, 34), "s")
     return sc.render()
 
 

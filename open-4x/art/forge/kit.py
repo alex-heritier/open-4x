@@ -246,8 +246,9 @@ def earth(svg, iso, rng, rim="#5f5237", mid="#85744e", core="#9b8a62", stone="#a
         pts.append(p(4 + math.cos(th) * rr, 4 + math.sin(th) * rr, 0))
     svg.poly(pts, "#0b0e07", op=0.42, extra=f'filter="{svg.blur(5)}" transform="translate(5 6)"')
     svg.poly(pts, svg.rad([(0, core), (0.7, mid), (1, rim)], 0.45, 0.4, 0.62), shade(rim, 0.75), 1.4)
+    lo, hi = (0.7, 7.3) if radius == 3.95 else (4 - 3.3 * radius / 3.95, 4 + 3.3 * radius / 3.95)
     for _ in range(n):
-        a, b = rng.uniform(0.7, 7.3), rng.uniform(0.7, 7.3)
+        a, b = rng.uniform(lo, hi), rng.uniform(lo, hi)
         q = p(a, b, 0)
         svg.ellipse(q[0], q[1], rng.uniform(2.2, 4.2), rng.uniform(1.1, 2.0), shade(stone, rng.uniform(0.8, 1.15)), op=spots)
 

@@ -37,7 +37,7 @@ Art is authored at **2x** the size the game draws, so it stays crisp on high-DPI
 | Asset | File px | Drawn px | Anchor |
 | --- | --- | --- | --- |
 | ground, water, river cell | 192x96 (1.5x) | 128x64 | one dual-grid diamond |
-| city (one per flavor), forest, pine, jungle, marsh, hills, mountain (and the dry and cold variants) | 256x224 | 128x112 | ground-diamond centre at (128, 160) |
+| city (one per flavor at three sizes: `city_<flavor>_small` for size 1-6, `city_<flavor>` 7-12, `city_<flavor>_large` 13+), forest, pine, jungle, marsh, hills, mountain (and the dry and cold variants) | 256x224 | 128x112 | ground-diamond centre at (128, 160) |
 | fog sheet cell, flat border sheet cell | 256x128 | 128x64 | one diamond, drawn over the tile |
 | infantry, pioneer, worker, cavalry, artillery (and each cell of their animation sheets) | 160x160 | 70x70 | tile centre about (80, 108) |
 | farm (plain, rice, corn, wheat), mine overlays | 256x128 | 128x64 | one diamond, drawn over the tile |

@@ -689,7 +689,7 @@ fn header(
                     ..default()
                 },
             ));
-            let sprite = city_sprite(&session.pack.visuals, game, c.owner);
+            let sprite = city_sprite(&session.pack.visuals, game, c.owner, c.population);
             p.spawn((
                 ImageNode::new(kit.image(sprite)),
                 Node {

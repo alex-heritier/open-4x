@@ -101,6 +101,32 @@
       "native": "sprites/city_native.png",
       "oceanic": "sprites/city_oceanic.png"
     },
+    "towns": {
+      "western": "sprites/city_western_small.png",
+      "latin": "sprites/city_latin_small.png",
+      "orthodox": "sprites/city_orthodox_small.png",
+      "arab": "sprites/city_arab_small.png",
+      "east_asian": "sprites/city_east_asian_small.png",
+      "south_asian": "sprites/city_south_asian_small.png",
+      "southeast_asian": "sprites/city_southeast_asian_small.png",
+      "african": "sprites/city_african_small.png",
+      "steppe": "sprites/city_steppe_small.png",
+      "native": "sprites/city_native_small.png",
+      "oceanic": "sprites/city_oceanic_small.png"
+    },
+    "metropolises": {
+      "western": "sprites/city_western_large.png",
+      "latin": "sprites/city_latin_large.png",
+      "orthodox": "sprites/city_orthodox_large.png",
+      "arab": "sprites/city_arab_large.png",
+      "east_asian": "sprites/city_east_asian_large.png",
+      "south_asian": "sprites/city_south_asian_large.png",
+      "southeast_asian": "sprites/city_southeast_asian_large.png",
+      "african": "sprites/city_african_large.png",
+      "steppe": "sprites/city_steppe_large.png",
+      "native": "sprites/city_native_large.png",
+      "oceanic": "sprites/city_oceanic_large.png"
+    },
     "fog": "terrain/fog.png",
     "margin": "margin/",
     "borders": "terrain/borders.png",

@@ -11,9 +11,10 @@ aggression is a weighted campaign roll, not a scripted event or guaranteed decla
   Hover that button for the income/upkeep breakdown in the status strip.
 - Open a city to build a **Factory** or, on the coast, a **Port**. Buildings use city
   production and compete with unit recruitment. Factories operate automatically.
-- Select a unit and hold **X while right-clicking** to move or attack with its stack.
-  The context menu also offers **Order whole stack**. Different movement allowances can
-  leave slower members behind; their standing orders continue next week.
+- Select a unit and press **X**, then choose a destination to move its stack. Choosing an
+  adjacent enemy city starts a stack battle. The context menu also offers **Order whole
+  stack**. Different movement allowances can leave slower members behind; their standing
+  orders continue next week.
 - The unit action bar offers **Load** for land units sharing a square with a transport,
   and **Unload** for a passenger or loaded transport in port. Cargo arriving by sea
   requires a built Port. Ordinary troops retain the existing naval landing rules.
@@ -73,6 +74,12 @@ their garrison over new economic buildings.
 **The entire battle resolves in one attack command in the current campaign turn.**
 Combat rounds never advance the date. The battle panel is playback of an already
 resolved result, and can be skipped without changing the result.
+
+The stack replay shows the opposing order of battle rather than a text log. Every
+fresh fighter appears in a nation-coloured bay, reserves wait below the active
+lanes, and the recorded lane timing drives clash motion, impact flashes, health
+loss, replacement entry, and the final `VICTOR` / `FALLEN` poses. Lane width and
+damage remain exactly the simulation result being played back.
 
 Fresh, mobile attackers on the selected unit's tile are sorted by attack; defenders
 by defense. Width is the smaller force, capped at three on mountains or in jungle.

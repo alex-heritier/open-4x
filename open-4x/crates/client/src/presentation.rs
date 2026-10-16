@@ -164,7 +164,7 @@ fn focus_option() -> Option<Coord> {
 pub(super) const SHEET_COLUMNS: u32 = 16;
 /// Tonal variants the pack's ground and water sheets hold past the 16 base rows: variant `k`
 /// (1..=6) of a pure cell with digit `d` is cell `256 + 4*(k-1) + d`.
-const VARIANTS: usize = 6;
+pub(super) const VARIANTS: usize = 6;
 
 /// Columns of the shore-cut farm sheet (rows are the four roles of a cell, see
 /// `Map::shore_pieces`).
@@ -360,16 +360,31 @@ impl Sight {
     }
 }
 
-/// The city sprite for a nation: the one its flavor names, or the pack's western one for a
+/// The largest population still drawn as a town, and as a city; anything bigger is a metropolis.
+const TOWN_MAX: i32 = 6;
+const CITY_MAX: i32 = 12;
+
+/// The city sprite for a city of `population` owned by `owner`: its flavor's town, city or
+/// metropolis, falling back to that flavor's city art, then to the pack's western one for a
 /// nation the player has no record of.
-pub(crate) fn city_sprite<'a>(visuals: &'a Visuals, game: &Game, owner: Id) -> &'a str {
+pub(crate) fn city_sprite<'a>(
+    visuals: &'a Visuals,
+    game: &Game,
+    owner: Id,
+    population: i32,
+) -> &'a str {
     let flavor = game
         .factions
         .get(&owner)
         .map_or(Flavor::Western, |faction| faction.flavor);
-    visuals
-        .cities
+    let sized = match population {
+        ..=TOWN_MAX => &visuals.towns,
+        ..=CITY_MAX => &visuals.cities,
+        _ => &visuals.metropolises,
+    };
+    sized
         .get(flavor.key())
+        .or_else(|| visuals.cities.get(flavor.key()))
         .or_else(|| visuals.cities.get(Flavor::Western.key()))
         .map_or("", String::as_str)
 }
@@ -516,14 +531,14 @@ pub(super) fn fit_terrain_atlas(
 }
 
 /// A position hash that breaks up repetition without touching any border.
-fn scatter(p: Coord) -> usize {
+pub(super) fn scatter(p: Coord) -> usize {
     (p.x.wrapping_mul(73_856_093) ^ p.y.wrapping_mul(19_349_663)).unsigned_abs() as usize
 }
 
 /// Sheet index for the cell at `p`. Pure cells (all four vertices alike) pick one of the pack's
 /// tonal variants; `first_digit` is the first digit that has them (the water sheet's land digit
 /// is empty).
-fn varied(index: usize, p: Coord, variants: usize, first_digit: usize) -> usize {
+pub(super) fn varied(index: usize, p: Coord, variants: usize, first_digit: usize) -> usize {
     if variants == 0 || index >= 256 || !index.is_multiple_of(85) || index / 85 < first_digit {
         return index;
     }
@@ -615,6 +630,8 @@ pub(super) struct Refresh<'w, 's> {
     camera: Query<'w, 's, (&'static mut Transform, &'static Projection), With<Camera2d>>,
     previous_size: Local<'s, Vec2>,
     stage: Res<'w, crate::stage::Stage>,
+    fx: Res<'w, crate::stage::FxArt>,
+    arena: ResMut<'w, crate::arena::Board>,
     walks: Res<'w, crate::march::Walks>,
     shapes: Res<'w, Shapes>,
     puppetry: crate::puppet::Puppetry<'w>,
@@ -636,6 +653,8 @@ pub(super) fn refresh(params: Refresh) {
         mut camera,
         mut previous_size,
         stage,
+        fx,
+        mut arena,
         walks,
         shapes,
         mut puppetry,
@@ -1072,7 +1091,7 @@ pub(super) fn refresh(params: Refresh) {
                 continue;
             }
             let z = Z_CITY + depth(y);
-            let path = city_sprite(visuals, game, city.owner);
+            let path = city_sprite(visuals, game, city.owner, city.population);
             let sprite = city_images
                 .entry(path)
                 .or_insert_with(|| assets.load(format!("{prefix}{path}")))
@@ -1325,6 +1344,17 @@ pub(super) fn refresh(params: Refresh) {
     }
     if rebuild_ui {
         build_ui(&mut commands, &session, size, &minimap, &assets);
+        // The stack fight takes the screen over: its own field, with the map dimmed behind it.
+        crate::arena::spawn(
+            &mut commands,
+            &assets,
+            &session,
+            session.game.as_ref().expect("a game to fight over"),
+            size,
+            &mut puppetry,
+            &mut arena,
+            fx.soft(),
+        );
     }
 }
 
@@ -1691,7 +1721,7 @@ fn unit_panel(p: &mut ChildSpawnerCommands, game: &Game, session: &Session, u: &
     }
     text(
         p,
-        "Go to [G] chooses a destination. Hold this unit to drag a route.",
+        "Go to [G] chooses a destination. Stack go to [X] orders the units standing with it.",
         12.0,
         INK_SOFT,
     );
@@ -3131,6 +3161,32 @@ mod tests {
         assert_eq!(outlined_city(&game, Selection::Tile(city.position)), None);
         game.units.remove(&id);
         assert_eq!(outlined_city(&game, Selection::Unit(id)), None);
+    }
+
+    #[test]
+    fn a_city_is_drawn_as_a_town_city_or_metropolis_by_its_size() {
+        let game = starter();
+        let pack = fourx_content::Pack::base();
+        let visuals = &pack.visuals;
+        let owner = game.cities.values().next().unwrap().owner;
+        let key = game.factions[&owner].flavor.key();
+        let drawn = |population| city_sprite(visuals, &game, owner, population);
+        for (population, sized) in [
+            (1, &visuals.towns),
+            (6, &visuals.towns),
+            (7, &visuals.cities),
+            (12, &visuals.cities),
+            (13, &visuals.metropolises),
+            (30, &visuals.metropolises),
+        ] {
+            assert_eq!(drawn(population), sized[key], "size {population}");
+        }
+        // A pack that draws only the middle size uses it for every population.
+        let mut plain = visuals.clone();
+        plain.towns.clear();
+        plain.metropolises.clear();
+        assert_eq!(city_sprite(&plain, &game, owner, 2), visuals.cities[key]);
+        assert_eq!(city_sprite(&plain, &game, owner, 20), visuals.cities[key]);
     }
 
     #[test]

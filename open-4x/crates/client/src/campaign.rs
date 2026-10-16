@@ -1,9 +1,11 @@
-//! Treasury, dispatches and simultaneous stack battle playback.
+//! Treasury, dispatches, and the clock the stack fight is played on. The field itself is
+//! [`crate::arena`].
 use super::*;
 use crate::chrome::{Frame, Skin, dress};
-use crate::theme::{CARD, GAIN, INK, INK_SOFT, LOSS, Tone, bold, button, rule};
+use crate::theme::{CARD, INK, INK_SOFT, Tone, bold, button, rule};
 use bevy::ui::FocusPolicy;
 use fourx_sim::Good;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Panel {
     Treasury,
@@ -13,13 +15,17 @@ pub(super) enum Panel {
 pub(super) struct Ledger;
 #[derive(Component)]
 pub(super) struct BudgetHint;
+
+/// The clock of a stack fight: it runs until the last lane of the record has been fought out.
+/// Everything else about the replay — the units, the blows, the sounds — is the field's own,
+/// so nothing here asks for a redraw.
 pub(super) fn animate(time: Res<Time>, mut session: ResMut<Session>) {
-    if let Some((battle, elapsed)) = &mut session.stack_replay {
-        let old = (*elapsed / 0.45) as u32;
-        *elapsed = (*elapsed + time.delta_secs()).min((battle.rounds + 1) as f32 * 0.45);
-        if (*elapsed / 0.45) as u32 != old {
-            session.dirty = true;
-        }
+    let end = session
+        .stack_replay
+        .as_ref()
+        .map(|(battle, _)| crate::arena::span(battle, &session.rules));
+    if let (Some(end), Some((_, elapsed))) = (end, session.stack_replay.as_mut()) {
+        *elapsed = (*elapsed + time.delta_secs()).min(end);
     }
 }
 pub(super) fn scroll(
@@ -179,152 +185,6 @@ pub(super) fn spawn(
             text(p,&session.message,13.0,INK_SOFT);
         });
     }
-    if let Some((b, elapsed)) = &session.stack_replay {
-        let step = (*elapsed / 0.45) as u32;
-        let finished = step > b.rounds;
-        overlay(commands, width).with_children(|p| {
-            dress(
-                p,
-                assets,
-                &session.asset_prefix,
-                Skin::Paper,
-                Frame::Grand,
-                false,
-            );
-            bold(
-                p,
-                format!("Battle at {},{}", b.target.x, b.target.y),
-                24.0,
-                INK,
-            );
-            text(
-                p,
-                format!(
-                    "{} against {} · {} lanes · round {}/{}",
-                    game.factions[&b.owner].name,
-                    game.factions[&b.enemy].name,
-                    b.width,
-                    step.min(b.rounds),
-                    b.rounds
-                ),
-                15.0,
-                INK_SOFT,
-            );
-            let lost_a = b
-                .lanes
-                .iter()
-                .filter(|l| {
-                    l.start + l.rounds.len() as u32 <= step
-                        && l.outcome == fourx_sim::Outcome::DefenderWon
-                })
-                .count();
-            let lost_d = b
-                .lanes
-                .iter()
-                .filter(|l| {
-                    l.start + l.rounds.len() as u32 <= step
-                        && l.outcome == fourx_sim::Outcome::AttackerWon
-                })
-                .count();
-            bold(
-                p,
-                format!("Losses: {lost_a} attackers · {lost_d} defenders"),
-                17.0,
-                INK,
-            );
-            p.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(8),
-                    overflow: Overflow::scroll_y(),
-                    min_height: px(0),
-                    ..default()
-                },
-                Ledger,
-                ScrollPosition::default(),
-            ))
-            .with_children(|p| {
-                for lane in 0..b.width {
-                    if let Some(l) = b
-                        .lanes
-                        .iter()
-                        .filter(|l| l.lane == lane && l.start <= step)
-                        .max_by_key(|l| l.start)
-                    {
-                        let n = step.saturating_sub(l.start).min(l.rounds.len() as u32) as usize;
-                        let hits = l.rounds[..n].iter().filter(|hit| **hit).count() as i32;
-                        p.spawn(Node {
-                            flex_direction: FlexDirection::Column,
-                            row_gap: px(3),
-                            ..default()
-                        })
-                        .with_children(|p| {
-                            text(p, format!("Lane {}", lane + 1), 12.0, INK_SOFT);
-                            health(
-                                p,
-                                &session.rules.units[&l.attacker.kind].name,
-                                l.attacker.hp
-                                    - (n as i32 - hits)
-                                    - i32::from(l.support.as_ref().is_some_and(|s| s.hit)),
-                                l.attacker.max_hp,
-                                GAIN,
-                            );
-                            health(
-                                p,
-                                &session.rules.units[&l.defender.kind].name,
-                                l.defender.hp - hits,
-                                l.defender.max_hp,
-                                LOSS,
-                            );
-                        });
-                    }
-                }
-            });
-            if finished {
-                bold(
-                    p,
-                    if b.advanced {
-                        "Victory — the stack advances"
-                    } else {
-                        "The defending stack holds"
-                    },
-                    19.0,
-                    INK,
-                );
-            }
-            button(
-                p,
-                if finished {
-                    "Continue"
-                } else {
-                    "Skip battle [Esc]"
-                },
-                Action::CloseBattle,
-                Tone::Primary,
-            );
-        });
-    }
-}
-fn health(p: &mut ChildSpawnerCommands, name: &str, hp: i32, max: i32, color: Color) {
-    text(p, format!("{name}  {}/{max}", hp.max(0)), 14.0, INK);
-    p.spawn((
-        Node {
-            width: percent(100),
-            height: px(7),
-            ..default()
-        },
-        BackgroundColor(INK_SOFT.with_alpha(0.15)),
-    ))
-    .with_children(|p| {
-        p.spawn((
-            Node {
-                width: percent(100.0 * hp.max(0) as f32 / max.max(1) as f32),
-                height: percent(100),
-                ..default()
-            },
-            BackgroundColor(color),
-        ));
-    });
 }
 
 fn text(p: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, color: Color) {

@@ -53,6 +53,13 @@ pub struct Visuals {
     /// City sprites by [`fourx_sim::Flavor`] key (`western`, `east_asian`, ...): every flavor
     /// needs one, so a nation's cities always have an architecture to be drawn in.
     pub cities: BTreeMap<String, String>,
+    /// The same towns drawn smaller and larger, by flavor key, after Civ3's town and metropolis:
+    /// `towns` for a city of size 1-6, `metropolises` for 13 and up; `cities` covers 7-12 and
+    /// stands in for any flavor these leave out.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub towns: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metropolises: BTreeMap<String, String>,
     /// The nation's banner, by flavor key: a second sprite drawn over the city and tinted with
     /// the owner's colour. A flavor left out simply has no flag.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -224,6 +231,8 @@ impl Visuals {
         .chain(self.resources.values())
         .chain(self.nations.values())
         .chain(self.cities.values())
+        .chain(self.towns.values())
+        .chain(self.metropolises.values())
         .chain(self.city_banners.values())
         .chain(self.menu.paths())
         .chain(self.combat.paths())
@@ -401,11 +410,17 @@ impl Pack {
                 "visuals.cities needs exactly one city sprite for each flavor",
             ));
         }
-        for flavor in self.visuals.city_banners.keys() {
-            if !flavors.contains(flavor.as_str()) {
-                return Err(invalid(&format!(
-                    "visuals.city_banners names unknown flavor {flavor:?}"
-                )));
+        for (field, sprites) in [
+            ("city_banners", &self.visuals.city_banners),
+            ("towns", &self.visuals.towns),
+            ("metropolises", &self.visuals.metropolises),
+        ] {
+            for flavor in sprites.keys() {
+                if !flavors.contains(flavor.as_str()) {
+                    return Err(invalid(&format!(
+                        "visuals.{field} names unknown flavor {flavor:?}"
+                    )));
+                }
             }
         }
         for flavor in self.visuals.farms.keys() {
@@ -812,6 +827,21 @@ mod tests {
             .map(|flavor| &pack.visuals.cities[flavor.key()])
             .collect();
         assert_eq!(paths.len(), Flavor::ALL.len(), "one skin per flavor");
+        // ...and draws it at three sizes, town, city and metropolis, each its own file.
+        let sized: std::collections::BTreeSet<_> = Flavor::ALL
+            .iter()
+            .flat_map(|flavor| {
+                [
+                    &pack.visuals.towns[flavor.key()],
+                    &pack.visuals.cities[flavor.key()],
+                    &pack.visuals.metropolises[flavor.key()],
+                ]
+            })
+            .collect();
+        assert_eq!(sized.len(), 3 * Flavor::ALL.len(), "three sizes per flavor");
+        let mut stray = Pack::base();
+        stray.visuals.towns.insert("martian".into(), "x.png".into());
+        assert!(stray.validate().is_err());
         // A pack that leaves a flavor out, or names one that does not exist, is rejected.
         let mut missing = Pack::base();
         missing.visuals.cities.remove("arab");

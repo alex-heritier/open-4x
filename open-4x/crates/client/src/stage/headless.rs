@@ -7,7 +7,7 @@ use super::*;
 use crate::initial_selection;
 use bevy::{audio::AudioSource, time::TimeUpdateStrategy};
 use fourx_runtime::Host;
-use fourx_sim::{Fighter, Outcome};
+use fourx_sim::{Fighter, Id, Outcome};
 use std::time::Duration;
 
 /// Where the test camera looks, and so where `--demo-combat` fights are staged.

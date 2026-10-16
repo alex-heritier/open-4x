@@ -1,3 +1,4 @@
+mod arena;
 mod bar;
 mod campaign;
 mod chrome;
@@ -388,6 +389,7 @@ enum Action {
     Found,
     Fortify,
     GoTo,
+    StackGoTo,
     SelectTile(Coord),
     Cancel,
     Disband,
@@ -691,6 +693,7 @@ pub fn run() {
         .init_resource::<march::Walks>()
         .init_resource::<puppet::UnitArt>()
         .init_resource::<puppet::Facings>()
+        .init_resource::<arena::Board>()
         .insert_non_send_resource(connection)
         .add_plugins(
             DefaultPlugins
@@ -754,6 +757,9 @@ pub fn run() {
                     presentation::refresh,
                     presentation::animate_selection_top,
                     presentation::place_selected_square,
+                    // After the refresh, so the field poses the units in the frame they are
+                    // spawned in.
+                    arena::animate,
                 )
                     .chain(),
                 presentation::update_minimap,
@@ -1040,12 +1046,22 @@ fn selected_unit(session: &Session) -> Option<&fourx_sim::Unit> {
 /// before its units may be attacked (see the diplomacy window).
 fn order_for(session: &Session, unit: Id, target: Coord) -> Option<Command> {
     let game = session.game.as_ref()?;
+    order_for_in(game, &session.rules, session.player, unit, target)
+}
+
+fn order_for_in(
+    game: &Game,
+    rules: &Rules,
+    player: Id,
+    unit: Id,
+    target: Coord,
+) -> Option<Command> {
     let u = game.units.get(&unit)?;
-    let def = session.rules.def(u);
+    let def = rules.def(u);
     let distance = game.map.distance(u.position, target);
     let enemy = game
-        .hostile_holder(target, session.player)
-        .is_some_and(|holder| game.at_war(session.player, holder));
+        .hostile_holder(target, player)
+        .is_some_and(|holder| game.at_war(player, holder));
     Some(if enemy && def.can_bombard() && distance <= def.range {
         Command::Bombard { unit, target }
     } else if enemy && def.can_attack() && distance == 1 {
@@ -1153,12 +1169,38 @@ fn next_city(session: &Session) -> Option<Id> {
     ids.get(next).copied()
 }
 
-fn stack_order_for(session: &Session, unit: Id, target: Coord) -> Option<Command> {
-    match order_for(session, unit, target)? {
+fn stack_command(
+    game: &Game,
+    rules: &Rules,
+    player: Id,
+    unit: Id,
+    target: Coord,
+) -> Option<Command> {
+    let selected = game.units.get(&unit)?;
+    let enemy = game
+        .hostile_holder(target, player)
+        .is_some_and(|holder| game.at_war(player, holder));
+    let fresh_attacker = game.units_at(selected.position).into_iter().any(|u| {
+        u.owner == player
+            && u.carrier.is_none()
+            && rules.def(u).domain == rules.def(selected).domain
+            && rules.def(u).can_attack()
+            && u.moves_left(rules.def(u)) > 0
+            && !u.attacked
+    });
+    if enemy && game.map.distance(selected.position, target) == 1 && fresh_attacker {
+        return Some(Command::AttackStack { unit, target });
+    }
+    match order_for_in(game, rules, player, unit, target)? {
         Command::Move { destination, .. } => Some(Command::MoveStack { unit, destination }),
         Command::Attack { target, .. } => Some(Command::AttackStack { unit, target }),
         _ => None,
     }
+}
+
+fn stack_order_for(session: &Session, unit: Id, target: Coord) -> Option<Command> {
+    let game = session.game.as_ref()?;
+    stack_command(game, &session.rules, session.player, unit, target)
 }
 
 fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
@@ -1172,7 +1214,14 @@ fn act(action: &Action, session: &mut Session, connection: &mut Connection) {
     let command = match action {
         Action::GoTo => {
             if let Some(unit) = unit {
-                session.goto = Some(goto::Targeting::new(unit, false));
+                session.goto = Some(goto::Targeting::new(unit, false, false));
+                session.dirty = true;
+            }
+            None
+        }
+        Action::StackGoTo => {
+            if let Some(unit) = unit {
+                session.goto = Some(goto::Targeting::new(unit, true, false));
                 session.dirty = true;
             }
             None
@@ -1651,6 +1700,9 @@ fn controls(params: Controls) {
     if keys.just_pressed(KeyCode::KeyG) {
         act(&Action::GoTo, &mut session, &mut connection);
     }
+    if keys.just_pressed(KeyCode::KeyX) {
+        act(&Action::StackGoTo, &mut session, &mut connection);
+    }
     if keys.just_pressed(KeyCode::KeyF) {
         act(&Action::Fortify, &mut session, &mut connection);
     }
@@ -1791,7 +1843,7 @@ fn controls(params: Controls) {
         if !matches!(session.selection, Selection::Unit(selected) if selected == id) {
             *hold = None;
         } else if mouse.pressed(MouseButton::Left) && time.elapsed_secs_f64() - started >= 0.3 {
-            session.goto = Some(goto::Targeting::new(id, true));
+            session.goto = Some(goto::Targeting::new(id, false, true));
             *hold = None;
         }
     }
@@ -1812,15 +1864,22 @@ fn controls(params: Controls) {
         });
         if confirm {
             let targeting = session.goto.take().unwrap();
-            if targeting.preview.is_some() {
-                issue(
-                    &mut session,
-                    &mut connection,
-                    Command::Move {
-                        unit: targeting.unit,
-                        destination: position,
-                    },
-                );
+            let command = targeting
+                .preview
+                .is_some()
+                .then(|| {
+                    if targeting.stack {
+                        stack_order_for(&session, targeting.unit, position)
+                    } else {
+                        Some(Command::Move {
+                            unit: targeting.unit,
+                            destination: position,
+                        })
+                    }
+                })
+                .flatten();
+            if let Some(command) = command {
+                issue(&mut session, &mut connection, command);
             }
             session.dirty = true;
         }
@@ -2042,6 +2101,57 @@ mod tests {
         let (at_unit, stack) = context_targets(game, unit.position);
         assert!(stack.contains(&unit.id));
         assert_eq!(at_unit, game.city_at(unit.position));
+    }
+
+    #[test]
+    fn a_noncombatant_can_launch_the_stack_attack_beside_an_enemy_city() {
+        let mut host =
+            Host::base_scenario("russo-japanese-war", 42).expect("the starter scenario starts");
+        let player = host.commander();
+        let noncombatant = host
+            .game
+            .units
+            .values()
+            .find(|u| {
+                u.owner == player
+                    && u.carrier.is_none()
+                    && host.rules.def(u).domain == fourx_sim::Domain::Land
+                    && !host.rules.def(u).can_attack()
+                    && !host.rules.def(u).can_bombard()
+            })
+            .map(|u| u.id)
+            .expect("the scenario has a civilian for this stack");
+        let attacker = host
+            .game
+            .units
+            .values()
+            .find(|u| u.owner == player && host.rules.def(u).can_attack())
+            .map(|u| u.id)
+            .expect("the scenario has an attacker");
+        let (enemy, city) = host
+            .game
+            .cities
+            .values()
+            .find(|c| c.owner != player)
+            .map(|c| (c.owner, c.position))
+            .unwrap();
+        let approach = city.offset(-1, 0);
+        let ground = host.game.map.get_mut(approach).unwrap();
+        ground.terrain = fourx_sim::terrain::Terrain::Grass;
+        ground.relief = fourx_sim::terrain::Relief::Flat;
+        ground.cover = fourx_sim::terrain::Cover::Bare;
+        host.game.set_position(noncombatant, approach);
+        host.game.set_position(attacker, approach);
+        if !host.game.at_war(player, enemy) {
+            host.command(player, Command::DeclareWar { nation: enemy })
+                .unwrap();
+        }
+
+        assert!(matches!(
+            stack_command(&host.game, &host.rules, player, noncombatant, city),
+            Some(Command::AttackStack { unit, target })
+                if unit == noncombatant && target == city
+        ));
     }
 
     #[test]
